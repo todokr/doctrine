@@ -124,6 +124,10 @@ export function createHandler(ctx: DaemonContext): Handler {
         // 却下はコメント必須。理由の無い却下はエージェントが次にどう動けばいいか分からない。
         const comment = approved ? "" : req(params, "comment");
         const project = getProject(ctx.db, task.project_id)!;
+        // warnings は意図的に読み捨てる。このワークフローは task.create で
+        // 既に検証済みであり、ここで再び ctx.warnings に積むと、却下ループ
+        // （onReject.goto で最大 maxAttempts 回まで繰り返され得る）のたびに
+        // 同じ警告が積み上がって溢れる。警告の出口は task.create の1箇所だけ。
         const { workflow: loaded } = await ctx.loadWorkflow(project.path, task.workflow_name);
         const workflow = withSetupStep(loaded, project.setup ?? undefined);
         applyApproval(ctx.db, taskId, { approved, comment }, workflow);
@@ -281,6 +285,9 @@ export async function tick(ctx: DaemonContext): Promise<void> {
     let worktreePath: string;
     try {
       const project = getProject(ctx.db, task.project_id)!;
+      // warnings は意図的に読み捨てる（task.create の警告と同じ理由）。
+      // tick は同じタスクを何周期にもわたって読み直すので、ここで積むと
+      // 起動している間ずっと同じ警告が ctx.warnings に積み上がり続ける。
       const { workflow: loaded } = await ctx.loadWorkflow(project.path, task.workflow_name);
       workflow = withSetupStep(loaded, project.setup ?? undefined);
 

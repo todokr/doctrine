@@ -224,3 +224,14 @@ dctl get <task-id>
   `agent` ステップは同一の `claude_session_id` を共有する。計画担当と
   レビュー担当を別々のエージェントとして持つような構成は、このサブプロジェクトの
   スコープ外（`docs/overview.md` 4章参照）。
+- **パッケージとしてインストールした `dctl` / `dctld` は動かない**
+  （[#5](https://github.com/todokr/doctrine/issues/5)）。`package.json` の
+  `bin` はどちらも `./src/*.ts` を直接指しているが、Node 24 は
+  `node_modules` 配下の `.ts` ファイルの型除去を拒否する
+  （`ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING`）。そのため、このリポジトリを
+  チェックアウトして `node src/cli/dctl.ts` / `node src/daemon/main.ts` として
+  動かす（本READMEの「セットアップ」節はこの形）分には問題ないが、依存として
+  `pnpm install` した場合やグローバルインストールした場合は、コマンドとして
+  一度も起動しない。`pnpm build` で `dist/` への出力は既に用意されているので、
+  対応は「`bin` を `dist/` の出力先に向け直すか」を選ぶだけの話であり、
+  その判断はissueに委ねる。

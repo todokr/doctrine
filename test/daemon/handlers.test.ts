@@ -128,6 +128,57 @@ test("tick は非冪等コマンドの警告を毎周期 ctx.warnings に積み�
   );
 });
 
+test("却下ループを何度回しても task.approve/task.reject は警告を積み直さない", async () => {
+  const ctx = context();
+  const h = createHandler(ctx);
+  // review を却下すると noop に戻り、また review に戻ってくるループ。
+  // push は非冪等（git push）なので task.create の時点で1件だけ警告が出る。
+  // このワークフロー自体は却下ループ中は一度も push まで到達しない。
+  await writeFile(
+    join(repo, ".doctrine", "workflows", "risky-loop.yaml"),
+    "name: risky-loop\nsteps:\n"
+      + "  - id: noop\n    type: command\n    run: \"true\"\n"
+      + "  - id: review\n    type: approval\n    title: 見て\n"
+      + "    onReject:\n      goto: noop\n      maxAttempts: 5\n"
+      + "  - id: push\n    type: command\n    run: git push\n",
+  );
+  await h("project.add", { path: repo }, NOOP_CONN);
+  const t = await h(
+    "task.create", { project: repo, title: "T", prompt: "p", workflow: "risky-loop" }, NOOP_CONN,
+  ) as { id: string; warnings: string[] };
+  assert.equal(t.warnings.length, 1, "作成時に push ステップの警告が1件出る");
+  const afterCreate = ctx.warnings.length;
+  assert.equal(afterCreate, 1);
+
+  // review へ到達するまで進める
+  await tick(ctx);
+  await until(() => getTask(ctx.db, t.id)?.state === "suspended");
+
+  // 却下を3回繰り返す（review -> noop -> review のループ）。
+  for (let i = 0; i < 3; i++) {
+    await h("task.reject", { task_id: t.id, comment: `だめ${i}` }, NOOP_CONN);
+    assert.equal(getTask(ctx.db, t.id)?.state, "queued");
+    await tick(ctx);
+    await until(() => getTask(ctx.db, t.id)?.state === "suspended");
+  }
+
+  assert.equal(
+    ctx.warnings.length, afterCreate,
+    "却下ループ中、task.reject も tick も同じワークフローを読み直すが ctx.warnings は増えない",
+  );
+
+  // 最後に承認して push まで進める（push 自体は失敗してよい。ここでの関心は
+  // task.approve が warnings を積まないことだけ）。
+  await h("task.approve", { task_id: t.id }, NOOP_CONN);
+  await tick(ctx);
+  await until(() => ctx.running.size === 0);
+
+  assert.equal(
+    ctx.warnings.length, afterCreate,
+    "task.approve も同じワークフローを読み直すが ctx.warnings を増やさない",
+  );
+});
+
 test("tick で枠を取り、worktree を作って approval まで進む", async () => {
   const events: ServerEvent[] = [];
   const ctx = context(events);
