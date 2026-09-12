@@ -54,7 +54,7 @@ export function createServer(handler: Handler) {
     try {
       req = JSON.parse(line) as Request;
     } catch {
-      write(socket, { id: 0, ok: false, error: "JSONとして読めません" });
+      write(socket, { id: null, ok: false, error: "JSONとして読めません" });
       return;
     }
     try {

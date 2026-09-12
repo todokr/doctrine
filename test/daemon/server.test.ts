@@ -1,7 +1,7 @@
 import { test, beforeEach, afterEach } from "vitest";
 import assert from "node:assert/strict";
 import { connect, type Socket } from "node:net";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer } from "../../src/daemon/server.ts";
@@ -119,14 +119,20 @@ test("log.line は follow 中のクライアントにだけ流れる", async () 
   idle.socket.end();
 });
 
-test("既存のソケットファイルがあっても listen できる", async () => {
-  const s1 = createServer(async () => "ok");
-  servers.push(s1);
-  await s1.listen(sock);
-  await s1.close();
-  const s2 = createServer(async () => "ok");
-  servers.push(s2);
-  await s2.listen(sock);
+test("listen: パスに古いファイルが残っていても bind できる（事前unlinkの許容性）", async () => {
+  // 生きたソケットではなく、ただのファイルを置く。close()を経由しない。
+  await writeFile(sock, "stale");
+  const s = createServer(async () => "ok");
+  servers.push(s);
+  await s.listen(sock);
+});
+
+test("close: 使ったパスをファイルシステムから実際に解放する", async () => {
+  const s = createServer(async () => "ok");
+  await s.listen(sock);
+  await s.close();
+  // servers配列には入れない: close済みなのでafterEachでの二重closeは不要。
+  await assert.rejects(() => stat(sock));
 });
 
 test("followersOnly は opts.taskId が省略されてもイベント自身の task_id で絞り込む", async () => {
@@ -159,6 +165,21 @@ test("followersOnly は opts.taskId が省略されてもイベント自身の t
   await assert.rejects(() => idle.next((o) => o.event === "log.line", 200));
   follower.socket.end();
   idle.socket.end();
+});
+
+test("JSONとして読めない行はidなしのエラー応答になり、接続は生きたまま次のリクエストに応答する", async () => {
+  const s = createServer(async () => "ok");
+  servers.push(s);
+  await s.listen(sock);
+  const c = client(sock);
+  c.socket.write("これはJSONではない\n");
+  const err = await c.next((o) => o.ok === false);
+  assert.equal(err.id, null);
+  assert.match(String(err.error), /JSON/);
+  c.send({ id: 1, method: "fine" });
+  const ok = await c.next((o) => o.id === 1);
+  assert.equal(ok.ok, true);
+  c.socket.end();
 });
 
 test("行の長さに上限がなく、巨大な1行でもフレーミングが壊れない", async () => {

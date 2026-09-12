@@ -2,7 +2,7 @@ export type Request = { id: number; method: string; params?: Record<string, unkn
 
 export type Response =
   | { id: number; ok: true; result: unknown }
-  | { id: number; ok: false; error: string };
+  | { id: number | null; ok: false; error: string };
 
 export type ServerEvent =
   | { event: "task.stateChanged"; task_id: string; from: string; to: string }
