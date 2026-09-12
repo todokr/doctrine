@@ -737,10 +737,14 @@ git commit -m "feat: ワークフロー変数の展開"
   export type StepBoundary = {
     taskId: string;
     taskPatch: Partial<Pick<TaskRow, "state"|"current_step_id"|"attempt_counts"|"worktree_path"|"claude_session_id"|"child_pid"|"child_started_at"|"resumed">>;
-    stepRun?: { step_id: string; attempt: number; status: StepRunStatus; exit_code: number | null; started_at: string; ended_at: string; log_path: string; cost_usd?: number | null; num_turns?: number | null; duration_ms?: number | null };
+    /** ステップ開始時に status: "running" / ended_at: null で挿入する。 */
+    stepRun?: { step_id: string; attempt: number; status: StepRunStatus; exit_code: number | null; started_at: string; ended_at: string | null; log_path: string; cost_usd?: number | null; num_turns?: number | null; duration_ms?: number | null };
+    /** ステップ終了時に、開始時に得た id の行を同じトランザクションで更新する。 */
+    stepRunUpdate?: { id: number; status: StepRunStatus; exit_code: number | null; ended_at: string; cost_usd?: number | null; num_turns?: number | null; duration_ms?: number | null };
     outputs?: { step_id: string; stdout: string; stderr: string; exit_code: number | null };
   };
-  export function commitStepBoundary(db: DatabaseSync, b: StepBoundary): void;
+  /** stepRun を挿入した場合はその step_runs.id を返す（イベントが載せる id）。無ければ null。 */
+  export function commitStepBoundary(db: DatabaseSync, b: StepBoundary): number | null;
   export const OUTPUT_TAIL_BYTES: number; // 8192
   // rateLimits.ts
   export function insertRateLimitSample(db: DatabaseSync, s: { window: string; utilization: number; resets_at: string | null }): void;
@@ -857,6 +861,35 @@ test("ステップ実行の挿入が失敗したらタスク更新も巻き戻�
     __forceStepTaskId: "missing",
   }));
   assert.equal(getTask(d, "t1")?.state, "queued");
+});
+
+test("開始時に running で挿入し、終了時に同じ行を更新する", () => {
+  const d = fixture();
+  const id = commitStepBoundary(d, {
+    taskId: "t1", taskPatch: { state: "running", current_step_id: "test" },
+    stepRun: { step_id: "test", attempt: 1, status: "running", exit_code: null,
+               started_at: "2026-09-12T00:00:00Z", ended_at: null, log_path: "/l" },
+  })!;
+  assert.equal(listStepRuns(d, "t1")[0].status, "running");
+  commitStepBoundary(d, {
+    taskId: "t1", taskPatch: {},
+    stepRunUpdate: { id, status: "success", exit_code: 0, ended_at: "2026-09-12T00:00:05Z" },
+    outputs: { step_id: "test", stdout: "ok", stderr: "", exit_code: 0 },
+  });
+  const rows = listStepRuns(d, "t1");
+  assert.equal(rows.length, 1, "行は増えない");
+  assert.equal(rows[0].status, "success");
+  assert.equal(rows[0].ended_at, "2026-09-12T00:00:05Z");
+});
+
+test("ステップ実行のidを返す（イベントが載せる id）", () => {
+  const d = fixture();
+  const id = commitStepBoundary(d, {
+    taskId: "t1", taskPatch: {},
+    stepRun: { step_id: "test", attempt: 1, status: "success", exit_code: 0, started_at: "a", ended_at: "b", log_path: "/l" },
+  });
+  assert.equal(id, listStepRuns(d, "t1")[0].id);
+  assert.equal(commitStepBoundary(d, { taskId: "t1", taskPatch: { state: "running" } }), null);
 });
 
 test("同じステップの2回目の出力は上書きされる", () => {
@@ -1111,9 +1144,15 @@ export type StepBoundary = {
   taskPatch: Partial<Pick<TaskRow,
     "state" | "current_step_id" | "attempt_counts" | "worktree_path" |
     "claude_session_id" | "child_pid" | "child_started_at" | "resumed">>;
+  /** ステップ開始時: status "running" / ended_at null で挿入し、返り値の id を持っておく。 */
   stepRun?: {
     step_id: string; attempt: number; status: StepRunStatus; exit_code: number | null;
-    started_at: string; ended_at: string; log_path: string;
+    started_at: string; ended_at: string | null; log_path: string;
+    cost_usd?: number | null; num_turns?: number | null; duration_ms?: number | null;
+  };
+  /** ステップ終了時: 開始時の行を同じトランザクションで更新する。 */
+  stepRunUpdate?: {
+    id: number; status: StepRunStatus; exit_code: number | null; ended_at: string;
     cost_usd?: number | null; num_turns?: number | null; duration_ms?: number | null;
   };
   outputs?: { step_id: string; stdout: string; stderr: string; exit_code: number | null };
@@ -1127,8 +1166,9 @@ function tail(s: string): string {
  * タスクの更新・ステップ実行記録・出力を1トランザクションで書く。
  * 落ちて失うのは最大1ステップ分、という保証がここに乗っている。
  */
-export function commitStepBoundary(db: DatabaseSync, b: StepBoundary): void {
+export function commitStepBoundary(db: DatabaseSync, b: StepBoundary): number | null {
   db.exec("BEGIN IMMEDIATE");
+  let stepRunId: number | null = null;
   try {
     const patch = { ...b.taskPatch };
     const keys = Object.keys(patch);
@@ -1139,13 +1179,25 @@ export function commitStepBoundary(db: DatabaseSync, b: StepBoundary): void {
 
     if (b.stepRun) {
       const s = b.stepRun;
-      db.prepare(
+      const inserted = db.prepare(
         `INSERT INTO step_runs (task_id, step_id, attempt, status, exit_code,
                                 started_at, ended_at, log_path, cost_usd, num_turns, duration_ms)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(b.taskId, s.step_id, s.attempt, s.status, s.exit_code,
             s.started_at, s.ended_at, s.log_path,
             s.cost_usd ?? null, s.num_turns ?? null, s.duration_ms ?? null);
+      stepRunId = Number(inserted.lastInsertRowid);
+    }
+
+    if (b.stepRunUpdate) {
+      const u = b.stepRunUpdate;
+      db.prepare(
+        `UPDATE step_runs SET status = ?, exit_code = ?, ended_at = ?,
+                              cost_usd = ?, num_turns = ?, duration_ms = ?
+         WHERE id = ?`,
+      ).run(u.status, u.exit_code, u.ended_at,
+            u.cost_usd ?? null, u.num_turns ?? null, u.duration_ms ?? null, u.id);
+      stepRunId = u.id;
     }
 
     if (b.outputs) {
@@ -1158,6 +1210,7 @@ export function commitStepBoundary(db: DatabaseSync, b: StepBoundary): void {
       ).run(b.taskId, o.step_id, tail(o.stdout), tail(o.stderr), o.exit_code);
     }
     db.exec("COMMIT");
+    return stepRunId;
   } catch (e) {
     db.exec("ROLLBACK");
     throw e;
@@ -1630,7 +1683,7 @@ beforeEach(async () => {
 afterEach(async () => { await rm(root, { recursive: true, force: true }); });
 
 test("ブランチ名を作る", () => {
-  assert.equal(branchNameFor("abc123", "ログイン画面を直す"), "doctrine/abc123-ロクイン画面を直す".replace("ロク", "ログ"));
+  assert.equal(branchNameFor("abc123", "ログイン画面を直す"), "doctrine/abc123-ログイン画面を直す");
   assert.equal(slugify("Fix the login screen!"), "fix-the-login-screen");
   assert.equal(slugify("  a///b  "), "a-b");
   assert.ok(slugify("x".repeat(100)).length <= 40);
@@ -2598,7 +2651,8 @@ git commit -m "feat: ステップ実行器（command / agent）とログのフ�
   export type EngineDeps = RunnerDeps & {
     globalLimit: number;
     onStateChanged?(taskId: string, from: TaskState, to: TaskState): void;
-    onStepRunFinished?(taskId: string, stepId: string, status: StepRunStatus): void;
+    onStepRunStarted?(taskId: string, stepRunId: number, stepId: string, attempt: number): void;
+    onStepRunFinished?(taskId: string, stepRunId: number, stepId: string, status: StepRunStatus): void;
   };
   export type Decision =
     | { kind: "next"; stepId: string }
@@ -2691,6 +2745,12 @@ test("approval ステップに来たら suspend", () => {
 Run: `pnpm test -- test/core/engine.test.ts`
 Expected: FAIL（モジュールが無い）
 
+**`maxAttempts` は分岐元のステップで数える。** `test` が `onFailure.goto: implement` で
+失敗を繰り返すとき、上限を見るのは `test` の試行回数であって `implement` のそれではない。
+`review` の `onReject.goto: implement` も同じで、上限は `review` 側で数える。
+飛び先（`implement`）の試行回数は増え続けるが、**どこでも上限判定には使わない**。
+飛び先のカウントをリセットしたり再チェックしたりしないこと。
+
 - [ ] **Step 3: `decide` を実装する**
 
 `src/core/engine.ts`（前半）:
@@ -2705,7 +2765,7 @@ import { getStepOutputs, type StepRunStatus } from "../db/stepRuns.ts";
 import { attemptCount, getProject, getTask, withAttempt, type TaskRow, type TaskState } from "../db/tasks.ts";
 import { insertRateLimitSample } from "../db/rateLimits.ts";
 import { assertTransition } from "./states.ts";
-import { runAgentStep, runCommandStep, type RunnerDeps, type StepOutcome } from "./stepRunner.ts";
+import { logPathFor, runAgentStep, runCommandStep, type RunnerDeps, type StepOutcome } from "./stepRunner.ts";
 
 export type Decision =
   | { kind: "next"; stepId: string }
@@ -2929,7 +2989,9 @@ steps:
 export type EngineDeps = RunnerDeps & {
   globalLimit: number;
   onStateChanged?(taskId: string, from: TaskState, to: TaskState): void;
-  onStepRunFinished?(taskId: string, stepId: string, status: StepRunStatus): void;
+  onStepRunStarted?(taskId: string, stepRunId: number, stepId: string, attempt: number): void;
+  /** stepRunId は commitStepBoundary が返した step_runs.id。イベントがこれを載せる。 */
+  onStepRunFinished?(taskId: string, stepRunId: number, stepId: string, status: StepRunStatus): void;
 };
 
 function contextFor(db: DatabaseSync, task: TaskRow): TemplateContext {
@@ -2982,10 +3044,18 @@ export async function runTask(
     const ctx = contextFor(db, task);
     const sessionId = task.claude_session_id ?? randomUUID();
 
-    commitStepBoundary(db, {
+    const logPath = logPathFor(deps.logRoot, taskId, step.id, attempt);
+    // 開始時に running の行を立てる。クラッシュ復帰はこの行を見て、
+    // どのステップの途中で落ちたかを知る（Task 11）。
+    const stepRunId = commitStepBoundary(db, {
       taskId,
       taskPatch: { current_step_id: step.id, attempt_counts: withAttempt(task, step.id), claude_session_id: sessionId },
-    });
+      stepRun: {
+        step_id: step.id, attempt, status: "running", exit_code: null,
+        started_at: new Date().toISOString(), ended_at: null, log_path: logPath,
+      },
+    })!;
+    deps.onStepRunStarted?.(taskId, stepRunId, step.id, attempt);
 
     const runnerDeps: RunnerDeps = {
       ...deps,
@@ -3010,15 +3080,14 @@ export async function runTask(
     commitStepBoundary(db, {
       taskId,
       taskPatch: { child_pid: null, child_started_at: null },
-      stepRun: {
-        step_id: step.id, attempt, status: outcome.status as StepRunStatus,
-        exit_code: outcome.exitCode, started_at: outcome.startedAt, ended_at: outcome.endedAt,
-        log_path: outcome.logPath, cost_usd: outcome.costUsd,
+      stepRunUpdate: {
+        id: stepRunId, status: outcome.status as StepRunStatus, exit_code: outcome.exitCode,
+        ended_at: outcome.endedAt, cost_usd: outcome.costUsd,
         num_turns: outcome.numTurns, duration_ms: outcome.durationMs,
       },
       outputs: { step_id: step.id, stdout: outcome.stdout, stderr: outcome.stderr, exit_code: outcome.exitCode },
     });
-    deps.onStepRunFinished?.(taskId, step.id, outcome.status as StepRunStatus);
+    deps.onStepRunFinished?.(taskId, stepRunId, step.id, outcome.status as StepRunStatus);
 
     task = getTask(db, taskId)!;
     const decision = decide({
@@ -4016,6 +4085,11 @@ export function createHandler(ctx: DaemonContext): Handler {
   };
 }
 
+/** 実行中のステップの step_runs.id。まだ1件も無ければ 0。 */
+function latestStepRunId(db: DatabaseSync, taskId: string): number {
+  return listStepRuns(db, taskId).at(-1)?.id ?? 0;
+}
+
 /** 1周: 枠の空きを見て queued を running にし、次に人を待つ地点まで進める。 */
 export async function tick(ctx: DaemonContext): Promise<void> {
   for (const task of selectAdmissible(ctx.db, ctx.globalLimit)) {
@@ -4045,12 +4119,15 @@ export async function tick(ctx: DaemonContext): Promise<void> {
       db: ctx.db, adapter: ctx.adapter, logRoot: ctx.logRoot, globalLimit: ctx.globalLimit,
       onStateChanged: (id, from, to) =>
         ctx.broadcast({ event: "task.stateChanged", task_id: id, from, to }),
-      onStepRunFinished: (id, stepId, status) =>
-        ctx.broadcast({ event: "stepRun.finished", task_id: id, step_run_id: 0, step_id: stepId, status }),
+      onStepRunStarted: (id, stepRunId, stepId) =>
+        ctx.broadcast({ event: "stepRun.started", task_id: id, step_run_id: stepRunId, step_id: stepId }),
+      onStepRunFinished: (id, stepRunId, stepId, status) =>
+        ctx.broadcast({ event: "stepRun.finished", task_id: id, step_run_id: stepRunId, step_id: stepId, status }),
       onRateLimit: (s) =>
         ctx.broadcast({ event: "ratelimit.sample", window: s.window, utilization: s.utilization, resets_at: s.resetsAt }),
       onLogLine: (line) =>
-        ctx.broadcast({ event: "log.line", task_id: task.id, step_run_id: 0, line },
+        ctx.broadcast(
+          { event: "log.line", task_id: task.id, step_run_id: latestStepRunId(ctx.db, task.id), line },
           { taskId: task.id, followersOnly: true }),
     }).finally(() => ctx.running.delete(task.id));
   }
@@ -4148,11 +4225,6 @@ export async function cleanupAfterRun(ctx: DaemonContext, taskId: string): Promi
       .finally(() => ctx.running.delete(task.id));
 ```
 
-`stepRun.started` イベントも spec 8章にあるので、`EngineDeps` に
-`onStepRunStarted?(taskId: string, stepId: string): void` を足し（Task 10 の `runTask` で
-ステップ実行の直前に呼ぶ）、`tick` から
-`ctx.broadcast({ event: "stepRun.started", task_id, step_run_id: 0, step_id })` を流すこと。
-
 Run: `pnpm test -- test/daemon/handlers.test.ts`
 Expected: PASS（13件）
 
@@ -4209,7 +4281,11 @@ export async function startDaemon(o: {
     }
   }
 
-  const timer = setInterval(() => { void tick(ctx); }, o.tickMs ?? 1000);
+  const timer = setInterval(() => {
+    void tick(ctx);
+    // 警告は溜めっぱなしにしない。見えていれば直せる。
+    for (const w of ctx.warnings.splice(0)) console.error(`[warn] ${w}`);
+  }, o.tickMs ?? 1000);
   timer.unref();
 
   return {
