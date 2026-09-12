@@ -13,28 +13,18 @@
 同時に、走り終わった後の扱い（コミットする／PRを作る／テストを流す／人が見る）は
 プロジェクトごとに違うので、**ユーザーが宣言的に定義できる**必要がある。
 
-### 学習用実装 uncle-jam との関係
-
-本プロジェクトのエンジンは、別リポジトリ `uncle-jam`
-（Mastra 風 durable workflow の核を理解するための最小実装）の
-**FSM + ステップ毎スナップショット**を移植したものである。
-
-- `suspended` = 人の承認待ち
-- ステップ境界ごとの永続化 = クラッシュしても失うのは最大1ステップ分
-
-doctrine は uncle-jam の派生ではなく新規リポジトリだが、
-設計の出自はそこにある。以後の設計判断でこの2点を崩さないこと。
-
-## 2. スコープ
+### 2. スコープ
 
 全体は4つのサブプロジェクトに分解済み。**本specは①のみを対象とする。**
 
-| # | サブプロジェクト | 内容 |
-|---|---|---|
-| ① | コア（本spec） | ワークフロースキーマ、FSM+永続化、worktreeライフサイクル、実行枠、Claude Codeアダプタ |
-| ② | デスクトップUIシェル | UIフレームワーク選定、カンバン、タスク詳細、コンポーザ |
-| ③ | 差分レビュー | 変更/コミット/PRペイン、ファイルツリー付きdiffビューア |
-| ④ | レポート生成 | 別エージェントによる静的HTMLレポート |
+
+| #   | サブプロジェクト    | 内容                                                     |
+| --- | ----------- | ------------------------------------------------------ |
+| ①   | コア（本spec）   | ワークフロースキーマ、FSM+永続化、worktreeライフサイクル、実行枠、Claude Codeアダプタ |
+| ②   | デスクトップUIシェル | UIフレームワーク選定、カンバン、タスク詳細、コンポーザ                           |
+| ③   | 差分レビュー      | 変更/コミット/PRペイン、ファイルツリー付きdiffビューア                        |
+| ④   | HTML生成、編集   | 別エージェントによる静的HTMLレポートおよび注釈つき編集、直接編集                     |
+
 
 ①には薄いデバッグCLI `uj`（`uj add` / `uj ls` / `uj approve` など）を同梱するが、
 これは**テスト・デバッグのための表面であって製品UIではない**。製品UIは②。
@@ -45,6 +35,7 @@ doctrine は uncle-jam の派生ではなく新規リポジトリだが、
 UIはUnixソケット越しのクライアント（ビュー）にすぎない。
 
 採用理由:
+
 - ウィンドウを閉じてもタスクが走り続ける（「投げておいて後で見る」が成立する）
 - エージェント実行の前後にステップを挟める。スケジューリングを1箇所に集約できる
 - ①をUIなしでテストできる
@@ -62,11 +53,6 @@ UIはUnixソケット越しのクライアント（ビュー）にすぎない�
 - `agent` — Claude Code を headless 実行。session id を記録し再開可能
 - `approval` — FSMを `suspended` にして人の入力（承認/却下/追加指示）を待つ
 
-`git` 型は**採用しない**。`git commit` も `gh pr create` も `command` で書けて、
-変数展開があれば十分。型を増やす対価に見合わない。
-
-### ワークフロー定義
-
 配置: `<project>/.uj/workflows/<name>.yaml`
 
 ```yaml
@@ -79,7 +65,7 @@ steps:
 
   - id: test
     type: command
-    run: npm test
+    run: pnpm test
     onFailure:
       goto: implement
       maxAttempts: 3
@@ -132,8 +118,8 @@ steps:
 - `{{ worktree.path }}`
 - `{{ project.path }}`
 - `{{ steps.<id>.stdout }}` `{{ steps.<id>.stderr }}` `{{ steps.<id>.exitCode }}`
-  — `agent` ステップの場合、`stdout` は最終結果テキスト
-却下コメントに専用の変数は設けない。**`approval` ステップの `stdout` が
+— `agent` ステップの場合、`stdout` は最終結果テキスト
+却下コメントに専用の変数は設けない。`**approval` ステップの `stdout` が
 却下コメントそのもの**として `step_outputs` に保存される。`agent` ステップの
 `stdout` を最終結果テキストとしたのと同じ扱いであり、変数の系統を増やさない。
 
@@ -148,7 +134,7 @@ steps:
 配置: `<project>/.uj/project.yaml`
 
 ```yaml
-setup: npm ci          # 全ワークフローの先頭に自動挿入される command ステップ
+setup: pnpm install --frozen-lockfile   # 全ワークフローの先頭に自動挿入される command ステップ
 defaultWorkflow: feature
 maxConcurrent: 1
 baseBranch: main
@@ -156,6 +142,8 @@ baseBranch: main
 
 `setup` は新しい概念ではなく、ただの `command` ステップに名前が付いたもの。
 新品 worktree に `node_modules` がない問題への解（5章参照）。
+**上の値は例である** — doctrine 自身は pnpm を使うが、`setup` の中身は
+対象プロジェクトが決めるもので、doctrine がパッケージマネージャを強制することはない。
 
 **ステップid `setup` は予約語**とする。自動挿入された結果として `step_runs` にも
 変数空間（`{{ steps.setup.stdout }}`）にも現れるため、ユーザー定義のワークフローが
@@ -165,24 +153,26 @@ baseBranch: main
 
 ### 状態（7つ）
 
-| 状態 | 意味 | 実行枠 |
-|---|---|---|
-| `queued` | 作成済み、実行枠の空き待ち | 占有しない |
-| `running` | ステップ実行中 | **占有する** |
+
+| 状態          | 意味                     | 実行枠                     |
+| ----------- | ---------------------- | ----------------------- |
+| `queued`    | 作成済み、実行枠の空き待ち          | 占有しない                   |
+| `running`   | ステップ実行中                | **占有する**                |
 | `suspended` | `approval` ステップで人の入力待ち | **全体枠のみ解放**（プロジェクト枠は保持） |
-| `paused` | 人が明示的に保留した | **全体枠のみ解放**（プロジェクト枠は保持） |
-| `completed` | 正常終了 | — |
-| `failed` | 失敗して終了 | — |
-| `canceled` | 人が中止した | — |
+| `paused`    | 人が明示的に保留した             | **全体枠のみ解放**（プロジェクト枠は保持） |
+| `completed` | 正常終了                   | —                       |
+| `failed`    | 失敗して終了                 | —                       |
+| `canceled`  | 人が中止した                 | —                       |
+
 
 設計判断:
 
-- **`queued` を独立させる** — 「枠待ち」がこのツールの中心概念。
-  uncle-jam の `pending` はこれに置き換える
-- **`suspended` と `paused` は別物** — 前者はワークフローが入力を要求している
-  （再開時に承認/却下という**値**を受け取る）、後者は人が割り込んだ（単に続きから）
-- **`canceled` を `failed` に畳まない** — 自分で止めたものが「失敗」列に
-  並ぶとボードが嘘をつく
+- `**queued` を独立させる** — 「枠待ち」がこのツールの中心概念。
+uncle-jam の `pending` はこれに置き換える
+- `**suspended` と `paused` は別物** — 前者はワークフローが入力を要求している
+（再開時に承認/却下という**値**を受け取る）、後者は人が割り込んだ（単に続きから）
+- `**canceled` を `failed` に畳まない** — 自分で止めたものが「失敗」列に
+並ぶとボードが嘘をつく
 - **枠の解放はスコープごとに違う**（5章で詳述）— 全体枠は解放し、プロジェクト枠は保持する
 
 ### 枠の占有数はカウンタで持たない
@@ -193,12 +183,12 @@ baseBranch: main
 
 - `projects` — `path`, `default_workflow`, `max_concurrent`, `base_branch`, `setup`
 - `tasks` — **これ自体がスナップショット**。`id`, `project_id`, `title`, `prompt`,
-  `workflow_name`, `state`, `current_step_id`, `attempt_counts`(JSON),
-  `branch`, `worktree_path`, `claude_session_id`, `child_pid`, `child_started_at`,
-  `priority`, `created_at`, `updated_at`
+`workflow_name`, `state`, `current_step_id`, `attempt_counts`(JSON),
+`branch`, `worktree_path`, `claude_session_id`, `child_pid`, `child_started_at`,
+`priority`, `created_at`, `updated_at`
 - `step_runs` — ステップ1回の実行記録。`task_id`, `step_id`, `attempt`, `status`,
-  `exit_code`, `started_at`, `ended_at`, `log_path`,
-  `cost_usd`, `num_turns`, `duration_ms`。**UIの「実行履歴」はこのテーブル**
+`exit_code`, `started_at`, `ended_at`, `log_path`,
+`cost_usd`, `num_turns`, `duration_ms`。**UIの「実行履歴」はこのテーブル**
 - `step_outputs` — 変数展開に使う分だけ（stdout/stderr の末尾）
 - `rate_limit_samples` — Claude Code から流れてくるレート消費率の記録（6章）
 
@@ -229,11 +219,11 @@ pid単独での判定は誤って無関係のプロセスを殺し得る）。
 
 殺し終えてから:
 
-- **`agent` ステップだった** → `claude_session_id` で `--resume` して続きから
-- **`command` ステップだった** → そのステップを**頭から再実行**
+- `**agent` ステップだった** → `claude_session_id` で `--resume` して続きから
+- `**command` ステップだった** → そのステップを**頭から再実行**
 
 この設計は**「`command` ステップは再実行安全でなければならない」という制約を
-ユーザーに課す**。`npm ci` や `npm test` は問題ないが `gh pr create` は
+ユーザーに課す**。`pnpm install --frozen-lockfile` や `pnpm test` は問題ないが `gh pr create` は
 二重実行になり得る。ワークフロー検証時に**終盤の非冪等コマンドを警告する**
 （完全には防げないが、黙って壊れるよりよい）。この制約はドキュメントに明記する。
 
@@ -245,20 +235,20 @@ pid単独での判定は誤って無関係のプロセスを殺し得る）。
 ディスクとgit refを抱える理由がない。
 
 - 置き場所: `~/.local/state/uj/worktrees/<project>/<task-id>`
-  — **リポジトリの外**。中に置くと ripgrep・ファイル監視・IDEインデックスが
-  全部舐めに行き、エージェント自身も混乱する
+— **リポジトリの外**。中に置くと ripgrep・ファイル監視・IDEインデックスが
+全部舐めに行き、エージェント自身も混乱する
 - ブランチ: `uj/<task-id>-<slug>`、`project.baseBranch` から生やす
 - 作成は自前の `git worktree add`（Claude Code の `-w` は使わない。
-  ライフサイクルの権威を1箇所に保つため）
+ライフサイクルの権威を1箇所に保つため）
 
 ### 後始末 — 成功と失敗で変える
 
-- **`completed`** → worktree を削除、**ブランチは残す**。
-  完了後の扱いはワークフローの最終ステップが既に決めている
+- `**completed**` → worktree を削除、**ブランチは残す**。
+完了後の扱いはワークフローの最終ステップが既に決めている
   - **例外**: 完了時に未コミットの変更が残っていたら**削除を拒否**し、警告として出す。
-    これはワークフローの書き方のバグであり、黙って消してよいものではない
-- **`failed` / `canceled`** → **worktree を残す**。
-  失敗した実行こそ中を見たい瞬間であり、そこで証拠を消すのは最悪の設計
+  これはワークフローの書き方のバグであり、黙って消してよいものではない
+- `**failed` / `canceled`** → **worktree を残す**。
+失敗した実行こそ中を見たい瞬間であり、そこで証拠を消すのは最悪の設計
 
 残す判断の代償（溜まる）への対策:
 UIで「古いworktree」を一覧表示 / `uj gc` コマンド / N日経過で警告。
@@ -275,11 +265,15 @@ UIで「古いworktree」を一覧表示 / `uj gc` コマンド / N日経過で�
 
 **解**: `project.yaml` の `setup` コマンドを全ワークフローの先頭に自動挿入する。
 
-**`node_modules` をメインからシンボリックリンクする案は却下。**
+`**node_modules` をメインからシンボリックリンクする案は却下。**
 ネイティブ依存で壊れ、複数タスクが同じ実体に同時に書けば破損する。
 並行実行のために分離したのにそこだけ共有したら意味がない。
-（pnpm のようなグローバル content-addressable store を持つパッケージマネージャなら
-`npm ci` 相当が元から安く、自然に速くなる。）
+
+なお doctrine 自身は pnpm を使う（7章）。pnpm はグローバルな content-addressable
+store から `node_modules` をハードリンクで張るため、worktree ごとの `setup` が
+元から安い。**この性質は `setup` 自動挿入という解を採る前提を強くするが、
+解そのものはパッケージマネージャに依存しない**（npm/yarn のプロジェクトでも
+`setup` を書けば動く。ただし毎回フルインストールの代価を払う）。
 
 ### 実行枠
 
@@ -299,11 +293,11 @@ worktree で分離した以上、上限の理由は衝突回避ではなく**負
 **2つの上限は理由が違うので、`suspended` / `paused` 時の扱いも違う。**
 
 - **全体枠は解放する** — 理由はマシン負荷とAPIコスト。人間を待っている間、
-  タスクはCPUもトークンも消費していない。握り続ける理由がない
+タスクはCPUもトークンも消費していない。握り続ける理由がない
 - **プロジェクト枠は保持する** — 理由は同一リポジトリでのマージ困難。
-  `suspended` のタスクは **worktree とブランチを生かしたまま**なので、
-  この理由は消えていない。ここで解放すると、まさに避けたかった状態
-  （同じリポジトリに複数の未マージブランチが並走する）を自分で作ることになる
+`suspended` のタスクは **worktree とブランチを生かしたまま**なので、
+この理由は消えていない。ここで解放すると、まさに避けたかった状態
+（同じリポジトリに複数の未マージブランチが並走する）を自分で作ることになる
 
 **この非対称性が飢餓を消す。** `maxConcurrent: 1` のプロジェクトで、
 タスクAが承認待ちの間にタスクBが割り込むことはない。承認した瞬間、
@@ -317,9 +311,10 @@ Aはプロジェクト枠を既に持っているので、全体枠さえ空け�
 **既定の挙動として組み込まれている**。ユーザーが操作するフラグとしては持たない。
 
 ### ①で意図的に落とすもの
+
 - **先行タスク（依存関係）** — グラフのスケジューリング・循環検出・
-  依存先失敗時の伝播という別の設計が丸ごと必要になり、
-  「並行実行の管理」という中心から外れる
+依存先失敗時の伝播という別の設計が丸ごと必要になり、
+「並行実行の管理」という中心から外れる
 - **レート消費率に応じた枠の自動調整** — 記録はするが制御には使わない（6章）
 
 ## 6. Claude Code アダプタ
@@ -340,15 +335,15 @@ claude -p '<prompt>'
 
 確認事項:
 
-- **`--output-format stream-json` は `-p` と併用時に `--verbose` 必須。**
-  付け忘れると
-  `Error: When using --print, --output-format=stream-json requires --verbose`
-  で即座に終了する
-- **`--session-id <uuid>` で我々がIDを指定できる。**
-  出力からパースして拾う必要がない。タスク作成時にUUIDを採番してDBに書いてから
-  起動できるため、「起動したがIDを記録する前に落ちた」という穴が消える
-- **`--permission-prompts none`** = プロンプトが出る操作は自動的に拒否される。
-  permission mode はそれ以外を決める。**headless でハングしないことを保証する**
+- `**--output-format stream-json` は `-p` と併用時に `--verbose` 必須。**
+付け忘れると
+`Error: When using --print, --output-format=stream-json requires --verbose`
+で即座に終了する
+- `**--session-id <uuid>` で我々がIDを指定できる。**
+出力からパースして拾う必要がない。タスク作成時にUUIDを採番してDBに書いてから
+起動できるため、「起動したがIDを記録する前に落ちた」という穴が消える
+- `**--permission-prompts none**` = プロンプトが出る操作は自動的に拒否される。
+permission mode はそれ以外を決める。**headless でハングしないことを保証する**
 - `--fork-session` は使わない（IDが変わるとDBとの対応が壊れる）
 
 ### 出力の読み取り
@@ -368,15 +363,15 @@ NDJSON（1行1JSON）。観測した `type`:
 - `result` — 最終テキスト（`onFailure.feed` の素材、`{{ steps.<id>.stdout }}` の中身）
 - `total_cost_usd`, `usage`, `num_turns`, `duration_ms` — `step_runs` に保存
 - `permission_denials: []` — 権限で弾かれた操作の一覧。
-  **`--permission-prompts none` の下では、権限で弾かれた実行も
-  `is_error: false` で帰ってくる**（途中で何もできずに終わったことが成功に見える）。
-  そのため `permission_denials` が空でないステップ実行は
-  `step_runs.status` を `degraded` として記録し、UIで区別できるようにする。
-  ワークフローは停止させない（判断材料を出すところまでが①の責務）
+`**--permission-prompts none` の下では、権限で弾かれた実行も
+`is_error: false` で帰ってくる**（途中で何もできずに終わったことが成功に見える）。
+そのため `permission_denials` が空でないステップ実行は
+`step_runs.status` を `degraded` として記録し、UIで区別できるようにする。
+ワークフローは停止させない（判断材料を出すところまでが①の責務）
 - `terminal_reason: "completed"`
 
 **未確認**: プロセス終了コードと `is_error` の対応関係は実測していない。
-**`result` 行を権威とし、終了コードは補助**とする。
+`**result` 行を権威とし、終了コードは補助**とする。
 対応表は実装時に確認し、確認結果をこのspecに追記すること。
 
 ### `rate_limit_event`
@@ -410,7 +405,7 @@ claude -p --resume <session-id> --output-format stream-json --verbose ... '<追�
 - `start(prompt, opts) -> AgentRun`
 - `resume(sessionId, prompt) -> AgentRun`
 - `AgentRun`: `events`（正規化済みイベントの非同期イテレータ）、
-  `result`（成否・テキスト・コスト）、`kill()`
+`result`（成否・テキスト・コスト）、`kill()`
 
 **この境界の目的は将来の他エージェント対応ではない**（対象は Claude Code のみと決定済み）。
 **アダプタをモックしてエンジンをテストするため**である。
@@ -420,24 +415,35 @@ claude -p --resume <session-id> --output-format stream-json --verbose ... '<追�
 
 - **ランタイム**: TypeScript + Node.js 24
   - Rust + 単一バイナリも検討したが、②のUIはどのフレームワークでもレンダラ側はTSになる。
-    ワークフロースキーマとイベント型を**デーモンとUIで共有できる**価値が上回る。
-    子プロセス起動と NDJSON の行単位読み取りは Node の得意領域
+  ワークフロースキーマとイベント型を**デーモンとUIで共有できる**価値が上回る。
+  子プロセス起動と NDJSON の行単位読み取りは Node の得意領域
 - **永続化**: SQLite（`node:sqlite`、組み込み。Node 24 では experimental 警告が出るが動作する）
   - uncle-jam の「1ジョブ = 1 JSONファイル」は捨てる。実行履歴・横断一覧・枠のカウントは
-    クエリしたいデータであり、JSONファイル群では毎回全読みになる。
-    書き手はデーモン1つだけなので同時書き込み問題は起きない
+  クエリしたいデータであり、JSONファイル群では毎回全読みになる。
+  書き手はデーモン1つだけなので同時書き込み問題は起きない
 - **IPC**: Unix ドメインソケット + 改行区切りJSON
   - TCPポートは開かない。ローカル専用でポートを開くと待受アドレス・トークン・
-    ポート衝突を全部考える羽目になる。ソケットはファイルパーミッションがそのまま認可になる
+  ポート衝突を全部考える羽目になる。ソケットはファイルパーミッションがそのまま認可になる
   - リクエスト/レスポンスに加え、**サーバ→クライアントのイベントプッシュ**
-    （状態遷移、ステップ完了、ログ行）を同じ接続で流す。UIはポーリングしない
+  （状態遷移、ステップ完了、ログ行）を同じ接続で流す。UIはポーリングしない
   - パス: `$XDG_RUNTIME_DIR/uj/ujd.sock`
 - **依存パッケージは2つ**: `yaml`（パース）、`zod`（検証）
   - ユーザーが手で書く設定ファイルなので、**エラーメッセージの質が直接UXになる**。
-    ここは手書きバリデータで妥協しない
+  ここは手書きバリデータで妥協しない
   - uncle-jam のゼロ依存方針は引き継がない（学習用実装の制約であって本番の制約ではない）
 - **テスト**: `node:test`（組み込み）
 - **ビルド**: `tsc` のみ
+- **パッケージマネージャ**: pnpm
+  - 5章で述べた worktree ごとの `setup` コストに直接効く。content-addressable store
+  からのハードリンクなので、1タスク1worktree でも依存解決が重くならない
+  - lockfile は `pnpm-lock.yaml` をコミットし、`setup` 相当は
+  `pnpm install --frozen-lockfile`（`npm ci` に相当）で固定する
+- **ツールチェーン管理**: mise（`mise.toml` をリポジトリ直下にコミット）
+  - Node.js と pnpm のバージョンをリポジトリに固定する。
+  デーモンが worktree の中でコマンドを走らせる以上、**worktree でも同じ
+  バージョンが解決されなければならない**。`mise.toml` は追跡ファイルなので
+  `git worktree add` で一緒に付いてくる（worktree はリポジトリ外に置くが、
+  mise の設定探索は cwd から上に辿るだけなので問題にならない）
 
 ### 先送りを明示
 
@@ -447,17 +453,17 @@ claude -p --resume <session-id> --output-format stream-json --verbose ... '<追�
 現時点の調査結果（2026-09時点、実測ベンチと公式比較より）:
 
 - 性能差は本用途では判断材料にならない。Tauri が有利なのは大量データがJSブリッジを
-  越える場面（映像フレーム等）であり、本用途（子プロセス起動・NDJSON読み取り・
-  数十枚のカード描画）では差が出ない
+越える場面（映像フレーム等）であり、本用途（子プロセス起動・NDJSON読み取り・
+数十枚のカード描画）では差が出ない
 - Deno Desktop の最大の利点である in-process IPC は、**デーモン構成にした時点で
-  打ち消される**（どのみちソケットを跨ぐ）
+打ち消される**（どのみちソケットを跨ぐ）
 - 実際に効く差は成熟度。Deno Desktop は 2.9（2026-06）で experimental。
-  既知バグに「ウィンドウを非表示にするとクラッシュする（可視ウィンドウが0になると
-  Denoランタイムが終了する）」があり、**常駐トレイ型UIと相性が悪い可能性がある**
+既知バグに「ウィンドウを非表示にするとクラッシュする（可視ウィンドウが0になると
+Denoランタイムが終了する）」があり、**常駐トレイ型UIと相性が悪い可能性がある**
 - Tauri はレンダラからUnixソケットを開けないため、ソケット接続とイベント転送に
-  Rustのブリッジコード（150行程度）が要る
+Rustのブリッジコード（150行程度）が要る
 - **現時点の推奨は Tauri**（成熟度差が唯一の実質的な差であるため）。
-  ②に着手する時点で Deno Desktop の安定度を再評価すること
+②に着手する時点で Deno Desktop の安定度を再評価すること
 
 ## 8. デーモンAPI（②との契約）
 
@@ -473,9 +479,9 @@ Unix ソケット上の改行区切りJSON。リクエスト/レスポンスと�
 - `task.pause` / `task.resume` / `task.cancel`
 - `task.logs`（task_id, step_run_id, tail? / follow?）
 - `worktree.list` / `worktree.remove`（`uj gc` の実体）
-  — 失敗したタスクの worktree は汚れているのが通常であり、git は削除を拒否する。
-  `git worktree remove --force` を使う。**未コミットの作業は失われる**ので、
-  UI側は必ず確認を挟むこと
+— 失敗したタスクの worktree は汚れているのが通常であり、git は削除を拒否する。
+`git worktree remove --force` を使う。**未コミットの作業は失われる**ので、
+UI側は必ず確認を挟むこと
 - `ratelimit.recent`
 
 **イベント（サーバ→クライアント）**
@@ -487,18 +493,19 @@ Unix ソケット上の改行区切りJSON。リクエスト/レスポンスと�
 
 ### 中断・保留・中止の意味
 
-- **`task.pause`** — 実行中の子プロセスに SIGTERM を送り、`paused` へ。
-  `agent` ステップなら `claude_session_id` は保持され、`resume` で `--resume` から続く。
-  `command` ステップならそのステップを頭から再実行する（4章の冪等性制約と同じ）。
-  **全体枠は解放され、プロジェクト枠は保持される**（5章）
-- **`task.resume`** — `paused` / `suspended` から `queued` へ。
-  行列の先頭に入る（5章の飢餓対策）
-- **`task.cancel`** — 子プロセスを終了させ `canceled` へ。worktree は**残す**
+- `**task.pause**` — 実行中の子プロセスに SIGTERM を送り、`paused` へ。
+`agent` ステップなら `claude_session_id` は保持され、`resume` で `--resume` から続く。
+`command` ステップならそのステップを頭から再実行する（4章の冪等性制約と同じ）。
+**全体枠は解放され、プロジェクト枠は保持される**（5章）
+- `**task.resume**` — `paused` / `suspended` から `queued` へ。
+行列の先頭に入る（5章の飢餓対策）
+- `**task.cancel**` — 子プロセスを終了させ `canceled` へ。worktree は**残す**
 
 ## 9. 用語
 
 - **タスク** — 1つのワークフロー実行。1つの worktree と1つのブランチを持つ
 - **ステップ** — ワークフロー定義中の1要素
 - **ステップ実行（step run）** — ステップの1回の試行。`onFailure.goto` により
-  同一ステップが複数回実行され得る
+同一ステップが複数回実行され得る
 - **実行枠（slot）** — 同時に `running` でいられるタスクの数。全体とプロジェクト単位の2スコープ
+
