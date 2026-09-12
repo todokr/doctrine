@@ -1,7 +1,7 @@
 # doctrine コア設計 — ワークフローエンジン + 実行監督
 
 - 日付: 2026-09-12
-- 対象: サブプロジェクト① のみ（コア。UI・差分レビュー・レポートは対象外）
+
 - 状態: 承認済み、実装計画の作成待ち
 
 ## 1. 背景と動機
@@ -26,12 +26,12 @@
 | ④   | HTML生成、編集   | 別エージェントによる静的HTMLレポートおよび注釈つき編集、直接編集                     |
 
 
-①には薄いデバッグCLI `uj`（`uj add` / `uj ls` / `uj approve` など）を同梱するが、
+①には薄いデバッグCLI `dctl`（`dctl add` / `dctl ls` / `dctl approve` など）を同梱するが、
 これは**テスト・デバッグのための表面であって製品UIではない**。製品UIは②。
 
 ### アーキテクチャ方針: 常駐デーモン + クライアント
 
-`ujd` デーモンがワークフローを進行させ、Claude Code を自前で spawn する。
+`dctld` デーモンがワークフローを進行させ、Claude Code を自前で spawn する。
 UIはUnixソケット越しのクライアント（ビュー）にすぎない。
 
 採用理由:
@@ -53,7 +53,7 @@ UIはUnixソケット越しのクライアント（ビュー）にすぎない�
 - `agent` — Claude Code を headless 実行。session id を記録し再開可能
 - `approval` — FSMを `suspended` にして人の入力（承認/却下/追加指示）を待つ
 
-配置: `<project>/.uj/workflows/<name>.yaml`
+配置: `<project>/.doctrine/workflows/<name>.yaml`
 
 ```yaml
 name: feature
@@ -131,7 +131,7 @@ steps:
 
 ### プロジェクト設定
 
-配置: `<project>/.uj/project.yaml`
+配置: `<project>/.doctrine/project.yaml`
 
 ```yaml
 setup: pnpm install --frozen-lockfile   # 全ワークフローの先頭に自動挿入される command ステップ
@@ -193,7 +193,7 @@ uncle-jam の `pending` はこれに置き換える
 - `rate_limit_samples` — Claude Code から流れてくるレート消費率の記録（6章）
 
 **ログ本文はDBに入れない。** ディスク上のファイル
-（`~/.local/state/uj/logs/<task-id>/<step-id>.<attempt>.log`）に書き、
+（`~/.local/state/doctrine/logs/<task-id>/<step-id>.<attempt>.log`）に書き、
 DBはパスと末尾数KBだけ持つ。エージェントのログは数MB級になり、
 DBに入れると一覧クエリが道連れで重くなる。
 
@@ -234,10 +234,10 @@ pid単独での判定は誤って無関係のプロセスを殺し得る）。
 **タスク作成時ではなく、実行枠が取れた瞬間**に作る。`queued` のタスクが
 ディスクとgit refを抱える理由がない。
 
-- 置き場所: `~/.local/state/uj/worktrees/<project>/<task-id>`
+- 置き場所: `~/.local/state/doctrine/worktrees/<project>/<task-id>`
 — **リポジトリの外**。中に置くと ripgrep・ファイル監視・IDEインデックスが
 全部舐めに行き、エージェント自身も混乱する
-- ブランチ: `uj/<task-id>-<slug>`、`project.baseBranch` から生やす
+- ブランチ: `doctrine/<task-id>-<slug>`、`project.baseBranch` から生やす
 - 作成は自前の `git worktree add`（Claude Code の `-w` は使わない。
 ライフサイクルの権威を1箇所に保つため）
 
@@ -251,7 +251,7 @@ pid単独での判定は誤って無関係のプロセスを殺し得る）。
 失敗した実行こそ中を見たい瞬間であり、そこで証拠を消すのは最悪の設計
 
 残す判断の代償（溜まる）への対策:
-UIで「古いworktree」を一覧表示 / `uj gc` コマンド / N日経過で警告。
+UIで「古いworktree」を一覧表示 / `dctl gc` コマンド / N日経過で警告。
 **溜まるのは見えていれば直せるが、消えたものは戻らない。**
 
 ### 孤児の照合
@@ -426,7 +426,7 @@ claude -p --resume <session-id> --output-format stream-json --verbose ... '<追�
   ポート衝突を全部考える羽目になる。ソケットはファイルパーミッションがそのまま認可になる
   - リクエスト/レスポンスに加え、**サーバ→クライアントのイベントプッシュ**
   （状態遷移、ステップ完了、ログ行）を同じ接続で流す。UIはポーリングしない
-  - パス: `$XDG_RUNTIME_DIR/uj/ujd.sock`
+  - パス: `$XDG_RUNTIME_DIR/doctrine/dctld.sock`
 - **依存パッケージは2つ**: `yaml`（パース）、`zod`（検証）
   - ユーザーが手で書く設定ファイルなので、**エラーメッセージの質が直接UXになる**。
   ここは手書きバリデータで妥協しない
@@ -478,7 +478,7 @@ Unix ソケット上の改行区切りJSON。リクエスト/レスポンスと�
 - `task.approve`（task_id）/ `task.reject`（task_id, comment）
 - `task.pause` / `task.resume` / `task.cancel`
 - `task.logs`（task_id, step_run_id, tail? / follow?）
-- `worktree.list` / `worktree.remove`（`uj gc` の実体）
+- `worktree.list` / `worktree.remove`（`dctl gc` の実体）
 — 失敗したタスクの worktree は汚れているのが通常であり、git は削除を拒否する。
 `git worktree remove --force` を使う。**未コミットの作業は失われる**ので、
 UI側は必ず確認を挟むこと
