@@ -108,7 +108,7 @@ steps:
     onReject:
       goto: implement
       maxAttempts: 5
-      feed: "レビューで却下された:\n{{ approval.comment }}"
+      feed: "レビューで却下された:\n{{ steps.review.stdout }}"
 ```
 
 `onReject` の形は `onFailure` と同一である（`goto` / `maxAttempts` / `feed`）。
@@ -133,7 +133,9 @@ steps:
 - `{{ project.path }}`
 - `{{ steps.<id>.stdout }}` `{{ steps.<id>.stderr }}` `{{ steps.<id>.exitCode }}`
   — `agent` ステップの場合、`stdout` は最終結果テキスト
-- `{{ approval.comment }}` — 直近の却下コメント。`onReject.feed` の中でのみ有効
+却下コメントに専用の変数は設けない。**`approval` ステップの `stdout` が
+却下コメントそのもの**として `step_outputs` に保存される。`agent` ステップの
+`stdout` を最終結果テキストとしたのと同じ扱いであり、変数の系統を増やさない。
 
 ### 形式は YAML（TSではない）
 
@@ -153,7 +155,11 @@ baseBranch: main
 ```
 
 `setup` は新しい概念ではなく、ただの `command` ステップに名前が付いたもの。
-新品 worktree に `node_modules` がない問題への解（4章参照）。
+新品 worktree に `node_modules` がない問題への解（5章参照）。
+
+**ステップid `setup` は予約語**とする。自動挿入された結果として `step_runs` にも
+変数空間（`{{ steps.setup.stdout }}`）にも現れるため、ユーザー定義のワークフローが
+同じidを持つと静かに衝突する。検証時に**エラーとして弾く**。
 
 ## 4. 状態機械と永続化
 
@@ -163,8 +169,8 @@ baseBranch: main
 |---|---|---|
 | `queued` | 作成済み、実行枠の空き待ち | 占有しない |
 | `running` | ステップ実行中 | **占有する** |
-| `suspended` | `approval` ステップで人の入力待ち | 解放する |
-| `paused` | 人が明示的に保留した | 解放する |
+| `suspended` | `approval` ステップで人の入力待ち | **全体枠のみ解放**（プロジェクト枠は保持） |
+| `paused` | 人が明示的に保留した | **全体枠のみ解放**（プロジェクト枠は保持） |
 | `completed` | 正常終了 | — |
 | `failed` | 失敗して終了 | — |
 | `canceled` | 人が中止した | — |
@@ -177,7 +183,7 @@ baseBranch: main
   （再開時に承認/却下という**値**を受け取る）、後者は人が割り込んだ（単に続きから）
 - **`canceled` を `failed` に畳まない** — 自分で止めたものが「失敗」列に
   並ぶとボードが嘘をつく
-- **`suspended` は枠を解放する** — 人間を待つ間マシンを遊ばせる理由がない
+- **枠の解放はスコープごとに違う**（5章で詳述）— 全体枠は解放し、プロジェクト枠は保持する
 
 ### 枠の占有数はカウンタで持たない
 
@@ -188,7 +194,8 @@ baseBranch: main
 - `projects` — `path`, `default_workflow`, `max_concurrent`, `base_branch`, `setup`
 - `tasks` — **これ自体がスナップショット**。`id`, `project_id`, `title`, `prompt`,
   `workflow_name`, `state`, `current_step_id`, `attempt_counts`(JSON),
-  `branch`, `worktree_path`, `claude_session_id`, `priority`, `created_at`, `updated_at`
+  `branch`, `worktree_path`, `claude_session_id`, `child_pid`, `child_started_at`,
+  `priority`, `created_at`, `updated_at`
 - `step_runs` — ステップ1回の実行記録。`task_id`, `step_id`, `attempt`, `status`,
   `exit_code`, `started_at`, `ended_at`, `log_path`,
   `cost_usd`, `num_turns`, `duration_ms`。**UIの「実行履歴」はこのテーブル**
@@ -210,6 +217,17 @@ DBに入れると一覧クエリが道連れで重くなる。
 
 デーモンが死ねば子プロセスの stdout は誰も読んでいない。よって
 **起動時に `running` のタスクはすべて古い**。復帰規則:
+
+**復帰の前に、必ず古い子プロセスを殺す。** デーモンが SIGKILL された場合、
+子の `claude` は**生き残ったまま同じ worktree に書き続けている**ことがある。
+そこへ `--resume` で2本目を起動すると、同じ作業ツリーに2つのエージェントが並ぶ。
+ステップ境界ごとの耐久性という本specの中心的な保証が、復帰経路で崩れる。
+
+そのため `tasks` に `child_pid` と `child_started_at` を持ち、復帰時に
+**pid と開始時刻の両方**で同一性を確認してから終了させる（pidは再利用されるため、
+pid単独での判定は誤って無関係のプロセスを殺し得る）。
+
+殺し終えてから:
 
 - **`agent` ステップだった** → `claude_session_id` で `--resume` して続きから
 - **`command` ステップだった** → そのステップを**頭から再実行**
@@ -276,15 +294,29 @@ worktree で分離した以上、上限の理由は衝突回避ではなく**負
 
 **受付順**: 優先度（P0〜P3、既定P2）→ 作成時刻のFIFO。
 
-**飢餓対策**: `suspended` / `paused` は枠を解放するため、承認した瞬間に
-「また行列の最後尾」になり得る。体験として許容できない。規則:
+### 枠の解放はスコープごとに違う
+
+**2つの上限は理由が違うので、`suspended` / `paused` 時の扱いも違う。**
+
+- **全体枠は解放する** — 理由はマシン負荷とAPIコスト。人間を待っている間、
+  タスクはCPUもトークンも消費していない。握り続ける理由がない
+- **プロジェクト枠は保持する** — 理由は同一リポジトリでのマージ困難。
+  `suspended` のタスクは **worktree とブランチを生かしたまま**なので、
+  この理由は消えていない。ここで解放すると、まさに避けたかった状態
+  （同じリポジトリに複数の未マージブランチが並走する）を自分で作ることになる
+
+**この非対称性が飢餓を消す。** `maxConcurrent: 1` のプロジェクトで、
+タスクAが承認待ちの間にタスクBが割り込むことはない。承認した瞬間、
+Aはプロジェクト枠を既に持っているので、全体枠さえ空けば即座に `running` に戻る。
+
+**追加の規則**（全体枠の取り合いに対して）:
 
 > **再開するタスクは行列の先頭に入る。進行中の仕事を、新規の仕事より先に終わらせる。**
 
-### ①で意図的に落とすもの
+画像の「実行枠を確保する」（suspend中も枠を握り続ける）は、この非対称性によって
+**既定の挙動として組み込まれている**。ユーザーが操作するフラグとしては持たない。
 
-- **「実行枠の確保」**（suspend中も枠を握り続けるフラグ）
-  — 上記の行列割り込み規則で大半が解決する。機構を2つ持つ理由がない
+### ①で意図的に落とすもの
 - **先行タスク（依存関係）** — グラフのスケジューリング・循環検出・
   依存先失敗時の伝播という別の設計が丸ごと必要になり、
   「並行実行の管理」という中心から外れる
@@ -335,7 +367,12 @@ NDJSON（1行1JSON）。観測した `type`:
 - `subtype: "success"`, `is_error: false` — 成否
 - `result` — 最終テキスト（`onFailure.feed` の素材、`{{ steps.<id>.stdout }}` の中身）
 - `total_cost_usd`, `usage`, `num_turns`, `duration_ms` — `step_runs` に保存
-- `permission_denials: []` — 権限で弾かれた操作の一覧
+- `permission_denials: []` — 権限で弾かれた操作の一覧。
+  **`--permission-prompts none` の下では、権限で弾かれた実行も
+  `is_error: false` で帰ってくる**（途中で何もできずに終わったことが成功に見える）。
+  そのため `permission_denials` が空でないステップ実行は
+  `step_runs.status` を `degraded` として記録し、UIで区別できるようにする。
+  ワークフローは停止させない（判断材料を出すところまでが①の責務）
 - `terminal_reason: "completed"`
 
 **未確認**: プロセス終了コードと `is_error` の対応関係は実測していない。
@@ -436,6 +473,9 @@ Unix ソケット上の改行区切りJSON。リクエスト/レスポンスと�
 - `task.pause` / `task.resume` / `task.cancel`
 - `task.logs`（task_id, step_run_id, tail? / follow?）
 - `worktree.list` / `worktree.remove`（`uj gc` の実体）
+  — 失敗したタスクの worktree は汚れているのが通常であり、git は削除を拒否する。
+  `git worktree remove --force` を使う。**未コミットの作業は失われる**ので、
+  UI側は必ず確認を挟むこと
 - `ratelimit.recent`
 
 **イベント（サーバ→クライアント）**
@@ -450,7 +490,7 @@ Unix ソケット上の改行区切りJSON。リクエスト/レスポンスと�
 - **`task.pause`** — 実行中の子プロセスに SIGTERM を送り、`paused` へ。
   `agent` ステップなら `claude_session_id` は保持され、`resume` で `--resume` から続く。
   `command` ステップならそのステップを頭から再実行する（4章の冪等性制約と同じ）。
-  **枠は解放される**
+  **全体枠は解放され、プロジェクト枠は保持される**（5章）
 - **`task.resume`** — `paused` / `suspended` から `queued` へ。
   行列の先頭に入る（5章の飢餓対策）
 - **`task.cancel`** — 子プロセスを終了させ `canceled` へ。worktree は**残す**
