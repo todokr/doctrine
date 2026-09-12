@@ -45,19 +45,42 @@ function buildWorkflowLookup(db: DatabaseSync): WorkflowLookup {
  * 生きたまま同じパスを掴んでいる場合、その unlink は生きているデーモンを
  * 気づかれないまま切り離す一方、そのデーモン自身は動き続け、両方が同じ
  * DB に書き込む事態になる。listen する前に、パスが存在すれば接続を試み、
- * つながれば生きているとみなして起動を拒否する。ECONNREFUSED なら古い
- * ソケットファイルなので、消してから通常どおり listen させてよい。
+ * つながれば生きているとみなして起動を拒否する。
+ *
+ * 「古いソケットファイルだから消してよい」と言えるのは ECONNREFUSED
+ * （何も listen していない）と ENOENT（stat と connect の間に消えた）
+ * だけである。EACCES（権限で弾かれた）・ENOTSOCK（パスがソケットではない
+ * 通常ファイル/ディレクトリ）などは「生きているかどうか判定できない」に
+ * すぎず、それを黙って「古い」側に倒すと、まさにこの関数が防ぐべき事態
+ * （生きているデーモンを気づかれずに切り離す）が起きる。判定できない
+ * 場合は必ず拒否する側に倒す。
  */
 async function assertSocketNotLive(path: string): Promise<void> {
   const exists = await stat(path).then(() => true, () => false);
   if (!exists) return;
-  const live = await new Promise<boolean>((resolve) => {
-    const sock = connect(path);
-    sock.once("connect", () => { sock.destroy(); resolve(true); });
-    sock.once("error", () => resolve(false));
-  });
-  if (live) {
+
+  const result = await new Promise<{ kind: "live" } | { kind: "stale" } | { kind: "unknown"; code: string }>(
+    (resolve) => {
+      const sock = connect(path);
+      sock.once("connect", () => { sock.destroy(); resolve({ kind: "live" }); });
+      sock.once("error", (err: NodeJS.ErrnoException) => {
+        if (err.code === "ECONNREFUSED" || err.code === "ENOENT") {
+          resolve({ kind: "stale" });
+        } else {
+          resolve({ kind: "unknown", code: err.code ?? String(err) });
+        }
+      });
+    },
+  );
+
+  if (result.kind === "live") {
     throw new Error(`デーモンが既に動作しています（ソケット: ${path}）。二重起動はできません。`);
+  }
+  if (result.kind === "unknown") {
+    throw new Error(
+      `ソケット (${path}) の状態を判定できませんでした（${result.code}）。` +
+      `デーモンが生きている可能性を否定できないため、起動を拒否します。`,
+    );
   }
   // 古いソケットファイル。次の listen() が改めて unlink するが、ここで消しておいても害はない。
   await unlink(path).catch(() => {});

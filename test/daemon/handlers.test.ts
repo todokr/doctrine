@@ -262,3 +262,41 @@ test("stepRun.started の step_run_id は本物で、task.logs から引ける",
   ) as { log_path: string };
   assert.ok(log.log_path.length > 0, "届いた step_run_id で本物のログが引ける");
 });
+
+test("worktree 作成に失敗したタスクは failed になり、他プロジェクトの健全なタスクは同じ pass で進む", async () => {
+  const ctx = context();
+  const h = createHandler(ctx);
+
+  // 壊れたプロジェクト: baseBranch が存在しないので `git worktree add` が失敗する。
+  await writeFile(join(repo, ".doctrine", "project.yaml"),
+    "defaultWorkflow: feature\nmaxConcurrent: 1\nbaseBranch: nonexistent-base\n");
+  await h("project.add", { path: repo }, NOOP_CONN);
+  const broken = await h(
+    "task.create", { project: repo, title: "broken", prompt: "p" }, NOOP_CONN,
+  ) as { id: string };
+
+  // 健全な別プロジェクト: 同じ pass で普通に進めるはず。
+  const healthyRoot = await mkdtemp(join(tmpdir(), "doctrine-daemon-healthy-"));
+  const healthyRepo = await makeRepo(healthyRoot, {
+    "README.md": "x\n",
+    ".doctrine/project.yaml": "defaultWorkflow: feature\nmaxConcurrent: 1\nbaseBranch: main\n",
+    ".doctrine/workflows/feature.yaml":
+      "name: feature\nsteps:\n  - id: review\n    type: approval\n    title: 見て\n",
+  });
+  await h("project.add", { path: healthyRepo }, NOOP_CONN);
+  const healthy = await h(
+    "task.create", { project: healthyRepo, title: "healthy", prompt: "p" }, NOOP_CONN,
+  ) as { id: string };
+
+  try {
+    await tick(ctx);
+    await until(() => ctx.running.size === 0);
+    assert.equal(getTask(ctx.db, broken.id)?.state, "failed",
+      "作れないまま queued に残すと毎周期リトライされ続ける");
+    assert.ok(ctx.warnings.some((w) => /実行を開始できませんでした/.test(w)));
+    assert.equal(getTask(ctx.db, healthy.id)?.state, "suspended",
+      "1タスクの不備が他プロジェクトのタスクの進行を妨げてはいけない");
+  } finally {
+    await rm(healthyRoot, { recursive: true, force: true });
+  }
+});

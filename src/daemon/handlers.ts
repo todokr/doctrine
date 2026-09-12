@@ -238,34 +238,45 @@ export async function cleanupAfterRun(ctx: DaemonContext, taskId: string): Promi
   }
 }
 
+/**
+ * タスクを失敗として記録し、可能なら警告を残す。tick の「枠を取ってから
+ * running を書くまでの間」で何が起きても、このタスクを queued のまま
+ * 残さないための共通経路。
+ *
+ * トレードオフ: 一時的な失敗（ディスク満杯・瞬間的なロックなど）も同じ扱いで
+ * failed になり、成功していたかもしれない試行を失って利用者が作り直す
+ * ことになる。それでも、queued のまま永遠にリトライされ続けて board から
+ * 見えなくなる（かつプロジェクトの同時実行枠を暗黙に圧迫し続ける）よりは、
+ * 理由付きで board に見える failed の方がまし、という判断。
+ */
+function failTaskInTick(ctx: DaemonContext, taskId: string, fromState: TaskState, reason: string): void {
+  ctx.warnings.push(`タスク ${taskId}: ${reason}`);
+  try {
+    assertTransition(fromState, "failed");
+    commitStepBoundary(ctx.db, { taskId, taskPatch: { state: "failed" } });
+    ctx.broadcast({ event: "task.stateChanged", task_id: taskId, from: fromState, to: "failed" });
+  } catch {
+    // fromState から failed へ遷移できない（既に終端など）場合はこれ以上書かず、
+    // 警告の記録だけに留める。
+  }
+}
+
 /** 1周: 枠の空きを見て queued を running にし、次に人を待つ地点まで進める。 */
 export async function tick(ctx: DaemonContext): Promise<void> {
   for (const task of selectAdmissible(ctx.db, ctx.globalLimit)) {
     if (ctx.running.has(task.id)) continue;
     ctx.running.add(task.id);
 
+    let workflow: Workflow;
+    let worktreePath: string;
     try {
       const project = getProject(ctx.db, task.project_id)!;
-      let workflow: Workflow;
-      try {
-        workflow = withSetupStep(
-          await ctx.loadWorkflow(project.path, task.workflow_name), project.setup ?? undefined);
-      } catch (e) {
-        // 壊れたワークフロー定義は queued に留めてはいけない。放置すると
-        // スケジューラが毎周期リトライし続ける。1タスクの不備で他タスクの
-        // tick まで止めないよう、ここで捕まえて failed に倒す。
-        assertTransition(task.state, "failed");
-        commitStepBoundary(ctx.db, { taskId: task.id, taskPatch: { state: "failed" } });
-        ctx.broadcast({ event: "task.stateChanged", task_id: task.id, from: task.state, to: "failed" });
-        ctx.warnings.push(`タスク ${task.id}: ワークフローを読めませんでした: ${(e as Error).message}`);
-        ctx.running.delete(task.id);
-        continue;
-      }
+      workflow = withSetupStep(
+        await ctx.loadWorkflow(project.path, task.workflow_name), project.setup ?? undefined);
 
       // worktree はタスク作成時ではなく、実行枠が取れた瞬間に作る
-      let worktreePath = task.worktree_path;
-      if (!worktreePath) {
-        worktreePath = worktreePathFor(project.path, task.id);
+      worktreePath = task.worktree_path ?? worktreePathFor(project.path, task.id);
+      if (!task.worktree_path) {
         await createWorktree({
           repoPath: project.path, worktreePath, branch: task.branch, baseBranch: project.base_branch,
         });
@@ -276,7 +287,16 @@ export async function tick(ctx: DaemonContext): Promise<void> {
         taskPatch: { state: "running", worktree_path: worktreePath, resumed: 0 },
       });
       ctx.broadcast({ event: "task.stateChanged", task_id: task.id, from: task.state, to: "running" });
+    } catch (e) {
+      // ワークフローが読めない・worktree が作れないなど、running を書く前に
+      // 何が起きても queued に留めてはいけない。放置するとスケジューラが
+      // 毎周期リトライし続け、1タスクの不備で他タスクの tick まで止めかねない。
+      failTaskInTick(ctx, task.id, task.state, `実行を開始できませんでした: ${(e as Error).message}`);
+      ctx.running.delete(task.id);
+      continue;
+    }
 
+    try {
       void runTask(ctx.db, task.id, workflow, {
         db: ctx.db, adapter: ctx.adapter, logRoot: ctx.logRoot, globalLimit: ctx.globalLimit,
         onStateChanged: (id, from, to) =>
@@ -298,21 +318,16 @@ export async function tick(ctx: DaemonContext): Promise<void> {
           // ワークフロー作者に見せるべき失敗）。void で握りつぶすと .finally() が
           // 同じ理由で再rejectし、誰も catch しないまま unhandled rejection になって
           // デーモンごと落ちる。ここで受け止め、タスクを failed に倒して警告に残す。
-          ctx.warnings.push(`タスク ${task.id}: 実行中に例外が発生しました: ${(e as Error).message}`);
           const after = getTask(ctx.db, task.id);
           if (after && !isTerminal(after.state)) {
-            try {
-              assertTransition(after.state, "failed");
-              commitStepBoundary(ctx.db, { taskId: task.id, taskPatch: { state: "failed" } });
-              ctx.broadcast({ event: "task.stateChanged", task_id: task.id, from: after.state, to: "failed" });
-            } catch {
-              // 遷移できない状態（terminal など）ならこれ以上は書き込まず、警告の記録だけに留める。
-            }
+            failTaskInTick(ctx, task.id, after.state, `実行中に例外が発生しました: ${(e as Error).message}`);
+          } else {
+            ctx.warnings.push(`タスク ${task.id}: 実行中に例外が発生しました: ${(e as Error).message}`);
           }
         })
         .finally(() => ctx.running.delete(task.id));
     } catch (e) {
-      // 枠を取ってから worktree 作成までのどこかで例外が出た場合も、
+      // void runTask(...) の呼び出し自体（Promise が返る前）で何か起きた場合も、
       // ctx.running の解放を必ず通す。
       ctx.running.delete(task.id);
       ctx.warnings.push(`タスク ${task.id}: tick 中に例外が発生しました: ${(e as Error).message}`);
