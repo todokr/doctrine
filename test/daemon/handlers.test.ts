@@ -504,3 +504,54 @@ test("最終ステップの approval でも未コミットの変更が残って�
   assert.ok(getTask(ctx.db, t.id)?.worktree_path, "削除を拒否して残す");
   assert.ok(ctx.warnings.some((w) => /未コミット/.test(w)), "警告として出す");
 });
+
+// --- tick の再入 ----------------------------------------------------------
+
+/**
+ * tick は1秒間隔で呼ばれるので、前の周が終わる前に次の周が始まる。tick は
+ * state: "running" を書く前に loadWorkflow と createWorktree を await するため、
+ * 2周目の selectAdmissible からは1周目のタスクがまだ queued に見える。
+ *
+ * それでも枠は溢れない: selectAdmissible は1回の呼び出しの中で projectUsed を
+ * 数え上げる（scheduler.ts）ので、maxConcurrent: 1 のプロジェクトからは
+ * 常に先頭の1件しか返らない。2周目は同じ先頭タスクを返し、それは
+ * ctx.running.has で弾かれる。2件目が繰り上がることはない。
+ *
+ * これは受付順（resumed DESC, priority ASC, created_at ASC, id ASC）が
+ * 決定的であることに依存している。順序が不定なら2周目が別のタスクを先頭として
+ * 返し、本当に枠を超える。
+ */
+test("tick が重なって呼ばれても maxConcurrent: 1 のプロジェクトで2件が走り出さない", async () => {
+  const ctx = context();
+  const h = createHandler(ctx);
+  await h("project.add", { path: repo }, NOOP_CONN);
+  const a = await h("task.create", { project: repo, title: "A", prompt: "p" }, NOOP_CONN) as { id: string };
+  const b = await h("task.create", { project: repo, title: "B", prompt: "p" }, NOOP_CONN) as { id: string };
+
+  // 実際に admit された回数を数える。2周目が2件目を繰り上げたならここが増える。
+  const admitted: string[] = [];
+  const loadWorkflow = ctx.loadWorkflow;
+  ctx.loadWorkflow = async (projectPath, name) => {
+    admitted.push(name);
+    return loadWorkflow(projectPath, name);
+  };
+
+  // 1周目が loadWorkflow / createWorktree を await している最中に2周目を始める
+  const first = tick(ctx);
+  assert.equal(getTask(ctx.db, a.id)!.state, "queued",
+    "2周目に入る時点で1周目はまだ running を書いていない（これが問題の窓）");
+  const second = tick(ctx);
+  await Promise.all([first, second]);
+  await until(() => ctx.running.size === 0);
+
+  const states = [getTask(ctx.db, a.id)!.state, getTask(ctx.db, b.id)!.state];
+  const holding = states.filter((s) => s === "running" || s === "suspended" || s === "paused");
+  assert.equal(holding.length, 1, `プロジェクト枠は1。実際: ${states.join(",")}`);
+  assert.equal(getTask(ctx.db, a.id)!.state, "suspended", "受付順は決定的で、先頭は常に A");
+  assert.equal(getTask(ctx.db, b.id)!.state, "queued");
+  assert.equal(getTask(ctx.db, b.id)!.worktree_path, null, "走らなかったタスクは worktree も作られない");
+
+  // 2周目が同じタスクを二重に開始していないこと（step_runs が重複しない）
+  assert.equal(listStepRuns(ctx.db, a.id).length, 0, "approval だけのワークフローに step_runs は無い");
+  assert.equal(admitted.length, 1, "2周目は先頭の同じタスクを返し、ctx.running で弾かれるだけ");
+});
