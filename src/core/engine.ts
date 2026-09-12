@@ -214,7 +214,15 @@ export function applyApproval(
 
   const stepId = task.current_step_id!;
   const index = workflow.steps.findIndex((s) => s.id === stepId);
-  const step = workflow.steps[index];
+  // ワークフローは承認のたびにディスクから読み直される。承認待ちの間に YAML が
+  // 編集されて承認ステップが消えていると、index は -1 になり steps[-1 + 1] が
+  // steps[0]（＝先頭ステップ）になる。黙ってワークフローを頭からやり直すより、
+  // 消えたステップ名を名指しして止める方がよい。
+  if (index === -1) {
+    throw new Error(
+      `承認待ちのステップがワークフローにありません: ${stepId}（承認待ちの間に定義が変更された可能性があります）`,
+    );
+  }
   const now = new Date().toISOString();
 
   if (verdict.approved) {

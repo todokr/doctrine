@@ -270,6 +270,44 @@ steps:
     "feed があることは会話が既にあることを意味しない");
 });
 
+test("承認待ちの間にワークフローが書き換わり、承認ステップが消えたらエラーになる", async () => {
+  const { db, root, workflow } = await taskFixture(`
+name: f
+steps:
+  - id: implement
+    type: command
+    run: "true"
+  - id: review
+    type: approval
+    title: "見て"
+`);
+  const adapter = createMockAdapter({ result: {} });
+  await runTask(db, "t1", workflow, { db, adapter, logRoot: join(root, "logs"), globalLimit: 4 });
+  assert.equal(getTask(db, "t1")?.state, "suspended");
+  const runsBefore = listStepRuns(db, "t1").length;
+
+  // 承認待ちの間に YAML が書き換えられ、review ステップが消えた状態。
+  // handlers は承認のたびにディスクから読み直すので、これが渡ってくる。
+  const edited = parseWorkflow(`
+name: f
+steps:
+  - id: implement
+    type: command
+    run: "true"
+`).workflow;
+
+  assert.throws(
+    () => applyApproval(db, "t1", { approved: true, comment: "" }, edited),
+    /review/,
+    "見つからないステップ名を名指しして落ちる",
+  );
+  const t = getTask(db, "t1")!;
+  assert.equal(t.state, "suspended", "書き込みは一切起きない");
+  assert.equal(t.current_step_id, "review");
+  assert.equal(listStepRuns(db, "t1").length, runsBefore,
+    "steps[-1 + 1] は steps[0]。黙って先頭からやり直してはいけない");
+});
+
 test("approval に来たら suspended で止まる", async () => {
   const { db, root, workflow } = await taskFixture(`
 name: f
