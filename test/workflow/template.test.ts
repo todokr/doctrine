@@ -45,3 +45,38 @@ test("ステップの未知のフィールドは落とす", () => {
 test("変数を含まない文字列はそのまま返す", () => {
   assert.equal(expand("pnpm test", ctx), "pnpm test");
 });
+
+test("閉じられていないプレースホルダーは落とす", () => {
+  assert.throws(() => expand("{{ task.prompt", ctx), (e: unknown) => {
+    assert.ok(e instanceof TemplateError);
+    assert.match((e as Error).message, /不正なプレースホルダー/);
+    return true;
+  });
+});
+
+test("空のプレースホルダーは落とす", () => {
+  assert.throws(() => expand("{{}}", ctx), TemplateError);
+});
+
+test("空白のみのプレースホルダーは落とす", () => {
+  assert.throws(() => expand("{{ }}", ctx), TemplateError);
+});
+
+test("代入された値に{{ }}を含むテンプレートは展開してもスルーする（再展開しない）", () => {
+  const ctxWithTemplate: TemplateContext = {
+    task: ctx.task,
+    worktree: ctx.worktree,
+    project: ctx.project,
+    steps: { test: { stdout: "見つからない: {{ task.prompt }}", stderr: "error", exitCode: "1" } },
+  };
+  const result = expand("失敗:\n{{ steps.test.stdout }}", ctxWithTemplate);
+  assert.equal(result, "失敗:\n見つからない: {{ task.prompt }}");
+});
+
+test("ステップidにドットを含めるとエラーメッセージで指摘する", () => {
+  assert.throws(() => expand("{{ steps.my.step.stdout }}", ctx), (e: unknown) => {
+    assert.ok(e instanceof TemplateError);
+    assert.match((e as Error).message, /ステップidには.*を含められません/);
+    return true;
+  });
+});
