@@ -4,7 +4,10 @@ const TRANSITIONS: Record<TaskState, readonly TaskState[]> = {
   /** ワークフローが読めなければ、ステップを1つも実行せずに failed になれる。running を経由すると、ステップ実行を記録することになり嘘になる。 */
   queued: ["running", "paused", "canceled", "failed"],
   running: ["suspended", "paused", "completed", "failed", "canceled", "queued"],
-  suspended: ["queued", "canceled", "failed"],
+  /** 最後のステップが approval で、承認されて次のステップが無いとき completed になる。
+      queued を経由させて次に何も無いことをスケジューラに発見させるのは、
+      待つ理由が無いのに一瞬枠を再取得させ、実態のない queued を記録することになる。 */
+  suspended: ["queued", "canceled", "failed", "completed"],
   paused: ["queued", "canceled"],
   completed: [],
   failed: [],

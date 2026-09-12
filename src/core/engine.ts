@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import { randomUUID } from "node:crypto";
-import type { Branch, Step, Workflow } from "../workflow/schema.ts";
+import type { Branch, Workflow } from "../workflow/schema.ts";
 import { branchOf } from "../workflow/schema.ts";
 import { expand, type TemplateContext } from "../workflow/template.ts";
 import { commitStepBoundary, type StepBoundary } from "../db/boundary.ts";
@@ -93,10 +93,7 @@ export async function runTask(
     }
 
     if (step.type === "approval") {
-      commitStepBoundary(db, {
-        taskId, taskPatch: { state: "suspended", current_step_id: step.id, child_pid: null, child_started_at: null },
-      });
-      deps.onStateChanged?.(taskId, task.state, "suspended");
+      setState(db, task, "suspended", deps, { current_step_id: step.id, child_pid: null, child_started_at: null });
       return;
     }
 
@@ -197,6 +194,10 @@ export function applyApproval(
 
   if (verdict.approved) {
     const next = workflow.steps[index + 1];
+    const to: TaskState = next ? "queued" : "completed";
+    // 遷移表に反する書き込みを防ぐ。ここで投げれば commitStepBoundary は一切呼ばれず、
+    // タスク行・step_run・outputs のどれも書き換わらない（呼び出し前に検査するのが要点）。
+    assertTransition(task.state, to);
     commitStepBoundary(db, {
       taskId,
       taskPatch: next
@@ -210,6 +211,8 @@ export function applyApproval(
   }
 
   const branch = step.type === "approval" ? step.onReject : undefined;
+  const to: TaskState = branch ? "queued" : "failed";
+  assertTransition(task.state, to);
   commitStepBoundary(db, {
     taskId,
     taskPatch: branch

@@ -35,6 +35,17 @@ test("ワークフローが読めなければ、ステップを1つも実行せ�
   assert.doesNotThrow(() => assertTransition("queued", "failed"));
 });
 
+test("suspended から completed になれる（最後が approval で承認されたとき）", () => {
+  assert.ok(canTransition("suspended", "completed"),
+    "承認されて次のステップが無ければ、そこでタスクは完了している");
+  assert.doesNotThrow(() => assertTransition("suspended", "completed"));
+});
+
+test("suspended から running / paused へは直接行けない", () => {
+  assert.equal(canTransition("suspended", "running"), false);
+  assert.equal(canTransition("suspended", "paused"), false);
+});
+
 test("不正な遷移は例外を投げる", () => {
   assert.throws(() => assertTransition("completed", "running"), InvalidTransitionError);
   assert.doesNotThrow(() => assertTransition("queued", "running"));

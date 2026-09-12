@@ -321,3 +321,21 @@ steps:
   applyApproval(db, "t1", { approved: false, comment: "だめ" }, workflow);
   assert.equal(getTask(db, "t1")?.state, "failed");
 });
+
+test("承認待ちでないタスクに applyApproval を呼ぶと例外を投げ、何も書き込まない", async () => {
+  const { db, root, workflow } = await taskFixture(`
+name: f
+steps:
+  - id: review
+    type: approval
+    title: "見て"
+`);
+  // taskFixture は state='running' のまま（runTask を呼んでいないので suspended になっていない）。
+  const before = getTask(db, "t1")!;
+  assert.equal(before.state, "running");
+
+  assert.throws(() => applyApproval(db, "t1", { approved: true, comment: "" }, workflow));
+
+  const after = getTask(db, "t1")!;
+  assert.deepEqual(after, before, "例外を投げた呼び出しは taskPatch/step_run/outputs のどれも書き込まない");
+});
