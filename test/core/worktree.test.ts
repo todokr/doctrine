@@ -2,19 +2,22 @@ import { test, beforeEach, afterEach } from "vitest";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { mkdtemp, rm, writeFile, stat } from "node:fs/promises";
+import { mkdtemp, rm, writeFile, stat, realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   createWorktree, removeWorktree, hasUncommittedChanges, findOrphans,
   branchNameFor, slugify, UncommittedChangesError,
+  stateDir, worktreePathFor, listWorktrees,
 } from "../../src/core/worktree.ts";
 
 const run = promisify(execFile);
 let repo: string;
 let root: string;
+let originalStateDir: string | undefined;
 
 beforeEach(async () => {
+  originalStateDir = process.env.DOCTRINE_STATE_DIR;
   root = await mkdtemp(join(tmpdir(), "doctrine-test-"));
   repo = join(root, "repo");
   await run("git", ["init", "-b", "main", repo]);
@@ -25,7 +28,11 @@ beforeEach(async () => {
   await run("git", ["-C", repo, "commit", "-m", "init"]);
 });
 
-afterEach(async () => { await rm(root, { recursive: true, force: true }); });
+afterEach(async () => {
+  if (originalStateDir === undefined) delete process.env.DOCTRINE_STATE_DIR;
+  else process.env.DOCTRINE_STATE_DIR = originalStateDir;
+  await rm(root, { recursive: true, force: true });
+});
 
 test("ブランチ名を作る", () => {
   assert.equal(branchNameFor("abc123", "ログイン画面を直す"), "doctrine/abc123-ログイン画面を直す");
@@ -90,4 +97,32 @@ test("DBに対応のない worktree を孤児として報告する", async () =>
   await createWorktree({ repoPath: repo, worktreePath: orphan, branch: "doctrine/b", baseBranch: "main" });
   const orphans = await findOrphans(repo, [known]);
   assert.deepEqual(orphans, [orphan]);
+});
+
+test("stateDir は DOCTRINE_STATE_DIR を尊重する", () => {
+  process.env.DOCTRINE_STATE_DIR = "/tmp/doctrine-custom-state";
+  assert.equal(stateDir(), "/tmp/doctrine-custom-state");
+
+  delete process.env.DOCTRINE_STATE_DIR;
+  assert.ok(stateDir().endsWith(join(".local", "state", "doctrine")));
+});
+
+test("worktreePathFor は stateDir/worktrees/<project の basename>/<taskId> を組み立てる", () => {
+  process.env.DOCTRINE_STATE_DIR = "/tmp/doctrine-known-state";
+  const projectPath = "/home/dev/projects/my-app";
+  assert.equal(
+    worktreePathFor(projectPath, "task-42"),
+    join("/tmp/doctrine-known-state", "worktrees", "my-app", "task-42"),
+  );
+});
+
+test("listWorktrees はメインの作業ツリーを除外する", async () => {
+  assert.deepEqual(await listWorktrees(repo), []);
+
+  const wt = join(root, "wt", "t1");
+  await createWorktree({ repoPath: repo, worktreePath: wt, branch: "doctrine/t1-x", baseBranch: "main" });
+
+  const worktrees = await listWorktrees(repo);
+  assert.equal(worktrees.length, 1);
+  assert.equal(await realpath(worktrees[0]!), await realpath(wt));
 });
