@@ -1,0 +1,129 @@
+import { readFileSync } from "node:fs";
+import { stat, unlink } from "node:fs/promises";
+import { connect } from "node:net";
+import { join } from "node:path";
+import { homedir } from "node:os";
+import type { DatabaseSync } from "node:sqlite";
+import { openDb } from "../db/migrate.ts";
+import { createClaudeAdapter } from "../adapter/claude.ts";
+import { recoverOnStartup, defaultProbe, type WorkflowLookup } from "../core/recovery.ts";
+import { findOrphans } from "../core/worktree.ts";
+import { getProject, listProjects, listTasks, type TaskRow } from "../db/tasks.ts";
+import { DEFAULT_GLOBAL_LIMIT } from "../core/scheduler.ts";
+import { parseWorkflow } from "../workflow/schema.ts";
+import { withSetupStep } from "../workflow/project.ts";
+import { createServer, socketPath } from "./server.ts";
+import { createHandler, loadWorkflowFromDisk, tick, type DaemonContext } from "./handlers.ts";
+
+export function stateRoot(): string {
+  return process.env.DOCTRINE_STATE_DIR ?? join(homedir(), ".local", "state", "doctrine");
+}
+
+/**
+ * recoverOnStartup が要求する同期ルックアップ。ワークフローYAMLが消えている・
+ * 壊れている・プロジェクトが見当たらない場合は undefined を返す（呼び出し側は
+ * 安全側=rerun-command に倒す）。ここで例外を漏らすと1タスクの不備で
+ * recoverOnStartup 全体が落ち、他の stale タスクが救済されずに残る。
+ */
+function buildWorkflowLookup(db: DatabaseSync): WorkflowLookup {
+  return (task: TaskRow) => {
+    try {
+      const project = getProject(db, task.project_id);
+      if (!project) return undefined;
+      const path = join(project.path, ".doctrine", "workflows", `${task.workflow_name}.yaml`);
+      const text = readFileSync(path, "utf8");
+      const workflow = parseWorkflow(text).workflow;
+      return withSetupStep(workflow, project.setup ?? undefined);
+    } catch {
+      return undefined;
+    }
+  };
+}
+
+/**
+ * server.listen() はソケットパスを無条件に unlink する。既に別のデーモンが
+ * 生きたまま同じパスを掴んでいる場合、その unlink は生きているデーモンを
+ * 気づかれないまま切り離す一方、そのデーモン自身は動き続け、両方が同じ
+ * DB に書き込む事態になる。listen する前に、パスが存在すれば接続を試み、
+ * つながれば生きているとみなして起動を拒否する。ECONNREFUSED なら古い
+ * ソケットファイルなので、消してから通常どおり listen させてよい。
+ */
+async function assertSocketNotLive(path: string): Promise<void> {
+  const exists = await stat(path).then(() => true, () => false);
+  if (!exists) return;
+  const live = await new Promise<boolean>((resolve) => {
+    const sock = connect(path);
+    sock.once("connect", () => { sock.destroy(); resolve(true); });
+    sock.once("error", () => resolve(false));
+  });
+  if (live) {
+    throw new Error(`デーモンが既に動作しています（ソケット: ${path}）。二重起動はできません。`);
+  }
+  // 古いソケットファイル。次の listen() が改めて unlink するが、ここで消しておいても害はない。
+  await unlink(path).catch(() => {});
+}
+
+export async function startDaemon(o: {
+  dbPath?: string; socketPath?: string; logRoot?: string; globalLimit?: number; tickMs?: number;
+} = {}): Promise<{ stop(): Promise<void> }> {
+  const resolvedSocketPath = o.socketPath ?? socketPath();
+  await assertSocketNotLive(resolvedSocketPath);
+
+  const db = openDb(o.dbPath ?? join(stateRoot(), "doctrine.db"));
+
+  const ctx: DaemonContext = {
+    db,
+    adapter: createClaudeAdapter(),
+    logRoot: o.logRoot ?? join(stateRoot(), "logs"),
+    globalLimit: o.globalLimit ?? DEFAULT_GLOBAL_LIMIT,
+    broadcast: () => {},
+    loadWorkflow: loadWorkflowFromDisk,
+    running: new Set(),
+    warnings: [],
+  };
+
+  const server = createServer(createHandler(ctx));
+  ctx.broadcast = (ev, opts) => server.broadcast(ev, opts);
+  await server.listen(resolvedSocketPath);
+
+  // 起動時: running のタスクはすべて古い。子を殺してから queued に戻す。
+  // 復帰に失敗したタスクは failed になって返る — ここで漏らさず出力する。
+  // 出力しなければ、そのタスクは running のまま両スロットを永久に塞いだまま、
+  // 起動ログの1行以外どこにも見えなくなる。
+  const recovered = await recoverOnStartup(db, defaultProbe(), buildWorkflowLookup(db));
+  for (const r of recovered) {
+    if (r.outcome === "recovered") {
+      console.error(`[recovery] ${r.taskId}: ${r.action}`);
+    } else {
+      console.error(`[recovery] ${r.taskId}: 復帰に失敗し failed にしました: ${r.error}`);
+    }
+  }
+
+  // 孤児の照合（自動削除はしない）
+  for (const project of listProjects(db)) {
+    const known = listTasks(db, { projectId: project.id })
+      .map((t) => t.worktree_path).filter((p): p is string => p !== null);
+    for (const orphan of await findOrphans(project.path, known)) {
+      console.error(`[orphan] 対応するタスクのない worktree: ${orphan}`);
+    }
+  }
+
+  const timer = setInterval(() => {
+    void tick(ctx);
+    // 警告は溜めっぱなしにしない。見えていれば直せる。
+    for (const w of ctx.warnings.splice(0)) console.error(`[warn] ${w}`);
+  }, o.tickMs ?? 1000);
+  timer.unref();
+
+  return {
+    async stop() {
+      clearInterval(timer);
+      await server.close();
+      db.close();
+    },
+  };
+}
+
+if (import.meta.filename === process.argv[1]) {
+  await startDaemon();
+}

@@ -1,0 +1,264 @@
+import { test, beforeEach, afterEach } from "vitest";
+import assert from "node:assert/strict";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { openDb } from "../../src/db/migrate.ts";
+import { getTask } from "../../src/db/tasks.ts";
+import { createHandler, tick, type DaemonContext } from "../../src/daemon/handlers.ts";
+import { createMockAdapter } from "../../src/adapter/mock.ts";
+import type { ServerEvent } from "../../src/daemon/protocol.ts";
+import { until, makeRepo } from "../helpers/repo.ts";
+
+const run = promisify(execFile);
+let root: string;
+let repo: string;
+
+const NOOP_CONN = { follow() {}, unfollow() {}, isFollowing: () => false };
+
+beforeEach(async () => {
+  root = await mkdtemp(join(tmpdir(), "doctrine-daemon-"));
+  repo = await makeRepo(root, {
+    "README.md": "x\n",
+    ".doctrine/project.yaml": "defaultWorkflow: feature\nmaxConcurrent: 1\nbaseBranch: main\n",
+    ".doctrine/workflows/feature.yaml":
+      "name: feature\nsteps:\n  - id: review\n    type: approval\n    title: 見て\n",
+  });
+  process.env.DOCTRINE_STATE_DIR = join(root, "state");
+});
+afterEach(async () => { await rm(root, { recursive: true, force: true }); delete process.env.DOCTRINE_STATE_DIR; });
+
+function context(events: ServerEvent[] = []): DaemonContext {
+  const db = openDb(":memory:");
+  return {
+    db,
+    adapter: createMockAdapter({ result: { ok: true, text: "done" } }),
+    logRoot: join(root, "logs"),
+    globalLimit: 4,
+    broadcast: (ev) => events.push(ev),
+    warnings: [],
+    loadWorkflow: async (projectPath, name) => {
+      const { parseWorkflow } = await import("../../src/workflow/schema.ts");
+      const { readFile } = await import("node:fs/promises");
+      return parseWorkflow(await readFile(join(projectPath, ".doctrine", "workflows", `${name}.yaml`), "utf8")).workflow;
+    },
+    running: new Set(),
+  };
+}
+
+test("project.add でプロジェクトを登録し、設定を読む", async () => {
+  const ctx = context();
+  const h = createHandler(ctx);
+  const p = await h("project.add", { path: repo }, NOOP_CONN) as { id: number; default_workflow: string };
+  assert.equal(p.default_workflow, "feature");
+  const list = await h("project.list", {}, NOOP_CONN) as unknown[];
+  assert.equal(list.length, 1);
+});
+
+test("task.create は queued のタスクを作り、worktree はまだ作らない", async () => {
+  const ctx = context();
+  const h = createHandler(ctx);
+  await h("project.add", { path: repo }, NOOP_CONN);
+  const t = await h("task.create", { project: repo, title: "T", prompt: "直して" }, NOOP_CONN) as { id: string };
+  const row = getTask(ctx.db, t.id)!;
+  assert.equal(row.state, "queued");
+  assert.equal(row.worktree_path, null, "枠が取れた瞬間に作る");
+  assert.match(row.branch, /^doctrine\//);
+});
+
+test("不正なワークフロー名はタスク作成時に落とす", async () => {
+  const ctx = context();
+  const h = createHandler(ctx);
+  await h("project.add", { path: repo }, NOOP_CONN);
+  await assert.rejects(() => h("task.create", { project: repo, title: "T", prompt: "p", workflow: "nonexistent" }, NOOP_CONN));
+});
+
+test("tick で枠を取り、worktree を作って approval まで進む", async () => {
+  const events: ServerEvent[] = [];
+  const ctx = context(events);
+  const h = createHandler(ctx);
+  await h("project.add", { path: repo }, NOOP_CONN);
+  const t = await h("task.create", { project: repo, title: "T", prompt: "p" }, NOOP_CONN) as { id: string };
+  await tick(ctx);
+  await until(() => ctx.running.size === 0);
+  const row = getTask(ctx.db, t.id)!;
+  assert.equal(row.state, "suspended");
+  assert.ok(row.worktree_path, "枠が取れた瞬間に worktree ができている");
+  assert.ok(events.some((e) => e.event === "task.stateChanged"));
+});
+
+test("task.approve で queued に戻り、行列の先頭に入る", async () => {
+  const ctx = context();
+  const h = createHandler(ctx);
+  await h("project.add", { path: repo }, NOOP_CONN);
+  // approval の後にもステップがあるワークフロー。承認直後に completed になってしまう
+  // 1ステップだけの workflow では「queued に戻る」経路を確認できない。
+  await writeFile(join(repo, ".doctrine", "workflows", "twostep.yaml"),
+    "name: twostep\nsteps:\n  - id: review\n    type: approval\n    title: 見て\n  - id: after\n    type: command\n    run: \"true\"\n");
+  const t = await h("task.create", { project: repo, title: "T", prompt: "p", workflow: "twostep" }, NOOP_CONN) as { id: string };
+  await tick(ctx);
+  await until(() => ctx.running.size === 0);
+  await h("task.approve", { task_id: t.id }, NOOP_CONN);
+  const row = getTask(ctx.db, t.id)!;
+  assert.equal(row.state, "queued");
+  assert.equal(row.resumed, 1);
+});
+
+test("task.reject はコメントを必須にする", async () => {
+  const ctx = context();
+  const h = createHandler(ctx);
+  await h("project.add", { path: repo }, NOOP_CONN);
+  const t = await h("task.create", { project: repo, title: "T", prompt: "p" }, NOOP_CONN) as { id: string };
+  await tick(ctx);
+  await until(() => ctx.running.size === 0);
+  await assert.rejects(() => h("task.reject", { task_id: t.id }, NOOP_CONN));
+});
+
+test("task.cancel は canceled にして worktree を残す", async () => {
+  const ctx = context();
+  const h = createHandler(ctx);
+  await h("project.add", { path: repo }, NOOP_CONN);
+  const t = await h("task.create", { project: repo, title: "T", prompt: "p" }, NOOP_CONN) as { id: string };
+  await tick(ctx);
+  await until(() => ctx.running.size === 0);
+  const before = getTask(ctx.db, t.id)!.worktree_path;
+  await h("task.cancel", { task_id: t.id }, NOOP_CONN);
+  const row = getTask(ctx.db, t.id)!;
+  assert.equal(row.state, "canceled");
+  assert.equal(row.worktree_path, before, "失敗・中止の worktree は残す");
+});
+
+test("task.list は state でフィルタできる", async () => {
+  const ctx = context();
+  const h = createHandler(ctx);
+  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("task.create", { project: repo, title: "A", prompt: "p" }, NOOP_CONN);
+  await h("task.create", { project: repo, title: "B", prompt: "p" }, NOOP_CONN);
+  const queued = await h("task.list", { state: "queued" }, NOOP_CONN) as unknown[];
+  assert.equal(queued.length, 2);
+});
+
+test("worktree.list は孤児を報告する", async () => {
+  const ctx = context();
+  const h = createHandler(ctx);
+  await h("project.add", { path: repo }, NOOP_CONN);
+  const res = await h("worktree.list", {}, NOOP_CONN) as { orphans: string[] }[];
+  assert.ok(Array.isArray(res));
+});
+
+test("未知のメソッドはエラーになる", async () => {
+  const ctx = context();
+  await assert.rejects(() => createHandler(ctx)("task.nope", {}, NOOP_CONN));
+});
+
+test("完了したタスクの worktree は削除され、ブランチは残る", async () => {
+  const ctx = context();
+  const h = createHandler(ctx);
+  await h("project.add", { path: repo }, NOOP_CONN);
+  // approval を含まない、すぐ終わるワークフローに差し替える
+  await writeFile(join(repo, ".doctrine", "workflows", "quick.yaml"),
+    "name: quick\nsteps:\n  - id: a\n    type: command\n    run: \"true\"\n");
+  const t = await h("task.create", { project: repo, title: "T", prompt: "p", workflow: "quick" }, NOOP_CONN) as { id: string };
+  await tick(ctx);
+  await until(() => getTask(ctx.db, t.id)?.state === "completed");
+  await until(() => ctx.running.size === 0);
+  assert.equal(getTask(ctx.db, t.id)?.worktree_path, null);
+  const { stdout } = await run("git", ["-C", repo, "branch", "--list", getTask(ctx.db, t.id)!.branch]);
+  assert.match(stdout, /doctrine\//, "完了後の扱いは最終ステップが決めている。ブランチは残す");
+});
+
+test("未コミットの変更が残っていたら削除せず警告する", async () => {
+  const ctx = context();
+  const h = createHandler(ctx);
+  await h("project.add", { path: repo }, NOOP_CONN);
+  await writeFile(join(repo, ".doctrine", "workflows", "dirty.yaml"),
+    "name: dirty\nsteps:\n  - id: a\n    type: command\n    run: \"touch leftover.txt\"\n");
+  const t = await h("task.create", { project: repo, title: "T", prompt: "p", workflow: "dirty" }, NOOP_CONN) as { id: string };
+  await tick(ctx);
+  await until(() => getTask(ctx.db, t.id)?.state === "completed");
+  await until(() => ctx.running.size === 0);
+  assert.ok(getTask(ctx.db, t.id)?.worktree_path, "削除を拒否して残す");
+  assert.ok(ctx.warnings.some((w) => /未コミット/.test(w)), "警告として出す");
+});
+
+test("失敗したタスクの worktree は削除しない", async () => {
+  const ctx = context();
+  const h = createHandler(ctx);
+  await h("project.add", { path: repo }, NOOP_CONN);
+  await writeFile(join(repo, ".doctrine", "workflows", "boom.yaml"),
+    "name: boom\nsteps:\n  - id: a\n    type: command\n    run: \"exit 1\"\n");
+  const t = await h("task.create", { project: repo, title: "T", prompt: "p", workflow: "boom" }, NOOP_CONN) as { id: string };
+  await tick(ctx);
+  await until(() => getTask(ctx.db, t.id)?.state === "failed");
+  await until(() => ctx.running.size === 0);
+  assert.ok(getTask(ctx.db, t.id)?.worktree_path);
+});
+
+test("tick 時点でワークフローが読めないタスクは failed になり、以後 tick で再試行されない", async () => {
+  const ctx = context();
+  const h = createHandler(ctx);
+  await h("project.add", { path: repo }, NOOP_CONN);
+  await writeFile(join(repo, ".doctrine", "workflows", "vanishing.yaml"),
+    "name: vanishing\nsteps:\n  - id: a\n    type: command\n    run: \"true\"\n");
+  const t = await h(
+    "task.create", { project: repo, title: "T", prompt: "p", workflow: "vanishing" }, NOOP_CONN,
+  ) as { id: string };
+  // 作成時点では読めたワークフローが、tick までの間に壊れる/消える場合を再現する。
+  await writeFile(join(repo, ".doctrine", "workflows", "vanishing.yaml"), "not: [valid");
+
+  await tick(ctx);
+  assert.equal(ctx.running.size, 0, "枠のガードは例外経路でも必ず解放される");
+  assert.equal(getTask(ctx.db, t.id)?.state, "failed", "queued のまま残すと毎周期リトライし続ける");
+  assert.ok(ctx.warnings.some((w) => /ワークフロー/.test(w)));
+
+  // 2周目のtickでも再試行されず、他のタスクの進行を妨げない
+  await tick(ctx);
+  assert.equal(getTask(ctx.db, t.id)?.state, "failed");
+});
+
+test("runTask が例外を投げても daemon は落ちず、タスクは failed になる", async () => {
+  const ctx = context();
+  const h = createHandler(ctx);
+  await h("project.add", { path: repo }, NOOP_CONN);
+  // {{ steps.nope.stdout }} は存在しないステップの出力を参照する。
+  // expand() はこれを意図的に例外として投げ、runTask はそれを握りつぶさず
+  // 伝播させる（ワークフロー作者に見える形にするため）。
+  await writeFile(join(repo, ".doctrine", "workflows", "brokenvar.yaml"),
+    "name: brokenvar\nsteps:\n  - id: a\n    type: command\n    run: \"echo {{ steps.nope.stdout }}\"\n");
+  const t = await h(
+    "task.create", { project: repo, title: "T", prompt: "p", workflow: "brokenvar" }, NOOP_CONN,
+  ) as { id: string };
+
+  await tick(ctx);
+  await until(() => getTask(ctx.db, t.id)?.state === "failed");
+  await until(() => ctx.running.size === 0);
+  assert.equal(getTask(ctx.db, t.id)?.state, "failed");
+  assert.ok(ctx.warnings.some((w) => /例外/.test(w)));
+});
+
+test("stepRun.started の step_run_id は本物で、task.logs から引ける", async () => {
+  const events: ServerEvent[] = [];
+  const ctx = context(events);
+  const h = createHandler(ctx);
+  await h("project.add", { path: repo }, NOOP_CONN);
+  await writeFile(join(repo, ".doctrine", "workflows", "quick.yaml"),
+    "name: quick\nsteps:\n  - id: a\n    type: command\n    run: \"true\"\n");
+  const t = await h(
+    "task.create", { project: repo, title: "T", prompt: "p", workflow: "quick" }, NOOP_CONN,
+  ) as { id: string };
+  await tick(ctx);
+  await until(() => getTask(ctx.db, t.id)?.state === "completed");
+  await until(() => ctx.running.size === 0);
+
+  const started = events.find((e) => e.event === "stepRun.started") as
+    { event: "stepRun.started"; step_run_id: number } | undefined;
+  assert.ok(started, "stepRun.started イベントが届いていない");
+  assert.ok(started!.step_run_id > 0, "プレースホルダーの0であってはならない");
+
+  const log = await h(
+    "task.logs", { task_id: t.id, step_run_id: started!.step_run_id }, NOOP_CONN,
+  ) as { log_path: string };
+  assert.ok(log.log_path.length > 0, "届いた step_run_id で本物のログが引ける");
+});
