@@ -5,13 +5,16 @@ import { insertProject, insertTask, getTask } from "../../src/db/tasks.ts";
 import { commitStepBoundary } from "../../src/db/boundary.ts";
 import type { Workflow } from "../../src/workflow/schema.ts";
 import {
-  isSameChild, killStaleChild, recoverOnStartup, type ProcessProbe, type WorkflowLookup,
+  isSameChild, killStaleChild, recoverOnStartup, psLstartCommand,
+  type ProcessProbe, type WorkflowLookup,
 } from "../../src/core/recovery.ts";
 
-function fixture() {
+function fixture(taskIds: string[] = ["t1"]) {
   const db = openDb(":memory:");
   const p = insertProject(db, { path: "/repo", default_workflow: "f", max_concurrent: 1, base_branch: "main", setup: null });
-  insertTask(db, { id: "t1", project_id: p, title: "T", prompt: "P", workflow_name: "f", branch: "b", priority: 2 });
+  for (const id of taskIds) {
+    insertTask(db, { id, project_id: p, title: "T", prompt: "P", workflow_name: "f", branch: "b", priority: 2 });
+  }
   return db;
 }
 
@@ -97,7 +100,7 @@ test("起動時、running のタスクは全部古いものとして扱う（age
     stepRun: { step_id: "implement", attempt: 1, status: "running", exit_code: null, started_at: "a", ended_at: "b", log_path: "/l" },
   });
   const actions = await recoverOnStartup(db, probe({ 4242: "2026-09-12T00:00:00.000Z" }), lookupWF);
-  assert.deepEqual(actions, [{ taskId: "t1", action: "resume-agent" }]);
+  assert.deepEqual(actions, [{ taskId: "t1", outcome: "recovered", action: "resume-agent" }]);
   const t = getTask(db, "t1")!;
   assert.equal(t.state, "queued", "枠を取り直してから再開する");
   assert.equal(t.resumed, 1, "再開は行列の先頭");
@@ -114,7 +117,7 @@ test("command ステップで落ちていたら頭から再実行する（先行
     stepRun: { step_id: "test", attempt: 1, status: "running", exit_code: null, started_at: "a", ended_at: "b", log_path: "/l" },
   });
   const actions = await recoverOnStartup(db, probe({}), lookupWF);
-  assert.deepEqual(actions, [{ taskId: "t1", action: "rerun-command" }]);
+  assert.deepEqual(actions, [{ taskId: "t1", outcome: "recovered", action: "rerun-command" }]);
 });
 
 test("ワークフローが引けない（YAML削除・壊れたなど）場合は安全側（command 再実行）に倒す", async () => {
@@ -126,7 +129,7 @@ test("ワークフローが引けない（YAML削除・壊れたなど）場合�
   });
   const lookupMissing: WorkflowLookup = () => undefined;
   const actions = await recoverOnStartup(db, probe({}), lookupMissing);
-  assert.deepEqual(actions, [{ taskId: "t1", action: "rerun-command" }]);
+  assert.deepEqual(actions, [{ taskId: "t1", outcome: "recovered", action: "rerun-command" }]);
 });
 
 test("running でないタスクには触らない", async () => {
@@ -134,4 +137,84 @@ test("running でないタスクには触らない", async () => {
   commitStepBoundary(db, { taskId: "t1", taskPatch: { state: "suspended" } });
   assert.deepEqual(await recoverOnStartup(db, probe({}), lookupWF), []);
   assert.equal(getTask(db, "t1")?.state, "suspended");
+});
+
+function runningTaskPatch(stepId: string) {
+  return {
+    state: "running" as const,
+    current_step_id: stepId,
+    child_pid: null,
+    child_started_at: null,
+  };
+}
+
+test("probe.startTimeOf が1件目で例外を投げても、残りは救済され失敗が報告される", async () => {
+  const db = fixture(["t1", "t2", "t3"]);
+  for (const id of ["t1", "t2", "t3"]) {
+    commitStepBoundary(db, {
+      taskId: id,
+      taskPatch: runningTaskPatch("implement"),
+      stepRun: { step_id: "implement", attempt: 1, status: "running", exit_code: null, started_at: "a", ended_at: "b", log_path: "/l" },
+    });
+  }
+  // t1 だけ child_pid を持たせ、probe.startTimeOf がそれに対して例外を投げるようにする。
+  commitStepBoundary(db, { taskId: "t1", taskPatch: { child_pid: 9999, child_started_at: "2026-09-12T00:00:00.000Z" } });
+
+  const throwingProbe: ProcessProbe = {
+    startTimeOf: async (pid) => {
+      if (pid === 9999) throw new Error("ps が失敗しました（テスト用）");
+      return null;
+    },
+    kill: () => {},
+  };
+
+  const results = await recoverOnStartup(db, throwingProbe, lookupWF);
+  const byId = new Map(results.map((r) => [r.taskId, r]));
+
+  assert.equal(byId.get("t1")?.outcome, "failed");
+  assert.equal(byId.get("t2")?.outcome, "recovered");
+  assert.equal(byId.get("t3")?.outcome, "recovered");
+  assert.deepEqual(byId.get("t2"), { taskId: "t2", outcome: "recovered", action: "resume-agent" });
+  assert.deepEqual(byId.get("t3"), { taskId: "t3", outcome: "recovered", action: "resume-agent" });
+
+  // 実際に queued まで進んだことを確認する（返り値だけでなく状態そのものを見る）。
+  assert.equal(getTask(db, "t2")!.state, "queued");
+  assert.equal(getTask(db, "t3")!.state, "queued");
+  // t1 は救済に失敗したので running のまま取り残されているはず（後で再試行できるように）。
+  assert.equal(getTask(db, "t1")!.state, "running");
+});
+
+test("lookupWorkflow が1件で例外を投げても、残りは救済され失敗が報告される", async () => {
+  const db = fixture(["t1", "t2", "t3"]);
+  for (const id of ["t1", "t2", "t3"]) {
+    commitStepBoundary(db, {
+      taskId: id,
+      taskPatch: runningTaskPatch("implement"),
+      stepRun: { step_id: "implement", attempt: 1, status: "running", exit_code: null, started_at: "a", ended_at: "b", log_path: "/l" },
+    });
+  }
+
+  const throwingLookup: WorkflowLookup = (task) => {
+    if (task.id === "t2") throw new Error("ワークフローYAMLが壊れています（テスト用）");
+    return WF;
+  };
+
+  const results = await recoverOnStartup(db, probe({}), throwingLookup);
+  const byId = new Map(results.map((r) => [r.taskId, r]));
+
+  assert.equal(byId.get("t2")?.outcome, "failed");
+  assert.deepEqual(byId.get("t1"), { taskId: "t1", outcome: "recovered", action: "resume-agent" });
+  assert.deepEqual(byId.get("t3"), { taskId: "t3", outcome: "recovered", action: "resume-agent" });
+
+  assert.equal(getTask(db, "t1")!.state, "queued");
+  assert.equal(getTask(db, "t3")!.state, "queued");
+  assert.equal(getTask(db, "t2")!.state, "running");
+});
+
+test("defaultProbe が使う ps コマンドはロケール・タイムゾーンを固定する", () => {
+  const { cmd, args, env } = psLstartCommand(4242);
+  assert.equal(cmd, "ps");
+  assert.deepEqual(args, ["-o", "lstart=", "-p", "4242"]);
+  assert.equal(env.LC_ALL, "C");
+  assert.equal(env.TZ, "UTC");
 });

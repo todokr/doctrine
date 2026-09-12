@@ -20,7 +20,13 @@ export type ProcessProbe = {
  */
 export type WorkflowLookup = (task: TaskRow) => Workflow | undefined;
 
-/** ps の lstart は秒精度なので、既定の許容は2秒。 */
+/**
+ * ps の lstart は秒精度なので、既定の許容は2秒。
+ * これは受け入れ側（accept-side）のリスクを内包する: この許容時間内に同じpidが
+ * 再利用されていれば、無関係の別プロセスを「同一の子」と誤認して殺してしまい得る。
+ * 秒精度と正面から向き合う以上ここは避けられず、逆に許容を狭めると本物の一致まで
+ * 弾いてしまう（gone/mismatch側に倒れ、生きた子を見逃す）ので、狭めない。
+ */
 export function isSameChild(
   recorded: { pid: number; startedAt: string },
   actualStartTime: string | null,
@@ -33,14 +39,34 @@ export function isSameChild(
   return Math.abs(a - b) <= toleranceMs;
 }
 
+/**
+ * `ps -o lstart=` を実行するためのコマンドを組み立てる。
+ * lstart の書式はロケール依存、`new Date(...)` によるパースはローカルタイムゾーン
+ * 依存。child_started_at は `new Date().toISOString()`（UTC）で記録しているため、
+ * ps 実行環境のロケール・タイムゾーンが記録時と食い違うと、パース結果がズレて
+ * 誤ったマッチ／不一致を「静かに」生む（例外にならない）のが一番危険。
+ * LC_ALL=C と TZ=UTC を強制し、書式とタイムゾーンを固定する。
+ */
+export function psLstartCommand(
+  pid: number,
+): { cmd: string; args: string[]; env: NodeJS.ProcessEnv } {
+  return {
+    cmd: "ps",
+    args: ["-o", "lstart=", "-p", String(pid)],
+    env: { ...process.env, LC_ALL: "C", TZ: "UTC" },
+  };
+}
+
 export function defaultProbe(): ProcessProbe {
   return {
     async startTimeOf(pid) {
       try {
-        const { stdout } = await run("ps", ["-o", "lstart=", "-p", String(pid)]);
+        const { cmd, args, env } = psLstartCommand(pid);
+        const { stdout } = await run(cmd, args, { env });
         const t = stdout.trim();
         if (!t) return null;
         const parsed = new Date(t);
+        // パース結果が不正なら「同一ではない」側（gone）に倒れる。既存の安全側の挙動。
         return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
       } catch {
         return null; // プロセスが存在しない
@@ -108,6 +134,16 @@ function classifyInterruptedStep(
 }
 
 /**
+ * 1件の復帰結果。recovered なら次のアクション、failed ならそのタスクを
+ * 復帰できなかった理由（呼び出し側が起動ログに出せるように文字列で持つ）。
+ * 判別ユニオンにしているのは、失敗を握りつぶさず、かつ成功と同じ配列で
+ * 返せて呼び出し側が扱いやすいため。
+ */
+export type RecoveryResult =
+  | { taskId: string; outcome: "recovered"; action: "resume-agent" | "rerun-command" }
+  | { taskId: string; outcome: "failed"; error: string };
+
+/**
  * デーモンが死ねば子プロセスの stdout は誰も読んでいない。
  * よって起動時に running のタスクはすべて古い。
  *
@@ -115,25 +151,35 @@ function classifyInterruptedStep(
  * 持たないまま呼び出せてしまい、全タスクが黙って rerun-command 扱いになる
  * （コンパイルも通り、テストでしか気づけない）。呼び出し側にワークフローの
  * 配線を強制するため、あえて省略不可にしている。
+ *
+ * このループは1タスクずつ独立させ、例外を外に漏らさない。ここは「デーモンが
+ * 一度壊れた後の後始末」という最も守りに入るべき経路であり、1タスク分の
+ * probe / lookupWorkflow の失敗（壊れたワークフローYAMLなど）で残り全部の
+ * stale タスクが救済されないまま放置される方がずっと悪い。失敗は失敗として
+ * 記録し、次のタスクの復帰を続ける。
  */
 export async function recoverOnStartup(
   db: DatabaseSync, probe: ProcessProbe, lookupWorkflow: WorkflowLookup,
-): Promise<{ taskId: string; action: "resume-agent" | "rerun-command" }[]> {
-  const actions: { taskId: string; action: "resume-agent" | "rerun-command" }[] = [];
+): Promise<RecoveryResult[]> {
+  const results: RecoveryResult[] = [];
 
   for (const task of listTasks(db, { state: "running" })) {
-    await killStaleChild(task, probe, "SIGKILL");
+    try {
+      await killStaleChild(task, probe, "SIGKILL");
 
-    const action = classifyInterruptedStep(task, lookupWorkflow);
+      const action = classifyInterruptedStep(task, lookupWorkflow);
 
-    // running -> queued は states.ts が明示的に許可している復帰専用の辺。
-    // 遷移表を経由せず書き込むと、遷移が壊れた将来の変更を検査なしで通してしまう。
-    assertTransition(task.state, "queued");
-    commitStepBoundary(db, {
-      taskId: task.id,
-      taskPatch: { state: "queued", resumed: 1, child_pid: null, child_started_at: null },
-    });
-    actions.push({ taskId: task.id, action });
+      // running -> queued は states.ts が明示的に許可している復帰専用の辺。
+      // 遷移表を経由せず書き込むと、遷移が壊れた将来の変更を検査なしで通してしまう。
+      assertTransition(task.state, "queued");
+      commitStepBoundary(db, {
+        taskId: task.id,
+        taskPatch: { state: "queued", resumed: 1, child_pid: null, child_started_at: null },
+      });
+      results.push({ taskId: task.id, outcome: "recovered", action });
+    } catch (e) {
+      results.push({ taskId: task.id, outcome: "failed", error: e instanceof Error ? e.message : String(e) });
+    }
   }
-  return actions;
+  return results;
 }
