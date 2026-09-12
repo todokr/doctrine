@@ -6,7 +6,7 @@
 
 **Architecture:** 常駐デーモン + Unixソケットクライアント。権威ある状態はSQLite1箇所（`tasks` / `step_runs`）。ステップ境界ごとに1トランザクションで書き、落ちても失うのは最大1ステップ。Claude Code はアダプタ境界の裏に隔離し、エンジンのテストはモックアダプタで実APIを叩かずに行う。
 
-**Tech Stack:** TypeScript + Node.js 24（ネイティブ型ストリッピングで `.ts` を直接実行）、`node:sqlite`、`node:test`、`node:net`（Unixドメインソケット）、依存は `yaml` と `zod` のみ、ビルドは `tsc`、パッケージマネージャは pnpm、ツールチェーンは mise。
+**Tech Stack:** TypeScript + Node.js 24（ネイティブ型ストリッピングで `.ts` を直接実行）、`node:sqlite`、`node:net`（Unixドメインソケット）、ランタイム依存は `yaml` と `zod` のみ、テストは vitest、ビルドは `tsc`、パッケージマネージャは pnpm、ツールチェーンは mise。
 
 **Spec:** `docs/superpowers/specs/2026-09-12-agent-orchestrator-core-design.md`
 
@@ -18,7 +18,7 @@ spec から逐語で持ってきた、全タスクに暗黙に掛かる制約。
 
 - **ランタイム**: TypeScript + Node.js 24（`mise.toml` で `node = "24.14.1"` に固定済み）
 - **依存パッケージは2つだけ**: `yaml`（パース）、`zod`（検証）。他を追加しない
-- **テスト**: `node:test`（組み込み）。テストランナーを追加しない
+- **テスト**: vitest（devDependency）。ランタイム依存は増やさない（配布物は yaml と zod のみ）
 - **ビルド**: `tsc` のみ。バンドラ・トランスパイラを追加しない
 - **パッケージマネージャ**: pnpm。lockfile は `pnpm-lock.yaml` をコミットし、インストールは `pnpm install --frozen-lockfile`
 - **永続化**: SQLite（`node:sqlite`、WALモード）。Node 24 では experimental 警告が出るが動作する
@@ -51,6 +51,7 @@ spec から逐語で持ってきた、全タスクに暗黙に掛かる制約。
 ```
 package.json                  pnpm/スクリプト定義
 tsconfig.json                 tsc 設定（型ストリッピング互換）
+vitest.config.ts              テスト設定（forks プール）
 src/
   workflow/
     schema.ts                 ワークフローYAMLの型と zod スキーマ、検証規則
@@ -92,7 +93,7 @@ test/
 ワークフローYAMLを型付きで読み、不正な定義を**その場で落とす**。プロジェクトの足場（package.json / tsconfig / テストの走り方）はこの成果物に必要な分としてここに畳み込む。
 
 **Files:**
-- Create: `package.json`, `tsconfig.json`, `.gitignore`（追記）
+- Create: `package.json`, `tsconfig.json`, `vitest.config.ts`, `.gitignore`（追記）
 - Create: `src/workflow/schema.ts`
 - Test: `test/workflow/schema.test.ts`
 
@@ -122,7 +123,8 @@ test/
   "type": "module",
   "engines": { "node": ">=24" },
   "scripts": {
-    "test": "node --test --experimental-sqlite \"test/**/*.test.ts\"",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "build": "tsc",
     "typecheck": "tsc --noEmit"
   },
@@ -132,7 +134,8 @@ test/
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
-    "typescript": "^5.7.0"
+    "typescript": "^5.7.0",
+    "vitest": "^2.1.0"
   }
 }
 ```
@@ -158,7 +161,28 @@ test/
 }
 ```
 
-相対importは**必ず `.ts` 拡張子つき**で書く（型ストリッピングの要求）。
+相対importは**必ず `.ts` 拡張子つき**で書く（`tsc` のビルドと、デーモンを
+`node src/daemon/main.ts` で直接起動するときのネイティブ型ストリッピングの両方が要求する）。
+
+`vitest.config.ts`:
+
+```ts
+import { defineConfig } from "vitest/config";
+
+export default defineConfig({
+  test: {
+    include: ["test/**/*.test.ts"],
+    // 各テストファイルが別プロセスで走る。
+    // process.env を書き換えるテスト（DOCTRINE_STATE_DIR）と、
+    // 子プロセス・Unixソケットを掴むテストが互いに干渉しない。
+    pool: "forks",
+    testTimeout: 15_000,
+  },
+});
+```
+
+アサーションは `node:assert/strict` をそのまま使う（vitest の `expect` は使わない）。
+テストランナーを替えてもアサーションの書き方が変わらない方が、後で困らない。
 
 ```bash
 pnpm install
@@ -169,7 +193,7 @@ pnpm install
 `test/workflow/schema.test.ts`:
 
 ```ts
-import { test } from "node:test";
+import { test } from "vitest";
 import assert from "node:assert/strict";
 import { parseWorkflow, WorkflowValidationError } from "../../src/workflow/schema.ts";
 
@@ -275,7 +299,7 @@ test("ステップが空なら落とす", () => {
 
 - [ ] **Step 3: テストが落ちることを確認する**
 
-Run: `pnpm test -- test/workflow/schema.test.ts`
+Run: `pnpm test test/workflow/schema.test.ts`
 Expected: FAIL（`Cannot find module '../../src/workflow/schema.ts'`）
 
 - [ ] **Step 4: 最小の実装を書く**
@@ -387,7 +411,7 @@ export function parseWorkflow(yamlText: string): { workflow: Workflow; warnings:
 
 - [ ] **Step 5: テストが通ることを確認する**
 
-Run: `pnpm test -- test/workflow/schema.test.ts`
+Run: `pnpm test test/workflow/schema.test.ts`
 Expected: PASS（6件）
 
 - [ ] **Step 6: 型チェック**
@@ -398,7 +422,7 @@ Expected: エラーなし
 - [ ] **Step 7: コミット**
 
 ```bash
-git add package.json pnpm-lock.yaml tsconfig.json src/workflow/schema.ts test/workflow/schema.test.ts
+git add package.json pnpm-lock.yaml tsconfig.json vitest.config.ts src/workflow/schema.ts test/workflow/schema.test.ts
 git commit -m "feat: ワークフローYAMLのスキーマ検証"
 ```
 
@@ -426,7 +450,7 @@ git commit -m "feat: ワークフローYAMLのスキーマ検証"
 `test/workflow/project.test.ts`:
 
 ```ts
-import { test } from "node:test";
+import { test } from "vitest";
 import assert from "node:assert/strict";
 import { parseProjectConfig, withSetupStep } from "../../src/workflow/project.ts";
 import { parseWorkflow, WorkflowValidationError } from "../../src/workflow/schema.ts";
@@ -482,7 +506,7 @@ test("setup 挿入は元のワークフローを破壊しない", () => {
 
 - [ ] **Step 2: テストが落ちることを確認する**
 
-Run: `pnpm test -- test/workflow/project.test.ts`
+Run: `pnpm test test/workflow/project.test.ts`
 Expected: FAIL（`Cannot find module '../../src/workflow/project.ts'`）
 
 - [ ] **Step 3: 実装を書く**
@@ -534,7 +558,7 @@ export function withSetupStep(workflow: Workflow, setup: string | undefined): Wo
 
 - [ ] **Step 4: テストが通ることを確認する**
 
-Run: `pnpm test -- test/workflow/project.test.ts`
+Run: `pnpm test test/workflow/project.test.ts`
 Expected: PASS（6件）
 
 - [ ] **Step 5: コミット**
@@ -573,7 +597,7 @@ git commit -m "feat: project.yaml の検証と setup ステップの自動挿入
 `test/workflow/template.test.ts`:
 
 ```ts
-import { test } from "node:test";
+import { test } from "vitest";
 import assert from "node:assert/strict";
 import { expand, TemplateError, type TemplateContext } from "../../src/workflow/template.ts";
 
@@ -624,7 +648,7 @@ test("変数を含まない文字列はそのまま返す", () => {
 
 - [ ] **Step 2: テストが落ちることを確認する**
 
-Run: `pnpm test -- test/workflow/template.test.ts`
+Run: `pnpm test test/workflow/template.test.ts`
 Expected: FAIL（モジュールが無い）
 
 - [ ] **Step 3: 実装を書く**
@@ -684,7 +708,7 @@ function resolve(expr: string, ctx: TemplateContext): string {
 
 - [ ] **Step 4: テストが通ることを確認する**
 
-Run: `pnpm test -- test/workflow/template.test.ts`
+Run: `pnpm test test/workflow/template.test.ts`
 Expected: PASS（7件）
 
 - [ ] **Step 5: コミット**
@@ -756,7 +780,7 @@ git commit -m "feat: ワークフロー変数の展開"
 `test/db/migrate.test.ts`:
 
 ```ts
-import { test } from "node:test";
+import { test } from "vitest";
 import assert from "node:assert/strict";
 import { openDb } from "../../src/db/migrate.ts";
 import { insertProject, insertTask, getTask, listTasks } from "../../src/db/tasks.ts";
@@ -814,7 +838,7 @@ test("同じidのタスクは作れない", () => {
 `test/db/boundary.test.ts`:
 
 ```ts
-import { test } from "node:test";
+import { test } from "vitest";
 import assert from "node:assert/strict";
 import { openDb } from "../../src/db/migrate.ts";
 import { insertProject, insertTask, getTask } from "../../src/db/tasks.ts";
@@ -917,7 +941,7 @@ test("巨大な出力は末尾だけ保存する", () => {
 
 - [ ] **Step 2: テストが落ちることを確認する**
 
-Run: `pnpm test -- test/db/`
+Run: `pnpm test test/db/`
 Expected: FAIL（モジュールが無い）
 
 - [ ] **Step 3: マイグレーションを書く**
@@ -1260,7 +1284,7 @@ test("ステップ実行の挿入が失敗したらタスク更新も巻き戻�
 });
 ```
 
-Run: `pnpm test -- test/db/`
+Run: `pnpm test test/db/`
 Expected: PASS（8件）
 
 - [ ] **Step 7: コミット**
@@ -1297,7 +1321,7 @@ I/Oを持たない純粋関数。**枠の占有がスコープごとに非対称
 `test/core/states.test.ts`:
 
 ```ts
-import { test } from "node:test";
+import { test } from "vitest";
 import assert from "node:assert/strict";
 import {
   canTransition, assertTransition, holdsGlobalSlot, holdsProjectSlot,
@@ -1357,7 +1381,7 @@ test("終端判定", () => {
 
 - [ ] **Step 2: テストが落ちることを確認する**
 
-Run: `pnpm test -- test/core/states.test.ts`
+Run: `pnpm test test/core/states.test.ts`
 Expected: FAIL（モジュールが無い）
 
 - [ ] **Step 3: 実装を書く**
@@ -1412,7 +1436,7 @@ export function isTerminal(s: TaskState): boolean {
 
 - [ ] **Step 4: テストが通ることを確認する**
 
-Run: `pnpm test -- test/core/states.test.ts`
+Run: `pnpm test test/core/states.test.ts`
 Expected: PASS（7件）
 
 - [ ] **Step 5: コミット**
@@ -1447,7 +1471,7 @@ git commit -m "feat: タスク状態機械と枠占有の判定"
 `test/core/scheduler.test.ts`:
 
 ```ts
-import { test } from "node:test";
+import { test } from "vitest";
 import assert from "node:assert/strict";
 import { openDb } from "../../src/db/migrate.ts";
 import { insertProject, insertTask } from "../../src/db/tasks.ts";
@@ -1546,7 +1570,7 @@ test("占有数はカウンタではなく running から導出する", () => {
 
 - [ ] **Step 2: テストが落ちることを確認する**
 
-Run: `pnpm test -- test/core/scheduler.test.ts`
+Run: `pnpm test test/core/scheduler.test.ts`
 Expected: FAIL（モジュールが無い）
 
 - [ ] **Step 3: 実装を書く**
@@ -1612,7 +1636,7 @@ export function selectAdmissible(
 
 - [ ] **Step 4: テストが通ることを確認する**
 
-Run: `pnpm test -- test/core/scheduler.test.ts`
+Run: `pnpm test test/core/scheduler.test.ts`
 Expected: PASS（9件）
 
 - [ ] **Step 5: コミット**
@@ -1653,7 +1677,7 @@ git commit -m "feat: 2スコープの実行枠スケジューラ"
 `test/core/worktree.test.ts`:
 
 ```ts
-import { test, beforeEach, afterEach } from "node:test";
+import { test, beforeEach, afterEach } from "vitest";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -1750,7 +1774,7 @@ test("DBに対応のない worktree を孤児として報告する", async () =>
 
 - [ ] **Step 2: テストが落ちることを確認する**
 
-Run: `pnpm test -- test/core/worktree.test.ts`
+Run: `pnpm test test/core/worktree.test.ts`
 Expected: FAIL（モジュールが無い）
 
 - [ ] **Step 3: 実装を書く**
@@ -1841,7 +1865,7 @@ export async function findOrphans(repoPath: string, knownPaths: string[]): Promi
 
 - [ ] **Step 4: テストが通ることを確認する**
 
-Run: `pnpm test -- test/core/worktree.test.ts`
+Run: `pnpm test test/core/worktree.test.ts`
 Expected: PASS（8件）
 
 最初のテストの `branchNameFor` の期待値は実装の `slugify`（NFKC正規化・非英数をハイフン化）に合わせて素直に書き直してよい。日本語タイトルの扱いを実装で確認してから期待値を確定させること。
@@ -1900,7 +1924,7 @@ spec 6章の実測契約をコードにする。**行長に上限を仮定しな
 `test/adapter/ndjson.test.ts`:
 
 ```ts
-import { test } from "node:test";
+import { test } from "vitest";
 import assert from "node:assert/strict";
 import { Readable } from "node:stream";
 import { readNdjson } from "../../src/adapter/ndjson.ts";
@@ -1940,7 +1964,7 @@ test("壊れた行は飛ばして続きを読む", async () => {
 
 - [ ] **Step 2: テストが落ちることを確認する**
 
-Run: `pnpm test -- test/adapter/ndjson.test.ts`
+Run: `pnpm test test/adapter/ndjson.test.ts`
 Expected: FAIL（モジュールが無い）
 
 - [ ] **Step 3: NDJSON読み取りを実装する**
@@ -1987,7 +2011,7 @@ function tryParse(line: string): unknown | undefined {
 `test/adapter/claude.test.ts`:
 
 ```ts
-import { test } from "node:test";
+import { test } from "vitest";
 import assert from "node:assert/strict";
 import { buildArgs, normalize, resultFrom } from "../../src/adapter/claude.ts";
 
@@ -2074,7 +2098,7 @@ test("is_error が true なら失敗", () => {
 
 - [ ] **Step 5: テストが落ちることを確認する**
 
-Run: `pnpm test -- test/adapter/claude.test.ts`
+Run: `pnpm test test/adapter/claude.test.ts`
 Expected: FAIL（モジュールが無い）
 
 - [ ] **Step 6: アダプタを実装する**
@@ -2306,7 +2330,7 @@ export function createMockAdapter(script: MockScript): MockAdapter {
 
 - [ ] **Step 8: テストが通ることを確認する**
 
-Run: `pnpm test -- test/adapter/`
+Run: `pnpm test test/adapter/`
 Expected: PASS（14件）
 
 `normalize` は配列を返すので、`claude.test.ts` の `rate_limit_event` のテストは `assert.deepEqual(ev, [...])` のまま通る。他のテストで `normalize` を単体で見る場合も配列で比較すること。
@@ -2374,7 +2398,7 @@ git commit -m "feat: Claude Code アダプタとモック、終了コードの�
 `test/core/stepRunner.test.ts`:
 
 ```ts
-import { test, beforeEach, afterEach } from "node:test";
+import { test, beforeEach, afterEach } from "vitest";
 import assert from "node:assert/strict";
 import { mkdtemp, rm, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -2491,7 +2515,7 @@ test("rate_limit イベントが通知される", async () => {
 
 - [ ] **Step 2: テストが落ちることを確認する**
 
-Run: `pnpm test -- test/core/stepRunner.test.ts`
+Run: `pnpm test test/core/stepRunner.test.ts`
 Expected: FAIL（モジュールが無い）
 
 - [ ] **Step 3: 実装を書く**
@@ -2624,7 +2648,7 @@ export async function runAgentStep(
 
 - [ ] **Step 4: テストが通ることを確認する**
 
-Run: `pnpm test -- test/core/stepRunner.test.ts`
+Run: `pnpm test test/core/stepRunner.test.ts`
 Expected: PASS（9件）
 
 - [ ] **Step 5: コミット**
@@ -2672,7 +2696,7 @@ git commit -m "feat: ステップ実行器（command / agent）とログのフ�
 `test/core/engine.test.ts`（前半）:
 
 ```ts
-import { test } from "node:test";
+import { test } from "vitest";
 import assert from "node:assert/strict";
 import { decide } from "../../src/core/engine.ts";
 import { parseWorkflow } from "../../src/workflow/schema.ts";
@@ -2742,7 +2766,7 @@ test("approval ステップに来たら suspend", () => {
 
 - [ ] **Step 2: テストが落ちることを確認する**
 
-Run: `pnpm test -- test/core/engine.test.ts`
+Run: `pnpm test test/core/engine.test.ts`
 Expected: FAIL（モジュールが無い）
 
 **`maxAttempts` は分岐元のステップで数える。** `test` が `onFailure.goto: implement` で
@@ -2808,7 +2832,7 @@ export function decide(o: {
 
 - [ ] **Step 4: テストが通ることを確認する**
 
-Run: `pnpm test -- test/core/engine.test.ts`
+Run: `pnpm test test/core/engine.test.ts`
 Expected: PASS（7件）
 
 - [ ] **Step 5: 進行ループのテストを追記する**
@@ -3163,7 +3187,7 @@ export function applyApproval(
 
 - [ ] **Step 7: テストが通ることを確認する**
 
-Run: `pnpm test -- test/core/engine.test.ts`
+Run: `pnpm test test/core/engine.test.ts`
 Expected: PASS（14件）
 
 - [ ] **Step 8: コミット**
@@ -3202,7 +3226,7 @@ git commit -m "feat: ワークフローエンジン（ステップ進行と差�
 `test/core/recovery.test.ts`:
 
 ```ts
-import { test } from "node:test";
+import { test } from "vitest";
 import assert from "node:assert/strict";
 import { openDb } from "../../src/db/migrate.ts";
 import { insertProject, insertTask, getTask } from "../../src/db/tasks.ts";
@@ -3299,7 +3323,7 @@ test("running でないタスクには触らない", async () => {
 
 - [ ] **Step 2: テストが落ちることを確認する**
 
-Run: `pnpm test -- test/core/recovery.test.ts`
+Run: `pnpm test test/core/recovery.test.ts`
 Expected: FAIL（モジュールが無い）
 
 - [ ] **Step 3: 実装を書く**
@@ -3399,7 +3423,7 @@ export async function recoverOnStartup(
 
 - [ ] **Step 4: テストが通ることを確認する**
 
-Run: `pnpm test -- test/core/recovery.test.ts`
+Run: `pnpm test test/core/recovery.test.ts`
 Expected: PASS（10件）
 
 `recoverOnStartup` が `agent` / `command` を判別する条件は、`step_runs` の最後のレコードが
@@ -3447,7 +3471,7 @@ git commit -m "feat: クラッシュ復帰（古い子プロセスの掃除と�
 `test/daemon/server.test.ts`:
 
 ```ts
-import { test, beforeEach, afterEach } from "node:test";
+import { test, beforeEach, afterEach } from "vitest";
 import assert from "node:assert/strict";
 import { connect } from "node:net";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -3564,7 +3588,7 @@ test("既存のソケットファイルがあっても listen できる", async 
 
 - [ ] **Step 2: テストが落ちることを確認する**
 
-Run: `pnpm test -- test/daemon/server.test.ts`
+Run: `pnpm test test/daemon/server.test.ts`
 Expected: FAIL（モジュールが無い）
 
 - [ ] **Step 3: プロトコルの型を書く**
@@ -3683,7 +3707,7 @@ export function createServer(handler: Handler) {
 
 - [ ] **Step 5: テストが通ることを確認する**
 
-Run: `pnpm test -- test/daemon/server.test.ts`
+Run: `pnpm test test/daemon/server.test.ts`
 Expected: PASS（5件）
 
 - [ ] **Step 6: コミット**
@@ -3725,7 +3749,7 @@ spec 8章のリクエストを実装し、デーモン本体（tick ループ）
 `test/daemon/handlers.test.ts`:
 
 ```ts
-import { test, beforeEach, afterEach } from "node:test";
+import { test, beforeEach, afterEach } from "vitest";
 import assert from "node:assert/strict";
 import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
@@ -3879,7 +3903,7 @@ test("未知のメソッドはエラーになる", async () => {
 
 - [ ] **Step 2: テストが落ちることを確認する**
 
-Run: `pnpm test -- test/daemon/handlers.test.ts`
+Run: `pnpm test test/daemon/handlers.test.ts`
 Expected: FAIL（モジュールが無い）
 
 - [ ] **Step 3: ハンドラを実装する**
@@ -4225,7 +4249,7 @@ export async function cleanupAfterRun(ctx: DaemonContext, taskId: string): Promi
       .finally(() => ctx.running.delete(task.id));
 ```
 
-Run: `pnpm test -- test/daemon/handlers.test.ts`
+Run: `pnpm test test/daemon/handlers.test.ts`
 Expected: PASS（13件）
 
 - [ ] **Step 4: デーモン本体を書く**
@@ -4304,7 +4328,7 @@ if (import.meta.filename === process.argv[1]) {
 
 - [ ] **Step 5: テストが通ることを確認する**
 
-Run: `pnpm test -- test/daemon/handlers.test.ts`
+Run: `pnpm test test/daemon/handlers.test.ts`
 Expected: PASS（10件）
 
 - [ ] **Step 6: コミット**
@@ -4339,7 +4363,7 @@ git commit -m "feat: デーモンAPI ハンドラとスケジューリングル�
 `test/daemon/cli.test.ts`:
 
 ```ts
-import { test } from "node:test";
+import { test } from "vitest";
 import assert from "node:assert/strict";
 import { parseArgv } from "../../src/cli/dctl.ts";
 
@@ -4376,7 +4400,7 @@ test("未知のサブコマンドは落ちる", () => {
 
 - [ ] **Step 2: テストが落ちることを確認する**
 
-Run: `pnpm test -- test/daemon/cli.test.ts`
+Run: `pnpm test test/daemon/cli.test.ts`
 Expected: FAIL（モジュールが無い）
 
 - [ ] **Step 3: 実装を書く**
@@ -4473,7 +4497,7 @@ if (import.meta.filename === process.argv[1]) {
 
 - [ ] **Step 4: テストが通ることを確認する**
 
-Run: `pnpm test -- test/daemon/cli.test.ts`
+Run: `pnpm test test/daemon/cli.test.ts`
 Expected: PASS（6件）
 
 `parseArgv` の positional 抽出はテストが要求する形（`approve t1` / `reject t1 --comment x`）を満たせば
@@ -4544,7 +4568,7 @@ export async function until(pred: () => boolean, timeoutMs = 5000): Promise<void
 `test/integration/fullCycle.test.ts`:
 
 ```ts
-import { test, beforeEach, afterEach } from "node:test";
+import { test, beforeEach, afterEach } from "vitest";
 import assert from "node:assert/strict";
 import { mkdtemp, rm, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
