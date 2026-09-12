@@ -90,6 +90,13 @@ export async function runTask(
 
   while (true) {
     task = getTask(db, taskId)!;
+    // ループが走り続ける権利を毎周確認する。task.cancel / task.pause は子を
+    // SIGTERM して新しい状態を書くが、このループを止める手段は持っていない。
+    // ここで降りないと、cancel 後も次のステップの子を spawn して、ユーザーが
+    // 捨てたつもりの worktree に書き続ける。pause ではさらに current_step_id を
+    // 進めてしまい、後の resume が1ステップ黙って飛ばす。
+    // 新しい状態を所有しているのは状態を書いた側なので、ここでは何も書かずに返る。
+    if (task.state !== "running") return;
     const step = workflow.steps.find((s) => s.id === stepId);
     if (!step) {
       setState(db, task, "failed", deps);

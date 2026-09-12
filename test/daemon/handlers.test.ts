@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openDb } from "../../src/db/migrate.ts";
 import { getTask } from "../../src/db/tasks.ts";
+import { listStepRuns } from "../../src/db/stepRuns.ts";
 import { createHandler, tick, type DaemonContext } from "../../src/daemon/handlers.ts";
 import { createMockAdapter } from "../../src/adapter/mock.ts";
 import type { ServerEvent } from "../../src/daemon/protocol.ts";
@@ -403,4 +404,57 @@ test("worktree 作成に失敗したタスクは failed になり、他プロジ
   } finally {
     await rm(healthyRoot, { recursive: true, force: true });
   }
+});
+
+// --- 実行中の cancel / pause が runTask のループを止める -------------------
+
+const TWO_AGENTS =
+  "name: twoagents\nsteps:\n  - id: a\n    type: agent\n    prompt: \"p1\"\n" +
+  "  - id: b\n    type: agent\n    prompt: \"p2\"\n";
+
+/** agent ステップ a の実行中（まだ結果が返らない状態）まで進めたタスクを作る。 */
+async function midFlight(ctx: DaemonContext, h: ReturnType<typeof createHandler>) {
+  const adapter = createMockAdapter({ result: { ok: true, text: "done" }, delayMs: 300 });
+  ctx.adapter = adapter;
+  await writeFile(join(repo, ".doctrine", "workflows", "twoagents.yaml"), TWO_AGENTS);
+  await h("project.add", { path: repo }, NOOP_CONN);
+  const t = await h(
+    "task.create", { project: repo, title: "T", prompt: "p", workflow: "twoagents" }, NOOP_CONN,
+  ) as { id: string };
+  await tick(ctx);
+  // 最初のステップの running 行が立ち、子が動き出したところまで待つ。
+  await until(() => listStepRuns(ctx.db, t.id).length === 1, 5000, "ステップ a の開始");
+  return { taskId: t.id, adapter };
+}
+
+test("実行中に cancel されたら runTask は次のステップを始めない", async () => {
+  const ctx = context();
+  const h = createHandler(ctx);
+  const { taskId, adapter } = await midFlight(ctx, h);
+
+  await h("task.cancel", { task_id: taskId }, NOOP_CONN);
+  const runsAtCancel = listStepRuns(ctx.db, taskId).length;
+  await until(() => ctx.running.size === 0, 5000, "runTask の終了");
+
+  assert.equal(listStepRuns(ctx.db, taskId).length, runsAtCancel,
+    "cancel 後に新しい step_runs 行を立ててはいけない");
+  assert.equal(adapter.calls.length, 1, "cancel 後にアダプタを呼び直してはいけない");
+  assert.equal(getTask(ctx.db, taskId)?.state, "canceled",
+    "状態を書いたのは handler 側であり、エンジンが上書きしてはいけない");
+});
+
+test("実行中に pause されたら runTask は current_step_id を進めない", async () => {
+  const ctx = context();
+  const h = createHandler(ctx);
+  const { taskId, adapter } = await midFlight(ctx, h);
+
+  await h("task.pause", { task_id: taskId }, NOOP_CONN);
+  const runsAtPause = listStepRuns(ctx.db, taskId).length;
+  await until(() => ctx.running.size === 0, 5000, "runTask の終了");
+
+  assert.equal(listStepRuns(ctx.db, taskId).length, runsAtPause);
+  assert.equal(adapter.calls.length, 1);
+  assert.equal(getTask(ctx.db, taskId)?.state, "paused");
+  assert.equal(getTask(ctx.db, taskId)?.current_step_id, "a",
+    "中断されたステップより先に進むと resume が1ステップ飛ばしてしまう");
 });
