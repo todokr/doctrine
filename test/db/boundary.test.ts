@@ -110,3 +110,47 @@ test("巨大な出力は末尾だけ保存する", () => {
   assert.ok(saved.length <= OUTPUT_TAIL_BYTES + 3);
   assert.ok(saved.endsWith("END"));
 });
+
+test("巨大な日本語出力はUTF-8バイト数で末尾を切る", () => {
+  const d = fixture();
+  const huge = "あ".repeat(20000) + "終";
+  commitStepBoundary(d, {
+    taskId: "t1", taskPatch: {},
+    stepRun: { step_id: "test", attempt: 1, status: "success", exit_code: 0, started_at: "a", ended_at: "b", log_path: "/l" },
+    outputs: { step_id: "test", stdout: huge, stderr: "", exit_code: 0 },
+  });
+  const saved = getStepOutputs(d, "t1").test.stdout;
+  assert.ok(Buffer.byteLength(saved, "utf8") <= OUTPUT_TAIL_BYTES);
+  assert.ok(saved.endsWith("終"));
+});
+
+test("末尾を切った結果に文字化け(U+FFFD)を含まない", () => {
+  const d = fixture();
+  const huge = "あ".repeat(20000) + "終";
+  commitStepBoundary(d, {
+    taskId: "t1", taskPatch: {},
+    stepRun: { step_id: "test", attempt: 1, status: "success", exit_code: 0, started_at: "a", ended_at: "b", log_path: "/l" },
+    outputs: { step_id: "test", stdout: huge, stderr: "", exit_code: 0 },
+  });
+  const saved = getStepOutputs(d, "t1").test.stdout;
+  assert.equal(saved.includes("�"), false);
+});
+
+test("上限ちょうど・未満の出力はそのまま保存される", () => {
+  const d = fixture();
+  const exact = "x".repeat(OUTPUT_TAIL_BYTES);
+  const under = "x".repeat(OUTPUT_TAIL_BYTES - 1);
+  commitStepBoundary(d, {
+    taskId: "t1", taskPatch: {},
+    stepRun: { step_id: "a", attempt: 1, status: "success", exit_code: 0, started_at: "a", ended_at: "b", log_path: "/l" },
+    outputs: { step_id: "a", stdout: exact, stderr: "", exit_code: 0 },
+  });
+  commitStepBoundary(d, {
+    taskId: "t1", taskPatch: {},
+    stepRun: { step_id: "b", attempt: 1, status: "success", exit_code: 0, started_at: "a", ended_at: "b", log_path: "/l" },
+    outputs: { step_id: "b", stdout: under, stderr: "", exit_code: 0 },
+  });
+  const outputs = getStepOutputs(d, "t1");
+  assert.equal(outputs.a.stdout, exact);
+  assert.equal(outputs.b.stdout, under);
+});

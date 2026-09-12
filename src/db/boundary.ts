@@ -25,7 +25,13 @@ export type StepBoundary = {
 };
 
 function tail(s: string): string {
-  return s.length <= OUTPUT_TAIL_BYTES ? s : s.slice(-OUTPUT_TAIL_BYTES);
+  const buf = Buffer.from(s, "utf8");
+  if (buf.length <= OUTPUT_TAIL_BYTES) return s;
+  let start = buf.length - OUTPUT_TAIL_BYTES;
+  // UTF-8 continuation bytes are 10xxxxxx; walk forward to the next code-point start
+  // so the tail never begins mid-character (which would decode to U+FFFD).
+  while (start < buf.length && (buf[start] & 0xc0) === 0x80) start++;
+  return buf.subarray(start).toString("utf8");
 }
 
 /**
