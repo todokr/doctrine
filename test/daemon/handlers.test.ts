@@ -1,6 +1,7 @@
 import { test, beforeEach, afterEach } from "vitest";
 import assert from "node:assert/strict";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { tmpdir } from "node:os";
@@ -457,4 +458,49 @@ test("実行中に pause されたら runTask は current_step_id を進めな�
   assert.equal(getTask(ctx.db, taskId)?.state, "paused");
   assert.equal(getTask(ctx.db, taskId)?.current_step_id, "a",
     "中断されたステップより先に進むと resume が1ステップ飛ばしてしまう");
+});
+
+// --- 最終ステップが approval のワークフローの後始末 -----------------------
+
+test("最終ステップの approval を承認したら worktree は削除され、ブランチは残る", async () => {
+  const ctx = context();
+  const h = createHandler(ctx);
+  await h("project.add", { path: repo }, NOOP_CONN);
+  // beforeEach の feature.yaml は approval 1ステップだけ。承認がそのまま完了になる。
+  const t = await h("task.create", { project: repo, title: "T", prompt: "p" }, NOOP_CONN) as { id: string };
+  await tick(ctx);
+  await until(() => getTask(ctx.db, t.id)?.state === "suspended");
+  await until(() => ctx.running.size === 0);
+  const worktreePath = getTask(ctx.db, t.id)!.worktree_path!;
+  const branch = getTask(ctx.db, t.id)!.branch;
+
+  await h("task.approve", { task_id: t.id }, NOOP_CONN);
+
+  assert.equal(getTask(ctx.db, t.id)?.state, "completed");
+  assert.equal(getTask(ctx.db, t.id)?.worktree_path, null,
+    "worktree_path が残ると findOrphans が既知扱いして孤児にも出てこない");
+  assert.equal(existsSync(worktreePath), false, "completed は worktree を削除する");
+  const { stdout } = await run("git", ["-C", repo, "branch", "--list", branch]);
+  assert.match(stdout, /doctrine\//, "ブランチは残す");
+});
+
+test("最終ステップの approval でも未コミットの変更が残っていたら削除せず警告する", async () => {
+  const ctx = context();
+  const h = createHandler(ctx);
+  await writeFile(join(repo, ".doctrine", "workflows", "dirtyapproval.yaml"),
+    "name: dirtyapproval\nsteps:\n  - id: a\n    type: command\n    run: \"touch leftover.txt\"\n" +
+    "  - id: review\n    type: approval\n    title: 見て\n");
+  await h("project.add", { path: repo }, NOOP_CONN);
+  const t = await h(
+    "task.create", { project: repo, title: "T", prompt: "p", workflow: "dirtyapproval" }, NOOP_CONN,
+  ) as { id: string };
+  await tick(ctx);
+  await until(() => getTask(ctx.db, t.id)?.state === "suspended");
+  await until(() => ctx.running.size === 0);
+
+  const after = await h("task.approve", { task_id: t.id }, NOOP_CONN) as { state: string };
+
+  assert.equal(after.state, "completed", "後始末に失敗しても承認自体は成立している");
+  assert.ok(getTask(ctx.db, t.id)?.worktree_path, "削除を拒否して残す");
+  assert.ok(ctx.warnings.some((w) => /未コミット/.test(w)), "警告として出す");
 });

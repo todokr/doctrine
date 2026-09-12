@@ -133,6 +133,19 @@ export function createHandler(ctx: DaemonContext): Handler {
         applyApproval(ctx.db, taskId, { approved, comment }, workflow);
         const after = getTask(ctx.db, taskId)!;
         ctx.broadcast({ event: "task.stateChanged", task_id: taskId, from: "suspended", to: after.state });
+        // 最終ステップが approval のワークフローは、ここが completed への唯一の
+        // 入口であり、tick の runTask().then(cleanupAfterRun) を通らない。
+        // 後始末しないと worktree_path が非nullのまま残り、findOrphans は既知の
+        // worktree とみなすので worktree.list にも出ず、溜まっていることすら見えない。
+        // 承認は既に成立しているので、後始末の失敗でこの要求を失敗させてはいけない
+        // （cleanupAfterRun は内部で警告に倒すが、想定外の例外もここで受け止める）。
+        if (after.state === "completed") {
+          await cleanupAfterRun(ctx, taskId).catch((e: Error) => {
+            ctx.warnings.push(`タスク ${taskId}: 承認後の後始末に失敗しました: ${e.message}`);
+          });
+          // worktree_path は後始末で変わり得るので、応答は読み直した行を返す。
+          return getTask(ctx.db, taskId)!;
+        }
         return after;
       }
 
