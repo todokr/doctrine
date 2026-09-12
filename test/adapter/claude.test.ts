@@ -1,6 +1,6 @@
 import { test } from "vitest";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, chmodSync } from "node:fs";
+import { mkdtempSync, writeFileSync, chmodSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildArgs, normalize, resultFrom, createClaudeAdapter } from "../../src/adapter/claude.ts";
@@ -103,22 +103,29 @@ test("stderrTail はデフォルトで空文字", () => {
 test("result行なしでstderrに出力して死んだプロセスは失敗＆stderrTailに証拠を残す", async () => {
   // 実の claude バイナリは使わない。result 行を出さずに stderr へ書いて
   // 非0で終了する偽の実行ファイルを立てて、createClaudeAdapter の挙動を検証する。
+  // フィクスチャは #!/usr/bin/env bash に依存する（このプロジェクトは既に sh や
+  // git を外部コマンドとして前提にしているため許容するが、最小コンテナでは
+  // bash が無く失敗しうる点は留意）。
   const dir = mkdtempSync(join(tmpdir(), "doctrine-adapter-test-"));
-  const script = join(dir, "fake-claude.sh");
-  writeFileSync(script, [
-    "#!/usr/bin/env bash",
-    'echo "boom: something went wrong" 1>&2',
-    'echo \'{"type":"system","subtype":"init"}\'',
-    "exit 7",
-  ].join("\n"));
-  chmodSync(script, 0o755);
+  try {
+    const script = join(dir, "fake-claude.sh");
+    writeFileSync(script, [
+      "#!/usr/bin/env bash",
+      'echo "boom: something went wrong" 1>&2',
+      'echo \'{"type":"system","subtype":"init"}\'',
+      "exit 7",
+    ].join("\n"));
+    chmodSync(script, 0o755);
 
-  const adapter = createClaudeAdapter(script);
-  const run = adapter.start("x", { cwd: dir, sessionId: "s1" });
-  const r = await run.result;
+    const adapter = createClaudeAdapter(script);
+    const run = adapter.start("x", { cwd: dir, sessionId: "s1" });
+    const r = await run.result;
 
-  assert.equal(r.ok, false);
-  assert.equal(r.exitCode, 7);
-  assert.ok(r.stderrTail.includes("boom: something went wrong"),
-    `stderrTail に証拠が残っているはず: ${r.stderrTail}`);
+    assert.equal(r.ok, false);
+    assert.equal(r.exitCode, 7);
+    assert.ok(r.stderrTail.includes("boom: something went wrong"),
+      `stderrTail に証拠が残っているはず: ${r.stderrTail}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

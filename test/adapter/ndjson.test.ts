@@ -35,19 +35,16 @@ test("壊れた行は飛ばして続きを読む", async () => {
   assert.deepEqual(await collect(['not json\n{"a":1}\n']), [{ a: 1 }]);
 });
 
-test("マルチバイト文字の途中でチャンクが分割されても復元する", async () => {
-  // 日本語（3バイト）と絵文字（サロゲートペア、4バイト）を含む行を作り、
-  // そのUTF-8バイト列をマルチバイト文字の途中で2つに割って別チャンクとして流す。
-  // setEncoding("utf8") が StringDecoder で不完全なバイト列を保留することの保証テスト。
-  const text = "こんにちは😀世界";
+/**
+ * text を含む1行のUTF-8バイト列を作り、cutAt バイト目で2チャンクに割って読ませる。
+ * setEncoding("utf8") が StringDecoder で不完全なバイト列を保留することの保証テスト
+ * （割らずに1チャンクで流すと、この保留は一切働かないため検証にならない）。
+ */
+async function collectSplitAtByte(text: string, cutAt: number): Promise<unknown[]> {
   const line = JSON.stringify({ text }) + "\n";
   const buf = Buffer.from(line, "utf8");
-
-  // "こんにちは" の3バイト目（"こ"の途中）で分割する
-  const jIdx = buf.indexOf(Buffer.from("こんにちは", "utf8"));
-  const splitAt = jIdx + 1; // "こ" の1バイト目の直後（マルチバイト文字の途中）
-  const part1 = buf.subarray(0, splitAt);
-  const part2 = buf.subarray(splitAt);
+  const part1 = buf.subarray(0, cutAt);
+  const part2 = buf.subarray(cutAt);
 
   const out: unknown[] = [];
   const stream = new Readable({
@@ -58,8 +55,27 @@ test("マルチバイト文字の途中でチャンクが分割されても復�
     },
   });
   for await (const v of readNdjson(stream)) out.push(v);
+  return out;
+}
+
+test("3バイト文字（日本語）の途中でチャンクが分割されても復元する", async () => {
+  const text = "こんにちは世界";
+  const buf = Buffer.from(JSON.stringify({ text }) + "\n", "utf8");
+  // "こ"（3バイト）の1バイト目の直後、つまりその3バイト列の途中で割る
+  const koStart = buf.indexOf(Buffer.from("こ", "utf8"));
+  const out = await collectSplitAtByte(text, koStart + 1);
 
   assert.deepEqual(out, [{ text }]);
-  const got = (out[0] as { text: string }).text;
-  assert.ok(!got.includes("�"), "U+FFFD（置換文字）が混入していない");
+  assert.ok(!(out[0] as { text: string }).text.includes("�"), "U+FFFD（置換文字）が混入していない");
+});
+
+test("4バイト文字（絵文字・サロゲートペア）の途中でチャンクが分割されても復元する", async () => {
+  const text = "あいう🎉えお";
+  const buf = Buffer.from(JSON.stringify({ text }) + "\n", "utf8");
+  // 絵文字（4バイト）の2バイト目、つまりその4バイト列の途中で割る
+  const emojiStart = buf.indexOf(Buffer.from("🎉", "utf8"));
+  const out = await collectSplitAtByte(text, emojiStart + 1);
+
+  assert.deepEqual(out, [{ text }]);
+  assert.ok(!(out[0] as { text: string }).text.includes("�"), "U+FFFD（置換文字）が混入していない");
 });
