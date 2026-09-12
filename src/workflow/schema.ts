@@ -58,6 +58,77 @@ export function branchOf(step: Step): Branch | undefined {
   return step.type === "approval" ? step.onReject : step.onFailure;
 }
 
+/** 既にスキーマ側でカスタムメッセージ（日本語）が設定されているかの簡易判定。 */
+const containsJapanese = (s: string): boolean => /[぀-ヿ㐀-鿿]/.test(s);
+
+function translateZodIssue(issue: z.ZodIssueOptionalMessage & { message?: string }): string {
+  const message = (issue as z.ZodIssue).message;
+  // すでに日本語のカスタムメッセージが設定されている場合はそのまま使う
+  // （stepId の正規表現エラー、steps の min(1) など）。
+  if (message && containsJapanese(message)) return message;
+
+  switch (issue.code) {
+    case z.ZodIssueCode.invalid_type: {
+      if (issue.received === "undefined") {
+        return `必須の項目が指定されていません（${issue.expected} が必要です）`;
+      }
+      return `型が不正です: ${issue.expected} が必要ですが ${issue.received} が指定されました`;
+    }
+    case z.ZodIssueCode.unrecognized_keys: {
+      return `認識できないキーがあります: ${issue.keys.join(", ")}`;
+    }
+    case z.ZodIssueCode.too_small: {
+      if (issue.type === "string") {
+        return `文字列が短すぎます（${issue.minimum}文字以上必要です）`;
+      }
+      if (issue.type === "number") {
+        const cmp = issue.inclusive ? "以上" : "より大きい値";
+        return `数値が小さすぎます（${issue.minimum}${cmp}が必要です）`;
+      }
+      if (issue.type === "array") {
+        return `要素数が足りません（${issue.minimum}件以上必要です）`;
+      }
+      return message ?? "値が小さすぎます";
+    }
+    case z.ZodIssueCode.too_big: {
+      if (issue.type === "string") {
+        return `文字列が長すぎます（${issue.maximum}文字以内にしてください）`;
+      }
+      if (issue.type === "number") {
+        const cmp = issue.inclusive ? "以下" : "より小さい値";
+        return `数値が大きすぎます（${issue.maximum}${cmp}が必要です）`;
+      }
+      if (issue.type === "array") {
+        return `要素数が多すぎます（${issue.maximum}件以内にしてください）`;
+      }
+      return message ?? "値が大きすぎます";
+    }
+    case z.ZodIssueCode.invalid_string: {
+      // regex等のカスタムメッセージが日本語でない場合のフォールバック
+      return message ?? "文字列の形式が不正です";
+    }
+    case z.ZodIssueCode.invalid_union_discriminator: {
+      return `type は次のいずれかである必要があります: ${issue.options.join(", ")}`;
+    }
+    case z.ZodIssueCode.invalid_enum_value: {
+      return `値が不正です。次のいずれかである必要があります: ${issue.options.join(", ")}`;
+    }
+    default:
+      // 未対応のコードは zod 自身のメッセージにフォールバックする
+      return message ?? "不明な検証エラーです";
+  }
+}
+
+/**
+ * zod の ZodError を、ユーザーに見せてよい日本語メッセージの配列に変換する。
+ * ワークフローYAMLは人間が手で書く設定ファイルなので、エラーメッセージの質が
+ * 直接UXになる。zodの英語デフォルトメッセージをそのまま出さない。
+ * project.yaml のバリデーション（後続タスク）もこの関数を再利用する。
+ */
+export function formatZodIssues(error: z.ZodError): string[] {
+  return error.issues.map((issue) => `${issue.path.join(".") || "(root)"}: ${translateZodIssue(issue)}`);
+}
+
 export function parseWorkflow(yamlText: string): { workflow: Workflow; warnings: string[] } {
   let raw: unknown;
   try {
@@ -68,9 +139,7 @@ export function parseWorkflow(yamlText: string): { workflow: Workflow; warnings:
 
   const parsed = workflowSchema.safeParse(raw);
   if (!parsed.success) {
-    throw new WorkflowValidationError(
-      parsed.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`),
-    );
+    throw new WorkflowValidationError(formatZodIssues(parsed.error));
   }
   const workflow = parsed.data as Workflow;
 

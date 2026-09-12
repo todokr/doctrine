@@ -1,2 +1,7 @@
+# esbuild (a transitive dependency of vite/vitest) needs its install script to
+# place the correct platform binary. Without this, pnpm blocks `pnpm test` /
+# `pnpm typecheck` behind an interactive "approve builds" prompt, and denying it
+# risks a missing/mismatched binary on some OS/arch. Allow it explicitly so
+# fresh installs are both non-interactive and correct.
 allowBuilds:
-  esbuild: false
+  esbuild: true

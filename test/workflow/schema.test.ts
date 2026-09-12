@@ -100,3 +100,72 @@ steps:
 test("ステップが空なら落とす", () => {
   assert.throws(() => parseWorkflow("name: empty\nsteps: []\n"), WorkflowValidationError);
 });
+
+test("未知のステップtypeは日本語で有効な型名を案内する", () => {
+  const yaml = `
+name: bad
+steps:
+  - id: a
+    type: agnet
+    run: "true"
+`;
+  assert.throws(() => parseWorkflow(yaml), (e: unknown) => {
+    assert.ok(e instanceof WorkflowValidationError);
+    const msg = e.issues.join("\n");
+    assert.match(msg, /command/);
+    assert.match(msg, /agent/);
+    assert.match(msg, /approval/);
+    return true;
+  });
+});
+
+test("ステップ内の未知のキーは日本語でキー名を案内する", () => {
+  const yaml = `
+name: bad
+steps:
+  - id: a
+    type: command
+    runn: pnpm test
+`;
+  assert.throws(() => parseWorkflow(yaml), (e: unknown) => {
+    assert.ok(e instanceof WorkflowValidationError);
+    assert.match(e.issues.join("\n"), /runn/);
+    return true;
+  });
+});
+
+test("maxAttempts が0以下なら日本語で最小値を案内する", () => {
+  const yaml = `
+name: bad
+steps:
+  - id: a
+    type: command
+    run: "true"
+    onFailure:
+      goto: a
+      maxAttempts: 0
+`;
+  assert.throws(() => parseWorkflow(yaml), (e: unknown) => {
+    assert.ok(e instanceof WorkflowValidationError);
+    const msg = e.issues.join("\n");
+    assert.match(msg, /maxAttempts/);
+    assert.match(msg, /[぀-ヿ一-鿿]/);
+    return true;
+  });
+});
+
+test("name がなければ日本語でnameを案内する", () => {
+  const yaml = `
+steps:
+  - id: a
+    type: command
+    run: "true"
+`;
+  assert.throws(() => parseWorkflow(yaml), (e: unknown) => {
+    assert.ok(e instanceof WorkflowValidationError);
+    const msg = e.issues.join("\n");
+    assert.match(msg, /name/);
+    assert.match(msg, /[぀-ヿ一-鿿]/);
+    return true;
+  });
+});
