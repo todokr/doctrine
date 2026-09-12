@@ -175,6 +175,18 @@ uncle-jam の `pending` はこれに置き換える
 並ぶとボードが嘘をつく
 - **枠の解放はスコープごとに違う**（5章で詳述）— 全体枠は解放し、プロジェクト枠は保持する
 
+**実装時に追加された遷移が2つある**（上の表には現れない、`queued` / `suspended` からの追加の辺）:
+
+- **`queued` → `failed`** — ワークフローが読み込めない、またはworktreeが作成できない
+  場合、1つもステップを実行しないままタスクを失敗させる必要がある。`running` を経由
+  させると、実際には実行していないステップ実行を記録したことになり嘘になる。
+  `queued` のまま残すという選択肢もあったが、それではスケジューラが毎周期リトライし
+  続け、他タスクの進行を巻き込みかねないため、`failed` として確定させる
+- **`suspended` → `completed`** — 最終ステップが `approval` であるワークフローは、
+  承認された瞬間に完了する。`queued` を経由させて次のステップの不在をスケジューラに
+  発見させるのは、待つ理由が無いのに一瞬枠を再取得させ、実態のない `queued` を
+  記録することになるため、直接 `completed` に遷移させる
+
 ### 枠の占有数はカウンタで持たない
 
 `running` なタスクを数えて導出する。カウンタを持てば必ず状態とズレる。
@@ -185,10 +197,30 @@ uncle-jam の `pending` はこれに置き換える
 - `tasks` — **これ自体がスナップショット**。`id`, `project_id`, `title`, `prompt`,
 `workflow_name`, `state`, `current_step_id`, `attempt_counts`(JSON),
 `branch`, `worktree_path`, `claude_session_id`, `child_pid`, `child_started_at`,
-`priority`, `created_at`, `updated_at`
+`priority`, `resumed`, `pending_feed`, `created_at`, `updated_at`
+  - `resumed` — 実装時に追加。「再開するタスクは行列の先頭に入る」（5章）の
+    順序付けに使う。`paused` / `suspended` からの明示的な再開、クラッシュ復帰時の
+    `running` → `queued` だけでなく、`approval` の承認・却下（次のステップ／
+    `onReject.goto` 先へ `queued` として戻す）でもこのフラグを立てる。
+    いずれも「既に進行していたタスクが `queued` へ戻る」という共通の形をしており、
+    新規タスクより先に枠を取り戻すべき点は同じであるため
+  - `pending_feed` — 実装時に追加。`onReject.feed` を展開した文字列を
+    suspend境界をまたいで運ぶ。`approval` の承認/却下はエンジンとは別の
+    APIコール（`applyApproval`）で行われるため、エンジンのインメモリ変数は
+    その呼び出しをまたいで生きられない。展開済みの feed をDBに置くことで、
+    再開後のステップに正しく渡す
 - `step_runs` — ステップ1回の実行記録。`task_id`, `step_id`, `attempt`, `status`,
 `exit_code`, `started_at`, `ended_at`, `log_path`,
 `cost_usd`, `num_turns`, `duration_ms`。**UIの「実行履歴」はこのテーブル**
+  - `status` の実際の値は `running` / `success` / `failed` / `degraded` の4つ
+    （`CHECK` 制約で固定）。本来ここに欲しい5つ目の値は `interrupted`
+    （デーモンクラッシュ時に `running` のまま閉じるしかなかった行を正直に表す）
+    だが、実装時点でマイグレーション機構が無く（`migrate.ts` は
+    `CREATE TABLE IF NOT EXISTS` のみで、既存のDBファイルにはスキーマ変更が
+    決して反映されない）、`CHECK` に新しい値を足すと、そのDBファイルへの
+    書き込みが既存の制約に弾かれて起動できなくなる。そのため中断された
+    ステップ実行は現状 `failed` として閉じている。マイグレーションが入り次第、
+    `interrupted` を追加すること
 - `step_outputs` — 変数展開に使う分だけ（stdout/stderr の末尾）
 - `rate_limit_samples` — Claude Code から流れてくるレート消費率の記録（6章）
 
