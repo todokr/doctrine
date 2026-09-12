@@ -1,8 +1,9 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { DatabaseSync } from "node:sqlite";
-import { commitStepBoundary } from "../db/boundary.ts";
+import { commitStepBoundary, type StepBoundary } from "../db/boundary.ts";
 import { listTasks, type TaskRow } from "../db/tasks.ts";
+import { listStepRuns } from "../db/stepRuns.ts";
 import { assertTransition } from "./states.ts";
 import type { Workflow } from "../workflow/schema.ts";
 
@@ -144,6 +145,35 @@ export type RecoveryResult =
   | { taskId: string; outcome: "failed"; error: string };
 
 /**
+ * 中断された時点で running のまま残っている step_runs 行を閉じる
+ * （taskId につき「最後の running 行」を1つだけ、あれば）。
+ *
+ * 本来の正直な値は「失敗ではなく中断された」ことを表す別の status
+ * （例えば "interrupted"）だが、tasks / step_runs の status は DDL の
+ * CHECK 制約で固定されており、このプロジェクトにはまだマイグレーション
+ * 機構が無い（既存のDBファイルは古い CHECK のまま起動され続ける — GitHub
+ * issue #1 で追跡中）。新しい値を追加すると、既存DBでの書き込みがその
+ * CHECK に弾かれて起動できなくなる。現時点で選べる中で最も正直な値は
+ * "failed" + ended_at を入れることで、running のまま放置する（＝「まだ
+ * 実行中」という明確な嘘を残す）よりはましと判断する。
+ *
+ * running の行が無ければ何もしない（呼び出し側はこれをエラー扱いしない）。
+ */
+function closeDanglingStepRun(db: DatabaseSync, taskId: string): Pick<StepBoundary, "stepRunUpdate"> {
+  const runs = listStepRuns(db, taskId);
+  const dangling = [...runs].reverse().find((r) => r.status === "running");
+  if (!dangling) return {};
+  return {
+    stepRunUpdate: {
+      id: dangling.id,
+      status: "failed",
+      exit_code: null,
+      ended_at: new Date().toISOString(),
+    },
+  };
+}
+
+/**
  * デーモンが死ねば子プロセスの stdout は誰も読んでいない。
  * よって起動時に running のタスクはすべて古い。
  *
@@ -155,8 +185,16 @@ export type RecoveryResult =
  * このループは1タスクずつ独立させ、例外を外に漏らさない。ここは「デーモンが
  * 一度壊れた後の後始末」という最も守りに入るべき経路であり、1タスク分の
  * probe / lookupWorkflow の失敗（壊れたワークフローYAMLなど）で残り全部の
- * stale タスクが救済されないまま放置される方がずっと悪い。失敗は失敗として
- * 記録し、次のタスクの復帰を続ける。
+ * stale タスクが救済されないまま放置される方がずっと悪い。
+ *
+ * 復帰に失敗したタスクは running のまま残さない。running は global slot と
+ * project slot の両方をライブに（カウンタを持たず毎回数え直して）専有する
+ * 唯一の状態であり、再起動しても直らない失敗（壊れたワークフローYAMLなど）
+ * を running のまま残すと、そのタスクは枠を握ったまま・プロジェクトの
+ * max_concurrent（既定/フィクスチャは1）を永久に塞ぎ、しかも起動時ログの
+ * 1行以外どこにも見えなくなる。failed は終端状態で両スロットを専有せず、
+ * 一覧からも見える（=本当に気づける）ので、failed に倒す。
+ * failed への書き込み自体が失敗しても掃討は続ける（二重に守る）。
  */
 export async function recoverOnStartup(
   db: DatabaseSync, probe: ProcessProbe, lookupWorkflow: WorkflowLookup,
@@ -175,10 +213,23 @@ export async function recoverOnStartup(
       commitStepBoundary(db, {
         taskId: task.id,
         taskPatch: { state: "queued", resumed: 1, child_pid: null, child_started_at: null },
+        ...closeDanglingStepRun(db, task.id),
       });
       results.push({ taskId: task.id, outcome: "recovered", action });
     } catch (e) {
-      results.push({ taskId: task.id, outcome: "failed", error: e instanceof Error ? e.message : String(e) });
+      const error = e instanceof Error ? e.message : String(e);
+      try {
+        assertTransition(task.state, "failed");
+        commitStepBoundary(db, {
+          taskId: task.id,
+          taskPatch: { state: "failed" },
+          ...closeDanglingStepRun(db, task.id),
+        });
+      } catch (e2) {
+        // failed への書き込み自体が失敗しても、他タスクの掃討を止めない。
+        console.error(`タスク ${task.id} を failed にできませんでした（復帰処理は継続します）:`, e2);
+      }
+      results.push({ taskId: task.id, outcome: "failed", error });
     }
   }
   return results;

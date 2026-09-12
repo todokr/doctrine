@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { openDb } from "../../src/db/migrate.ts";
 import { insertProject, insertTask, getTask } from "../../src/db/tasks.ts";
 import { commitStepBoundary } from "../../src/db/boundary.ts";
+import { listStepRuns } from "../../src/db/stepRuns.ts";
 import type { Workflow } from "../../src/workflow/schema.ts";
 import {
   isSameChild, killStaleChild, recoverOnStartup, psLstartCommand,
@@ -172,6 +173,7 @@ test("probe.startTimeOf が1件目で例外を投げても、残りは救済さ�
   const byId = new Map(results.map((r) => [r.taskId, r]));
 
   assert.equal(byId.get("t1")?.outcome, "failed");
+  assert.match((byId.get("t1") as { error: string }).error, /ps が失敗しました/);
   assert.equal(byId.get("t2")?.outcome, "recovered");
   assert.equal(byId.get("t3")?.outcome, "recovered");
   assert.deepEqual(byId.get("t2"), { taskId: "t2", outcome: "recovered", action: "resume-agent" });
@@ -180,8 +182,9 @@ test("probe.startTimeOf が1件目で例外を投げても、残りは救済さ�
   // 実際に queued まで進んだことを確認する（返り値だけでなく状態そのものを見る）。
   assert.equal(getTask(db, "t2")!.state, "queued");
   assert.equal(getTask(db, "t3")!.state, "queued");
-  // t1 は救済に失敗したので running のまま取り残されているはず（後で再試行できるように）。
-  assert.equal(getTask(db, "t1")!.state, "running");
+  // t1 は復帰できないと分かったので、running のまま枠を専有し続けるのではなく
+  // failed（終端・両スロット非専有・一覧に見える）に倒す。
+  assert.equal(getTask(db, "t1")!.state, "failed");
 });
 
 test("lookupWorkflow が1件で例外を投げても、残りは救済され失敗が報告される", async () => {
@@ -203,12 +206,13 @@ test("lookupWorkflow が1件で例外を投げても、残りは救済され失�
   const byId = new Map(results.map((r) => [r.taskId, r]));
 
   assert.equal(byId.get("t2")?.outcome, "failed");
+  assert.match((byId.get("t2") as { error: string }).error, /ワークフローYAMLが壊れています/);
   assert.deepEqual(byId.get("t1"), { taskId: "t1", outcome: "recovered", action: "resume-agent" });
   assert.deepEqual(byId.get("t3"), { taskId: "t3", outcome: "recovered", action: "resume-agent" });
 
   assert.equal(getTask(db, "t1")!.state, "queued");
   assert.equal(getTask(db, "t3")!.state, "queued");
-  assert.equal(getTask(db, "t2")!.state, "running");
+  assert.equal(getTask(db, "t2")!.state, "failed");
 });
 
 test("defaultProbe が使う ps コマンドはロケール・タイムゾーンを固定する", () => {
@@ -217,4 +221,67 @@ test("defaultProbe が使う ps コマンドはロケール・タイムゾーン
   assert.deepEqual(args, ["-o", "lstart=", "-p", "4242"]);
   assert.equal(env.LC_ALL, "C");
   assert.equal(env.TZ, "UTC");
+});
+
+test("復帰に成功したら、中断した step_runs 行を running のまま残さない", async () => {
+  const db = fixture();
+  commitStepBoundary(db, {
+    taskId: "t1",
+    taskPatch: { state: "running", current_step_id: "implement" },
+    stepRun: { step_id: "implement", attempt: 1, status: "running", exit_code: null, started_at: "a", ended_at: null, log_path: "/l" },
+  });
+  await recoverOnStartup(db, probe({}), lookupWF);
+  const runs = listStepRuns(db, "t1");
+  assert.equal(runs.length, 1);
+  assert.notEqual(runs[0].status, "running");
+  assert.ok(runs[0].ended_at !== null, "ended_at が入っている必要がある");
+});
+
+test("復帰に失敗しても、中断した step_runs 行を running のまま残さない", async () => {
+  const db = fixture();
+  commitStepBoundary(db, {
+    taskId: "t1",
+    taskPatch: { state: "running", current_step_id: "implement" },
+    stepRun: { step_id: "implement", attempt: 1, status: "running", exit_code: null, started_at: "a", ended_at: null, log_path: "/l" },
+  });
+  const throwingLookup: WorkflowLookup = () => { throw new Error("壊れている（テスト用）"); };
+  const results = await recoverOnStartup(db, probe({}), throwingLookup);
+  assert.equal(results[0]?.outcome, "failed");
+  const runs = listStepRuns(db, "t1");
+  assert.equal(runs.length, 1);
+  assert.notEqual(runs[0].status, "running");
+  assert.ok(runs[0].ended_at !== null);
+});
+
+test("running のまま残っている step_runs 行が無ければ、何も書き足さずに復帰する", async () => {
+  const db = fixture();
+  // current_step_id はあるが、対応する step_runs 行を一切作らない
+  // （approval からの queued 経由など、step_run 行が無いまま running になったケースを模す）。
+  commitStepBoundary(db, { taskId: "t1", taskPatch: { state: "running", current_step_id: "implement" } });
+  const actions = await recoverOnStartup(db, probe({}), lookupWF);
+  assert.deepEqual(actions, [{ taskId: "t1", outcome: "recovered", action: "resume-agent" }]);
+  assert.deepEqual(listStepRuns(db, "t1"), []);
+});
+
+test("running の step_runs 行が複数あっても、最後の running 行だけを閉じ、既に終わっている行はそのまま", async () => {
+  const db = fixture();
+  commitStepBoundary(db, {
+    taskId: "t1",
+    taskPatch: { current_step_id: "implement" },
+    stepRun: { step_id: "implement", attempt: 1, status: "failed", exit_code: 1, started_at: "a", ended_at: "b", log_path: "/l1" },
+  });
+  commitStepBoundary(db, {
+    taskId: "t1",
+    taskPatch: { state: "running", current_step_id: "implement" },
+    stepRun: { step_id: "implement", attempt: 2, status: "running", exit_code: null, started_at: "c", ended_at: null, log_path: "/l2" },
+  });
+  await recoverOnStartup(db, probe({}), lookupWF);
+  const runs = listStepRuns(db, "t1");
+  assert.equal(runs.length, 2);
+  // 最初の（既に終わっている）行はそのまま。
+  assert.equal(runs[0].status, "failed");
+  assert.equal(runs[0].ended_at, "b");
+  // 2件目（running だった行）だけが閉じられている。
+  assert.notEqual(runs[1].status, "running");
+  assert.ok(runs[1].ended_at !== null);
 });
