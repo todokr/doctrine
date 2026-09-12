@@ -1,0 +1,47 @@
+import { test } from "vitest";
+import assert from "node:assert/strict";
+import { expand, TemplateError, type TemplateContext } from "../../src/workflow/template.ts";
+
+const ctx: TemplateContext = {
+  task: { id: "t1", title: "ログイン修正", prompt: "直して", branch: "doctrine/t1-login" },
+  worktree: { path: "/state/wt/t1" },
+  project: { path: "/repo" },
+  steps: { test: { stdout: "ok", stderr: "3 failing", exitCode: "1" } },
+};
+
+test("4系統すべてを展開する", () => {
+  assert.equal(expand("{{ task.prompt }}", ctx), "直して");
+  assert.equal(expand("{{ task.branch }}", ctx), "doctrine/t1-login");
+  assert.equal(expand("{{ worktree.path }}", ctx), "/state/wt/t1");
+  assert.equal(expand("{{ project.path }}", ctx), "/repo");
+  assert.equal(expand("{{ steps.test.stderr }}", ctx), "3 failing");
+  assert.equal(expand("{{ steps.test.exitCode }}", ctx), "1");
+});
+
+test("空白の有無を問わない", () => {
+  assert.equal(expand("{{task.id}}/{{  task.id  }}", ctx), "t1/t1");
+});
+
+test("1つの文字列に複数個埋められる", () => {
+  assert.equal(expand("テストが失敗した:\n{{ steps.test.stderr }}", ctx), "テストが失敗した:\n3 failing");
+});
+
+test("未知の系統は落とす", () => {
+  assert.throws(() => expand("{{ env.HOME }}", ctx), (e: unknown) => {
+    assert.ok(e instanceof TemplateError);
+    assert.match((e as Error).message, /env\.HOME/);
+    return true;
+  });
+});
+
+test("未実行のステップを参照したら落とす", () => {
+  assert.throws(() => expand("{{ steps.build.stdout }}", ctx), TemplateError);
+});
+
+test("ステップの未知のフィールドは落とす", () => {
+  assert.throws(() => expand("{{ steps.test.cost }}", ctx), TemplateError);
+});
+
+test("変数を含まない文字列はそのまま返す", () => {
+  assert.equal(expand("pnpm test", ctx), "pnpm test");
+});
