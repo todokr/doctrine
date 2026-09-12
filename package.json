@@ -2,6 +2,7 @@
   "name": "doctrine",
   "private": true,
   "type": "module",
+  "bin": { "dctl": "./src/cli/dctl.ts", "dctld": "./src/daemon/main.ts" },
   "engines": { "node": ">=24" },
   "scripts": {
     "test": "vitest run",
