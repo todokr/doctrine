@@ -34,15 +34,55 @@ export function logPathFor(logRoot: string, taskId: string, stepId: string, atte
   return join(logRoot, taskId, `${stepId}.${attempt}.log`);
 }
 
-async function openLog(path: string) {
-  await mkdir(dirname(path), { recursive: true });
-  return createWriteStream(path, { flags: "a" });
-}
+type Log = { write(chunk: string): void; close(): Promise<void> };
 
-function closeLog(log: ReturnType<typeof createWriteStream>): Promise<void> {
-  return new Promise((resolve, reject) => {
-    log.end((err: Error | null | undefined) => (err ? reject(err) : resolve()));
-  });
+/**
+ * ログファイルを開く。ディスクが満杯・ログ用ディレクトリの権限喪失・
+ * 実行中の削除などでファイルに書けなくなることがあるが、それはステップの
+ * 実行結果（コマンド/エージェントの成否）とは無関係であるべき。
+ * このためログの書き込み失敗は握りつぶし、以降の write を無視するだけに
+ * とどめる — 例外を投げて daemon 全体（他タスクも含む）を落とすことは絶対にしない。
+ */
+async function openLog(path: string): Promise<Log> {
+  let stream: ReturnType<typeof createWriteStream> | null = null;
+  let failed = false;
+
+  try {
+    await mkdir(dirname(path), { recursive: true });
+    stream = createWriteStream(path, { flags: "a" });
+  } catch (e) {
+    failed = true;
+    console.error(`ログファイルを開けませんでした（ステップの実行は継続します）: ${path}`, e);
+  }
+
+  if (stream) {
+    stream.on("error", (e) => {
+      if (!failed) {
+        console.error(`ログファイルへの書き込みに失敗しました（ステップの実行は継続します）: ${path}`, e);
+      }
+      failed = true;
+    });
+  }
+
+  return {
+    write(chunk: string) {
+      if (failed || !stream) return;
+      try {
+        stream.write(chunk);
+      } catch {
+        failed = true;
+      }
+    },
+    close(): Promise<void> {
+      if (failed || !stream) return Promise.resolve();
+      return new Promise((resolve) => {
+        // ここでも reject しない: close 時点でストリームが壊れていても
+        // ステップの結果には影響させない。
+        stream!.once("error", () => resolve());
+        stream!.end(() => resolve());
+      });
+    },
+  };
 }
 
 export async function runCommandStep(
@@ -89,7 +129,7 @@ export async function runCommandStep(
       logPath,
     };
   } finally {
-    await closeLog(log);
+    await log.close();
   }
 }
 
@@ -147,6 +187,6 @@ export async function runAgentStep(
       logPath,
     };
   } finally {
-    await closeLog(log);
+    await log.close();
   }
 }

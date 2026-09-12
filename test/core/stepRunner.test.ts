@@ -1,6 +1,6 @@
 import { test, beforeEach, afterEach } from "vitest";
 import assert from "node:assert/strict";
-import { mkdtemp, rm, readFile } from "node:fs/promises";
+import { mkdtemp, rm, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openDb } from "../../src/db/migrate.ts";
@@ -74,10 +74,11 @@ test("agent ステップは最終テキストを stdout にする", async () => 
 test("resume: true なら resume が呼ばれる", async () => {
   const adapter = createMockAdapter({ result: { ok: true, text: "続きです" } });
   await runAgentStep(
-    { id: "a", type: "agent", prompt: "追加指示" }, ctx,
+    { id: "a", type: "agent", prompt: "{{ task.prompt }} を直して" }, ctx,
     { cwd: root, taskId: "t1", attempt: 2, sessionId: "s1", resume: true, deps: deps({ adapter }) });
   assert.equal(adapter.calls[0].kind, "resume");
   assert.equal(adapter.calls[0].sessionId, "s1");
+  assert.equal(adapter.calls[0].prompt, "直して を直して", "resume でもプロンプトの変数が展開されている");
 });
 
 test("permission_denials があれば degraded として返る", async () => {
@@ -95,7 +96,7 @@ test("子プロセスのpidと開始時刻が通知される", async () => {
     { id: "a", type: "agent", prompt: "p" }, ctx,
     { cwd: root, taskId: "t1", attempt: 1, sessionId: "s1", resume: false, deps: d });
   assert.equal(seen.length, 1);
-  assert.ok(seen[0].pid > 0);
+  assert.equal(seen[0].pid, 424242, "モックが返す実際のpidと一致する（>0だけでは不十分）");
   assert.ok(Date.parse(seen[0].startedAt) > 0);
 });
 
@@ -139,6 +140,21 @@ test("run に未知の変数を使うとTemplateErrorが伝播する（握りつ
       { id: "s", type: "command", run: "echo {{ nope.nope }}" }, ctx,
       { cwd: root, taskId: "t1", attempt: 1, deps: deps() }),
   );
+});
+
+test("ログ先が書き込み不能でもステップの実行結果には影響しない", async () => {
+  // logRoot の親をディレクトリではなくファイルにして、
+  // ログファイル用の mkdir/createWriteStream を確実に失敗させる。
+  const blocker = join(root, "blocker");
+  await writeFile(blocker, "not a directory");
+  const d = deps({ logRoot: join(blocker, "logs") });
+
+  const out = await runCommandStep(
+    { id: "s", type: "command", run: "echo hello" }, ctx,
+    { cwd: root, taskId: "t1", attempt: 1, deps: d });
+
+  assert.equal(out.status, "success");
+  assert.match(out.stdout, /hello/);
 });
 
 test("失敗したagentステップは stderrTail を stderr として返す", async () => {
