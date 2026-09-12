@@ -26,12 +26,15 @@ export function worktreePathFor(projectPath: string, taskId: string): string {
 }
 
 export function slugify(title: string): string {
-  return title
+  const collapsed = title
     .normalize("NFKC")
     .replace(/[^\p{L}\p{N}]+/gu, "-")
-    .replace(/^-+|-+$/g, "")
-    .toLowerCase()
-    .slice(0, 40);
+    .toLowerCase();
+  // コードポイント単位で切る（UTF-16 コード単位で切ると絵文字などのサロゲート
+  // ペアを分断してしまう）。トリムは切り詰めた「後」に行う — そうしないと
+  // 切り詰め境界にちょうどハイフンが来たとき末尾にハイフンが残ってしまう。
+  const truncated = Array.from(collapsed).slice(0, 40).join("");
+  return truncated.replace(/^-+|-+$/g, "");
 }
 
 export function branchNameFor(taskId: string, title: string): string {
