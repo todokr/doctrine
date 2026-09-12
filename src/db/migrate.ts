@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   claude_session_id TEXT,
   child_pid INTEGER,
   child_started_at TEXT,
+  pending_feed TEXT,
   priority INTEGER NOT NULL DEFAULT 2,
   resumed INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,

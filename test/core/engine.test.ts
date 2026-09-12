@@ -91,6 +91,16 @@ async function taskFixture(workflowYaml: string) {
   return { db, root, workflow: parseWorkflow(workflowYaml).workflow };
 }
 
+/**
+ * applyApproval が queued にしたタスクを、スケジューラが拾って running にしたのと
+ * 同じ状態にする（本物のスケジューラは別タスクの範囲。ここではテストのために
+ * 直接書き換える）。runTask は running のタスクを進める前提なので、
+ * queued のまま2回目の runTask を呼ぶのはテストの都合としても不正確。
+ */
+function toRunning(db: ReturnType<typeof openDb>, taskId: string): void {
+  db.prepare("UPDATE tasks SET state = 'running' WHERE id = ?").run(taskId);
+}
+
 test("成功する2ステップを通して completed になる", async () => {
   const { db, root, workflow } = await taskFixture(`
 name: f
@@ -258,16 +268,142 @@ steps:
   assert.equal(getStepOutputs(db, "t1").review.stdout, "命名が変です");
 });
 
-// states.ts の TRANSITIONS では suspended -> completed は許可されていない
-// （suspended: ["queued","canceled","failed"]）。しかし applyApproval は
-// 承認された approval ステップが最後のステップだったとき、commitStepBoundary で
-// 直接 completed を書き込んでおり、assertTransition を経由しない
-// （brief の実装そのままで、states.ts はこのタスクでは変更禁止）。
-// このテストはその経路が実際に完走することの記録であって、状態機械としての
-// 正しさを保証するものではない。suspended -> completed を許可された遷移として
-// states.ts に追加するか、applyApproval 側で別の経路にするかは、レビューで
-// 判断してほしい（このコミットでは変更しない）。
-test("承認ステップが最後のとき、承認すると completed になる（state machine 未経由の既知の経路）", async () => {
+test("却下の feed が resume するエージェントに実際に渡る（保存されているだけでは足りない）", async () => {
+  const { db, root, workflow } = await taskFixture(`
+name: f
+steps:
+  - id: implement
+    type: agent
+    prompt: "p"
+  - id: review
+    type: approval
+    title: "見て"
+    onReject:
+      goto: implement
+      maxAttempts: 3
+      feed: "レビューで却下された:\\n{{ steps.review.stdout }}"
+`);
+  const adapter = createMockAdapter({ result: {} });
+  await runTask(db, "t1", workflow, { db, adapter, logRoot: join(root, "logs"), globalLimit: 4 });
+  applyApproval(db, "t1", { approved: false, comment: "命名が変です" }, workflow);
+
+  // 承認待ちの間の runTask 呼び出しは終わっている。ここが新しい runTask 呼び出しで、
+  // ローカル変数の pendingFeed は無 — DB の pending_feed から引き継げているかを見る。
+  toRunning(db, "t1"); // スケジューラが queued を拾って running にした想定
+  await runTask(db, "t1", workflow, { db, adapter, logRoot: join(root, "logs"), globalLimit: 4 });
+
+  assert.equal(adapter.calls.length, 2);
+  assert.equal(adapter.calls[1].kind, "resume", "差し戻し後の実装は会話の継続");
+  assert.match(adapter.calls[1].prompt, /レビューで却下された/);
+  assert.match(adapter.calls[1].prompt, /命名が変です/);
+});
+
+test("onReject.maxAttempts を使い切ったら、goto を続けず failed になる", async () => {
+  const { db, root, workflow } = await taskFixture(`
+name: f
+steps:
+  - id: implement
+    type: agent
+    prompt: "p"
+  - id: review
+    type: approval
+    title: "見て"
+    onReject:
+      goto: implement
+      maxAttempts: 3
+      feed: "だめ:\\n{{ steps.review.stdout }}"
+`);
+  const adapter = createMockAdapter({ result: {} });
+
+  await runTask(db, "t1", workflow, { db, adapter, logRoot: join(root, "logs"), globalLimit: 4 });
+  applyApproval(db, "t1", { approved: false, comment: "1回目" }, workflow);
+  assert.equal(getTask(db, "t1")?.state, "queued", "1回目の却下: まだ goto できる");
+
+  toRunning(db, "t1");
+  await runTask(db, "t1", workflow, { db, adapter, logRoot: join(root, "logs"), globalLimit: 4 });
+  applyApproval(db, "t1", { approved: false, comment: "2回目" }, workflow);
+  assert.equal(getTask(db, "t1")?.state, "queued", "2回目の却下: まだ goto できる");
+
+  toRunning(db, "t1");
+  await runTask(db, "t1", workflow, { db, adapter, logRoot: join(root, "logs"), globalLimit: 4 });
+  applyApproval(db, "t1", { approved: false, comment: "3回目" }, workflow);
+  assert.equal(getTask(db, "t1")?.state, "failed", "3回目の却下: maxAttempts(3) を使い切って failed");
+});
+
+test("却下を重ねると review ステップの step_run.attempt が増えていく", async () => {
+  const { db, root, workflow } = await taskFixture(`
+name: f
+steps:
+  - id: implement
+    type: agent
+    prompt: "p"
+  - id: review
+    type: approval
+    title: "見て"
+    onReject:
+      goto: implement
+      maxAttempts: 3
+      feed: "だめ"
+`);
+  const adapter = createMockAdapter({ result: {} });
+
+  await runTask(db, "t1", workflow, { db, adapter, logRoot: join(root, "logs"), globalLimit: 4 });
+  applyApproval(db, "t1", { approved: false, comment: "1回目" }, workflow);
+  toRunning(db, "t1");
+  await runTask(db, "t1", workflow, { db, adapter, logRoot: join(root, "logs"), globalLimit: 4 });
+  applyApproval(db, "t1", { approved: false, comment: "2回目" }, workflow);
+
+  const reviewRuns = listStepRuns(db, "t1").filter((r) => r.step_id === "review");
+  assert.equal(reviewRuns.length, 2);
+  assert.ok(reviewRuns[0].attempt < reviewRuns[1].attempt,
+    `attempt は増えていくはず: ${reviewRuns.map((r) => r.attempt)}`);
+});
+
+test("消費した feed は次のステップに漏れない", async () => {
+  const { db, root, workflow } = await taskFixture(`
+name: f
+steps:
+  - id: implement
+    type: agent
+    prompt: "p"
+  - id: review
+    type: approval
+    title: "見て"
+    onReject:
+      goto: implement
+      maxAttempts: 3
+      feed: "却下されたコメント固有文字列XYZ"
+  - id: after
+    type: command
+    run: "true"
+`);
+  const adapter = createMockAdapter({ result: {} });
+  await runTask(db, "t1", workflow, { db, adapter, logRoot: join(root, "logs"), globalLimit: 4 });
+  applyApproval(db, "t1", { approved: false, comment: "だめ" }, workflow);
+  // ここで pending_feed が立っているはず
+  assert.notEqual(getTask(db, "t1")?.pending_feed, null);
+
+  // 差し戻し後、implement が resume で feed を受け取り、review へ再度到達して承認する
+  toRunning(db, "t1");
+  await runTask(db, "t1", workflow, { db, adapter, logRoot: join(root, "logs"), globalLimit: 4 });
+  applyApproval(db, "t1", { approved: true, comment: "" }, workflow);
+  assert.equal(getTask(db, "t1")?.pending_feed, null, "消費した feed は残らない");
+
+  // after ステップまで進む runTask 呼び出し。ここでの implement 呼び出しは
+  // もう無い（after は command ステップ）ので、代わりに直近の agent 呼び出し
+  // （差し戻し直後の resume）にだけ feed 文字列が含まれていたことを確認する。
+  toRunning(db, "t1");
+  await runTask(db, "t1", workflow, { db, adapter, logRoot: join(root, "logs"), globalLimit: 4 });
+  assert.equal(getTask(db, "t1")?.state, "completed");
+
+  const feedCalls = adapter.calls.filter((c) => c.prompt.includes("XYZ"));
+  assert.equal(feedCalls.length, 1, "feed を含む呼び出しは差し戻し直後の1回だけ");
+});
+
+// states.ts の TRANSITIONS には suspended -> completed を追加済み（round 1 対応）。
+// 承認された approval ステップが最後のステップのとき、queued を経由させず直接
+// completed にする（待つ理由が無いのに一瞬枠を再取得させないため）。
+test("承認ステップが最後のとき、承認すると completed になる", async () => {
   const { db, root, workflow } = await taskFixture(`
 name: f
 steps:

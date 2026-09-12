@@ -9,7 +9,7 @@ export type StepBoundary = {
   taskId: string;
   taskPatch: Partial<Pick<TaskRow,
     "state" | "current_step_id" | "attempt_counts" | "worktree_path" |
-    "claude_session_id" | "child_pid" | "child_started_at" | "resumed">>;
+    "claude_session_id" | "child_pid" | "child_started_at" | "resumed" | "pending_feed">>;
   /** ステップ開始時: status "running" / ended_at null で挿入し、返り値の id を持っておく。 */
   stepRun?: {
     step_id: string; attempt: number; status: StepRunStatus; exit_code: number | null;

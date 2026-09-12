@@ -13,6 +13,7 @@ export type TaskRow = {
   state: TaskState; current_step_id: string | null; attempt_counts: string;
   branch: string; worktree_path: string | null; claude_session_id: string | null;
   child_pid: number | null; child_started_at: string | null;
+  pending_feed: string | null;
   priority: number; resumed: number; created_at: string; updated_at: string;
 };
 

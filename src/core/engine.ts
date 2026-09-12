@@ -82,7 +82,11 @@ export async function runTask(
   if (!task) throw new Error(`タスクがありません: ${taskId}`);
 
   let stepId = task.current_step_id ?? workflow.steps[0].id;
-  let pendingFeed: string | null = null;
+  // suspend 境界（承認待ち）をまたいだ feed は task.pending_feed に永続化されている。
+  // ローカル変数だけでは runTask の呼び出し自体が終わってしまうと消えるし、
+  // daemon が承認待ちの最中に再起動しても復元できない。ここで一度だけ取り込み、
+  // 直後のステップ開始コミットで DB 側を null に戻して「消費は一度きり」を保証する。
+  let pendingFeed: string | null = task.pending_feed ?? null;
 
   while (true) {
     task = getTask(db, taskId)!;
@@ -106,7 +110,10 @@ export async function runTask(
     // どのステップの途中で落ちたかを知る（Task 11）。
     const stepRunId = commitStepBoundary(db, {
       taskId,
-      taskPatch: { current_step_id: step.id, attempt_counts: withAttempt(task, step.id), claude_session_id: sessionId },
+      taskPatch: {
+        current_step_id: step.id, attempt_counts: withAttempt(task, step.id),
+        claude_session_id: sessionId, pending_feed: null,
+      },
       stepRun: {
         step_id: step.id, attempt, status: "running", exit_code: null,
         started_at: new Date().toISOString(), ended_at: null, log_path: logPath,
@@ -210,15 +217,47 @@ export function applyApproval(
     return;
   }
 
-  const branch = step.type === "approval" ? step.onReject : undefined;
-  const to: TaskState = branch ? "queued" : "failed";
+  // 却下は onFailure と同じ「失敗して分岐する」ケースであり、goto/maxAttempts の
+  // 判断はここで作り直さず decide に委ねる。attemptCount(task, stepId) + 1 は
+  // このコミットで attempt_counts に書く値そのものであり、decide に渡す attempts と
+  // 一致させる（この数がそのまま maxAttempts と比較される数、かつ step_runs に
+  // 記録される attempt になる）。
+  const advancedAttempt = attemptCount(task, stepId) + 1;
+  const advancedAttemptCounts = withAttempt(task, stepId);
+  const decision = decide({
+    workflow, currentStepId: stepId, outcome: "failed", attempts: advancedAttempt,
+  });
+
+  // {{ steps.review.stdout }} は却下コメントを指す。DBへ書く前に、これから書く値を
+  // 直接コンテキストへ差し込んで展開する（コマンド実行パスが「出力を書いてから
+  // 次のステップで参照する」のと同じ意味を、1トランザクション内で再現する）。
+  const ctx = contextFor(db, task);
+  ctx.steps[stepId] = { stdout: verdict.comment, stderr: "", exitCode: "1" };
+
+  if (decision.kind === "goto") {
+    const to: TaskState = "queued";
+    assertTransition(task.state, to);
+    commitStepBoundary(db, {
+      taskId,
+      taskPatch: {
+        state: "queued", current_step_id: decision.stepId, resumed: 1,
+        attempt_counts: advancedAttemptCounts,
+        pending_feed: decision.feed ? expand(decision.feed, ctx) : null,
+      },
+      stepRun: { step_id: stepId, attempt: advancedAttempt, status: "failed",
+                 exit_code: 1, started_at: now, ended_at: now, log_path: "" },
+      outputs: { step_id: stepId, stdout: verdict.comment, stderr: "", exit_code: 1 },
+    });
+    return;
+  }
+
+  // decision.kind === "fail"（onReject が無い、または maxAttempts を使い切った）
+  const to: TaskState = "failed";
   assertTransition(task.state, to);
   commitStepBoundary(db, {
     taskId,
-    taskPatch: branch
-      ? { state: "queued", current_step_id: branch.goto, resumed: 1 }
-      : { state: "failed" },
-    stepRun: { step_id: stepId, attempt: attemptCount(task, stepId) + 1, status: "failed",
+    taskPatch: { state: "failed", attempt_counts: advancedAttemptCounts },
+    stepRun: { step_id: stepId, attempt: advancedAttempt, status: "failed",
                exit_code: 1, started_at: now, ended_at: now, log_path: "" },
     outputs: { step_id: stepId, stdout: verdict.comment, stderr: "", exit_code: 1 },
   });
