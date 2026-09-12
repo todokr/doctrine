@@ -404,8 +404,14 @@ NDJSON（1行1JSON）。観測した `type`:
 ### 再開
 
 ```
-claude -p --resume <session-id> --output-format stream-json --verbose ... '<追加指示>'
+claude -p --resume <session-id> '<追加指示>' --output-format stream-json --verbose --permission-prompts none ...
 ```
+
+プロンプトは `--resume <session-id>` の直後・残りのフラグより前に置く。
+この順序は2026-09-12に実バイナリ（claude v2.1.269）で検証済み: 同一セッションを
+`--resume` で再開し、この順序で渡したプロンプトが正しく認識されて返答に反映されることを
+確認した（詳細はTask 8レポート参照。当初の記述ではプロンプトを末尾に置いていたが、
+実装・実測に合わせてここを訂正した）。
 
 クラッシュ復帰と、`approval` ステップでの「却下＋追加指示」の両方をこれで賄う。
 

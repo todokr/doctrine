@@ -13,6 +13,8 @@ export type AgentResult = {
   durationMs: number | null;
   permissionDenials: unknown[];
   exitCode: number | null;
+  /** result 行が来ずに終わった実行を診断するための stderr 末尾（最大4KB）。 */
+  stderrTail: string;
 };
 
 export type StartOptions = {

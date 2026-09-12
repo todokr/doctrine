@@ -2,7 +2,15 @@ import { spawn } from "node:child_process";
 import { readNdjson } from "./ndjson.ts";
 import type { AgentAdapter, AgentEvent, AgentResult, AgentRun, StartOptions } from "./types.ts";
 
-/** spec 6章の実測契約。1つでも欠けると実行時にしか壊れない。 */
+/**
+ * spec 6章の実測契約。1つでも欠けると実行時にしか壊れない。
+ *
+ * 再開時の引数順序（`-p --resume <id> <prompt> --output-format ...`、
+ * プロンプトが `--resume <id>` の直後・残りのフラグの前に来る）は
+ * 2026-09-12 に実バイナリ（claude v2.1.269）で検証済み: 同一セッションを
+ * `--resume` で再開し、この順序で渡したプロンプトが正しく認識されて
+ * 返答に反映されることを確認した（詳細はTask 8レポート参照）。
+ */
 export function buildArgs(prompt: string, opts: StartOptions, resumeSessionId?: string): string[] {
   const args = ["-p"];
   if (resumeSessionId) args.push("--resume", resumeSessionId);
@@ -53,11 +61,11 @@ function extractText(o: Record<string, unknown>): string {
  * result 行が権威。終了コードは補助。
  * --permission-prompts none の下では、権限で弾かれた実行も is_error: false で帰ってくる。
  */
-export function resultFrom(resultLine: unknown, exitCode: number | null): AgentResult {
+export function resultFrom(resultLine: unknown, exitCode: number | null, stderrTail = ""): AgentResult {
   if (typeof resultLine !== "object" || resultLine === null) {
     return {
       ok: false, degraded: false, text: "", costUsd: null, numTurns: null,
-      durationMs: null, permissionDenials: [], exitCode,
+      durationMs: null, permissionDenials: [], exitCode, stderrTail,
     };
   }
   const o = resultLine as Record<string, unknown>;
@@ -71,6 +79,7 @@ export function resultFrom(resultLine: unknown, exitCode: number | null): AgentR
     durationMs: typeof o.duration_ms === "number" ? o.duration_ms : null,
     permissionDenials: denials,
     exitCode,
+    stderrTail,
   };
 }
 
@@ -115,7 +124,7 @@ export function createClaudeAdapter(bin = "claude"): AgentAdapter {
     const result = new Promise<AgentResult>((resolve, reject) => {
       child.once("error", reject);
       child.once("close", (code) => {
-        pump.then(() => resolve(resultFrom(resultLine, code)), reject);
+        pump.then(() => resolve(resultFrom(resultLine, code, stderrTail)), reject);
       });
     });
 

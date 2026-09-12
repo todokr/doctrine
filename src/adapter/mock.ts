@@ -14,7 +14,7 @@ export type MockAdapter = AgentAdapter & {
 
 const DEFAULT: AgentResult = {
   ok: true, degraded: false, text: "", costUsd: 0, numTurns: 1,
-  durationMs: 1, permissionDenials: [], exitCode: 0,
+  durationMs: 1, permissionDenials: [], exitCode: 0, stderrTail: "",
 };
 
 export function createMockAdapter(script: MockScript): MockAdapter {

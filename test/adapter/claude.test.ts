@@ -1,6 +1,9 @@
 import { test } from "vitest";
 import assert from "node:assert/strict";
-import { buildArgs, normalize, resultFrom } from "../../src/adapter/claude.ts";
+import { mkdtempSync, writeFileSync, chmodSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { buildArgs, normalize, resultFrom, createClaudeAdapter } from "../../src/adapter/claude.ts";
 
 test("起動フラグは実測した契約どおりに並ぶ", () => {
   const args = buildArgs("やって", {
@@ -29,6 +32,16 @@ test("再開は --resume を使い --fork-session を使わない", () => {
   const args = buildArgs("追加で直して", { cwd: "/wt", sessionId: "s1" }, "s1");
   assert.ok(args.includes("--resume"));
   assert.equal(args.includes("--fork-session"), false);
+});
+
+test("再開の引数順序は実測どおり: プロンプトは --resume <id> の直後、他フラグの前", () => {
+  const args = buildArgs("追加で直して", { cwd: "/wt", sessionId: "s1" }, "s1");
+  assert.deepEqual(args, [
+    "-p", "--resume", "s1", "追加で直して",
+    "--output-format", "stream-json",
+    "--verbose",
+    "--permission-prompts", "none",
+  ]);
 });
 
 test("rate_limit_event を正規化する", () => {
@@ -80,4 +93,32 @@ test("result 行が来なければ失敗とみなす", () => {
 test("is_error が true なら失敗", () => {
   const r = resultFrom({ type: "result", subtype: "error", is_error: true, result: "だめ" }, 0);
   assert.equal(r.ok, false);
+});
+
+test("stderrTail はデフォルトで空文字", () => {
+  const r = resultFrom(undefined, 1);
+  assert.equal(r.stderrTail, "");
+});
+
+test("result行なしでstderrに出力して死んだプロセスは失敗＆stderrTailに証拠を残す", async () => {
+  // 実の claude バイナリは使わない。result 行を出さずに stderr へ書いて
+  // 非0で終了する偽の実行ファイルを立てて、createClaudeAdapter の挙動を検証する。
+  const dir = mkdtempSync(join(tmpdir(), "doctrine-adapter-test-"));
+  const script = join(dir, "fake-claude.sh");
+  writeFileSync(script, [
+    "#!/usr/bin/env bash",
+    'echo "boom: something went wrong" 1>&2',
+    'echo \'{"type":"system","subtype":"init"}\'',
+    "exit 7",
+  ].join("\n"));
+  chmodSync(script, 0o755);
+
+  const adapter = createClaudeAdapter(script);
+  const run = adapter.start("x", { cwd: dir, sessionId: "s1" });
+  const r = await run.result;
+
+  assert.equal(r.ok, false);
+  assert.equal(r.exitCode, 7);
+  assert.ok(r.stderrTail.includes("boom: something went wrong"),
+    `stderrTail に証拠が残っているはず: ${r.stderrTail}`);
 });
