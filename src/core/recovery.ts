@@ -107,11 +107,10 @@ export async function killStaleChild(
 /**
  * 中断されたステップが agent か command かを判別する。
  *
- * claude_session_id の有無だけでは判別できない: engine.ts はステップを開始する
- * コミットで、ステップの種別を問わず（command でも）claude_session_id を
- * セットする（`task.claude_session_id ?? randomUUID()` を毎ステップ開始時に
- * 書き戻す）。そのため一度でも agent ステップを通過したタスクは、以降の
- * command ステップの最中に落ちても claude_session_id が非nullのままであり、
+ * claude_session_id の有無だけでは判別できない: engine.ts が書くのは agent
+ * ステップの開始時だけだが、この値はタスク全体で1つであり、一度立つと消えない。
+ * そのため一度でも agent ステップを通過したタスクは、以降の command ステップの
+ * 最中に落ちても claude_session_id が非nullのままであり、
  * 「非nullなら agent」という判定はここで誤る。
  *
  * 正しい判別材料は current_step_id が指すステップの実際の型であり、

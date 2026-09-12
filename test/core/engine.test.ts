@@ -207,6 +207,69 @@ steps:
   assert.equal(adapter.calls[1].prompt, "落ちた");
 });
 
+test("2つ目の agent ステップは同じ session id で resume される", async () => {
+  const { db, root, workflow } = await taskFixture(`
+name: f
+steps:
+  - id: implement
+    type: agent
+    prompt: "実装して"
+  - id: review
+    type: agent
+    prompt: "レビューして"
+`);
+  const adapter = createMockAdapter({ result: { ok: true, text: "done" } });
+  await runTask(db, "t1", workflow, { db, adapter, logRoot: join(root, "logs"), globalLimit: 4 });
+
+  assert.equal(adapter.calls.length, 2);
+  assert.equal(adapter.calls[0].kind, "start");
+  assert.equal(adapter.calls[1].kind, "resume",
+    "同じ session id で2度 start すると、CLI が拒否するか会話が継続しない");
+  assert.equal(adapter.calls[1].sessionId, adapter.calls[0].sessionId);
+});
+
+test("先行する command ステップは session を消費しない（最初の agent は start）", async () => {
+  const { db, root, workflow } = await taskFixture(`
+name: f
+steps:
+  - id: prepare
+    type: command
+    run: "true"
+  - id: implement
+    type: agent
+    prompt: "実装して"
+`);
+  const adapter = createMockAdapter({ result: { ok: true, text: "done" } });
+  await runTask(db, "t1", workflow, { db, adapter, logRoot: join(root, "logs"), globalLimit: 4 });
+
+  assert.equal(adapter.calls.length, 1);
+  assert.equal(adapter.calls[0].kind, "start",
+    "project.setup は全ワークフローの先頭に入る。ここで session を使ったことにすると、" +
+    "最初の agent が一度も start していない id で resume してしまう");
+});
+
+test("command ステップの失敗から agent へ goto しても、最初の agent は start", async () => {
+  const { db, root, workflow } = await taskFixture(`
+name: f
+steps:
+  - id: build
+    type: command
+    run: "false"
+    onFailure:
+      goto: repair
+      maxAttempts: 2
+      feed: "壊れた"
+  - id: repair
+    type: agent
+    prompt: "直して"
+`);
+  const adapter = createMockAdapter({ result: { ok: true, text: "done" } });
+  await runTask(db, "t1", workflow, { db, adapter, logRoot: join(root, "logs"), globalLimit: 4 });
+
+  assert.equal(adapter.calls[0].kind, "start",
+    "feed があることは会話が既にあることを意味しない");
+});
+
 test("approval に来たら suspended で止まる", async () => {
   const { db, root, workflow } = await taskFixture(`
 name: f

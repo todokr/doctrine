@@ -110,6 +110,11 @@ export async function runTask(
 
     const attempt = attemptCount(task, step.id) + 1;
     const ctx = contextFor(db, task);
+    // session id はタスク全体で1つ。「このステップを始める時点で既に会話が
+    // あったか」だけが resume すべきかを決める（ステップ内の再試行かどうかでは
+    // ない）。agent ステップが2つ並ぶワークフローで2度 start すると、同じ
+    // --session-id を使い回すことになり、CLI が拒否するか会話が継続しない。
+    const hadSession = task.claude_session_id !== null;
     const sessionId = task.claude_session_id ?? randomUUID();
 
     const logPath = logPathFor(deps.logRoot, taskId, step.id, attempt);
@@ -119,7 +124,13 @@ export async function runTask(
       taskId,
       taskPatch: {
         current_step_id: step.id, attempt_counts: withAttempt(task, step.id),
-        claude_session_id: sessionId, pending_feed: null,
+        // 会話を始めるのは agent ステップだけ。command ステップでも書くと、
+        // 一度も start していない id が「会話がある」ことにされ、次の agent が
+        // その id で resume してしまう（project.setup は全ワークフローの
+        // 先頭に command ステップとして入るので、これは常道の形で必ず踏む）。
+        // 既存の非null値を消さないよう、キーごと省く（null を書かない）。
+        ...(step.type === "agent" ? { claude_session_id: sessionId } : {}),
+        pending_feed: null,
       },
       stepRun: {
         step_id: step.id, attempt, status: "running", exit_code: null,
@@ -140,7 +151,7 @@ export async function runTask(
       },
     };
 
-    const isResume = pendingFeed !== null || attempt > 1;
+    const isResume = hadSession;
     const outcome: StepOutcome = step.type === "command"
       ? await runCommandStep(step, ctx, { cwd: task.worktree_path!, taskId, attempt, deps: runnerDeps })
       : await runAgentStep(
