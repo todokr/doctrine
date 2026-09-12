@@ -42,7 +42,7 @@ function context(events: ServerEvent[] = []): DaemonContext {
     loadWorkflow: async (projectPath, name) => {
       const { parseWorkflow } = await import("../../src/workflow/schema.ts");
       const { readFile } = await import("node:fs/promises");
-      return parseWorkflow(await readFile(join(projectPath, ".doctrine", "workflows", `${name}.yaml`), "utf8")).workflow;
+      return parseWorkflow(await readFile(join(projectPath, ".doctrine", "workflows", `${name}.yaml`), "utf8"));
     },
     running: new Set(),
   };
@@ -73,6 +73,59 @@ test("不正なワークフロー名はタスク作成時に落とす", async ()
   const h = createHandler(ctx);
   await h("project.add", { path: repo }, NOOP_CONN);
   await assert.rejects(() => h("task.create", { project: repo, title: "T", prompt: "p", workflow: "nonexistent" }, NOOP_CONN));
+});
+
+test("非冪等コマンドを含むワークフローは task.create の応答と ctx.warnings の両方に警告が乗る", async () => {
+  const ctx = context();
+  const h = createHandler(ctx);
+  await writeFile(
+    join(repo, ".doctrine", "workflows", "risky.yaml"),
+    "name: risky\nsteps:\n  - id: open-pr\n    type: command\n    run: gh pr create --fill\n",
+  );
+  await h("project.add", { path: repo }, NOOP_CONN);
+  const created = await h(
+    "task.create", { project: repo, title: "T", prompt: "p", workflow: "risky" }, NOOP_CONN,
+  ) as { warnings: string[] };
+  assert.equal(created.warnings.length, 1, "レスポンスに警告が乗る（ユーザーの目の前に出る）");
+  assert.match(created.warnings[0], /gh pr create/);
+  assert.equal(ctx.warnings.length, 1, "デーモンのstderr相当（ctx.warnings）にも記録される");
+  assert.match(ctx.warnings[0], /gh pr create/);
+});
+
+test("冪等なワークフローは task.create で警告を出さない", async () => {
+  const ctx = context();
+  const h = createHandler(ctx);
+  await h("project.add", { path: repo }, NOOP_CONN);
+  const created = await h(
+    "task.create", { project: repo, title: "T", prompt: "p" }, NOOP_CONN,
+  ) as { warnings: string[] };
+  assert.deepEqual(created.warnings, []);
+  assert.equal(ctx.warnings.length, 0);
+});
+
+test("tick は非冪等コマンドの警告を毎周期 ctx.warnings に積み直さない", async () => {
+  const events: ServerEvent[] = [];
+  const ctx = context(events);
+  const h = createHandler(ctx);
+  // git push を使う（gh pr create と違い、remote未設定のこのテスト用リポジトリでは
+  // ネットワークに触らずすぐ失敗する。tick が実際にステップを実行しても安全）。
+  await writeFile(
+    join(repo, ".doctrine", "workflows", "risky.yaml"),
+    "name: risky\nsteps:\n  - id: push\n    type: command\n    run: git push\n",
+  );
+  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("task.create", { project: repo, title: "T", prompt: "p", workflow: "risky" }, NOOP_CONN);
+  ctx.warnings.length = 0; // task.create 自身が積んだ分をリセットし、tick 由来だけを見る
+
+  await tick(ctx);
+  await until(() => ctx.running.size === 0);
+  await tick(ctx);
+  await tick(ctx);
+
+  assert.deepEqual(
+    ctx.warnings, [],
+    "tick が同じワークフローを毎回読み込んでも、作成時に一度出た警告を再び積まない",
+  );
 });
 
 test("tick で枠を取り、worktree を作って approval まで進む", async () => {

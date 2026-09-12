@@ -132,15 +132,28 @@ doctrine はステップ境界ごとに状態を1トランザクションで書�
 - **問題になり得る例: `gh pr create`、`git push`、`npm publish`**
   （復帰のたびに二重にPRが立つ・二重にpushされる・二重に公開される）
 
-ワークフローのパーサ（`parseWorkflow`）自体は `gh pr create` / `gh release create` /
+ワークフローのパーサ（`parseWorkflow`）は `gh pr create` / `gh release create` /
 `git push` / `npm publish` / `pnpm publish` のような既知の非冪等コマンドを検出する
-チェックを持っている。**が、現状その結果はどの呼び出し元からも読まれておらず、
-実際には一度も表示されない。** 検証で弾かれるのは、YAMLとして壊れている・
-スキーマに合わない・`goto` の宛先が無い、といった**構造的な不正**だけである
-（これは `dctl add` 実行時、および壊れたままの`running`タスクを起動時に
-読もうとするときに落ちる）。したがって、**`command` ステップが再実行安全か
-どうかは、今のところ完全にワークフローの書き手の責任であり、doctrine 側の
-警告は当てにできない。**
+チェックを持っており、`dctl add`（`task.create`）の応答に警告として乗る
+（あわせてデーモンの標準エラー出力にも記録される）。
+
+```bash
+$ dctl add --project /path/to/repo --title "PRを作る" --prompt "..." --workflow release
+{
+  "id": "...",
+  ...,
+  "warnings": [
+    "ステップ \"open-pr\" のコマンドは再実行で二重に効く可能性があります: gh pr create --fill\n  クラッシュ復帰時、command ステップは頭から再実行されます。"
+  ]
+}
+```
+
+この警告は**正規表現による既知パターンの検出であり、完全には防げない。**
+また `task.create` の1回だけに出る（同じワークフローを `task.approve` /
+`task.reject` / 通常の `tick` が読み直すたびには再表示しない。作成時に
+一度伝われば十分であり、同じ警告が延々流れ続けるのを避けるため）。したがって、
+**`command` ステップが再実行安全かどうかの最終的な担保は、常にワークフローの
+書き手の責任である。**
 
 ## 4. worktree は失敗・中止時に残る
 

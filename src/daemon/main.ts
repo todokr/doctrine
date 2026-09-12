@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import { readFileSync } from "node:fs";
 import { stat, unlink } from "node:fs/promises";
 import { connect } from "node:net";
@@ -14,6 +15,7 @@ import { parseWorkflow } from "../workflow/schema.ts";
 import { withSetupStep } from "../workflow/project.ts";
 import { createServer, socketPath } from "./server.ts";
 import { createHandler, loadWorkflowFromDisk, tick, type DaemonContext } from "./handlers.ts";
+import { isDirectlyExecuted } from "../util/entry.ts";
 
 export function stateRoot(): string {
   return process.env.DOCTRINE_STATE_DIR ?? join(homedir(), ".local", "state", "doctrine");
@@ -147,6 +149,6 @@ export async function startDaemon(o: {
   };
 }
 
-if (import.meta.filename === process.argv[1]) {
+if (isDirectlyExecuted(import.meta.filename)) {
   await startDaemon();
 }

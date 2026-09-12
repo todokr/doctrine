@@ -29,7 +29,7 @@ export type DaemonContext = {
   logRoot: string;
   globalLimit: number;
   broadcast(ev: ServerEvent, opts?: { taskId?: string; followersOnly?: boolean }): void;
-  loadWorkflow(projectPath: string, name: string): Promise<Workflow>;
+  loadWorkflow(projectPath: string, name: string): Promise<{ workflow: Workflow; warnings: string[] }>;
   running: Set<string>;
   /** 後始末を拒否したときなど、人に見せる必要のある警告 */
   warnings: string[];
@@ -41,12 +41,14 @@ function req(params: Record<string, unknown>, key: string): string {
   return v;
 }
 
-export async function loadWorkflowFromDisk(projectPath: string, name: string): Promise<Workflow> {
+export async function loadWorkflowFromDisk(
+  projectPath: string, name: string,
+): Promise<{ workflow: Workflow; warnings: string[] }> {
   const path = join(projectPath, ".doctrine", "workflows", `${name}.yaml`);
   const text = await readFile(path, "utf8").catch(() => {
     throw new Error(`ワークフローがありません: ${path}`);
   });
-  return parseWorkflow(text).workflow;
+  return parseWorkflow(text);
 }
 
 export function createHandler(ctx: DaemonContext): Handler {
@@ -83,13 +85,21 @@ export function createHandler(ctx: DaemonContext): Handler {
         const prompt = req(params, "prompt");
         const workflowName = typeof params.workflow === "string" ? params.workflow : project.default_workflow;
         // 不正な定義はタスク作成時に落とす
-        await ctx.loadWorkflow(projectPath, workflowName);
+        const { warnings } = await ctx.loadWorkflow(projectPath, workflowName);
         const id = randomUUID();
-        return insertTask(ctx.db, {
+        const task = insertTask(ctx.db, {
           id, project_id: project.id, title, prompt, workflow_name: workflowName,
           branch: branchNameFor(id, title),
           priority: typeof params.priority === "number" ? params.priority : 2,
         });
+        // タスク作成時だけがこの warnings の出口。task.approve/reject や tick も
+        // 同じ loadWorkflow を通るが、そちらは既存タスクを毎回再読込するので、
+        // ここで積むと同じ警告が tick のたびに ctx.warnings に溜まり続ける
+        // （デーモンのstderrを埋め尽くす）。作成時の1回だけに絞る。
+        for (const w of warnings) ctx.warnings.push(`タスク ${id} の作成時の検証: ${w}`);
+        // dctl add はレスポンスをそのまま表示するCLIなので、ここに乗せておけば
+        // ログを探しに行かなくてもユーザーの目の前に出る。
+        return { ...task, warnings };
       }
       case "task.list": {
         const filter: { projectId?: number; state?: TaskState } = {};
@@ -114,8 +124,8 @@ export function createHandler(ctx: DaemonContext): Handler {
         // 却下はコメント必須。理由の無い却下はエージェントが次にどう動けばいいか分からない。
         const comment = approved ? "" : req(params, "comment");
         const project = getProject(ctx.db, task.project_id)!;
-        const workflow = withSetupStep(
-          await ctx.loadWorkflow(project.path, task.workflow_name), project.setup ?? undefined);
+        const { workflow: loaded } = await ctx.loadWorkflow(project.path, task.workflow_name);
+        const workflow = withSetupStep(loaded, project.setup ?? undefined);
         applyApproval(ctx.db, taskId, { approved, comment }, workflow);
         const after = getTask(ctx.db, taskId)!;
         ctx.broadcast({ event: "task.stateChanged", task_id: taskId, from: "suspended", to: after.state });
@@ -271,8 +281,8 @@ export async function tick(ctx: DaemonContext): Promise<void> {
     let worktreePath: string;
     try {
       const project = getProject(ctx.db, task.project_id)!;
-      workflow = withSetupStep(
-        await ctx.loadWorkflow(project.path, task.workflow_name), project.setup ?? undefined);
+      const { workflow: loaded } = await ctx.loadWorkflow(project.path, task.workflow_name);
+      workflow = withSetupStep(loaded, project.setup ?? undefined);
 
       // worktree はタスク作成時ではなく、実行枠が取れた瞬間に作る
       worktreePath = task.worktree_path ?? worktreePathFor(project.path, task.id);

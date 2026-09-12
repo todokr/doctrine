@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 import { connect } from "node:net";
-import { realpathSync } from "node:fs";
 import { socketPath } from "../daemon/server.ts";
 import type { Response, ServerEvent } from "../daemon/protocol.ts";
+import { isDirectlyExecuted } from "../util/entry.ts";
 
 const NUMERIC = new Set(["priority", "limit", "tail", "step_run_id"]);
 const BOOLEAN = new Set(["force", "follow"]);
@@ -189,24 +189,6 @@ export async function main(argv: string[]): Promise<number> {
   }
 }
 
-/**
- * `node_modules/.bin/dctl` はシンボリックリンクなので、そこ経由で起動すると
- * `process.argv[1]` はリンク自身のパス、`import.meta.filename` は解決済みの
- * 実体パスになり、素の `===` 比較は一致しない。すると `main()` が一度も
- * 呼ばれないまま exit code 0 で終わる — 何もしていないのに成功したように
- * 見える、最悪の壊れ方をする。両辺を realpath してから比較することで、
- * シンボリックリンク越しの起動でも正しく判定できるようにする。
- */
-function isDirectlyExecuted(): boolean {
-  const invoked = process.argv[1];
-  if (!invoked) return false;
-  try {
-    return realpathSync(import.meta.filename) === realpathSync(invoked);
-  } catch {
-    return false;
-  }
-}
-
-if (isDirectlyExecuted()) {
+if (isDirectlyExecuted(import.meta.filename)) {
   process.exitCode = await main(process.argv.slice(2));
 }
