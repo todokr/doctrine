@@ -28,11 +28,16 @@ export async function makeRepo(root: string, files: Record<string, string>): Pro
  * 非同期に進む状態が条件を満たすまで待つ。tick が待たずに開始する runTask など、
  * テスト側から完了を観測する手段が無い処理を待つのに使う。
  */
-export async function until(pred: () => boolean | Promise<boolean>, timeoutMs = 5000): Promise<void> {
+export async function until(
+  pred: () => boolean | Promise<boolean>,
+  timeoutMs = 5000,
+  description?: string,
+): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (await pred()) return;
     await new Promise((r) => setTimeout(r, 10));
   }
-  throw new Error("タイムアウト: 条件が満たされませんでした");
+  const suffix = description ? `: ${description}` : "";
+  throw new Error(`タイムアウト: 条件が満たされませんでした${suffix}`);
 }
