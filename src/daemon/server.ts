@@ -82,8 +82,9 @@ export function createServer(handler: Handler) {
       });
     },
     broadcast(ev: ServerEvent, opts: { taskId?: string; followersOnly?: boolean } = {}): void {
+      const key = opts.taskId ?? ("task_id" in ev ? ev.task_id : undefined);
       for (const [socket, following] of conns) {
-        if (opts.followersOnly && opts.taskId && !following.has(opts.taskId)) continue;
+        if (opts.followersOnly && (key === undefined || !following.has(key))) continue;
         write(socket, ev);
       }
     },

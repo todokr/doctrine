@@ -121,9 +121,55 @@ test("log.line は follow 中のクライアントにだけ流れる", async () 
 
 test("既存のソケットファイルがあっても listen できる", async () => {
   const s1 = createServer(async () => "ok");
+  servers.push(s1);
   await s1.listen(sock);
   await s1.close();
   const s2 = createServer(async () => "ok");
   servers.push(s2);
   await s2.listen(sock);
+});
+
+test("followersOnly は opts.taskId が省略されてもイベント自身の task_id で絞り込む", async () => {
+  const s = createServer(async (method, params, conn) => {
+    if (method === "task.logs" && params.follow) conn.follow(String(params.task_id));
+    return "ok";
+  });
+  servers.push(s);
+  await s.listen(sock);
+  const follower = client(sock);
+  const idle = client(sock);
+  follower.send({ id: 1, method: "task.logs", params: { task_id: "t1", follow: true } });
+  await follower.next((o) => o.id === 1);
+  // opts.taskId を渡さない呼び出し（呼び出し側の指定漏れを想定）。
+  // task_id を持たないイベントで followersOnly を使う場合は誰にも配らない（fail closed）。
+  s.broadcast(
+    { event: "ratelimit.sample", window: "1h", utilization: 0.5, resets_at: null },
+    { followersOnly: true },
+  );
+  await assert.rejects(
+    () => follower.next((o) => o.event === "ratelimit.sample", 200),
+    /タイムアウト/,
+  );
+  // task_id を持つイベントなら、opts.taskId 省略でもイベント自身の task_id で絞り込まれる。
+  s.broadcast(
+    { event: "log.line", task_id: "t1", step_run_id: 1, line: "hi" },
+    { followersOnly: true },
+  );
+  await follower.next((o) => o.event === "log.line");
+  await assert.rejects(() => idle.next((o) => o.event === "log.line", 200));
+  follower.socket.end();
+  idle.socket.end();
+});
+
+test("行の長さに上限がなく、巨大な1行でもフレーミングが壊れない", async () => {
+  const big = "x".repeat(1_000_000);
+  const s = createServer(async () => big);
+  servers.push(s);
+  await s.listen(sock);
+  const c = client(sock);
+  c.send({ id: 1, method: "big" });
+  const res = await c.next((o) => o.id === 1, 5000);
+  assert.equal(res.ok, true);
+  assert.equal((res.result as string).length, 1_000_000);
+  c.socket.end();
 });
