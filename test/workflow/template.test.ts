@@ -55,11 +55,27 @@ test("閉じられていないプレースホルダーは落とす", () => {
 });
 
 test("空のプレースホルダーは落とす", () => {
-  assert.throws(() => expand("{{}}", ctx), TemplateError);
+  assert.throws(() => expand("{{}}", ctx), (e: unknown) => {
+    assert.ok(e instanceof TemplateError);
+    assert.match((e as Error).message, /不正なプレースホルダー/);
+    return true;
+  });
 });
 
 test("空白のみのプレースホルダーは落とす", () => {
-  assert.throws(() => expand("{{ }}", ctx), TemplateError);
+  assert.throws(() => expand("{{ }}", ctx), (e: unknown) => {
+    assert.ok(e instanceof TemplateError);
+    assert.match((e as Error).message, /不正なプレースホルダー/);
+    return true;
+  });
+});
+
+test("プレースホルダー内に中括弧を含むと落とす", () => {
+  assert.throws(() => expand("{{{{ task.id }}", ctx), (e: unknown) => {
+    assert.ok(e instanceof TemplateError);
+    assert.match((e as Error).message, /不正なプレースホルダー/);
+    return true;
+  });
 });
 
 test("代入された値に{{ }}を含むテンプレートは展開してもスルーする（再展開しない）", () => {
@@ -76,7 +92,15 @@ test("代入された値に{{ }}を含むテンプレートは展開してもス
 test("ステップidにドットを含めるとエラーメッセージで指摘する", () => {
   assert.throws(() => expand("{{ steps.my.step.stdout }}", ctx), (e: unknown) => {
     assert.ok(e instanceof TemplateError);
-    assert.match((e as Error).message, /ステップidには.*を含められません/);
+    assert.match((e as Error).message, /ステップidには . を含められません/);
+    return true;
+  });
+});
+
+test("ステップにフィールドがないと落とす", () => {
+  assert.throws(() => expand("{{ steps.test }}", ctx), (e: unknown) => {
+    assert.ok(e instanceof TemplateError);
+    assert.match((e as Error).message, /ステップ出力を参照するにはフィールドが必要です/);
     return true;
   });
 });

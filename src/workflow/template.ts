@@ -30,8 +30,31 @@ export function expand(template: string, ctx: TemplateContext): string {
 function validatePlaceholders(template: string): void {
   const matches = Array.from(template.matchAll(PATTERN));
   const matchedIndices = new Set<number>();
+
   for (const match of matches) {
     if (match.index !== undefined) {
+      const expr = match[1];
+      const trimmed = expr.trim();
+
+      // Reject empty or whitespace-only expressions
+      if (!trimmed) {
+        const endIdx = Math.min(match.index + 30, template.length);
+        const excerpt = template.substring(match.index, endIdx);
+        throw new TemplateError(
+          `不正なプレースホルダー: "${excerpt}..." — プレースホルダーは閉じられていないか空です`,
+        );
+      }
+
+      // Reject expressions containing unescaped braces (e.g., "{{ {{ task.id }}")
+      if (trimmed.includes("{") || trimmed.includes("}")) {
+        const endIdx = Math.min(match.index + 30, template.length);
+        const excerpt = template.substring(match.index, endIdx);
+        throw new TemplateError(
+          `不正なプレースホルダー: "${excerpt}..." — プレースホルダーは閉じられていないか空です`,
+        );
+      }
+
+      // Mark all characters of this match as covered
       for (let i = 0; i < match[0].length; i++) {
         matchedIndices.add(match.index + i);
       }
@@ -60,7 +83,12 @@ function resolve(expr: string, ctx: TemplateContext): string {
   if (expr === "worktree.path") return ctx.worktree.path;
   if (expr === "project.path") return ctx.project.path;
   if (parts[0] === "steps") {
-    if (parts.length !== 3) {
+    if (parts.length < 3) {
+      throw new TemplateError(
+        `{{ ${expr} }}: ステップ出力を参照するにはフィールドが必要です（形式: steps.<id>.<field>）`,
+      );
+    }
+    if (parts.length > 3) {
       throw new TemplateError(
         `{{ ${expr} }}: ステップidには . を含められません（形式: steps.<id>.<field>）`,
       );
