@@ -29,6 +29,12 @@ test("queued から直接 suspended にはならない", () => {
   assert.equal(canTransition("queued", "suspended"), false);
 });
 
+test("ワークフローが読めなければ、ステップを1つも実行せずに failed になれる", () => {
+  assert.ok(canTransition("queued", "failed"),
+    "queued のまま残すとスケジューラが毎tickリトライし続ける");
+  assert.doesNotThrow(() => assertTransition("queued", "failed"));
+});
+
 test("不正な遷移は例外を投げる", () => {
   assert.throws(() => assertTransition("completed", "running"), InvalidTransitionError);
   assert.doesNotThrow(() => assertTransition("queued", "running"));

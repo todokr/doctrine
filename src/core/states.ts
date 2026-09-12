@@ -1,7 +1,8 @@
 import type { TaskState } from "../db/tasks.ts";
 
 const TRANSITIONS: Record<TaskState, readonly TaskState[]> = {
-  queued: ["running", "paused", "canceled"],
+  /** ワークフローが読めなければ、ステップを1つも実行せずに failed になれる。running を経由すると、ステップ実行を記録することになり嘘になる。 */
+  queued: ["running", "paused", "canceled", "failed"],
   running: ["suspended", "paused", "completed", "failed", "canceled", "queued"],
   suspended: ["queued", "canceled", "failed"],
   paused: ["queued", "canceled"],
