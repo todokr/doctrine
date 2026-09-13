@@ -1,4 +1,4 @@
-import { basename, isAbsolute, join, resolve } from "@std/path";
+import { basename, dirname, isAbsolute, join, resolve } from "@std/path";
 import { runCommand } from "../util/exec.ts";
 import { homeDir } from "../util/home.ts";
 
@@ -72,6 +72,7 @@ export async function ensureDoctrineOutExcluded(repoPath: string): Promise<void>
   if (content.split("\n").some((l) => l.trim() === DOCTRINE_OUT_EXCLUDE_LINE)) return;
 
   const withTrailingNewline = content.length > 0 && !content.endsWith("\n") ? content + "\n" : content;
+  await Deno.mkdir(dirname(excludePath), { recursive: true });
   await Deno.writeTextFile(excludePath, withTrailingNewline + DOCTRINE_OUT_EXCLUDE_LINE + "\n");
 }
 

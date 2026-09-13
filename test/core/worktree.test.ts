@@ -56,6 +56,14 @@ test("worktree作成時に .doctrine-out/ を .git/info/exclude に追記する"
   assert.match(content, /^\.doctrine-out\/$/m);
 });
 
+test(".git/info/ が存在しなくても worktree作成時に .git/info/exclude を作成する", async () => {
+  await rm(join(repo, ".git", "info"), { recursive: true, force: true });
+  const wt = join(root, "wt", "t1b");
+  await createWorktree({ repoPath: repo, worktreePath: wt, branch: "doctrine/t1b-x", baseBranch: "main" });
+  const content = await readFile(join(repo, ".git", "info", "exclude"), "utf8");
+  assert.match(content, /^\.doctrine-out\/$/m);
+});
+
 test(".doctrine-out/ 配下の変更は hasUncommittedChanges で無視される", async () => {
   const wt = join(root, "wt", "t2");
   await createWorktree({ repoPath: repo, worktreePath: wt, branch: "doctrine/t2-x", baseBranch: "main" });

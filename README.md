@@ -256,11 +256,10 @@ dctl get <task-id>
     session: planner
     prompt: "計画を .doctrine-out/plan.md に書いてください"
 
-  - id: plan-review
-    type: approval
-    title: "計画を確認してください"
-    review:
-      files: [".doctrine-out/plan.md"]
+  - id: review
+    type: agent
+    session: reviewer
+    prompt: "{{ worktree.path }}/.doctrine-out/plan.md の内容をレビューしてください"
 ```
 
 `.doctrine-out/` という名前は規約であり、doctrine が強制するものではない
