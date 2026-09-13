@@ -1,7 +1,9 @@
 {
   "tasks": {
     "test": "deno test --allow-all test/",
-    "check": "deno check src test"
+    "check": "deno check src test",
+    "install": "deno install -g -A -f --config deno.json -n dctl src/cli/dctl.ts && deno install -g -A -f --config deno.json -n dctld src/daemon/main.ts",
+    "build": "deno compile -A --output dist/dctl src/cli/dctl.ts && deno compile -A --output dist/dctld src/daemon/main.ts"
   },
   "imports": {
     "@std/path": "jsr:@std/path@^1",
