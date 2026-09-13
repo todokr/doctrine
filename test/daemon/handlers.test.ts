@@ -1,4 +1,4 @@
-import { test, beforeEach, afterEach } from "vitest";
+import { test, beforeEach, afterEach } from "@std/testing/bdd";
 import assert from "node:assert/strict";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";

@@ -11,22 +11,24 @@
 ## 1. セットアップ
 
 ```bash
-mise install                        # Node と pnpm のバージョンをリポジトリに固定
-pnpm install --frozen-lockfile
+mise install                        # Deno のバージョンをリポジトリに固定
+deno install --frozen               # 依存（deno.lock 固定）を取得
 mkdir -p ~/.local/state/doctrine    # dctld はこのディレクトリを自分で作らない
 ```
 
-`dctl` / `dctld` はこのリポジトリの `bin` フィールドに登録されているだけで、
-まだ `npm publish` も `pnpm link` もしていない。手元で試す間は次のように
-Node から直接起動する（本READMEのコマンド例は全てこの形で動作確認済み）。
+`dctl` / `dctld` はまだコマンドとしてインストールできない
+（[#5](https://github.com/todokr/doctrine/issues/5)）。手元で試す間は次のように
+Deno から直接起動する。
 
 ```bash
-node src/daemon/main.ts &          # デーモンを起動（フォアグラウンドで動く。&で背景へ）
-node src/cli/dctl.ts ls            # CLIから接続
+deno run -A src/daemon/main.ts &   # デーモンを起動（フォアグラウンドで動く。&で背景へ）
+deno run -A src/cli/dctl.ts ls     # CLIから接続
 ```
 
 以降、このREADMEでは `dctl` / `dctld` と書くが、実体は
-`node src/cli/dctl.ts` / `node src/daemon/main.ts` と読み替えること。
+`deno run -A src/cli/dctl.ts` / `deno run -A src/daemon/main.ts` と読み替えること。
+
+テストは `deno task test`、型チェックは `deno task check`。
 
 ### プロジェクトを登録し、タスクを作る
 
@@ -224,14 +226,9 @@ dctl get <task-id>
   `agent` ステップは同一の `claude_session_id` を共有する。計画担当と
   レビュー担当を別々のエージェントとして持つような構成は、このサブプロジェクトの
   スコープ外（`docs/overview.md` 4章参照）。
-- **パッケージとしてインストールした `dctl` / `dctld` は動かない**
-  （[#5](https://github.com/todokr/doctrine/issues/5)）。`package.json` の
-  `bin` はどちらも `./src/*.ts` を直接指しているが、Node 24 は
-  `node_modules` 配下の `.ts` ファイルの型除去を拒否する
-  （`ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING`）。そのため、このリポジトリを
-  チェックアウトして `node src/cli/dctl.ts` / `node src/daemon/main.ts` として
-  動かす（本READMEの「セットアップ」節はこの形）分には問題ないが、依存として
-  `pnpm install` した場合やグローバルインストールした場合は、コマンドとして
-  一度も起動しない。`pnpm build` で `dist/` への出力は既に用意されているので、
-  対応は「`bin` を `dist/` の出力先に向け直すか」を選ぶだけの話であり、
-  その判断はissueに委ねる。
+- **`dctl` / `dctld` をコマンドとしてインストールする手段が無い**
+  （[#5](https://github.com/todokr/doctrine/issues/5)）。Deno への移行で
+  `package.json` の `bin` は無くなった。`deno compile` で単一バイナリを
+  作る方向で解消し得るが未着手。それまではこのリポジトリをチェックアウトして
+  `deno run -A src/cli/dctl.ts` / `deno run -A src/daemon/main.ts` として動かす
+  （本READMEの「セットアップ」節はこの形）。

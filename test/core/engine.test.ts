@@ -1,4 +1,4 @@
-import { test, afterEach } from "vitest";
+import { test, afterEach } from "@std/testing/bdd";
 import assert from "node:assert/strict";
 import { writeFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -10,6 +10,12 @@ import { openDb } from "../../src/db/migrate.ts";
 import { insertProject, insertTask, getTask } from "../../src/db/tasks.ts";
 import { getStepOutputs, getStepRun, listStepRuns } from "../../src/db/stepRuns.ts";
 import { createMockAdapter } from "../../src/adapter/mock.ts";
+
+const roots: string[] = [];
+
+afterEach(async () => {
+  await Promise.all(roots.splice(0).map((r) => rm(r, { recursive: true, force: true })));
+});
 
 const wf = parseWorkflow(`
 name: feature
@@ -74,12 +80,6 @@ test("approval ステップに来たら suspend", () => {
 });
 
 // --- runTask / applyApproval ---------------------------------------------
-
-const roots: string[] = [];
-
-afterEach(async () => {
-  await Promise.all(roots.splice(0).map((r) => rm(r, { recursive: true, force: true })));
-});
 
 async function taskFixture(workflowYaml: string) {
   const root = await mkdtemp(join(tmpdir(), "doctrine-engine-"));

@@ -1,4 +1,4 @@
-import { test } from "vitest";
+import { test } from "@std/testing/bdd";
 import assert from "node:assert/strict";
 import { parseProjectConfig, withSetupStep } from "../../src/workflow/project.ts";
 import { parseWorkflow, WorkflowValidationError } from "../../src/workflow/schema.ts";

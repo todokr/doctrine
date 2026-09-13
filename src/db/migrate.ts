@@ -1,10 +1,4 @@
-// vite-node（vitest）は node:sqlite をNodeの builtinModules 一覧から
-// 判定しており、実験的モジュールのため一覧に無く外部化に失敗する
-// （"Failed to load url sqlite" になる）。静的 import ではなく
-// process.getBuiltinModule で実行時に取得することで回避する。
-import type { DatabaseSync } from "node:sqlite";
-type SqliteModule = typeof import("node:sqlite");
-const { DatabaseSync: DatabaseSyncCtor } = process.getBuiltinModule("node:sqlite") as SqliteModule;
+import { DatabaseSync } from "node:sqlite";
 
 const DDL = `
 CREATE TABLE IF NOT EXISTS projects (
@@ -75,7 +69,7 @@ CREATE TABLE IF NOT EXISTS rate_limit_samples (
 `;
 
 export function openDb(path: string): DatabaseSync {
-  const db = new DatabaseSyncCtor(path);
+  const db = new DatabaseSync(path);
   if (path !== ":memory:") db.exec("PRAGMA journal_mode = WAL");
   db.exec("PRAGMA foreign_keys = ON");
   db.exec(DDL);

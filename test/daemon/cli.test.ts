@@ -1,10 +1,25 @@
-import { test, beforeEach, afterEach } from "vitest";
+import { test, beforeEach, afterEach } from "@std/testing/bdd";
 import assert from "node:assert/strict";
 import { createServer, type Server, type Socket } from "node:net";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseArgv, call } from "../../src/cli/dctl.ts";
+
+let root: string;
+let sock: string;
+const servers: Server[] = [];
+const sockets: Socket[] = [];
+
+beforeEach(async () => {
+  root = await mkdtemp(join(tmpdir(), "doctrine-cli-"));
+  sock = join(root, "dctld.sock");
+});
+afterEach(async () => {
+  for (const s of sockets.splice(0)) s.destroy();
+  for (const s of servers.splice(0)) await new Promise<void>((resolve) => s.close(() => resolve()));
+  await rm(root, { recursive: true, force: true });
+});
 
 test("dctl add", () => {
   assert.deepEqual(
@@ -59,21 +74,6 @@ test("数値フラグに数値でない値を渡すと落ちる", () => {
 // --- call() はソケットでデーモンとやり取りする。ここではテスト用の使い捨てサーバを
 // 一時ディレクトリ上のソケットで立て、call() の挙動（イベント無視・null id・
 // 不正JSON・タイムアウト）を検証する。実ソケットパス（socketPath()）には触れない。
-
-let root: string;
-let sock: string;
-const servers: Server[] = [];
-const sockets: Socket[] = [];
-
-beforeEach(async () => {
-  root = await mkdtemp(join(tmpdir(), "doctrine-cli-"));
-  sock = join(root, "dctld.sock");
-});
-afterEach(async () => {
-  for (const s of sockets.splice(0)) s.destroy();
-  for (const s of servers.splice(0)) await new Promise<void>((resolve) => s.close(() => resolve()));
-  await rm(root, { recursive: true, force: true });
-});
 
 /** 接続してきたソケットに、渡した行（JSON文字列化前提の生テキスト）を順番に流す使い捨てサーバ。 */
 function fakeDaemon(onConnect: (socket: Socket) => void): Promise<Server> {

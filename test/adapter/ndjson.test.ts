@@ -1,4 +1,4 @@
-import { test } from "vitest";
+import { test } from "@std/testing/bdd";
 import assert from "node:assert/strict";
 import { Readable } from "node:stream";
 import { readNdjson } from "../../src/adapter/ndjson.ts";

@@ -1,8 +1,7 @@
-#!/usr/bin/env node
+#!/usr/bin/env -S deno run --allow-all
 import { connect } from "node:net";
 import { socketPath } from "../daemon/server.ts";
 import type { Response, ServerEvent } from "../daemon/protocol.ts";
-import { isDirectlyExecuted } from "../util/entry.ts";
 
 const NUMERIC = new Set(["priority", "limit", "tail", "step_run_id"]);
 const BOOLEAN = new Set(["force", "follow"]);
@@ -189,6 +188,6 @@ export async function main(argv: string[]): Promise<number> {
   }
 }
 
-if (isDirectlyExecuted(import.meta.filename)) {
+if (import.meta.main) {
   process.exitCode = await main(process.argv.slice(2));
 }
