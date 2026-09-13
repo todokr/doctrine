@@ -29,6 +29,8 @@ export type StepBoundary = {
     id: number; status: StepRunStatus; exit_code: number | null; ended_at: string;
     cost_usd?: number | null; num_turns?: number | null; duration_ms?: number | null;
   };
+  /** ステップ開始時（agent ステップのみ）: そのロールのセッションを記録する。 */
+  sessionUpsert?: { role: string; session_id: string };
   outputs?: { step_id: string; stdout: string; stderr: string; exit_code: number | null };
 };
 
@@ -98,6 +100,16 @@ export function commitStepBoundary(db: Db, b: StepBoundary): Promise<number | nu
         .where("id", "=", u.id)
         .execute();
       stepRunId = u.id;
+    }
+
+    if (b.sessionUpsert) {
+      const s = b.sessionUpsert;
+      await trx.insertInto("task_sessions")
+        .values({ task_id: b.taskId, role: s.role, session_id: s.session_id })
+        .onConflict((oc) => oc.columns(["task_id", "role"]).doUpdateSet((eb) => ({
+          session_id: eb.ref("excluded.session_id"),
+        })))
+        .execute();
     }
 
     if (b.outputs) {
