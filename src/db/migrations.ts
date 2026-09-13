@@ -109,6 +109,24 @@ const migrations: Record<string, Migration> = {
         .execute();
     },
   },
+  "0002_task_sessions": {
+    // deno-lint-ignore no-explicit-any
+    async up(db: Kysely<any>) {
+      await db.schema.createTable("task_sessions").ifNotExists()
+        .addColumn("task_id", "text", (c) => c.notNull().references("tasks.id"))
+        .addColumn("role", "text", (c) => c.notNull())
+        .addColumn("session_id", "text", (c) => c.notNull())
+        .addPrimaryKeyConstraint("task_sessions_pk", ["task_id", "role"])
+        .execute();
+
+      // 既存の tasks.claude_session_id を role "default" として移す。
+      // 列自体はここでは消さない（コードから参照しなくなるだけ、spec 5章）。
+      await sql`
+        INSERT INTO task_sessions (task_id, role, session_id)
+        SELECT id, 'default', claude_session_id FROM tasks WHERE claude_session_id IS NOT NULL
+      `.execute(db);
+    },
+  },
 };
 
 /** ファイルを動的 import しない（権限も要らず、deno check で型検査される）。 */
