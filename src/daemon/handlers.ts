@@ -1,6 +1,7 @@
 import { join } from "@std/path";
 import { parseWorkflow, type Workflow } from "../workflow/schema.ts";
 import { parseProjectConfig, withSetupStep } from "../workflow/project.ts";
+import { ensureProjectScaffold } from "../workflow/scaffold.ts";
 import {
   getProject, getProjectByPath, getTask, insertProject, insertTask, listProjects, listTasks,
   type TaskState,
@@ -54,13 +55,17 @@ export function createHandler(ctx: DaemonContext): Handler {
     switch (method) {
       case "project.add": {
         const path = req(params, "path");
-        const cfgText = await Deno.readTextFile(join(path, ".doctrine", "project.yaml"));
-        const cfg = parseProjectConfig(cfgText);
+        // 最初に叩く init 的なコマンドなので、2回目はエラーにせず登録済みと伝えるだけにする
+        const existing = await getProjectByPath(ctx.db, path);
+        if (existing) return { ...existing, created: [], alreadyRegistered: true };
+
+        const { created } = await ensureProjectScaffold(path);
+        const cfg = parseProjectConfig(await Deno.readTextFile(join(path, ".doctrine", "project.yaml")));
         const id = await insertProject(ctx.db, {
           path, default_workflow: cfg.defaultWorkflow, max_concurrent: cfg.maxConcurrent,
           base_branch: cfg.baseBranch, setup: cfg.setup ?? null,
         });
-        return await getProject(ctx.db, id);
+        return { ...(await getProject(ctx.db, id)), created, alreadyRegistered: false };
       }
       case "project.list":
         return await listProjects(ctx.db);
