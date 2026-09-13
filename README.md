@@ -118,12 +118,34 @@ steps:
 ### ステップは3種類だけ
 
 - **`command`** — worktree内でシェルコマンドを実行する。非0終了でステップ失敗。
-- **`agent`** — Claude Code を headless 実行する。`claude_session_id` を記録し再開可能。
+- **`agent`** — Claude Code を headless 実行する。会話を role 単位（`session: <role>`）で
+  記録し再開可能。
 - **`approval`** — ワークフローを `suspended` にし、人の承認・却下・追加コメントを待つ。
 
 失敗時の分岐は `onFailure`（`command` / `agent`）と `onReject`（`approval`）のみで、
 どちらも同じ形（`goto` / `maxAttempts` / `feed`）を持つ。分岐先へ戻った `agent` は
-`claude_session_id` で `--resume` されるので、会話は継続する（やり直しではない）。
+同じ role のセッションIDで `--resume` されるので、会話は継続する（やり直しではない）。
+
+### role ごとの会話（`session`）
+
+`agent` ステップに `session: <role>` を書くと、同じ role を持つステップ同士が1本の会話を
+共有する。差し戻しで同じ role の `agent` ステップへ戻ると、その会話が `--resume` される。
+
+```yaml
+  - id: plan
+    type: agent
+    session: planner
+    prompt: "計画を .doctrine-out/plan.md に書いてください"
+
+  - id: implement
+    type: agent
+    session: implementer
+    prompt: "{{ worktree.path }}/.doctrine-out/plan.md を実装してください"
+```
+
+`session` を省略すると、すべての `agent` ステップが暗黙の既定ロールを共有する
+（今までどおり「タスクに会話は1本」）。役割を分けたときの詳しい設計は
+[`docs/superpowers/specs/2026-09-13-step-artifacts-design.md`](docs/superpowers/specs/2026-09-13-step-artifacts-design.md) を参照。
 
 ### 変数は4系統だけ
 
@@ -223,6 +245,35 @@ dctl get <task-id>
 `degraded` を見逃すと、「成功した」と思って進めたタスクが実質何も達成していない、
 という気づきにくい失敗を踏む。
 
+## 6. ステップ間で成果物を渡す
+
+前段の `agent` ステップが後段へ計画やレビュー結果を渡したいときは、worktree 内の
+ファイルに書かせ、後段は `{{ worktree.path }}` でパスを組み立てて読ませる。
+
+```yaml
+  - id: plan
+    type: agent
+    session: planner
+    prompt: "計画を .doctrine-out/plan.md に書いてください"
+
+  - id: plan-review
+    type: approval
+    title: "計画を確認してください"
+    review:
+      files: [".doctrine-out/plan.md"]
+```
+
+`.doctrine-out/` という名前は規約であり、doctrine が強制するものではない
+（プロンプトで指示する自由な文字列）。ただし doctrine は worktree 作成時に、
+この名前を `.git/info/exclude` へ自動で追記する。これにより:
+
+- `completed` の後始末（4章）が、この中間ファイルを「未コミットの変更」として
+  誤って削除拒否しない
+- レビュー画面の diff にも混ざらない
+
+対象を別の名前にしたい場合でも、この自動追記の対象は `.doctrine-out/` に固定されている
+点に注意する（変えたい場合は自分で `.git/info/exclude` に追記する）。
+
 ## 既知の制約
 
 実装の過程で判明した、まだ直していない・あえて直さないと決めた制約。
@@ -241,7 +292,3 @@ dctl get <task-id>
   ディスク満杯やロックなどで一時的に失敗した場合、そのタスクは（リトライされず）
   `failed` になる。`queued` のままにすると、スケジューラが毎周期リトライし続け、
   他タスクの進行を巻き込みかねないため。取り直すにはタスクを作り直すこと。
-- **1タスクにつきエージェントの会話は1本だけ。** ワークフロー内のすべての
-  `agent` ステップは同一の `claude_session_id` を共有する。計画担当と
-  レビュー担当を別々のエージェントとして持つような構成は、このサブプロジェクトの
-  スコープ外（`docs/overview.md` 4章参照）。
