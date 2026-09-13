@@ -1,0 +1,1021 @@
+<title>doctrine 板プロトタイプ</title>
+<!-- PROTOTYPE (使い捨て): issue #17。サイドバーにタスク一覧、中央にレビュー画面／タスク画面という構成を確かめる。
+     データはすべてモック、操作はメモリ上のスタブ（デーモンにはつながっていない）。 -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --ground:#E6E9ED; --surface:#FFFFFF; --side:#F4F5F7; --surface-2:#EEF0F3; --sunken:#E3E7EC;
+  --ink:#15181C; --ink-2:#56606B; --ink-3:#8A929C; --line:#D8DCE2;
+  --accent:#2F5BD3; --accent-ink:#FFFFFF; --accent-soft:#E2E9FB;
+  --attn:#A15F00; --attn-bg:#FFF0D2; --attn-line:#E4B25C;
+  --danger:#B3261E; --danger-bg:#FCE6E3;
+  --degraded:#6E36AE; --degraded-bg:#EFE5FA;
+  --ok:#23704A; --ok-bg:#E1F2E8;
+  --add-bg:#E4F4EA; --add-gutter:#CDEBD8; --del-bg:#FBE9E7; --del-gutter:#F4D3CF;
+  --kw:#8A3FB0; --str:#1F7A4D; --com:#8A929C; --num:#B0561B;
+  --shadow:0 12px 32px rgba(20,28,40,.18);
+  --bar:#15181C; --bar-ink:#F3F5F7;
+  --sans:"Zen Kaku Gothic New","Hiragino Sans","Noto Sans JP",system-ui,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,"SFMono-Regular",Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ground:#0E1013; --surface:#16191D; --side:#1B1F24; --surface-2:#22262C; --sunken:#0F1114;
+    --ink:#E6E9ED; --ink-2:#A2AAB4; --ink-3:#6E7681; --line:#2B3037;
+    --accent:#86A2FF; --accent-ink:#0E1426; --accent-soft:#232D4A;
+    --attn:#EFB14A; --attn-bg:#33270F; --attn-line:#7F5B1D;
+    --danger:#FF8A7D; --danger-bg:#3A1B18;
+    --degraded:#C7A0FF; --degraded-bg:#2A1F3D;
+    --ok:#74D19C; --ok-bg:#15301F;
+    --add-bg:#15291D; --add-gutter:#1C3826; --del-bg:#301A18; --del-gutter:#42221F;
+    --kw:#D19BFF; --str:#8FD6A8; --com:#6E7681; --num:#F0A36B;
+    --shadow:0 12px 32px rgba(0,0,0,.55);
+    --bar:#F3F5F7; --bar-ink:#15181C;
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#0E1013; --surface:#16191D; --side:#1B1F24; --surface-2:#22262C; --sunken:#0F1114;
+  --ink:#E6E9ED; --ink-2:#A2AAB4; --ink-3:#6E7681; --line:#2B3037;
+  --accent:#86A2FF; --accent-ink:#0E1426; --accent-soft:#232D4A;
+  --attn:#EFB14A; --attn-bg:#33270F; --attn-line:#7F5B1D;
+  --danger:#FF8A7D; --danger-bg:#3A1B18;
+  --degraded:#C7A0FF; --degraded-bg:#2A1F3D;
+  --ok:#74D19C; --ok-bg:#15301F;
+  --add-bg:#15291D; --add-gutter:#1C3826; --del-bg:#301A18; --del-gutter:#42221F;
+  --kw:#D19BFF; --str:#8FD6A8; --com:#6E7681; --num:#F0A36B;
+  --shadow:0 12px 32px rgba(0,0,0,.55);
+  --bar:#F3F5F7; --bar-ink:#15181C;
+}
+*{box-sizing:border-box}
+body{background:var(--ground);color:var(--ink);font-family:var(--sans);font-size:13px;line-height:1.5;padding-inline:16px;padding-block:12px 76px}
+button,input,textarea,select{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.mono{font-family:var(--mono);font-size:11.5px}
+.hint{color:var(--ink-3);font-size:11.5px}
+
+.app{max-width:1600px;margin-inline:auto;display:grid;grid-template-columns:52px 292px minmax(0,1fr);height:calc(100vh - 100px);min-height:560px;background:var(--surface);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+@media (max-width:900px){.app{grid-template-columns:1fr;height:auto}}
+
+/* icon rail */
+.rail{background:var(--side);border-right:1px solid var(--line);display:flex;flex-direction:column;align-items:center;gap:6px;padding-block:10px}
+.rail .grow{flex:1}
+.ib{position:relative;width:36px;height:36px;border-radius:9px;border:0;background:transparent;color:var(--ink-2);display:grid;place-items:center}
+.ib:hover{background:var(--surface-2)}
+.ib[aria-pressed="true"]{background:var(--accent-soft);color:var(--accent)}
+.ib svg{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.ib .pip{position:absolute;top:6px;right:6px;width:7px;height:7px;border-radius:50%;background:var(--attn);border:2px solid var(--side)}
+@media (max-width:900px){.rail{flex-direction:row;justify-content:flex-start;padding-inline:8px;border-right:0;border-bottom:1px solid var(--line)}.rail .grow{display:none}}
+
+/* sidebar */
+.side{background:var(--side);border-right:1px solid var(--line);display:flex;flex-direction:column;min-height:0}
+.side-head{display:flex;align-items:center;gap:8px;padding:10px 10px 8px 12px;border-bottom:1px solid var(--line)}
+.side-head select{border:0;background:transparent;font-weight:700;font-size:14px;padding:2px 0;max-width:170px}
+.side-head .count{color:var(--ink-3);font-variant-numeric:tabular-nums}
+.side-head .grow{flex:1}
+.plus{width:28px;height:28px;border-radius:7px;border:1px solid var(--line);background:var(--surface);font-size:16px;line-height:1}
+.plus:hover{border-color:var(--ink-3)}
+.side-scroll{overflow-y:auto;flex:1;padding:6px 6px 10px}
+@media (max-width:900px){.side{border-right:0;border-bottom:1px solid var(--line)}.side-scroll{max-height:320px}}
+.grp{margin-top:8px}
+.grp h3{margin:0;padding:4px 8px;font-size:11.5px;font-weight:700;color:var(--ink-2);display:flex;gap:6px;align-items:center;letter-spacing:.02em}
+.grp h3 .count{color:var(--ink-3);font-weight:400;font-variant-numeric:tabular-nums}
+.it{width:100%;border:0;background:transparent;border-radius:8px;padding:6px 8px 6px 6px;display:grid;grid-template-columns:18px minmax(0,1fr);gap:2px 6px;text-align:left}
+.it:hover{background:var(--surface-2)}
+.it[aria-current="true"]{background:var(--accent-soft);box-shadow:inset 3px 0 0 var(--accent)}
+.it .ico{grid-row:span 2;display:grid;place-items:center;height:20px}
+.it .t{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:500}
+.it .m{display:flex;gap:6px;align-items:center;color:var(--ink-3);font-size:11.5px;min-width:0}
+.it .m .pj{display:inline-flex;align-items:center;gap:5px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.it .m .tm{margin-left:auto;font-variant-numeric:tabular-nums;white-space:nowrap}
+.pjdot{width:7px;height:7px;border-radius:50%;flex:none;display:inline-block}
+.diamond{width:9px;height:9px;background:var(--attn);transform:rotate(45deg);border-radius:1.5px}
+.bang{width:12px;height:12px;border-radius:50%;background:var(--danger);color:var(--surface);font-size:9px;font-weight:700;display:grid;place-items:center;line-height:1}
+.bang.deg{background:var(--degraded)}
+.spin{width:12px;height:12px;border-radius:50%;border:2px dotted var(--accent);animation:spin 2.4s linear infinite}
+.ring{width:10px;height:10px;border-radius:50%;border:1.5px solid var(--ink-3)}
+.pause{width:10px;height:10px;border-left:3px solid var(--ink-2);border-right:3px solid var(--ink-2)}
+.check{width:12px;height:12px;border-radius:50%;background:var(--ok);position:relative}
+.xmark{width:12px;height:12px;border-radius:50%;background:var(--ink-3)}
+@keyframes spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.spin{animation:none}}
+.side-foot{border-top:1px solid var(--line);padding:7px 12px;color:var(--ink-3);font-size:11px;display:flex;gap:10px;flex-wrap:wrap;font-variant-numeric:tabular-nums}
+.side-foot b{color:var(--ink-2);font-weight:500;font-family:var(--mono)}
+
+/* main */
+.main{overflow-y:auto;min-height:0;display:flex;flex-direction:column}
+.pad{padding:18px 22px;display:grid;gap:14px;align-content:start}
+.crumbs{display:flex;gap:8px;flex-wrap:wrap;align-items:center;color:var(--ink-3);font-size:11.5px}
+h1{margin:0;font-size:19px;line-height:1.35;text-wrap:balance}
+.headrow{display:flex;gap:8px 12px;flex-wrap:wrap;align-items:center}
+.pill{font-size:11px;font-weight:700;padding:0 7px;border-radius:4px;line-height:19px;white-space:nowrap;display:inline-flex;gap:5px;align-items:center}
+.p-attn{background:var(--attn-bg);color:var(--attn)}
+.p-danger{background:var(--danger-bg);color:var(--danger)}
+.p-deg{background:var(--degraded-bg);color:var(--degraded)}
+.p-run{background:var(--accent-soft);color:var(--accent)}
+.p-muted{background:var(--surface-2);color:var(--ink-2)}
+.p-ok{background:var(--ok-bg);color:var(--ok)}
+.btn{border:1px solid var(--line);background:var(--surface);border-radius:7px;padding:5px 12px;white-space:nowrap}
+.btn:hover{border-color:var(--ink-3)}
+.btn.sm{padding:3px 9px;font-size:12px}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);font-weight:700}
+.btn.danger{color:var(--danger);border-color:var(--danger)}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.spacer{flex:1}
+.box{border:1px solid var(--line);border-radius:9px;padding:12px 14px;display:grid;gap:8px}
+.box h2{margin:0;font-size:13px}
+.box p{margin:0}
+.box.attn{background:var(--attn-bg);border-color:var(--attn-line)}
+.box.danger{background:var(--danger-bg);border-color:var(--danger)}
+.box.deg{background:var(--degraded-bg);border-color:var(--degraded)}
+.box.quiet{background:var(--surface-2);border-color:var(--surface-2)}
+pre.block{margin:0;background:var(--sunken);border-radius:7px;padding:10px 12px;font-family:var(--mono);font-size:11.5px;line-height:1.6;overflow-x:auto;white-space:pre;max-height:320px;overflow-y:auto}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:7px;overflow:hidden;background:var(--surface)}
+.seg button{border:0;background:transparent;padding:3px 10px;font-size:12px;border-left:1px solid var(--line)}
+.seg button:first-child{border-left:0}
+.seg button[aria-pressed="true"]{background:var(--ink);color:var(--surface)}
+.actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+details.runs summary{cursor:pointer;color:var(--ink-2);font-size:12px;font-weight:700}
+.runtable{overflow-x:auto;margin-top:8px}
+table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}
+th,td{padding:6px 10px;border-top:1px solid var(--line);text-align:left;white-space:nowrap;vertical-align:top}
+th{color:var(--ink-3);font-size:11px;font-weight:500;border-top:0;background:var(--surface-2)}
+tr.stale td{background:var(--attn-bg)}
+.table-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:9px}
+
+/* review */
+.rv-files-md{border:1px solid var(--line);border-radius:9px;overflow:hidden}
+.rv-files-md header{display:flex;gap:8px;align-items:center;padding:7px 12px;background:var(--surface-2);border-bottom:1px solid var(--line)}
+.md{padding:6px 18px 14px;max-width:72ch;line-height:1.75}
+.md h1{font-size:16px;margin:10px 0 4px}
+.md h2{font-size:13.5px;margin:14px 0 2px}
+.md ul,.md ol{margin:4px 0;padding-left:22px}
+.md p{margin:4px 0}
+.md code{font-family:var(--mono);font-size:11.5px;background:var(--surface-2);padding:0 4px;border-radius:3px}
+.rv-body{display:grid;grid-template-columns:236px minmax(0,1fr);gap:14px;align-items:start}
+@media (max-width:1150px){.rv-body{grid-template-columns:1fr}}
+.filelist{border:1px solid var(--line);border-radius:9px;overflow:hidden;position:sticky;top:0}
+.filelist header{padding:7px 10px;background:var(--surface-2);border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;gap:6px;font-size:11.5px;color:var(--ink-2)}
+.fl{width:100%;border:0;border-top:1px solid var(--line);background:var(--surface);padding:6px 10px;display:grid;grid-template-columns:16px minmax(0,1fr);gap:1px 6px;text-align:left}
+.fl:first-of-type{border-top:0}
+.fl:hover{background:var(--surface-2)}
+.fl[aria-current="true"]{background:var(--accent-soft)}
+.fl .v{grid-row:span 2;align-self:center;width:13px;height:13px;border-radius:3px;border:1.5px solid var(--ink-3)}
+.fl .v.on{background:var(--ok);border-color:var(--ok)}
+.fl .nm{font-family:var(--mono);font-size:11.5px;overflow-wrap:anywhere}
+.fl .st{font-size:10.5px;color:var(--ink-3);display:flex;gap:6px;font-variant-numeric:tabular-nums}
+.add{color:var(--ok)} .del{color:var(--danger)}
+.changed{color:var(--attn);font-weight:700}
+.diffs{display:grid;gap:12px;min-width:0}
+.file{border:1px solid var(--line);border-radius:9px;overflow:hidden;min-width:0}
+.file > header{display:flex;gap:8px;align-items:center;padding:6px 10px;background:var(--surface-2);border-bottom:1px solid var(--line);flex-wrap:wrap}
+.file > header .nm{font-family:var(--mono);font-size:12px;font-weight:500;overflow-wrap:anywhere}
+.viewed{display:inline-flex;gap:6px;align-items:center;border:1px solid var(--line);background:var(--surface);border-radius:6px;padding:1px 8px;font-size:11.5px}
+.viewed.on{background:var(--ok-bg);border-color:var(--ok);color:var(--ok)}
+.code{overflow-x:auto;font-family:var(--mono);font-size:12px;line-height:1.6}
+.hunk{background:var(--accent-soft);color:var(--ink-2);padding:2px 10px;font-size:11px}
+.ln{display:grid;grid-template-columns:42px 42px 20px max-content;min-width:100%}
+.ln .o,.ln .n{color:var(--ink-3);text-align:right;padding-right:8px;user-select:none;font-size:11px}
+.ln .c{white-space:pre;padding-right:16px}
+.ln .cm{border:0;background:transparent;color:var(--accent);opacity:0;font-weight:700;padding:0;width:20px}
+.ln:hover .cm,.ln .cm:focus-visible{opacity:1}
+.ln.a{background:var(--add-bg)} .ln.a .o,.ln.a .n{background:var(--add-gutter)}
+.ln.d{background:var(--del-bg)} .ln.d .o,.ln.d .n{background:var(--del-gutter)}
+.tk-kw{color:var(--kw)} .tk-str{color:var(--str)} .tk-com{color:var(--com);font-style:italic} .tk-num{color:var(--num)}
+.lc{margin:4px 10px 6px 104px;border:1px solid var(--line);border-radius:8px;background:var(--surface);padding:8px 10px;display:grid;gap:6px;font-family:var(--sans);font-size:12.5px;max-width:640px}
+.lc .who{font-size:11px;color:var(--ink-3)}
+textarea{width:100%;border:1px solid var(--line);background:var(--surface);border-radius:7px;padding:7px 9px;resize:vertical;min-height:54px}
+input[type=text],select.field{width:100%;border:1px solid var(--line);background:var(--surface);border-radius:7px;padding:7px 9px}
+.empty-diff{padding:20px;color:var(--ink-3);border:1px dashed var(--line);border-radius:9px;text-align:center}
+.decide{position:sticky;bottom:0;margin-top:auto;background:var(--surface);border-top:1px solid var(--line);padding:10px 22px;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:end;box-shadow:0 -8px 20px rgba(0,0,0,.05)}
+@media (max-width:700px){.decide{grid-template-columns:1fr}}
+.decide .meta{display:flex;gap:12px;flex-wrap:wrap;color:var(--ink-2);font-size:12px;margin-bottom:6px}
+.decide textarea{min-height:40px}
+
+/* modal */
+.scrim{position:fixed;inset:0;background:rgba(10,14,20,.4);z-index:30}
+.modal{position:fixed;z-index:31;left:50%;top:56px;transform:translateX(-50%);width:min(640px,calc(100% - 32px));max-height:calc(100vh - 150px);overflow-y:auto;background:var(--surface);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);padding:18px;display:grid;gap:12px}
+.modal h2{margin:0;font-size:16px}
+.field-l{display:grid;gap:4px}
+.field-l label{font-size:11.5px;color:var(--ink-2);font-weight:500}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+@media (max-width:560px){.grid2{grid-template-columns:1fr}}
+.warnlist{margin:0;padding-left:18px;display:grid;gap:6px}
+
+.protobar{position:fixed;left:50%;bottom:12px;transform:translateX(-50%);z-index:50;background:var(--bar);color:var(--bar-ink);border-radius:999px;padding:5px 12px;display:flex;align-items:center;gap:10px;box-shadow:0 8px 24px rgba(0,0,0,.35);font-size:12px;max-width:calc(100% - 24px);flex-wrap:wrap;justify-content:center}
+.protobar button{border:0;background:color-mix(in srgb,var(--bar-ink) 12%,transparent);color:inherit;border-radius:999px;padding:3px 10px}
+.protobar .tag{font-size:10px;opacity:.6;letter-spacing:.1em}
+.protobar kbd{font-family:var(--mono);font-size:10.5px;border:1px solid color-mix(in srgb,var(--bar-ink) 35%,transparent);border-radius:4px;padding:0 4px}
+.toast{position:fixed;left:50%;bottom:60px;transform:translateX(-50%);z-index:60;background:var(--ink);color:var(--surface);padding:7px 14px;border-radius:8px;font-size:12.5px}
+</style>
+
+<div id="root"></div>
+
+<script>
+// ================================================================ モックデータ
+const NOW = Date.parse("2026-09-13T15:00:00+09:00");
+const MIN = 60000;
+const PROJECTS = [
+  { id: "doctrine", color: "#5B8DEF", path: "~/git/doctrine", def: "feature" },
+  { id: "shop-api", color: "#D9695F", path: "~/work/shop-api", def: "feature" },
+  { id: "blog", color: "#3FA796", path: "~/git/blog", def: "feature" },
+];
+const st = (id, type, extra = {}) => ({ id, type, ...extra });
+const WORKFLOWS = {
+  "doctrine/feature": [st("setup","command"), st("implement","agent"), st("test","command"), st("review","approval",{ title: "差分を確認してください", onReject: "implement" }), st("open-pr","command")],
+  "doctrine/guided": [st("setup","command"), st("plan","agent"), st("plan-approval","approval",{ title: "計画を確認してください", onReject: "plan", review: { files: [".doctrine-out/plan.md"] } }), st("implement","agent"), st("code-review","agent"), st("human-review","approval",{ title: "変更を確認してください", onReject: "implement" }), st("open-pr","command")],
+  "shop-api/feature": [st("setup","command"), st("implement","agent"), st("lint","command"), st("test","command"), st("review","approval",{ title: "差分を確認してください", onReject: "implement" }), st("open-pr","command")],
+  "shop-api/hotfix": [st("setup","command"), st("fix","agent"), st("test","command"), st("confirm","approval",{ title: "本番反映前に確認してください", onReject: "fix" })],
+  "blog/feature": [st("setup","command"), st("implement","agent"), st("build","command"), st("review","approval",{ title: "差分を確認してください", onReject: "implement" }), st("deploy-preview","command")],
+};
+
+const DIFF_2B91 = [
+  { path: "src/daemon/handlers.ts", hash: "a91", hunks: [
+    { old: 219, new: 219, body:
+`       case "worktree.list": {
+-        const out: { project: string; orphans: string[] }[] = [];
++        const out: WorktreeEntry[] = [];
+         for (const project of await listProjects(ctx.db)) {
+-          const known = (await listTasks(ctx.db, { projectId: project.id }))
+-            .map((t) => t.worktree_path).filter((p): p is string => p !== null);
+-          out.push({ project: project.path, orphans: await findOrphans(project.path, known) });
++          const tasks = await listTasks(ctx.db, { projectId: project.id });
++          for (const wt of await listDoctrineWorktrees(project.path)) {
++            const task = tasks.find((t) => t.worktree_path === wt.path) ?? null;
++            out.push({
++              project: project.path, path: wt.path, branch: wt.branch,
++              task_id: task?.id ?? null, task_state: task?.state ?? null,
++              dirty: await isDirty(wt.path),
++              // 孤児にはタスクが無いので、ディレクトリの更新日時で古さを測る
++              age_basis: task ? task.updated_at : wt.mtime,
++            });
++          }
+         }
+         return out;
+       }` },
+    { old: 228, new: 236, body:
+`       case "worktree.remove": {
+-        const taskId = req(params, "task_id");
+-        const task = await getTask(ctx.db, taskId);
+-        if (!task?.worktree_path) throw new Error("worktree がありません");
++        const target = await resolveRemoveTarget(ctx, params);
++        if (target.task && !isTerminal(target.task.state)) {
++          throw new Error("実行中のタスクの worktree は削除できません");
++        }` },
+  ] },
+  { path: "src/core/worktree.ts", hash: "b17", hunks: [
+    { old: 88, new: 88, body:
+` export async function findOrphans(repoPath: string, known: string[]) {
+   const all = await listDoctrineWorktrees(repoPath);
+   return all.filter((w) => !known.includes(w.path)).map((w) => w.path);
+ }
++
++export function isUnderStateDir(path: string, stateDir: string): boolean {
++  const rel = relative(join(stateDir, "worktrees"), resolve(path));
++  return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
++}` },
+  ] },
+  { path: "test/daemon/handlers.test.ts", hash: "c40", hunks: [
+    { old: 402, new: 402, body:
+`+test("worktree.remove は state 配下にないパスを拒否する", async () => {
++  const { handle } = await setup();
++  await assert.rejects(
++    handle("worktree.remove", { path: "/tmp/elsewhere" }),
++    /state ディレクトリ配下ではありません/,
++  );
++});
++
++test("worktree.remove は実行中のタスクの worktree を force でも拒否する", async () => {
++  const { handle, running } = await setupRunningTask();
++  await assert.rejects(handle("worktree.remove", { task_id: running.id, force: true }));
++});` },
+  ] },
+];
+
+const DIFF_1103 = [
+  { path: "src/stock/reserve.ts", hash: "r2", prevHash: "r1", hunks: [
+    { old: 30, new: 30, body:
+` export async function reserve(db: Db, orderId: string, items: Item[]) {
+-  for (const item of items) {
+-    await db.insert("reservations", { orderId, sku: item.sku, qty: item.qty });
+-  }
++  const key = idempotencyKey(orderId, items);
++  return await withRetry(async () => {
++    return await db.transaction(async (tx) => {
++      const existing = await tx.find("reservations", { key });
++      if (existing) return existing;
++      try {
++        return await tx.insert("reservations", { key, orderId, items });
++      } catch (e) {
++        if (isUniqueViolation(e)) return await tx.find("reservations", { key });
++        throw e;
++      }
++    });
++  }, { attempts: 3, backoffMs: 200, jitter: true });
+ }` },
+  ], since: [
+    { old: 35, new: 35, body:
+`       if (existing) return existing;
+-      return await tx.insert("reservations", { key, orderId, items });
++      try {
++        return await tx.insert("reservations", { key, orderId, items });
++      } catch (e) {
++        if (isUniqueViolation(e)) return await tx.find("reservations", { key });
++        throw e;
++      }
+     });
+-  }, { attempts: 3, backoffMs: 200 });
++  }, { attempts: 3, backoffMs: 200, jitter: true });` },
+  ] },
+  { path: "test/stock/reserve.test.ts", hash: "t2", prevHash: "t1", hunks: [
+    { old: 0, new: 1, body:
+`+import { assert } from "../helpers.ts";
++
++test("同じ注文の再試行は引当を二重に作らない", async () => {
++  const db = await freshDb();
++  await reserve(db, "o-1", [{ sku: "A", qty: 1 }]);
++  await reserve(db, "o-1", [{ sku: "A", qty: 1 }]);
++  assert.equal(await db.count("reservations"), 1);
++});
++
++test("同時に走った引当は一意制約違反を既存の行として扱う", async () => {
++  const db = await freshDb();
++  await Promise.all([reserve(db, "o-2", items), reserve(db, "o-2", items)]);
++  assert.equal(await db.count("reservations"), 1);
++});` },
+  ], since: [
+    { old: 7, new: 7, body:
+` });
++
++test("同時に走った引当は一意制約違反を既存の行として扱う", async () => {
++  const db = await freshDb();
++  await Promise.all([reserve(db, "o-2", items), reserve(db, "o-2", items)]);
++  assert.equal(await db.count("reservations"), 1);
++});` },
+  ] },
+  { path: "src/stock/idempotency.ts", hash: "k1", prevHash: "k1", hunks: [
+    { old: 0, new: 1, body:
+`+import { createHash } from "node:crypto";
++
++export function idempotencyKey(orderId: string, items: Item[]): string {
++  const canonical = items.map((i) => i.sku + ":" + i.qty).sort().join(",");
++  return createHash("sha256").update(orderId + "|" + canonical).digest("hex");
++}` },
+  ] },
+];
+
+const DIFF_B204 = [
+  { path: "src/pages/index.astro", hash: "p1", hunks: [
+    { old: 12, new: 12, body:
+` const posts = (await getCollection("blog")).sort(byDate);
++const PAGE_SIZE = 10;
++const page = Number(Astro.url.searchParams.get("page") ?? "1");
++const shown = posts.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+ ---
+-{posts.map((p) => <PostCard post={p} />)}
++{shown.map((p) => <PostCard post={p} />)}
++<Pager page={page} total={Math.ceil(posts.length / PAGE_SIZE)} />` },
+  ] },
+  { path: "src/components/Pager.astro", hash: "p2", hunks: [
+    { old: 0, new: 1, body:
+`+---
++const { page, total } = Astro.props;
++---
++<nav class="pager">
++  {page > 1 && <a href={"?page=" + (page - 1)}>前へ</a>}
++  <span>{page} / {total}</span>
++  {page < total && <a href={"?page=" + (page + 1)}>次へ</a>}
++</nav>` },
+  ] },
+];
+
+const PLAN_MD = `# 計画: Review Guide の保存形式
+## 目的
+③ のレビュー画面が読む Review Guide を、エージェントが worktree に書き出す形式を決める。
+## 変更対象
+- \`.doctrine-out/guide.json\` を新設し、スキーマを zod で定義する
+- \`src/workflow/schema.ts\` は変えない（doctrine はガイドの中身を理解しない）
+## 方針
+1. Why / What / How / Reading Order / Key Decisions / Risks / Tests の7節を持つ JSON にする
+2. Reading Order の各項目に \`path\` と \`lines\` を持たせ、diff と機械的に照合できるようにする
+3. Markdown ではなく JSON にする。照合に構造が要るため
+## リスク
+- エージェントが JSON を壊すと表示できない。検証に失敗したら生の文字列をそのまま出す
+## テスト方針
+- 7節のどれかが欠けた JSON を検証が落とすこと
+- Reading Order に diff に無いパスが入っていたら警告になること`;
+
+const LOG_TEST_FAIL = `$ deno task test
+running 41 tests from ./test/daemon/handlers.test.ts
+  daemon.warning は後始末の失敗を1回だけ送る ... FAILED (9ms)
+
+error: AssertionError: Expected values to be strictly equal:
+  + actual - expected
+  + 2
+  - 1
+    at test/daemon/handlers.test.ts:512:12
+FAILED | 40 passed | 1 failed (7s)
+exit 1`;
+const LOG_DEGRADED = `tool_use Edit src/order/time.ts (+12 −4)
+tool_use Bash "git commit -m 'fix: 注文日時を UTC で保存する'"
+permission_denied: Bash(git commit) は permissionMode=acceptEdits で許可されていません
+assistant: コミットできなかったため、変更はワーキングツリーに残しています
+{"type":"result","subtype":"success","permission_denials":1}
+[test] $ deno task test
+[test] ok | 88 passed | 0 failed (5s)`;
+const LOG_RUNNING = `{"type":"system","subtype":"init","session_id":"4be1…"}
+assistant: src/daemon/protocol.ts の ServerEvent に task.cleanedUp を足します
+tool_use Read src/daemon/protocol.ts
+tool_use Edit src/daemon/protocol.ts (+2 −0)
+tool_use Read src/daemon/handlers.ts`;
+const FOLLOW_POOL = [
+  "assistant: cleanupAfterRun の戻り値に outcome を持たせます",
+  "tool_use Edit src/core/engine.ts (+14 −3)",
+  "tool_use Bash \"deno test test/core/engine.test.ts\"",
+  "ok | 31 passed | 0 failed (3s)",
+  "assistant: 承認経路（task.approve）でも同じイベントを送ります",
+  "tool_use Edit src/daemon/handlers.ts (+6 −1)",
+];
+
+// 状態は doctrine の7状態。degraded / refused はフラグ。
+const TASKS = [
+  { id: "t-2b91", wf: "doctrine/feature", title: "worktree.list をディスク上の全件にする", state: "suspended", step: "review", attempt: 1, prio: 2, since: NOW - 42 * MIN, diff: DIFF_2B91, reviews: [] },
+  { id: "s-1103", wf: "shop-api/feature", title: "在庫引当のリトライを冪等にする", state: "suspended", step: "review", attempt: 2, prio: 1, since: NOW - 15 * MIN, diff: DIFF_1103,
+    reviews: [{ at: NOW - 140 * MIN, text: "src/stock/reserve.ts:36\n  > return await tx.insert(\"reservations\", { key, orderId, items });\n  同時に2つ走ると一意制約違反で落ちます。既存の行として扱ってください\n\n全体: 同時実行のテストも足してください" }] },
+  { id: "t-a1b2", wf: "doctrine/guided", title: "Review Guide の保存形式を試す", state: "suspended", step: "plan-approval", attempt: 1, prio: 2, since: NOW - 130 * MIN, diff: [], reviewFiles: { ".doctrine-out/plan.md": PLAN_MD }, reviews: [] },
+  { id: "b-204", wf: "blog/feature", title: "記事一覧にページネーションを付ける", state: "suspended", step: "review", attempt: 1, prio: 3, since: NOW - 60 * 26 * MIN, diff: DIFF_B204, reviews: [] },
+
+  { id: "t-e812", wf: "doctrine/feature", title: "daemon.warning イベントを追加する", state: "failed", step: "test", attempt: 3, prio: 2, since: NOW - 60 * 26 * MIN, log: LOG_TEST_FAIL, dirty: true },
+  { id: "t-3cd2", wf: "doctrine/feature", title: "gc の確認文言を直す", state: "completed", step: "open-pr", attempt: 1, prio: 2, since: NOW - 95 * MIN, refused: true, dirty: true, log: "$ gh pr create --fill\nhttps://github.com/todokr/doctrine/pull/31\nexit 0" },
+  { id: "s-1202", wf: "shop-api/hotfix", title: "注文日時のタイムゾーンずれ", state: "running", step: "test", attempt: 1, prio: 0, since: NOW - 23 * MIN, degraded: "fix", log: LOG_DEGRADED },
+
+  { id: "t-7f3a", wf: "doctrine/feature", title: "task.cleanedUp イベントを追加する", state: "running", step: "implement", attempt: 1, prio: 1, since: NOW - 11 * MIN, log: LOG_RUNNING },
+  { id: "t-c04d", wf: "doctrine/feature", title: "workflow.list にステップを載せる", state: "running", step: "implement", attempt: 2, prio: 2, since: NOW - 134 * MIN, log: "[test #1] FAILED | 1 failed\nassistant: テストの失敗を受けて setupStep の挿入位置を直します\ntool_use Edit src/workflow/project.ts (+5 −2)" },
+  { id: "s-1102", wf: "shop-api/feature", title: "注文 API にカーソルページングを入れる", state: "running", step: "lint", attempt: 1, prio: 2, since: NOW - 48 * MIN, log: "$ deno lint\nChecked 214 files" },
+
+  { id: "s-1104", wf: "shop-api/feature", title: "価格改定バッチの分割実行", state: "queued", step: null, attempt: 0, prio: 0, since: NOW - 4 * MIN },
+  { id: "t-91e0", wf: "doctrine/feature", title: "ログ追従を1接続1タスクに上書きする", state: "queued", step: null, attempt: 0, prio: 2, since: NOW - 25 * MIN },
+
+  { id: "t-d5e6", wf: "doctrine/guided", title: "step_outputs の全文保持を検討する", state: "paused", step: "plan", attempt: 1, prio: 2, since: NOW - 60 * 5 * MIN, log: "assistant: step_outputs の容量見積もりを出します\n(SIGTERM で一時停止)" },
+
+  { id: "t-0a77", wf: "doctrine/feature", title: "README にデーモン起動手順を書く", state: "completed", step: "open-pr", attempt: 1, prio: 2, since: NOW - 60 * 3 * MIN, log: "exit 0" },
+  { id: "s-1105", wf: "shop-api/feature", title: "決済 Webhook の署名検証", state: "canceled", step: "implement", attempt: 1, prio: 2, since: NOW - 60 * 24 * 9 * MIN, dirty: true, log: "(SIGTERM で中止)" },
+  { id: "b-198", wf: "blog/feature", title: "OGP 画像を記事ごとに生成する", state: "completed", step: "deploy-preview", attempt: 1, prio: 2, since: NOW - 60 * 24 * 2 * MIN, log: "exit 0" },
+];
+TASKS.forEach((t) => {
+  t.project = t.wf.split("/")[0];
+  t.prompt ??= `${t.title}。詳細は issue を参照してください。`;
+  t.branch = `doctrine/${t.id}-${t.title.length}`;
+  const keepWorktree = t.state !== "queued" && (t.state !== "completed" || t.refused);
+  t.worktree = keepWorktree ? `~/.local/state/doctrine/worktrees/${t.project}/${t.id}` : null;
+});
+const ORPHANS = [
+  { project: "shop-api", path: "~/.local/state/doctrine/worktrees/shop-api/s-0931", dirty: true, ageDays: 21 },
+  { project: "doctrine", path: "~/.local/state/doctrine/worktrees/doctrine/t-1e2f", dirty: false, ageDays: 8 },
+];
+const WARNINGS = [
+  { at: NOW - 360 * MIN, text: "起動時に孤児の worktree を2件検出しました（自動削除はしません）" },
+  { at: NOW - 95 * MIN, text: "タスク t-3cd2: 未コミットの変更が残っているため worktree を削除しませんでした" },
+];
+
+// ================================================================ 表示状態
+const S = {
+  view: "tasks", project: "all", sel: "t-2b91",
+  diffLayout: "stack", scope: {}, file: {},
+  viewed: new Set(["s-1103|src/stock/idempotency.ts|k1", "s-1103|src/stock/reserve.ts|r1", "s-1103|test/stock/reserve.test.ts|t1"]),
+  comments: {}, editing: null, overall: {}, modal: null, composer: null, confirmWt: null, toast: null, showDone: false,
+};
+
+// ================================================================ 導出
+const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+const proj = (id) => PROJECTS.find((p) => p.id === id);
+const stepDef = (t) => WORKFLOWS[t.wf].find((x) => x.id === t.step);
+const isTerminal = (s) => ["completed", "failed", "canceled"].includes(s);
+function clock(ms) { const d = new Date(ms); return `${String(d.getMonth() + 1).padStart(2, "0")}/${String(d.getDate()).padStart(2, "0")} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`; }
+function elapsed(ms) { const m = Math.round((NOW - ms) / MIN); return m < 60 ? `${m}分` : `${Math.floor(m / 60)}時間${String(m % 60).padStart(2, "0")}分`; }
+function ago(ms) { const m = Math.round((NOW - ms) / MIN); if (m < 1) return "たった今"; if (m < 60) return `${m}分前`; if (m < 1440) return `${Math.floor(m / 60)}時間前`; return `${Math.floor(m / 1440)}日前`; }
+
+function groupOf(t) {
+  if (t.state === "suspended") return "review";
+  if (t.state === "failed" || t.refused || (t.degraded && !isTerminal(t.state))) return "check";
+  if (t.state === "running") return "running";
+  if (t.state === "queued") return "queued";
+  if (t.state === "paused") return "paused";
+  return "done";
+}
+const GROUPS = [
+  { key: "review", name: "レビュー待ち", sort: (a, b) => a.since - b.since },
+  { key: "check", name: "要確認", sort: (a, b) => b.since - a.since },
+  { key: "running", name: "実行中", sort: (a, b) => a.since - b.since },
+  { key: "queued", name: "待ち", sort: (a, b) => a.prio - b.prio || a.since - b.since },
+  { key: "paused", name: "一時停止", sort: (a, b) => b.since - a.since },
+];
+const visibleTasks = () => TASKS.filter((t) => S.project === "all" || t.project === S.project);
+function sidebarOrder() {
+  const ts = visibleTasks();
+  if (S.view === "done") return ts.filter((t) => groupOf(t) === "done").sort((a, b) => b.since - a.since);
+  return GROUPS.flatMap((g) => ts.filter((t) => groupOf(t) === g.key).sort(g.sort));
+}
+const countReview = () => TASKS.filter((t) => groupOf(t) === "review").length;
+
+function worktrees() {
+  const rows = TASKS.filter((t) => t.worktree).map((t) => ({ project: t.project, path: t.worktree, task: t, dirty: !!t.dirty, ageDays: isTerminal(t.state) ? Math.floor((NOW - t.since) / (1440 * MIN)) : null }));
+  return [...rows, ...ORPHANS.map((o) => ({ ...o, task: null }))].sort((a, b) => (b.ageDays ?? -1) - (a.ageDays ?? -1));
+}
+const staleCount = () => worktrees().filter((w) => (w.ageDays ?? 0) >= 7).length;
+
+// ================================================================ サイドバー
+const ICONS = {
+  inbox: '<svg viewBox="0 0 24 24"><path d="M3 13h5l1.5 3h5L16 13h5"/><path d="M5 5h14l2 8v6H3v-6z"/></svg>',
+  done: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/></svg>',
+  tree: '<svg viewBox="0 0 24 24"><circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="9" r="2"/><path d="M6 7v10M18 11c0 4-6 3-12 6"/></svg>',
+  gear: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>',
+};
+function rail() {
+  return `<nav class="rail" aria-label="ビュー">
+    <button class="ib" title="タスク" aria-pressed="${S.view === "tasks"}" data-act="view" data-v="tasks">${ICONS.inbox}${countReview() ? '<span class="pip"></span>' : ""}</button>
+    <button class="ib" title="終了したタスク" aria-pressed="${S.view === "done"}" data-act="view" data-v="done">${ICONS.done}</button>
+    <button class="ib" title="worktree と警告" aria-pressed="${S.view === "worktrees"}" data-act="view" data-v="worktrees">${ICONS.tree}${staleCount() || WARNINGS.length ? '<span class="pip"></span>' : ""}</button>
+    <span class="grow"></span>
+    <button class="ib" title="設定（エディタ・ターミナルのコマンドなど）" data-act="toast" data-msg="設定はプロトタイプの範囲外です">${ICONS.gear}</button>
+  </nav>`;
+}
+function icon(t) {
+  switch (groupOf(t)) {
+    case "review": return '<span class="diamond"></span>';
+    case "check": return t.degraded && !t.refused && t.state !== "failed" ? '<span class="bang deg">!</span>' : '<span class="bang">!</span>';
+    case "running": return '<span class="spin"></span>';
+    case "queued": return '<span class="ring"></span>';
+    case "paused": return '<span class="pause"></span>';
+    default: return t.state === "completed" ? '<span class="check"></span>' : '<span class="xmark"></span>';
+  }
+}
+function timeLabel(t) {
+  const g = groupOf(t);
+  if (g === "review") return clock(t.since);
+  if (g === "running") return elapsed(t.since);
+  if (g === "queued") return `P${t.prio} · ${ago(t.since)}`;
+  return ago(t.since);
+}
+function item(t) {
+  const p = proj(t.project);
+  return `<button class="it" data-act="sel" data-id="${t.id}" aria-current="${S.sel === t.id}">
+    <span class="ico">${icon(t)}</span>
+    <span class="t">${esc(t.title)}</span>
+    <span class="m"><span class="pj"><span class="pjdot" style="background:${p.color}"></span>${esc(p.id)}</span><span class="tm">${timeLabel(t)}</span></span>
+  </button>`;
+}
+function sidebar() {
+  const ts = visibleTasks();
+  const head = `<div class="side-head">
+    <select id="proj-filter" aria-label="プロジェクトで絞り込む">
+      <option value="all" ${S.project === "all" ? "selected" : ""}>${S.view === "done" ? "終了したタスク" : "全タスク"}</option>
+      ${PROJECTS.map((p) => `<option value="${p.id}" ${S.project === p.id ? "selected" : ""}>${p.id}</option>`).join("")}
+    </select>
+    <span class="count">${S.view === "done" ? ts.filter((t) => groupOf(t) === "done").length : ts.filter((t) => groupOf(t) !== "done").length}</span>
+    <span class="grow"></span>
+    <button class="plus" data-act="compose" title="新しいタスク" aria-label="新しいタスク">＋</button>
+  </div>`;
+  let body;
+  if (S.view === "done") {
+    body = sidebarOrder().map(item).join("") || '<p class="hint" style="padding:8px">ありません</p>';
+  } else {
+    body = GROUPS.map((g) => {
+      const list = ts.filter((t) => groupOf(t) === g.key).sort(g.sort);
+      if (!list.length) return "";
+      return `<section class="grp"><h3>${g.name} <span class="count">${list.length}</span></h3>${list.map(item).join("")}</section>`;
+    }).join("");
+  }
+  return `<aside class="side">${head}<div class="side-scroll">${body}</div>
+    <div class="side-foot"><span>5時間 <b>62%</b></span><span>7日 <b>38%</b></span><span>17:40 リセット</span></div></aside>`;
+}
+
+// ================================================================ diff
+function highlight(code) {
+  const re = /(\/\/.*$)|("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')|\b(const|let|return|if|else|async|await|function|export|import|from|throw|new|for|of|try|catch|type)\b|\b(\d+)\b/g;
+  let out = "", last = 0, m;
+  while ((m = re.exec(code))) {
+    out += esc(code.slice(last, m.index));
+    const cls = m[1] ? "com" : m[2] ? "str" : m[3] ? "kw" : "num";
+    out += `<span class="tk-${cls}">${esc(m[0])}</span>`;
+    last = m.index + m[0].length;
+  }
+  return out + esc(code.slice(last));
+}
+function filesFor(t) {
+  const since = S.scope[t.id] === "since";
+  return since ? t.diff.filter((f) => f.since).map((f) => ({ ...f, hunks: f.since })) : t.diff;
+}
+const stats = (f) => {
+  let a = 0, d = 0;
+  for (const h of f.hunks) for (const l of h.body.split("\n")) { if (l[0] === "+") a++; else if (l[0] === "-") d++; }
+  return { a, d };
+};
+const vkey = (t, f, hash = f.hash) => `${t.id}|${f.path}|${hash}`;
+const isViewed = (t, f) => S.viewed.has(vkey(t, f));
+const changedSinceViewed = (t, f) => !isViewed(t, f) && f.prevHash && f.prevHash !== f.hash && S.viewed.has(vkey(t, f, f.prevHash));
+const commentsOf = (t) => (S.comments[t.id] ??= []);
+
+function fileBlock(t, f) {
+  const viewed = isViewed(t, f);
+  const { a, d } = stats(f);
+  let rows = "";
+  for (const h of f.hunks) {
+    rows += `<div class="hunk">@@ -${h.old} +${h.new} @@</div>`;
+    let o = h.old, n = h.new;
+    for (const raw of h.body.split("\n")) {
+      const kind = raw[0] === "+" ? "a" : raw[0] === "-" ? "d" : "";
+      const text = raw.slice(1);
+      const on = kind === "a" ? "" : o, nn = kind === "d" ? "" : n;
+      const line = kind === "d" ? o : n;
+      rows += `<div class="ln ${kind}"><span class="o">${on}</span><span class="n">${nn}</span><button class="cm" data-act="lc-new" data-path="${esc(f.path)}" data-line="${line}" data-quote="${esc(text.trim())}" aria-label="${line}行目にコメント">+</button><span class="c">${highlight(text)}</span></div>`;
+      rows += lineComments(t, f.path, line);
+      if (kind !== "a") o++;
+      if (kind !== "d") n++;
+    }
+  }
+  return `<section class="file" id="file-${esc(f.path)}">
+    <header><span class="nm">${esc(f.path)}</span><span class="add mono">+${a}</span><span class="del mono">−${d}</span>
+      ${changedSinceViewed(t, f) ? '<span class="changed">前回見た後に変更</span>' : ""}
+      <span class="spacer"></span>
+      <button class="viewed ${viewed ? "on" : ""}" data-act="viewed" data-path="${esc(f.path)}">${viewed ? "✓ 見た" : "見た"}</button>
+    </header>
+    <div class="code">${rows}</div>
+  </section>`;
+}
+function lineComments(t, path, line) {
+  let html = "";
+  commentsOf(t).forEach((c, i) => {
+    if (c.path !== path || c.line !== line) return;
+    html += `<div class="lc"><span class="who">あなた · 送信前の下書き</span><div>${esc(c.text)}</div><div class="actions"><button class="btn sm" data-act="lc-del" data-i="${i}">削除</button></div></div>`;
+  });
+  const e = S.editing;
+  if (e && e.task === t.id && e.path === path && e.line === line) {
+    html += `<div class="lc"><span class="who">${esc(path)}:${line} にコメント</span>
+      <textarea id="lc-text" placeholder="エージェントへの指摘">${esc(e.text)}</textarea>
+      <div class="actions"><button class="btn sm primary" data-act="lc-save">下書きに追加</button><button class="btn sm" data-act="lc-cancel">やめる</button></div></div>`;
+  }
+  return html;
+}
+function composeRejection(t) {
+  const parts = commentsOf(t).map((c) => `${c.path}:${c.line}\n  > ${c.quote}\n  ${c.text}`);
+  const overall = (S.overall[t.id] ?? "").trim();
+  if (overall) parts.push(`全体: ${overall}`);
+  return parts.join("\n\n");
+}
+
+function md(src) {
+  const inline = (s) => esc(s).replace(/`([^`]+)`/g, "<code>$1</code>");
+  let html = "", list = null;
+  const close = () => { if (list) { html += `</${list}>`; list = null; } };
+  for (const line of src.split("\n")) {
+    let m;
+    if ((m = line.match(/^(#{1,2}) (.*)/))) { close(); html += `<h${m[1].length}>${inline(m[2])}</h${m[1].length}>`; }
+    else if ((m = line.match(/^- (.*)/))) { if (list !== "ul") { close(); html += "<ul>"; list = "ul"; } html += `<li>${inline(m[1])}</li>`; }
+    else if ((m = line.match(/^\d+\. (.*)/))) { if (list !== "ol") { close(); html += "<ol>"; list = "ol"; } html += `<li>${inline(m[1])}</li>`; }
+    else if (line.trim()) { close(); html += `<p>${inline(line)}</p>`; }
+  }
+  close();
+  return html;
+}
+
+// ================================================================ 中央: レビュー画面
+function openButtons(t) {
+  return `<button class="btn sm" data-act="toast" data-msg="code ${esc(t.worktree)} を起動しました">エディタで開く</button>
+    <button class="btn sm" data-act="toast" data-msg="konsole --workdir ${esc(t.worktree)} を起動しました">ターミナルで開く</button>`;
+}
+function reviewView(t) {
+  const def = stepDef(t);
+  const p = proj(t.project);
+  const files = filesFor(t);
+  const all = t.diff;
+  const hasSince = t.reviews.length > 0 && all.some((f) => f.since);
+  const scope = S.scope[t.id] ?? "all";
+  const cur = S.file[t.id] ?? files[0]?.path;
+  const shown = S.diffLayout === "single" ? files.filter((f) => f.path === cur) : files;
+  const unviewed = all.filter((f) => !isViewed(t, f));
+  const last = t.reviews[t.reviews.length - 1];
+  const declared = def.review?.files ?? [];
+  const ncom = commentsOf(t).length;
+  const canReject = ncom > 0 || (S.overall[t.id] ?? "").trim().length > 0;
+
+  return `<div class="pad">
+    <div class="crumbs"><span class="pjdot" style="background:${p.color}"></span><span>${esc(p.id)}</span><span class="mono">${esc(t.wf)}</span><span class="mono">${t.id}</span><span class="mono">P${t.prio}</span></div>
+    <h1>${esc(t.title)}</h1>
+    <div class="headrow">
+      <span class="pill p-attn">◆ ${esc(def.title)}</span>
+      ${t.reviews.length ? `<span class="pill p-muted">${t.reviews.length + 1}回目のレビュー</span>` : ""}
+      <span class="hint">${ago(t.since)}から待っています</span>
+      <span class="mono hint">${esc(t.branch)}</span>
+      <span class="spacer"></span>
+      ${openButtons(t)}
+    </div>
+
+    ${last ? `<details class="box quiet"><summary style="cursor:pointer"><b>前回の差し戻し</b> <span class="hint">${ago(last.at)}</span></summary><pre class="block" style="margin-top:8px">${esc(last.text)}</pre></details>` : ""}
+
+    ${declared.map((path) => `<section class="rv-files-md">
+      <header><span class="mono">${esc(path)}</span><span class="hint">このステップが見せるファイル（review.files）</span></header>
+      <div class="md">${md(t.reviewFiles?.[path] ?? "(ファイルがありません)")}</div>
+    </section>`).join("")}
+
+    <div class="headrow">
+      <b>変更</b>
+      <span class="hint">${all.length} ファイル · ベースブランチとの merge-base から worktree の現在まで（未コミットを含む）</span>
+      <span class="spacer"></span>
+      ${hasSince ? `<span class="seg" role="group" aria-label="差分の範囲"><button data-act="scope" data-s="all" aria-pressed="${scope === "all"}">全体</button><button data-act="scope" data-s="since" aria-pressed="${scope === "since"}">前回レビュー以降</button></span>` : ""}
+    </div>
+
+    ${all.length === 0 ? `<div class="empty-diff">コードの変更はまだありません。上の計画を読んで判断してください。</div>` : `
+    <div class="rv-body">
+      <nav class="filelist" aria-label="変更ファイル">
+        <header><span>見た ${all.length - unviewed.length} / ${all.length}</span><span class="mono">n / p · v</span></header>
+        ${files.map((f) => { const { a, d } = stats(f); return `<button class="fl" data-act="file" data-path="${esc(f.path)}" aria-current="${cur === f.path}">
+          <span class="v ${isViewed(t, f) ? "on" : ""}"></span>
+          <span class="nm">${esc(f.path)}</span>
+          <span class="st"><span class="add">+${a}</span><span class="del">−${d}</span>${changedSinceViewed(t, f) ? '<span class="changed">変更あり</span>' : ""}</span>
+        </button>`; }).join("")}
+        ${scope === "since" && all.length > files.length ? `<div class="hint" style="padding:6px 10px">前回から変わっていない ${all.length - files.length} ファイルを隠しています</div>` : ""}
+      </nav>
+      <div class="diffs">${shown.map((f) => fileBlock(t, f)).join("")}</div>
+    </div>`}
+  </div>
+  <footer class="decide">
+    <div>
+      <div class="meta"><span>行コメント <b>${ncom}</b> 件</span><span>未確認のファイル <b>${unviewed.length}</b> 件</span><span class="hint">判断にキーは割り当てていません</span></div>
+      <textarea id="overall" placeholder="全体へのコメント（差し戻すときに行コメントと一緒に送ります）">${esc(S.overall[t.id] ?? "")}</textarea>
+    </div>
+    <div class="actions">
+      <button class="btn danger" id="reject-btn" data-act="reject" ${canReject ? "" : "disabled"}>差し戻す…</button>
+      <button class="btn primary" data-act="approve">承認する</button>
+    </div>
+  </footer>`;
+}
+
+// ================================================================ 中央: タスク画面
+function taskView(t) {
+  const p = proj(t.project);
+  const g = groupOf(t);
+  const steps = WORKFLOWS[t.wf];
+  const idx = steps.findIndex((x) => x.id === t.step);
+  const stateTxt = { running: ["実行中", "p-run"], queued: ["待ち", "p-muted"], paused: ["一時停止", "p-muted"], failed: ["失敗", "p-danger"], completed: ["完了", "p-ok"], canceled: ["中止", "p-muted"] }[t.state];
+  const queuePos = TASKS.filter((x) => x.state === "queued").sort((a, b) => a.prio - b.prio || a.since - b.since).findIndex((x) => x.id === t.id) + 1;
+  const retry = t.state === "failed" || t.state === "canceled";
+  const def = stepDef(t);
+  return `<div class="pad">
+    <div class="crumbs"><span class="pjdot" style="background:${p.color}"></span><span>${esc(p.id)}</span><span class="mono">${esc(t.wf)}</span><span class="mono">${t.id}</span><span class="mono">P${t.prio}</span></div>
+    <h1>${esc(t.title)}</h1>
+    <div class="headrow">
+      <span class="pill ${stateTxt[1]}">${stateTxt[0]}</span>
+      ${t.step ? `<span>ステップ <span class="mono">${esc(t.step)}</span> <span class="hint">（${idx + 1} / ${steps.length}${t.attempt > 1 ? ` · ${t.attempt}回目` : ""}）</span></span>` : ""}
+      <span class="hint">${t.state === "running" ? `${elapsed(t.since)} 経過` : ago(t.since)}</span>
+    </div>
+
+    ${t.state === "failed" ? `<section class="box danger"><h2><span class="mono">${esc(t.step)}</span> で失敗しました（${t.attempt}回目。onFailure の maxAttempts に達しました）</h2><p>worktree は証拠として残しています。中を確認してから、同じ内容で投入し直すか、worktree を削除してください。</p></section>` : ""}
+    ${t.refused ? `<section class="box danger"><h2>worktree の削除を拒否しました</h2><p>完了時に未コミットの変更が残っていました。ワークフローの最終ステップがコミットしていない可能性があります。中を確認してから削除してください。</p><div class="actions"><button class="btn sm danger" data-act="wt-remove" data-path="${esc(t.worktree)}">worktree を削除…</button></div></section>` : ""}
+    ${t.degraded ? `<section class="box deg"><h2><span class="mono">${esc(t.degraded)}</span> が、権限で拒否された操作を含んだまま成功扱いで終わりました</h2><p>後続のステップは進んでいますが、エージェントが意図した操作（ここではコミット）はされていません。</p></section>` : ""}
+    ${t.state === "queued" ? `<section class="box quiet"><p>実行枠が空くのを待っています（行列の ${queuePos} 番目）。枠が取れた時点で worktree が作られます。</p></section>` : ""}
+
+    <div class="actions">
+      ${t.state === "running" ? '<button class="btn" data-act="pause">一時停止</button>' : ""}
+      ${t.state === "paused" ? '<button class="btn" data-act="resume">再開</button>' : ""}
+      ${!isTerminal(t.state) ? '<button class="btn danger" data-act="cancel">中止</button>' : ""}
+      ${retry ? '<button class="btn primary" data-act="retry">同じ内容で投入し直す</button>' : ""}
+      ${t.worktree ? `${openButtons(t)}<button class="btn sm" data-act="toast" data-msg="パスをコピーしました">パスをコピー</button>` : ""}
+    </div>
+
+    ${t.log ? `<div class="headrow"><b>ログ</b><span class="mono hint">${esc(t.step ?? "")}${t.attempt > 1 ? " #" + t.attempt : ""}</span><span class="spacer"></span><span class="hint">${t.state === "running" ? '<span class="spin" style="display:inline-block;vertical-align:-2px"></span> 追従中' : "末尾 200 行"}</span></div>
+    <pre class="block" id="log">${esc(t.log)}</pre>` : ""}
+
+    ${t.step ? `<details class="runs"><summary>実行履歴</summary><div class="runtable"><table>
+      <thead><tr><th>ステップ</th><th>種類</th><th>試行</th><th>状態</th></tr></thead>
+      <tbody>${steps.slice(0, idx + 1).map((s, i) => `<tr><td class="mono">${esc(s.id)}</td><td class="hint">${s.type}</td><td class="mono">#${i === idx ? t.attempt : 1}</td><td>${i < idx ? '<span class="pill p-ok">成功</span>' : `<span class="pill ${stateTxt[1]}">${stateTxt[0]}</span>`}${t.degraded === s.id ? ' <span class="pill p-deg">degraded</span>' : ""}</td></tr>`).join("")}</tbody>
+    </table></div></details>` : ""}
+  </div>`;
+}
+
+// ================================================================ 中央: worktree と警告
+function worktreeView() {
+  const rows = worktrees();
+  return `<div class="pad">
+    <h1>worktree と警告</h1>
+    <section class="box quiet"><h2>デーモンからの警告</h2><ul class="warnlist">${WARNINGS.map((w) => `<li>${esc(w.text)} <span class="hint">· ${ago(w.at)}</span></li>`).join("")}</ul></section>
+    <div class="headrow"><b>残っている worktree</b><span class="hint">${rows.length} 件 · 終端状態になってから7日を過ぎたものを「古い」とします（孤児はディレクトリの更新日時から）</span></div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>経過</th><th>タスク</th><th>変更</th><th>パス</th><th></th></tr></thead>
+      <tbody>${rows.map((w) => {
+        const live = w.task && !isTerminal(w.task.state);
+        return `<tr class="${(w.ageDays ?? 0) >= 7 ? "stale" : ""}">
+          <td class="mono">${w.ageDays == null ? "—" : w.ageDays + "日"}</td>
+          <td>${w.task ? `<button class="btn sm" data-act="sel" data-id="${w.task.id}" data-v="tasks">${esc(w.task.title)}</button>` : '<span class="pill p-muted">孤児</span>'}</td>
+          <td>${w.dirty ? '<span class="pill p-attn">未コミット</span>' : '<span class="hint">なし</span>'}</td>
+          <td class="mono">${esc(w.path)}</td>
+          <td>${live ? '<span class="hint">実行中は削除不可</span>' : `<button class="btn sm danger" data-act="wt-remove" data-path="${esc(w.path)}">削除…</button>`}</td>
+        </tr>`;
+      }).join("")}</tbody>
+    </table></div>
+  </div>`;
+}
+
+// ================================================================ モーダル
+function modal() {
+  if (!S.modal) return "";
+  const t = TASKS.find((x) => x.id === S.sel);
+  let body = "";
+  if (S.modal === "approve-confirm") {
+    const un = t.diff.filter((f) => !isViewed(t, f));
+    body = `<h2>まだ見ていないファイルが ${un.length} 件あります</h2>
+      <ul class="warnlist">${un.map((f) => `<li class="mono">${esc(f.path)}${changedSinceViewed(t, f) ? ' <span class="changed">前回見た後に変更</span>' : ""}</li>`).join("")}</ul>
+      <p class="hint">承認は止めません。見落としがないか確かめるための確認です。</p>
+      <div class="actions"><button class="btn primary" data-act="approve-do">このまま承認する</button><button class="btn" data-act="modal-close">戻って確認する</button></div>`;
+  } else if (S.modal === "reject-preview") {
+    const def = stepDef(t);
+    body = `<h2>差し戻してエージェントに送る内容</h2>
+      <p class="hint">行コメントと全体へのコメントを1つの文字列にまとめて <span class="mono">task.reject(comment)</span> で送ります。<span class="mono">${esc(def.onReject)}</span> ステップに戻ります。</p>
+      <pre class="block">${esc(composeRejection(t))}</pre>
+      <div class="actions"><button class="btn danger" data-act="reject-do">差し戻す</button><button class="btn" data-act="modal-close">戻る</button></div>`;
+  } else if (S.modal === "compose") {
+    const c = S.composer;
+    body = `<h2>${c.retryOf ? "同じ内容で投入し直す" : "新しいタスク"}</h2>
+      ${c.retryOf ? `<p class="hint">元のタスク <span class="mono">${c.retryOf}</span> と worktree はそのまま残ります。</p>` : ""}
+      <div class="grid2">
+        <div class="field-l"><label for="c-project">プロジェクト</label><select class="field" id="c-project">${PROJECTS.map((p) => `<option value="${p.id}" ${p.id === c.project ? "selected" : ""}>${p.id}</option>`).join("")}</select></div>
+        <div class="field-l"><label for="c-wf">ワークフロー</label><select class="field" id="c-wf">${Object.keys(WORKFLOWS).filter((w) => w.startsWith(c.project + "/")).map((w) => { const n = w.split("/")[1]; const dflt = n === proj(c.project).def; return `<option value="${w}" ${w === c.wf ? "selected" : ""}>${n}${dflt ? "（既定）" : ""}</option>`; }).join("")}</select></div>
+      </div>
+      <p class="hint">手順: ${WORKFLOWS[c.wf].map((s) => `<span class="mono">${esc(s.id)}</span>`).join(" → ")}</p>
+      <div class="field-l"><label for="c-title">タイトル</label><input type="text" id="c-title" value="${esc(c.title)}"></div>
+      <div class="field-l"><label for="c-prompt">指示</label><textarea id="c-prompt" rows="5">${esc(c.prompt)}</textarea></div>
+      <div class="field-l"><label for="c-prio">優先度</label><select class="field" id="c-prio">${[0, 1, 2, 3].map((n) => `<option value="${n}" ${n === c.prio ? "selected" : ""}>P${n}</option>`).join("")}</select></div>
+      <div class="actions"><button class="btn primary" data-act="create">投入する</button><button class="btn" data-act="modal-close">やめる</button></div>`;
+  } else if (S.modal === "wt-confirm") {
+    const w = worktrees().find((r) => r.path === S.confirmWt);
+    body = `<h2>worktree を削除しますか？</h2><p class="mono">${esc(w?.path)}</p>
+      ${w?.dirty ? "<p><b>未コミットの変更があります。削除すると失われ、戻せません。</b></p>" : ""}
+      <div class="actions"><button class="btn danger" data-act="wt-do">削除する</button><button class="btn" data-act="modal-close">やめる</button></div>`;
+  }
+  return `<div class="scrim" data-act="modal-close"></div><div class="modal" role="dialog">${body}</div>`;
+}
+
+// ================================================================ 描画
+function render() {
+  const t = TASKS.find((x) => x.id === S.sel);
+  let main;
+  if (S.view === "worktrees") main = worktreeView();
+  else if (!t) main = `<div class="pad"><p class="hint">左からタスクを選んでください</p></div>`;
+  else if (t.state === "suspended") main = reviewView(t);
+  else main = taskView(t);
+  const scrollTop = document.querySelector(".main")?.scrollTop ?? 0;
+  document.getElementById("root").innerHTML = `<div class="app">${rail()}${sidebar()}<main class="main">${main}</main></div>${modal()}
+    <div class="protobar" aria-label="プロトタイプ操作（評価対象外）"><span class="tag">PROTOTYPE</span>
+      <span>diff：<button data-act="layout">${S.diffLayout === "stack" ? "全ファイルを連続表示" : "1ファイルずつ表示"}</button></span>
+      <span><kbd>j</kbd><kbd>k</kbd> タスク <kbd>n</kbd><kbd>p</kbd> ファイル <kbd>v</kbd> 見た</span></div>
+    ${S.toast ? `<div class="toast" role="status">${esc(S.toast)}</div>` : ""}`;
+  const m = document.querySelector(".main");
+  if (m && render.keepScroll) m.scrollTop = scrollTop;
+  render.keepScroll = false;
+  const lc = document.getElementById("lc-text");
+  if (lc && S.editing?.focus) { lc.focus(); S.editing.focus = false; }
+}
+
+// ================================================================ 操作（スタブ）
+function toast(msg) { S.toast = msg; render.keepScroll = true; render(); clearTimeout(toast.h); toast.h = setTimeout(() => { S.toast = null; render.keepScroll = true; render(); }, 2200); }
+function selectNextReview(except) {
+  const next = sidebarOrder().find((x) => groupOf(x) === "review" && x.id !== except);
+  if (next) S.sel = next.id;
+}
+function openComposer(from) {
+  const project = from ? from.project : (S.project !== "all" ? S.project : PROJECTS[0].id);
+  S.composer = from
+    ? { retryOf: from.id, project, wf: from.wf, title: from.title, prompt: from.prompt, prio: from.prio }
+    : { project, wf: `${project}/${proj(project).def}`, title: "", prompt: "", prio: 2 };
+  S.modal = "compose";
+}
+function syncComposer() {
+  const c = S.composer; if (!c) return;
+  c.title = document.getElementById("c-title")?.value ?? c.title;
+  c.prompt = document.getElementById("c-prompt")?.value ?? c.prompt;
+  c.prio = Number(document.getElementById("c-prio")?.value ?? c.prio);
+}
+
+document.addEventListener("change", (e) => {
+  if (e.target.id === "proj-filter") { S.project = e.target.value; render(); }
+  if (e.target.id === "c-project") { syncComposer(); S.composer.project = e.target.value; S.composer.wf = `${e.target.value}/${proj(e.target.value).def}`; render(); }
+  if (e.target.id === "c-wf") { syncComposer(); S.composer.wf = e.target.value; render(); }
+});
+document.addEventListener("input", (e) => {
+  if (e.target.id === "overall") {
+    S.overall[S.sel] = e.target.value;
+    const t = TASKS.find((x) => x.id === S.sel);
+    document.getElementById("reject-btn").disabled = !(commentsOf(t).length || e.target.value.trim());
+  }
+  if (e.target.id === "lc-text" && S.editing) S.editing.text = e.target.value;
+});
+document.addEventListener("click", (e) => {
+  const el = e.target.closest("[data-act]");
+  if (!el) return;
+  const t = TASKS.find((x) => x.id === S.sel);
+  const act = el.dataset.act;
+  switch (act) {
+    case "view": S.view = el.dataset.v; if (S.view === "done") { const f = sidebarOrder()[0]; if (f) S.sel = f.id; } else if (S.view === "tasks" && groupOf(t) === "done") { const f = sidebarOrder()[0]; if (f) S.sel = f.id; } break;
+    case "sel": S.sel = el.dataset.id; if (el.dataset.v) S.view = el.dataset.v; S.editing = null; break;
+    case "toast": return toast(el.dataset.msg);
+    case "compose": openComposer(null); break;
+    case "retry": openComposer(t); break;
+    case "modal-close": syncComposer(); S.modal = null; break;
+    case "layout": S.diffLayout = S.diffLayout === "stack" ? "single" : "stack"; break;
+    case "scope": S.scope[t.id] = el.dataset.s; S.file[t.id] = undefined; break;
+    case "file": {
+      S.file[t.id] = el.dataset.path;
+      if (S.diffLayout === "stack") { document.getElementById("file-" + el.dataset.path)?.scrollIntoView({ block: "start", behavior: "smooth" }); render.keepScroll = true; }
+      break;
+    }
+    case "viewed": {
+      const f = t.diff.find((x) => x.path === el.dataset.path);
+      const k = vkey(t, f);
+      S.viewed.has(k) ? S.viewed.delete(k) : S.viewed.add(k);
+      render.keepScroll = true; break;
+    }
+    case "lc-new": S.editing = { task: t.id, path: el.dataset.path, line: Number(el.dataset.line), quote: el.dataset.quote, text: "", focus: true }; render.keepScroll = true; break;
+    case "lc-cancel": S.editing = null; render.keepScroll = true; break;
+    case "lc-save": {
+      const ed = S.editing;
+      if (ed.text.trim()) commentsOf(t).push({ path: ed.path, line: ed.line, quote: ed.quote, text: ed.text.trim() });
+      S.editing = null; render.keepScroll = true; break;
+    }
+    case "lc-del": commentsOf(t).splice(Number(el.dataset.i), 1); render.keepScroll = true; break;
+    case "approve": if (t.diff.some((f) => !isViewed(t, f))) { S.modal = "approve-confirm"; render.keepScroll = true; break; } // fallthrough
+    case "approve-do": {
+      const steps = WORKFLOWS[t.wf], i = steps.findIndex((x) => x.id === t.step);
+      S.modal = null;
+      if (i === steps.length - 1) { t.state = "completed"; t.worktree = null; }
+      else { t.state = "running"; t.step = steps[i + 1].id; t.attempt = 1; t.log = `$ ${steps[i + 1].id}\n…`; }
+      t.since = NOW; selectNextReview(t.id);
+      return toast(`承認しました: ${t.title}`);
+    }
+    case "reject": S.modal = "reject-preview"; render.keepScroll = true; break;
+    case "reject-do": {
+      const def = stepDef(t);
+      t.reviews.push({ at: NOW, text: composeRejection(t) });
+      S.comments[t.id] = []; S.overall[t.id] = "";
+      t.state = "running"; t.step = def.onReject; t.attempt += 1; t.since = NOW; t.log = "assistant: レビューの指摘を読みます\n…";
+      S.modal = null; selectNextReview(t.id);
+      return toast(`差し戻しました: ${t.title}`);
+    }
+    case "pause": t.state = "paused"; t.since = NOW; return toast("一時停止しました");
+    case "resume": t.state = "queued"; t.since = NOW; return toast("再開しました。行列の先頭に入ります");
+    case "cancel": t.state = "canceled"; t.since = NOW; t.dirty = true; return toast("中止しました。worktree は残します");
+    case "create": {
+      syncComposer();
+      const c = S.composer;
+      const id = (c.project[0]) + "-" + Math.random().toString(16).slice(2, 6);
+      TASKS.push({ id, wf: c.wf, project: c.project, title: c.title || "無題のタスク", prompt: c.prompt, state: "queued", step: null, attempt: 0, prio: c.prio, since: NOW, worktree: null, branch: `doctrine/${id}` });
+      S.modal = null; S.view = "tasks"; S.sel = id;
+      return toast("タスクを投入しました");
+    }
+    case "wt-remove": S.confirmWt = el.dataset.path; S.modal = "wt-confirm"; break;
+    case "wt-do": {
+      const p = S.confirmWt;
+      const oi = ORPHANS.findIndex((o) => o.path === p); if (oi >= 0) ORPHANS.splice(oi, 1);
+      TASKS.forEach((x) => { if (x.worktree === p) { x.worktree = null; x.refused = false; x.dirty = false; } });
+      const wi = WARNINGS.findIndex((w) => w.text.includes("t-3cd2")); if (wi >= 0 && !TASKS.find((x) => x.id === "t-3cd2").refused) WARNINGS.splice(wi, 1);
+      S.modal = null;
+      return toast("worktree を削除しました");
+    }
+  }
+  render();
+});
+document.addEventListener("keydown", (e) => {
+  if (e.target.closest("input,textarea,select,[contenteditable]") || e.metaKey || e.ctrlKey || e.altKey) return;
+  if (e.key === "Escape" && S.modal) { S.modal = null; render(); return; }
+  const t = TASKS.find((x) => x.id === S.sel);
+  if (e.key === "j" || e.key === "k") {
+    const order = sidebarOrder(); const i = order.findIndex((x) => x.id === S.sel);
+    const n = order[Math.max(0, Math.min(order.length - 1, i + (e.key === "j" ? 1 : -1)))];
+    if (n) { S.sel = n.id; S.editing = null; if (S.view === "worktrees") S.view = "tasks"; render(); }
+    return;
+  }
+  if (!t || t.state !== "suspended" || !t.diff.length) return;
+  const files = filesFor(t);
+  if (e.key === "n" || e.key === "p") {
+    const i = Math.max(0, files.findIndex((f) => f.path === (S.file[t.id] ?? files[0].path)));
+    const f = files[(i + (e.key === "n" ? 1 : files.length - 1)) % files.length];
+    S.file[t.id] = f.path; render.keepScroll = S.diffLayout === "stack"; render();
+    if (S.diffLayout === "stack") document.getElementById("file-" + f.path)?.scrollIntoView({ block: "start", behavior: "smooth" });
+  }
+  if (e.key === "v") {
+    const f = t.diff.find((x) => x.path === (S.file[t.id] ?? files[0].path));
+    const k = vkey(t, f); S.viewed.has(k) ? S.viewed.delete(k) : S.viewed.add(k);
+    render.keepScroll = true; render();
+  }
+});
+setInterval(() => {
+  const t = TASKS.find((x) => x.id === S.sel);
+  const pre = document.getElementById("log");
+  if (!t || t.state !== "running" || !pre || S.view === "worktrees") return;
+  t.logIdx = (t.logIdx ?? 0) + 1;
+  t.log += "\n" + FOLLOW_POOL[t.logIdx % FOLLOW_POOL.length];
+  pre.textContent = t.log;
+  pre.scrollTop = pre.scrollHeight;
+}, 1800);
+render();
+</script>
