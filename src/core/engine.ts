@@ -5,9 +5,13 @@ import { commitStepBoundary, StateConflictError, type StepBoundary } from "../db
 import { getStepOutputs, type StepRunStatus } from "../db/stepRuns.ts";
 import { attemptCount, getProject, getTask, withAttempt, type TaskRow, type TaskState } from "../db/tasks.ts";
 import { insertRateLimitSample } from "../db/rateLimits.ts";
+import { getSessionId } from "../db/sessions.ts";
 import type { Db } from "../db/schema.ts";
 import { assertTransition } from "./states.ts";
 import { logPathFor, runAgentStep, runCommandStep, type RunnerDeps, type StepOutcome } from "./stepRunner.ts";
+
+/** session を省略した agent ステップが共有する暗黙のロール名。 */
+export const DEFAULT_SESSION_ROLE = "default";
 
 export type Decision =
   | { kind: "next"; stepId: string }
@@ -123,12 +127,14 @@ export async function runTask(
 
     const attempt = attemptCount(task, step.id) + 1;
     const ctx = await contextFor(db, task);
-    // session id はタスク全体で1つ。「このステップを始める時点で既に会話が
-    // あったか」だけが resume すべきかを決める（ステップ内の再試行かどうかでは
-    // ない）。agent ステップが2つ並ぶワークフローで2度 start すると、同じ
-    // --session-id を使い回すことになり、CLI が拒否するか会話が継続しない。
-    const hadSession = task.claude_session_id !== null;
-    const sessionId = task.claude_session_id ?? crypto.randomUUID();
+    // セッションはロール単位（agent ステップの session、省略時は既定ロール）。
+    // 「このロールで会話が既にあったか」だけが resume すべきかを決める
+    // （ステップ内の再試行かどうかではない）。session を省略すると全 agent ステップが
+    // 同じ既定ロールを共有するので、今までどおり「タスクに会話は1本」になる。
+    const role = step.type === "agent" ? (step.session ?? DEFAULT_SESSION_ROLE) : null;
+    const existingSessionId = role ? await getSessionId(db, taskId, role) : undefined;
+    const hadSession = existingSessionId !== undefined;
+    const sessionId = existingSessionId ?? crypto.randomUUID();
 
     const logPath = logPathFor(deps.logRoot, taskId, step.id, attempt);
     // 開始時に running の行を立てる。クラッシュ復帰はこの行を見て、
@@ -142,14 +148,13 @@ export async function runTask(
         requireState: "running",
         taskPatch: {
           current_step_id: step.id, attempt_counts: withAttempt(task, step.id),
-          // 会話を始めるのは agent ステップだけ。command ステップでも書くと、
-          // 一度も start していない id が「会話がある」ことにされ、次の agent が
-          // その id で resume してしまう（project.setup は全ワークフローの
-          // 先頭に command ステップとして入るので、これは常道の形で必ず踏む）。
-          // 既存の非null値を消さないよう、キーごと省く（null を書かない）。
-          ...(step.type === "agent" ? { claude_session_id: sessionId } : {}),
           pending_feed: null,
         },
+        // 会話を始めるのは agent ステップだけ。command ステップでは書かない —
+        // 一度も start していないロールが「会話がある」ことにされ、次の agent が
+        // そのロールで resume してしまうのを防ぐ（project.setup は全ワークフローの
+        // 先頭に command ステップとして入るので、これは常道の形で必ず踏む）。
+        sessionUpsert: role ? { role, session_id: sessionId } : undefined,
         stepRun: {
           step_id: step.id, attempt, status: "running", exit_code: null,
           started_at: new Date().toISOString(), ended_at: null, log_path: logPath,
