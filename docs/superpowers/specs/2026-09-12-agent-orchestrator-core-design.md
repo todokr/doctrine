@@ -566,7 +566,9 @@ claude -p --resume <session-id> '<追加指示>' --output-format stream-json --v
   （`DOCTRINE_STATE_DIR` など）の書き換えは必ずフックかテスト本体の中で行い、後始末する
   - `@std/testing/bdd` はファイル直下のフックをテストより前に宣言することを要求する
 - **型チェック**: `deno check`。ビルドは不要（Deno が TS をそのまま実行する）。
-  配布は `deno compile` の単一バイナリを想定（[#5](https://github.com/todokr/doctrine/issues/5)）
+  コマンド化は2通り（[#5](https://github.com/todokr/doctrine/issues/5)）。開発用は `deno task install`
+  （`deno install -g` がチェックアウトのソースを指すシェルスクリプトを置く。ソースを保存すれば即反映）、
+  配布用は `deno task build`（`deno compile` で `dist/` に単一バイナリ）
 - **依存管理**: `deno.json` の `imports` と `deno.lock`
   - lockfile はコミットし、`setup` 相当は `deno install --frozen` で固定する
 - **ツールチェーン管理**: mise（`mise.toml` をリポジトリ直下にコミット）

@@ -15,17 +15,28 @@ mise install                        # Deno のバージョンをリポジトリ�
 deno install --frozen               # 依存（deno.lock 固定）を取得
 ```
 
-`dctl` / `dctld` はまだコマンドとしてインストールできない
-（[#5](https://github.com/todokr/doctrine/issues/5)）。手元で試す間は次のように
-Deno から直接起動する。
+`dctl` / `dctld` をコマンドとして使うには、次のどちらかを行う。
 
 ```bash
-deno run -A src/daemon/main.ts &   # デーモンを起動（フォアグラウンドで動く。&で背景へ）
-deno run -A src/cli/dctl.ts ls     # CLIから接続
+deno task install   # ~/.deno/bin に dctl / dctld を置く（要 PATH）
+deno task build     # dist/dctl / dist/dctld に単一バイナリを作る
 ```
 
-以降、このREADMEでは `dctl` / `dctld` と書くが、実体は
-`deno run -A src/cli/dctl.ts` / `deno run -A src/daemon/main.ts` と読み替えること。
+- **`deno task install`（普段使い）** — 置かれるのはこのチェックアウトのソースを
+  `deno run` する小さなシェルスクリプトなので、ソースを保存すれば再インストール
+  なしで反映される。その代わりチェックアウトを移動・削除すると動かなくなる。
+  `deno.json` の `imports` はインストール時点のものが複製されるので、
+  依存を変えたら `deno task install` をやり直すこと。
+- **`deno task build`（配布用）** — Deno もチェックアウトも不要な単体の実行ファイル。
+  1本あたり約100MBあり、ソースを変えるたびにビルドし直す必要がある。
+
+```bash
+dctld &     # デーモンを起動（フォアグラウンドで動く。&で背景へ）
+dctl ls     # CLIから接続
+```
+
+インストールせずに `deno run -A src/daemon/main.ts` / `deno run -A src/cli/dctl.ts`
+として直接動かしてもよい。
 
 テストは `deno task test`、型チェックは `deno task check`。
 
@@ -222,9 +233,3 @@ dctl get <task-id>
   `agent` ステップは同一の `claude_session_id` を共有する。計画担当と
   レビュー担当を別々のエージェントとして持つような構成は、このサブプロジェクトの
   スコープ外（`docs/overview.md` 4章参照）。
-- **`dctl` / `dctld` をコマンドとしてインストールする手段が無い**
-  （[#5](https://github.com/todokr/doctrine/issues/5)）。Deno への移行で
-  `package.json` の `bin` は無くなった。`deno compile` で単一バイナリを
-  作る方向で解消し得るが未着手。それまではこのリポジトリをチェックアウトして
-  `deno run -A src/cli/dctl.ts` / `deno run -A src/daemon/main.ts` として動かす
-  （本READMEの「セットアップ」節はこの形）。
