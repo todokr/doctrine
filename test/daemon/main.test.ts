@@ -4,7 +4,10 @@ import { mkdtemp, rm, stat, chmod } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn, type ChildProcess } from "node:child_process";
-import { startDaemon } from "../../src/daemon/main.ts";
+import { startDaemon, tickCycle } from "../../src/daemon/main.ts";
+import { openDb } from "../../src/db/migrate.ts";
+import { createMockAdapter } from "../../src/adapter/mock.ts";
+import type { DaemonContext } from "../../src/daemon/handlers.ts";
 
 let root: string;
 const daemons: { stop(): Promise<void> }[] = [];
@@ -96,4 +99,57 @@ test("ソケットに繋げるか判定できない（権限拒否など）な�
       return true;
     },
   );
+});
+
+/**
+ * setInterval が `void tick(ctx)` を裸で呼んでいると、tick の reject に
+ * 持ち主がいない。Node は未処理の rejection でプロセスを落とすので、
+ * 1周のスケジューリング失敗がデーモンごと道連れにする。tickCycle は
+ * 決して reject せず、代わりに理由を stderr に出す。
+ */
+test("スケジューリングの1周が失敗してもデーモンは落ちず、理由が出て次の周期は動く", async () => {
+  const db = openDb(":memory:");
+  const ctx: DaemonContext = {
+    db,
+    adapter: createMockAdapter({ result: { ok: true, text: "done" } }),
+    logRoot: join(root, "logs"),
+    globalLimit: 4,
+    broadcast: () => {},
+    loadWorkflow: async () => { throw new Error("使わない"); },
+    running: new Set(),
+    warnings: ["前の周で積まれた警告"],
+  };
+
+  const logged: string[] = [];
+  const realError = console.error;
+  console.error = (...args: unknown[]) => { logged.push(args.map(String).join(" ")); };
+
+  const prepare = db.prepare.bind(db);
+  let boom = true;
+  (db as unknown as { prepare: typeof prepare }).prepare = ((sql: string) => {
+    if (boom && sql.includes("state = 'queued'")) throw new Error("DBが壊れた");
+    return prepare(sql);
+  }) as typeof prepare;
+
+  try {
+    // reject しない（ここで throw すれば、setInterval 上では
+    // unhandled rejection になってプロセスが死んでいたということ）。
+    await tickCycle(ctx);
+
+    assert.ok(
+      logged.some((l) => /\[tick\].*スケジューリングの1周に失敗/.test(l)),
+      `失敗は黙って飲み込まず出す。実際: ${JSON.stringify(logged)}`,
+    );
+    assert.ok(logged.some((l) => /前の周で積まれた警告/.test(l)), "失敗した周でも警告は吐き出す");
+    assert.equal(ctx.warnings.length, 0);
+
+    // 次の周期は普通に回る（1周の失敗でスケジューリングを止めない）
+    boom = false;
+    logged.length = 0;
+    await tickCycle(ctx);
+    assert.equal(logged.length, 0, `正常な周は何も出さない。実際: ${JSON.stringify(logged)}`);
+  } finally {
+    console.error = realError;
+    db.close();
+  }
 });

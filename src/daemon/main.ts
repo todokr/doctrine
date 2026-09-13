@@ -88,6 +88,30 @@ async function assertSocketNotLive(path: string): Promise<void> {
   await unlink(path).catch(() => {});
 }
 
+/**
+ * setInterval から呼ばれる1周期ぶんの処理。**この関数は決して reject しない。**
+ *
+ * `void tick(ctx)` を裸で呼ぶと、tick の reject に持ち主がいない。Node は
+ * 未処理の promise rejection でプロセスを落とすので、1周のスケジューリング失敗が
+ * 「その周をスキップする」ではなく**デーモンごと落とす**ことになり、実行中の
+ * タスクが全部巻き添えになる（子プロセスは孤児として残り、次回起動の
+ * recovery 頼みになる）。1周の失敗はスケジューリングを止める理由ではない。
+ *
+ * ただし黙って飲み込まない。毎周期失敗し続けているデーモンは運用者に見える必要がある。
+ */
+export async function tickCycle(ctx: DaemonContext): Promise<void> {
+  try {
+    await tick(ctx);
+  } catch (e) {
+    console.error(`[tick] スケジューリングの1周に失敗しました（次の周期で再試行します）: ${(e as Error).message}`);
+  }
+  // 警告は溜めっぱなしにしない。見えていれば直せる。失敗した周でも吐く
+  // （tick は途中まで進んで警告を積んでから落ちることがある）。
+  try {
+    for (const w of ctx.warnings.splice(0)) console.error(`[warn] ${w}`);
+  } catch { /* ここで落ちて周期を止める価値のあるものは何もない */ }
+}
+
 export async function startDaemon(o: {
   dbPath?: string; socketPath?: string; logRoot?: string; globalLimit?: number; tickMs?: number;
 } = {}): Promise<{ stop(): Promise<void> }> {
@@ -133,11 +157,7 @@ export async function startDaemon(o: {
     }
   }
 
-  const timer = setInterval(() => {
-    void tick(ctx);
-    // 警告は溜めっぱなしにしない。見えていれば直せる。
-    for (const w of ctx.warnings.splice(0)) console.error(`[warn] ${w}`);
-  }, o.tickMs ?? 1000);
+  const timer = setInterval(() => { void tickCycle(ctx); }, o.tickMs ?? 1000);
   timer.unref();
 
   return {
