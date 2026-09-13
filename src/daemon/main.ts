@@ -1,9 +1,5 @@
 #!/usr/bin/env -S deno run --allow-all
-import { readFileSync } from "node:fs";
-import { stat, unlink } from "node:fs/promises";
-import { connect } from "node:net";
-import { join } from "node:path";
-import { homedir } from "node:os";
+import { join } from "@std/path";
 import type { DatabaseSync } from "node:sqlite";
 import { openDb } from "../db/migrate.ts";
 import { createClaudeAdapter } from "../adapter/claude.ts";
@@ -15,9 +11,10 @@ import { parseWorkflow } from "../workflow/schema.ts";
 import { withSetupStep } from "../workflow/project.ts";
 import { createServer, socketPath } from "./server.ts";
 import { createHandler, loadWorkflowFromDisk, tick, type DaemonContext } from "./handlers.ts";
+import { homeDir } from "../util/home.ts";
 
 export function stateRoot(): string {
-  return process.env.DOCTRINE_STATE_DIR ?? join(homedir(), ".local", "state", "doctrine");
+  return Deno.env.get("DOCTRINE_STATE_DIR") ?? join(homeDir(), ".local", "state", "doctrine");
 }
 
 /**
@@ -32,7 +29,7 @@ function buildWorkflowLookup(db: DatabaseSync): WorkflowLookup {
       const project = getProject(db, task.project_id);
       if (!project) return undefined;
       const path = join(project.path, ".doctrine", "workflows", `${task.workflow_name}.yaml`);
-      const text = readFileSync(path, "utf8");
+      const text = Deno.readTextFileSync(path);
       const workflow = parseWorkflow(text).workflow;
       return withSetupStep(workflow, project.setup ?? undefined);
     } catch {
@@ -57,22 +54,21 @@ function buildWorkflowLookup(db: DatabaseSync): WorkflowLookup {
  * 場合は必ず拒否する側に倒す。
  */
 async function assertSocketNotLive(path: string): Promise<void> {
-  const exists = await stat(path).then(() => true, () => false);
+  const exists = await Deno.stat(path).then(() => true, () => false);
   if (!exists) return;
 
-  const result = await new Promise<{ kind: "live" } | { kind: "stale" } | { kind: "unknown"; code: string }>(
-    (resolve) => {
-      const sock = connect(path);
-      sock.once("connect", () => { sock.destroy(); resolve({ kind: "live" }); });
-      sock.once("error", (err: NodeJS.ErrnoException) => {
-        if (err.code === "ECONNREFUSED" || err.code === "ENOENT") {
-          resolve({ kind: "stale" });
-        } else {
-          resolve({ kind: "unknown", code: err.code ?? String(err) });
-        }
-      });
-    },
-  );
+  let result: { kind: "live" } | { kind: "stale" } | { kind: "unknown"; code: string };
+  try {
+    const conn = await Deno.connect({ transport: "unix", path });
+    conn.close();
+    result = { kind: "live" };
+  } catch (err) {
+    if (err instanceof Deno.errors.ConnectionRefused || err instanceof Deno.errors.NotFound) {
+      result = { kind: "stale" };
+    } else {
+      result = { kind: "unknown", code: (err as { code?: string }).code ?? String(err) };
+    }
+  }
 
   if (result.kind === "live") {
     throw new Error(`デーモンが既に動作しています（ソケット: ${path}）。二重起動はできません。`);
@@ -84,7 +80,7 @@ async function assertSocketNotLive(path: string): Promise<void> {
     );
   }
   // 古いソケットファイル。次の listen() が改めて unlink するが、ここで消しておいても害はない。
-  await unlink(path).catch(() => {});
+  await Deno.remove(path).catch(() => {});
 }
 
 /**
@@ -157,7 +153,7 @@ export async function startDaemon(o: {
   }
 
   const timer = setInterval(() => { void tickCycle(ctx); }, o.tickMs ?? 1000);
-  timer.unref();
+  Deno.unrefTimer(timer);
 
   return {
     async stop() {

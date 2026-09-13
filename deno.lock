@@ -7,6 +7,7 @@
     "jsr:@std/fs@^1.0.24": "1.0.24",
     "jsr:@std/internal@^1.0.12": "1.0.14",
     "jsr:@std/internal@^1.0.14": "1.0.14",
+    "jsr:@std/path@1": "1.1.6",
     "jsr:@std/path@^1.1.5": "1.1.6",
     "jsr:@std/path@^1.1.6": "1.1.6",
     "jsr:@std/testing@^1.0.20": "1.0.20",
@@ -64,6 +65,7 @@
   },
   "workspace": {
     "dependencies": [
+      "jsr:@std/path@1",
       "jsr:@std/testing@^1.0.20",
       "npm:yaml@^2.6.0",
       "npm:zod@^3.24.0"

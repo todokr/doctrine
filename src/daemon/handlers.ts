@@ -1,6 +1,4 @@
-import { randomUUID } from "node:crypto";
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join } from "@std/path";
 import type { DatabaseSync } from "node:sqlite";
 import { parseWorkflow, type Workflow } from "../workflow/schema.ts";
 import { parseProjectConfig, withSetupStep } from "../workflow/project.ts";
@@ -45,7 +43,7 @@ export async function loadWorkflowFromDisk(
   projectPath: string, name: string,
 ): Promise<{ workflow: Workflow; warnings: string[] }> {
   const path = join(projectPath, ".doctrine", "workflows", `${name}.yaml`);
-  const text = await readFile(path, "utf8").catch(() => {
+  const text = await Deno.readTextFile(path).catch(() => {
     throw new Error(`ワークフローがありません: ${path}`);
   });
   return parseWorkflow(text);
@@ -56,7 +54,7 @@ export function createHandler(ctx: DaemonContext): Handler {
     switch (method) {
       case "project.add": {
         const path = req(params, "path");
-        const cfgText = await readFile(join(path, ".doctrine", "project.yaml"), "utf8");
+        const cfgText = await Deno.readTextFile(join(path, ".doctrine", "project.yaml"));
         const cfg = parseProjectConfig(cfgText);
         const id = insertProject(ctx.db, {
           path, default_workflow: cfg.defaultWorkflow, max_concurrent: cfg.maxConcurrent,
@@ -70,7 +68,7 @@ export function createHandler(ctx: DaemonContext): Handler {
         const path = req(params, "path");
         const project = getProjectByPath(ctx.db, path);
         if (!project) throw new Error(`未登録のプロジェクトです: ${path}`);
-        const cfg = parseProjectConfig(await readFile(join(path, ".doctrine", "project.yaml"), "utf8"));
+        const cfg = parseProjectConfig(await Deno.readTextFile(join(path, ".doctrine", "project.yaml")));
         ctx.db.prepare(
           `UPDATE projects SET default_workflow=?, max_concurrent=?, base_branch=?, setup=? WHERE id=?`,
         ).run(cfg.defaultWorkflow, cfg.maxConcurrent, cfg.baseBranch, cfg.setup ?? null, project.id);
@@ -86,7 +84,7 @@ export function createHandler(ctx: DaemonContext): Handler {
         const workflowName = typeof params.workflow === "string" ? params.workflow : project.default_workflow;
         // 不正な定義はタスク作成時に落とす
         const { warnings } = await ctx.loadWorkflow(projectPath, workflowName);
-        const id = randomUUID();
+        const id = crypto.randomUUID();
         const task = insertTask(ctx.db, {
           id, project_id: project.id, title, prompt, workflow_name: workflowName,
           branch: branchNameFor(id, title),
@@ -198,7 +196,7 @@ export function createHandler(ctx: DaemonContext): Handler {
         const stepRunId = Number(params.step_run_id);
         const run = getStepRun(ctx.db, stepRunId);
         if (!run) throw new Error("ステップ実行がありません");
-        const text = await readFile(run.log_path, "utf8").catch(() => "");
+        const text = await Deno.readTextFile(run.log_path).catch(() => "");
         const tailLines = typeof params.tail === "number" ? params.tail : 200;
         return { log_path: run.log_path, lines: text.split("\n").slice(-tailLines) };
       }

@@ -1,5 +1,4 @@
 #!/usr/bin/env -S deno run --allow-all
-import { connect } from "node:net";
 import { socketPath } from "../daemon/server.ts";
 import type { Response, ServerEvent } from "../daemon/protocol.ts";
 
@@ -93,45 +92,44 @@ function isEvent(msg: Response | ServerEvent): msg is ServerEvent {
   return "event" in msg;
 }
 
-export function call(
+export async function call(
   path: string,
   method: string,
   params: Record<string, unknown>,
   timeoutMs = REQUEST_TIMEOUT_MS,
 ): Promise<unknown> {
-  return new Promise((resolve, reject) => {
-    const requestId = 1;
-    const socket = connect(path);
-    let buf = "";
-    let settled = false;
+  const requestId = 1;
+  // タイムアウト時に読み取り待ちの接続を閉じるため、接続は外から触れる場所に置く。
+  const state: { conn?: Deno.UnixConn } = {};
+  let timer: ReturnType<typeof setTimeout> | undefined;
 
-    const timer = setTimeout(() => {
-      if (settled) return;
-      settled = true;
-      socket.destroy();
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
       reject(new Error(`デーモンからの応答がありません（${timeoutMs}ミリ秒待ちました）`));
     }, timeoutMs);
+  });
 
-    function settle(fn: () => void): void {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      fn();
+  const exchange = (async (): Promise<unknown> => {
+    try {
+      state.conn = await Deno.connect({ transport: "unix", path });
+    } catch (err) {
+      if (err instanceof Deno.errors.NotFound) {
+        throw new Error(`デーモンが起動していないようです（ソケットが見つかりません: ${path}）`);
+      }
+      throw err;
     }
+    const conn = state.conn;
+    const request = new TextEncoder().encode(JSON.stringify({ id: requestId, method, params }) + "\n");
+    let offset = 0;
+    while (offset < request.length) offset += await conn.write(request.subarray(offset));
 
-    socket.setEncoding("utf8");
-    socket.on("error", (err: NodeJS.ErrnoException) => {
-      settle(() => {
-        if (err.code === "ENOENT") {
-          reject(new Error(`デーモンが起動していないようです（ソケットが見つかりません: ${path}）`));
-        } else {
-          reject(err);
-        }
-      });
-    });
-    socket.on("connect", () => socket.write(JSON.stringify({ id: requestId, method, params }) + "\n"));
-    socket.on("data", (chunk: string) => {
-      buf += chunk;
+    const decoder = new TextDecoder();
+    const bytes = new Uint8Array(64 * 1024);
+    let buf = "";
+    while (true) {
+      const n = await conn.read(bytes);
+      if (n === null) throw new Error("デーモンが応答を返す前に接続を閉じました");
+      buf += decoder.decode(bytes.subarray(0, n), { stream: true });
       let i: number;
       while ((i = buf.indexOf("\n")) !== -1) {
         const line = buf.slice(0, i);
@@ -142,15 +140,8 @@ export function call(
         try {
           msg = JSON.parse(line) as Response | ServerEvent;
         } catch {
-          // これはこの Promise executor の外（'data' コールバック）で起きるので、
-          // 素の throw は誰にも catch されず uncaught exception としてプロセスを
-          // 落とす。必ずここで捕まえて reject に変換し、ソケットも閉じる。
           const excerpt = line.length > 200 ? `${line.slice(0, 200)}…` : line;
-          settle(() => {
-            socket.destroy();
-            reject(new Error(`デーモンからの応答がJSONとして読めません: ${excerpt}`));
-          });
-          return;
+          throw new Error(`デーモンからの応答がJSONとして読めません: ${excerpt}`);
         }
 
         if (isEvent(msg)) continue; // このコマンドはイベント購読をしないので無視
@@ -158,28 +149,29 @@ export function call(
           // id が null ということは、デーモンがリクエスト自体を JSON として
           // 読めなかったということ。この接続でこれ以上まともな応答は来ないので、
           // 無視して待ち続けるのではなく、ここで確定的に失敗させる。
-          settle(() => {
-            socket.end();
-            reject(new Error(msg.ok ? "不明なプロトコルエラーです" : msg.error));
-          });
-          return;
+          throw new Error(msg.ok ? "不明なプロトコルエラーです" : msg.error);
         }
         if (msg.id !== requestId) continue;
-        settle(() => {
-          socket.end();
-          if (msg.ok) resolve(msg.result);
-          else reject(new Error(msg.error));
-        });
-        return;
+        if (msg.ok) return msg.result;
+        throw new Error(msg.error);
       }
-    });
-  });
+    }
+  })();
+  // タイムアウトが先に確定した後、閉じた接続の読み取りが reject しても未処理にしない。
+  exchange.catch(() => {});
+
+  try {
+    return await Promise.race([exchange, timeout]);
+  } finally {
+    clearTimeout(timer);
+    try { state.conn?.close(); } catch { /* 既に閉じている */ }
+  }
 }
 
 export async function main(argv: string[]): Promise<number> {
   try {
     const { method, params } = parseArgv(argv);
-    const result = await call(process.env.DOCTRINE_SOCKET ?? socketPath(), method, params);
+    const result = await call(Deno.env.get("DOCTRINE_SOCKET") ?? socketPath(), method, params);
     console.log(JSON.stringify(result, null, 2));
     return 0;
   } catch (e) {
@@ -189,5 +181,5 @@ export async function main(argv: string[]): Promise<number> {
 }
 
 if (import.meta.main) {
-  process.exitCode = await main(process.argv.slice(2));
+  Deno.exitCode = await main(Deno.args);
 }
