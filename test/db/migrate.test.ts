@@ -186,6 +186,7 @@ const COLUMNS = {
     started_at: true, ended_at: true, log_path: true, cost_usd: true, num_turns: true, duration_ms: true,
   },
   step_outputs: { task_id: true, step_id: true, stdout: true, stderr: true, exit_code: true },
+  task_sessions: { task_id: true, role: true, session_id: true },
   rate_limit_samples: { id: true, observed_at: true, window: true, utilization: true, resets_at: true },
 } satisfies { [T in keyof Database]: { [C in keyof Database[T]]: true } };
 
@@ -203,12 +204,12 @@ async function appliedMigrations(d: Db): Promise<string[]> {
   return rows.map((r) => r.name);
 }
 
-test("マイグレーションで5つのテーブルができる", async () => {
+test("マイグレーションで6つのテーブルができる", async () => {
   const d = await db();
   const { rows } = await sql<{ name: string }>`SELECT name FROM sqlite_master WHERE type='table' ORDER BY name`
     .execute(d);
   const names = rows.map((r) => r.name);
-  for (const t of ["projects", "rate_limit_samples", "step_outputs", "step_runs", "tasks"]) {
+  for (const t of ["projects", "rate_limit_samples", "step_outputs", "step_runs", "task_sessions", "tasks"]) {
     assert.ok(names.includes(t), `${t} が無い: ${names.join(",")}`);
   }
 });
@@ -269,12 +270,12 @@ test("開き直してもマイグレーションは二度流れず、データ�
   const path = await tempDbPath();
   const first = await openDb(path);
   await seed(first);
-  assert.deepEqual(await appliedMigrations(first), ["0001_baseline"]);
+  assert.deepEqual(await appliedMigrations(first), ["0001_baseline", "0002_task_sessions"]);
   await first.destroy();
 
   const second = await openDb(path);
   try {
-    assert.deepEqual(await appliedMigrations(second), ["0001_baseline"]);
+    assert.deepEqual(await appliedMigrations(second), ["0001_baseline", "0002_task_sessions"]);
     assert.equal((await second.selectFrom("projects").selectAll().execute()).length, 1);
   } finally {
     await second.destroy();
@@ -299,12 +300,36 @@ test("pending_feed を足す前に作られたDBファイルは、行を保っ�
 
   const d = await openDb(path);
   try {
-    assert.deepEqual(await appliedMigrations(d), ["0001_baseline"]);
+    assert.deepEqual(await appliedMigrations(d), ["0001_baseline", "0002_task_sessions"]);
     const old = await getTask(d, "old");
     assert.equal(old?.state, "suspended", "既存の行は残る");
     assert.equal(old?.pending_feed, null, "列が足されていて、読める");
     await d.updateTable("tasks").set({ pending_feed: "feed" }).where("id", "=", "old").execute();
     assert.equal((await getTask(d, "old"))?.pending_feed, "feed", "書ける");
+  } finally {
+    await d.destroy();
+  }
+});
+
+test("claude_session_id を持つ既存タスクは role \"default\" として task_sessions に移される", async () => {
+  const path = await tempDbPath();
+  const legacy = new DatabaseSync(path);
+  legacy.exec(LEGACY_DDL);
+  legacy.prepare("INSERT INTO projects (path, default_workflow) VALUES ('/repo', 'feature')").run();
+  legacy.prepare(
+    `INSERT INTO tasks (id, project_id, title, prompt, workflow_name, state, branch, claude_session_id, created_at, updated_at)
+     VALUES ('old', 1, 'T', 'P', 'feature', 'running', 'b', 'sess-1', 'x', 'x')`,
+  ).run();
+  legacy.prepare(
+    `INSERT INTO tasks (id, project_id, title, prompt, workflow_name, state, branch, created_at, updated_at)
+     VALUES ('no-session', 1, 'T', 'P', 'feature', 'queued', 'b2', 'x', 'x')`,
+  ).run();
+  legacy.close();
+
+  const d = await openDb(path);
+  try {
+    const rows = await d.selectFrom("task_sessions").selectAll().execute();
+    assert.deepEqual(rows.map((r) => ({ task_id: r.task_id, role: r.role, session_id: r.session_id })), [{ task_id: "old", role: "default", session_id: "sess-1" }]);
   } finally {
     await d.destroy();
   }

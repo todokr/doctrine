@@ -230,6 +230,64 @@ steps:
   assert.equal(adapter.calls[1].sessionId, adapter.calls[0].sessionId);
 });
 
+test("異なる session を持つ agent ステップは独立した会話になる", async () => {
+  const { db, root, workflow } = await taskFixture(`
+name: f
+steps:
+  - id: plan
+    type: agent
+    session: planner
+    prompt: "計画して"
+  - id: implement
+    type: agent
+    session: implementer
+    prompt: "実装して"
+`);
+  const adapter = createMockAdapter({ result: { ok: true, text: "done" } });
+  await runTask(db, "t1", workflow, { db, adapter, logRoot: join(root, "logs"), globalLimit: 4 });
+
+  assert.equal(adapter.calls.length, 2);
+  assert.equal(adapter.calls[0].kind, "start");
+  assert.equal(adapter.calls[1].kind, "start", "role が違うので implementer は自分の会話を持たない");
+  assert.notEqual(adapter.calls[1].sessionId, adapter.calls[0].sessionId, "ロールごとに別の session id");
+});
+
+test("session ごとに独立した会話が保たれる（別ロールを挟んでも取り違えない）", async () => {
+  const { db, root, workflow } = await taskFixture(`
+name: f
+steps:
+  - id: implement
+    type: agent
+    session: implementer
+    prompt: "実装して"
+  - id: review
+    type: agent
+    session: reviewer
+    prompt: "レビューして"
+  - id: test
+    type: command
+    run: "false"
+    onFailure:
+      goto: implement
+      maxAttempts: 2
+      feed: "指摘があった"
+`);
+  const adapter = createMockAdapter({ result: { ok: true, text: "done" } });
+  await runTask(db, "t1", workflow, { db, adapter, logRoot: join(root, "logs"), globalLimit: 4 });
+
+  // implement(start) -> review(start) -> test(失敗) -> implement(resume) -> review(resume)
+  // -> test(失敗、maxAttempts=2 を使い切って failed)
+  assert.equal(adapter.calls.length, 4);
+  assert.equal(adapter.calls[0].kind, "start");
+  assert.equal(adapter.calls[1].kind, "start");
+  assert.equal(adapter.calls[2].kind, "resume");
+  assert.equal(adapter.calls[3].kind, "resume");
+  assert.equal(adapter.calls[2].sessionId, adapter.calls[0].sessionId, "implementer の会話が続く");
+  assert.equal(adapter.calls[3].sessionId, adapter.calls[1].sessionId, "reviewer の会話が続く");
+  assert.notEqual(adapter.calls[0].sessionId, adapter.calls[1].sessionId, "ロールごとに別の session id");
+  assert.equal((await getTask(db, "t1"))?.state, "failed", "maxAttempts を使い切って failed");
+});
+
 test("先行する command ステップは session を消費しない（最初の agent は start）", async () => {
   const { db, root, workflow } = await taskFixture(`
 name: f

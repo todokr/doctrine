@@ -1,6 +1,6 @@
 import { test } from "@std/testing/bdd";
 import assert from "node:assert/strict";
-import { parseWorkflow, WorkflowValidationError, type CommandStep } from "../../src/workflow/schema.ts";
+import { parseWorkflow, WorkflowValidationError, type CommandStep, type AgentStep } from "../../src/workflow/schema.ts";
 
 const VALID = `
 name: feature
@@ -168,4 +168,53 @@ steps:
     assert.match(msg, /[぀-ヿ一-鿿]/);
     return true;
   });
+});
+
+test("agent ステップの session を読める", () => {
+  const yaml = `
+name: roles
+steps:
+  - id: plan
+    type: agent
+    session: planner
+    prompt: "計画してください"
+  - id: review
+    type: approval
+    title: "確認してください"
+`;
+  const { workflow } = parseWorkflow(yaml);
+  assert.equal((workflow.steps[0] as AgentStep).session, "planner");
+});
+
+test("session を省略した agent ステップは undefined のまま", () => {
+  const { workflow } = parseWorkflow(VALID);
+  assert.equal((workflow.steps[0] as AgentStep).session, undefined);
+});
+
+test("session に使えない文字は日本語で案内する", () => {
+  const yaml = `
+name: bad
+steps:
+  - id: plan
+    type: agent
+    session: "plan ner"
+    prompt: "x"
+`;
+  assert.throws(() => parseWorkflow(yaml), (e: unknown) => {
+    assert.ok(e instanceof WorkflowValidationError);
+    assert.match(e.issues.join("\n"), /session/);
+    return true;
+  });
+});
+
+test("command ステップに session を書くと弾かれる", () => {
+  const yaml = `
+name: bad
+steps:
+  - id: a
+    type: command
+    run: "true"
+    session: x
+`;
+  assert.throws(() => parseWorkflow(yaml), WorkflowValidationError);
 });

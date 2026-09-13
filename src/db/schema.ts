@@ -43,6 +43,12 @@ export interface TasksTable {
   updated_at: string;
 }
 
+export interface TaskSessionsTable {
+  task_id: string;
+  role: string;
+  session_id: string;
+}
+
 export interface StepRunsTable {
   id: Generated<number>;
   task_id: string;
@@ -79,6 +85,7 @@ export interface Database {
   tasks: TasksTable;
   step_runs: StepRunsTable;
   step_outputs: StepOutputsTable;
+  task_sessions: TaskSessionsTable;
   rate_limit_samples: RateLimitSamplesTable;
 }
 

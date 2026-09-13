@@ -4,7 +4,7 @@ import { z } from "zod";
 export type Branch = { goto: string; maxAttempts: number; feed?: string };
 export type CommandStep = { id: string; type: "command"; run: string; onFailure?: Branch };
 export type AgentStep = {
-  id: string; type: "agent"; prompt: string;
+  id: string; type: "agent"; prompt: string; session?: string;
   permissionMode?: string; model?: string; onFailure?: Branch;
 };
 export type ApprovalStep = { id: string; type: "approval"; title: string; onReject?: Branch };
@@ -39,6 +39,7 @@ const stepSchema = z.discriminatedUnion("type", [
   z.object({ id: stepId, type: z.literal("command"), run: z.string().min(1), onFailure: branch.optional() }).strict(),
   z.object({
     id: stepId, type: z.literal("agent"), prompt: z.string().min(1),
+    session: z.string().min(1).regex(/^[a-zA-Z0-9_-]+$/, "sessionは英数字・ハイフン・アンダースコアのみ").optional(),
     permissionMode: z.string().optional(), model: z.string().optional(), onFailure: branch.optional(),
   }).strict(),
   z.object({ id: stepId, type: z.literal("approval"), title: z.string().min(1), onReject: branch.optional() }).strict(),
