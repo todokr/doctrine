@@ -13,7 +13,6 @@
 ```bash
 mise install                        # Deno のバージョンをリポジトリに固定
 deno install --frozen               # 依存（deno.lock 固定）を取得
-mkdir -p ~/.local/state/doctrine    # dctld はこのディレクトリを自分で作らない
 ```
 
 `dctl` / `dctld` はまだコマンドとしてインストールできない

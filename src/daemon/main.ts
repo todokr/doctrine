@@ -1,5 +1,5 @@
 #!/usr/bin/env -S deno run --allow-all
-import { join } from "@std/path";
+import { dirname, join } from "@std/path";
 import { openDb } from "../db/migrate.ts";
 import { createClaudeAdapter } from "../adapter/claude.ts";
 import { recoverOnStartup, defaultProbe, type WorkflowLookup } from "../core/recovery.ts";
@@ -113,7 +113,11 @@ export async function startDaemon(o: {
   const resolvedSocketPath = o.socketPath ?? socketPath();
   await assertSocketNotLive(resolvedSocketPath);
 
-  const db = await openDb(o.dbPath ?? join(stateRoot(), "doctrine.db"));
+  // SQLite は親ディレクトリを作らない。作らずに開くと "unable to open database file"
+  // という原因の分かりにくいエラーで即終了する。ソケット側（server.listen）と揃えて 0o700 で作る。
+  const dbPath = o.dbPath ?? join(stateRoot(), "doctrine.db");
+  await Deno.mkdir(dirname(dbPath), { recursive: true, mode: 0o700 });
+  const db = await openDb(dbPath);
 
   const ctx: DaemonContext = {
     db,

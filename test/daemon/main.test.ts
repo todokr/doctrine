@@ -102,6 +102,24 @@ test("ソケットに繋げるか判定できない（権限拒否など）な�
   );
 });
 
+test("状態ディレクトリが存在しなくても、0o700 で作って起動できる", async () => {
+  const state = join(root, "nested", "state");
+  const prev = Deno.env.get("DOCTRINE_STATE_DIR");
+  Deno.env.set("DOCTRINE_STATE_DIR", state);
+  try {
+    const d = await startDaemon({ socketPath: join(root, "dctld.sock"), tickMs: 1_000_000 });
+    daemons.push(d);
+
+    const s = await stat(state);
+    assert.ok(s.isDirectory());
+    assert.equal(s.mode & 0o777, 0o700, "DBを置くディレクトリは本人以外に見せない");
+    await stat(join(state, "doctrine.db"));
+  } finally {
+    if (prev === undefined) Deno.env.delete("DOCTRINE_STATE_DIR");
+    else Deno.env.set("DOCTRINE_STATE_DIR", prev);
+  }
+});
+
 /**
  * setInterval が `void tick(ctx)` を裸で呼んでいると、tick の reject に
  * 持ち主がいない。Node は未処理の rejection でプロセスを落とすので、
