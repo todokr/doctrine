@@ -175,6 +175,18 @@ uncle-jam の `pending` はこれに置き換える
 並ぶとボードが嘘をつく
 - **枠の解放はスコープごとに違う**（5章で詳述）— 全体枠は解放し、プロジェクト枠は保持する
 
+**実装時に追加された遷移が2つある**（上の表には現れない、`queued` / `suspended` からの追加の辺）:
+
+- **`queued` → `failed`** — ワークフローが読み込めない、またはworktreeが作成できない
+  場合、1つもステップを実行しないままタスクを失敗させる必要がある。`running` を経由
+  させると、実際には実行していないステップ実行を記録したことになり嘘になる。
+  `queued` のまま残すという選択肢もあったが、それではスケジューラが毎周期リトライし
+  続け、他タスクの進行を巻き込みかねないため、`failed` として確定させる
+- **`suspended` → `completed`** — 最終ステップが `approval` であるワークフローは、
+  承認された瞬間に完了する。`queued` を経由させて次のステップの不在をスケジューラに
+  発見させるのは、待つ理由が無いのに一瞬枠を再取得させ、実態のない `queued` を
+  記録することになるため、直接 `completed` に遷移させる
+
 ### 枠の占有数はカウンタで持たない
 
 `running` なタスクを数えて導出する。カウンタを持てば必ず状態とズレる。
@@ -185,10 +197,30 @@ uncle-jam の `pending` はこれに置き換える
 - `tasks` — **これ自体がスナップショット**。`id`, `project_id`, `title`, `prompt`,
 `workflow_name`, `state`, `current_step_id`, `attempt_counts`(JSON),
 `branch`, `worktree_path`, `claude_session_id`, `child_pid`, `child_started_at`,
-`priority`, `created_at`, `updated_at`
+`priority`, `resumed`, `pending_feed`, `created_at`, `updated_at`
+  - `resumed` — 実装時に追加。「再開するタスクは行列の先頭に入る」（5章）の
+    順序付けに使う。`paused` / `suspended` からの明示的な再開、クラッシュ復帰時の
+    `running` → `queued` だけでなく、`approval` の承認・却下（次のステップ／
+    `onReject.goto` 先へ `queued` として戻す）でもこのフラグを立てる。
+    いずれも「既に進行していたタスクが `queued` へ戻る」という共通の形をしており、
+    新規タスクより先に枠を取り戻すべき点は同じであるため
+  - `pending_feed` — 実装時に追加。`onReject.feed` を展開した文字列を
+    suspend境界をまたいで運ぶ。`approval` の承認/却下はエンジンとは別の
+    APIコール（`applyApproval`）で行われるため、エンジンのインメモリ変数は
+    その呼び出しをまたいで生きられない。展開済みの feed をDBに置くことで、
+    再開後のステップに正しく渡す
 - `step_runs` — ステップ1回の実行記録。`task_id`, `step_id`, `attempt`, `status`,
 `exit_code`, `started_at`, `ended_at`, `log_path`,
 `cost_usd`, `num_turns`, `duration_ms`。**UIの「実行履歴」はこのテーブル**
+  - `status` の実際の値は `running` / `success` / `failed` / `degraded` の4つ
+    （`CHECK` 制約で固定）。本来ここに欲しい5つ目の値は `interrupted`
+    （デーモンクラッシュ時に `running` のまま閉じるしかなかった行を正直に表す）
+    だが、実装時点でマイグレーション機構が無く（`migrate.ts` は
+    `CREATE TABLE IF NOT EXISTS` のみで、既存のDBファイルにはスキーマ変更が
+    決して反映されない）、`CHECK` に新しい値を足すと、そのDBファイルへの
+    書き込みが既存の制約に弾かれて起動できなくなる。そのため中断された
+    ステップ実行は現状 `failed` として閉じている。マイグレーションが入り次第、
+    `interrupted` を追加すること
 - `step_outputs` — 変数展開に使う分だけ（stdout/stderr の末尾）
 - `rate_limit_samples` — Claude Code から流れてくるレート消費率の記録（6章）
 
@@ -370,9 +402,20 @@ NDJSON（1行1JSON）。観測した `type`:
 ワークフローは停止させない（判断材料を出すところまでが①の責務）
 - `terminal_reason: "completed"`
 
-**未確認**: プロセス終了コードと `is_error` の対応関係は実測していない。
-`**result` 行を権威とし、終了コードは補助**とする。
-対応表は実装時に確認し、確認結果をこのspecに追記すること。
+**実測結果**（`claude` v2.1.269、2026-09-12実施。以下2ケースのみ、詳細はTask 8レポート参照）:
+
+| ケース | 終了コード | `is_error` | `permission_denials` |
+|---|---|---|---|
+| 正常終了（`say hi`） | `0` | `false` | `[]` |
+| 権限で弾かれた実行（`--permission-mode default --permission-prompts none` で `rm` を試みさせる） | `0` | `false` | 非空（`tool_name: "Bash"` の1件） |
+
+両ケースとも終了コードは `0` で、`is_error` も両方 `false` だった。つまり**終了コードは
+成否はおろか degraded かどうかも区別しない**——プロセスが完走した場合、正常終了と
+権限拒否のどちらも「終了コード0・`is_error: false`」という同じ組み合わせを返す。
+終了コードが役立つのはプロセスが `result` 行を出さずに落ちた場合（クラッシュ等）の検知のみで、
+その用途では非0を想定する（未計測。意図的にクラッシュさせる実測は本タスクの範囲外とした）。
+これは設計時点の想定（result 行が権威、終了コードは補助）と完全に一致するため、
+`resultFrom` の実装は変更していない。
 
 ### `rate_limit_event`
 
@@ -393,8 +436,14 @@ NDJSON（1行1JSON）。観測した `type`:
 ### 再開
 
 ```
-claude -p --resume <session-id> --output-format stream-json --verbose ... '<追加指示>'
+claude -p --resume <session-id> '<追加指示>' --output-format stream-json --verbose --permission-prompts none ...
 ```
+
+プロンプトは `--resume <session-id>` の直後・残りのフラグより前に置く。
+この順序は2026-09-12に実バイナリ（claude v2.1.269）で検証済み: 同一セッションを
+`--resume` で再開し、この順序で渡したプロンプトが正しく認識されて返答に反映されることを
+確認した（詳細はTask 8レポート参照。当初の記述ではプロンプトを末尾に置いていたが、
+実装・実測に合わせてここを訂正した）。
 
 クラッシュ復帰と、`approval` ステップでの「却下＋追加指示」の両方をこれで賄う。
 
