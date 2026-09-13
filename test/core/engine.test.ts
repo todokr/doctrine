@@ -6,10 +6,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { decide, runTask, applyApproval } from "../../src/core/engine.ts";
 import { parseWorkflow } from "../../src/workflow/schema.ts";
-import { openDb } from "../../src/db/migrate.ts";
+import { DatabaseSync } from "node:sqlite";
+import { openDb, openDbOn } from "../../src/db/migrate.ts";
 import { insertProject, insertTask, getTask } from "../../src/db/tasks.ts";
 import { getStepOutputs, getStepRun, listStepRuns } from "../../src/db/stepRuns.ts";
 import { createMockAdapter } from "../../src/adapter/mock.ts";
+import type { Db } from "../../src/db/schema.ts";
 
 const roots: string[] = [];
 
@@ -84,10 +86,10 @@ test("approval ステップに来たら suspend", () => {
 async function taskFixture(workflowYaml: string) {
   const root = await mkdtemp(join(tmpdir(), "doctrine-engine-"));
   roots.push(root);
-  const db = openDb(":memory:");
-  const pid = insertProject(db, { path: root, default_workflow: "f", max_concurrent: 1, base_branch: "main", setup: null });
-  insertTask(db, { id: "t1", project_id: pid, title: "T", prompt: "直して", workflow_name: "f", branch: "doctrine/t1-t", priority: 2 });
-  db.prepare("UPDATE tasks SET state='running', worktree_path=? WHERE id='t1'").run(root);
+  const db = await openDb(":memory:");
+  const pid = await insertProject(db, { path: root, default_workflow: "f", max_concurrent: 1, base_branch: "main", setup: null });
+  await insertTask(db, { id: "t1", project_id: pid, title: "T", prompt: "直して", workflow_name: "f", branch: "doctrine/t1-t", priority: 2 });
+  await db.updateTable("tasks").set({ state: "running", worktree_path: root }).where("id", "=", "t1").execute();
   return { db, root, workflow: parseWorkflow(workflowYaml).workflow };
 }
 
@@ -97,8 +99,8 @@ async function taskFixture(workflowYaml: string) {
  * 直接書き換える）。runTask は running のタスクを進める前提なので、
  * queued のまま2回目の runTask を呼ぶのはテストの都合としても不正確。
  */
-function toRunning(db: ReturnType<typeof openDb>, taskId: string): void {
-  db.prepare("UPDATE tasks SET state = 'running' WHERE id = ?").run(taskId);
+async function toRunning(db: Db, taskId: string): Promise<void> {
+  await db.updateTable("tasks").set({ state: "running" }).where("id", "=", taskId).execute();
 }
 
 test("成功する2ステップを通して completed になる", async () => {
@@ -115,8 +117,8 @@ steps:
   await runTask(db, "t1", workflow, {
     db, adapter: createMockAdapter({ result: {} }), logRoot: join(root, "logs"), globalLimit: 4,
   });
-  assert.equal(getTask(db, "t1")?.state, "completed");
-  assert.deepEqual(listStepRuns(db, "t1").map((r) => [r.step_id, r.status]), [["a", "success"], ["b", "success"]]);
+  assert.equal((await getTask(db, "t1"))?.state, "completed");
+  assert.deepEqual((await listStepRuns(db, "t1")).map((r) => [r.step_id, r.status]), [["a", "success"], ["b", "success"]]);
 });
 
 // 元の brief のテストは「テストが失敗したらエージェントに差し戻し、2周目で通る」と
@@ -156,9 +158,9 @@ steps:
 
   await runTask(db, "t1", workflow, { db, adapter, logRoot: join(root, "logs"), globalLimit: 4 });
 
-  const runs = listStepRuns(db, "t1");
+  const runs = await listStepRuns(db, "t1");
   assert.equal(runs.filter((r) => r.step_id === "implement").length, 2, "実装ステップへ2回目に戻って成功する");
-  assert.equal(getTask(db, "t1")?.state, "completed");
+  assert.equal((await getTask(db, "t1"))?.state, "completed");
 });
 
 test("maxAttempts を使い切ったら failed になる", async () => {
@@ -180,9 +182,9 @@ steps:
     db, adapter: createMockAdapter({ result: { ok: true, text: "やった" } }),
     logRoot: join(root, "logs"), globalLimit: 4,
   });
-  const runs = listStepRuns(db, "t1");
+  const runs = await listStepRuns(db, "t1");
   assert.equal(runs.filter((r) => r.step_id === "test").length, 3, "test ステップは maxAttempts 回まで試す");
-  assert.equal(getTask(db, "t1")?.state, "failed");
+  assert.equal((await getTask(db, "t1"))?.state, "failed");
 });
 
 test("差し戻しでは resume が使われる（会話が継続する）", async () => {
@@ -283,8 +285,8 @@ steps:
 `);
   const adapter = createMockAdapter({ result: {} });
   await runTask(db, "t1", workflow, { db, adapter, logRoot: join(root, "logs"), globalLimit: 4 });
-  assert.equal(getTask(db, "t1")?.state, "suspended");
-  const runsBefore = listStepRuns(db, "t1").length;
+  assert.equal((await getTask(db, "t1"))?.state, "suspended");
+  const runsBefore = (await listStepRuns(db, "t1")).length;
 
   // 承認待ちの間に YAML が書き換えられ、review ステップが消えた状態。
   // handlers は承認のたびにディスクから読み直すので、これが渡ってくる。
@@ -296,15 +298,15 @@ steps:
     run: "true"
 `).workflow;
 
-  assert.throws(
+  await assert.rejects(
     () => applyApproval(db, "t1", { approved: true, comment: "" }, edited),
     /review/,
     "見つからないステップ名を名指しして落ちる",
   );
-  const t = getTask(db, "t1")!;
+  const t = (await getTask(db, "t1"))!;
   assert.equal(t.state, "suspended", "書き込みは一切起きない");
   assert.equal(t.current_step_id, "review");
-  assert.equal(listStepRuns(db, "t1").length, runsBefore,
+  assert.equal((await listStepRuns(db, "t1")).length, runsBefore,
     "steps[-1 + 1] は steps[0]。黙って先頭からやり直してはいけない");
 });
 
@@ -322,7 +324,7 @@ steps:
   await runTask(db, "t1", workflow, {
     db, adapter: createMockAdapter({ result: {} }), logRoot: join(root, "logs"), globalLimit: 4,
   });
-  const t = getTask(db, "t1")!;
+  const t = (await getTask(db, "t1"))!;
   assert.equal(t.state, "suspended");
   assert.equal(t.current_step_id, "review");
 });
@@ -339,8 +341,8 @@ steps:
     run: "true"
 `);
   await runTask(db, "t1", workflow, { db, adapter: createMockAdapter({ result: {} }), logRoot: join(root, "logs"), globalLimit: 4 });
-  applyApproval(db, "t1", { approved: true, comment: "" }, workflow);
-  const t = getTask(db, "t1")!;
+  await applyApproval(db, "t1", { approved: true, comment: "" }, workflow);
+  const t = (await getTask(db, "t1"))!;
   assert.equal(t.state, "queued");
   assert.equal(t.resumed, 1);
   assert.equal(t.current_step_id, "after");
@@ -362,11 +364,11 @@ steps:
       feed: "レビューで却下された:\\n{{ steps.review.stdout }}"
 `);
   await runTask(db, "t1", workflow, { db, adapter: createMockAdapter({ result: {} }), logRoot: join(root, "logs"), globalLimit: 4 });
-  applyApproval(db, "t1", { approved: false, comment: "命名が変です" }, workflow);
-  const t = getTask(db, "t1")!;
+  await applyApproval(db, "t1", { approved: false, comment: "命名が変です" }, workflow);
+  const t = (await getTask(db, "t1"))!;
   assert.equal(t.state, "queued");
   assert.equal(t.current_step_id, "implement");
-  assert.equal(getStepOutputs(db, "t1").review.stdout, "命名が変です");
+  assert.equal((await getStepOutputs(db, "t1")).review.stdout, "命名が変です");
 });
 
 test("却下の feed が resume するエージェントに実際に渡る（保存されているだけでは足りない）", async () => {
@@ -386,11 +388,11 @@ steps:
 `);
   const adapter = createMockAdapter({ result: {} });
   await runTask(db, "t1", workflow, { db, adapter, logRoot: join(root, "logs"), globalLimit: 4 });
-  applyApproval(db, "t1", { approved: false, comment: "命名が変です" }, workflow);
+  await applyApproval(db, "t1", { approved: false, comment: "命名が変です" }, workflow);
 
   // 承認待ちの間の runTask 呼び出しは終わっている。ここが新しい runTask 呼び出しで、
   // ローカル変数の pendingFeed は無 — DB の pending_feed から引き継げているかを見る。
-  toRunning(db, "t1"); // スケジューラが queued を拾って running にした想定
+  await toRunning(db, "t1"); // スケジューラが queued を拾って running にした想定
   await runTask(db, "t1", workflow, { db, adapter, logRoot: join(root, "logs"), globalLimit: 4 });
 
   assert.equal(adapter.calls.length, 2);
@@ -417,18 +419,18 @@ steps:
   const adapter = createMockAdapter({ result: {} });
 
   await runTask(db, "t1", workflow, { db, adapter, logRoot: join(root, "logs"), globalLimit: 4 });
-  applyApproval(db, "t1", { approved: false, comment: "1回目" }, workflow);
-  assert.equal(getTask(db, "t1")?.state, "queued", "1回目の却下: まだ goto できる");
+  await applyApproval(db, "t1", { approved: false, comment: "1回目" }, workflow);
+  assert.equal((await getTask(db, "t1"))?.state, "queued", "1回目の却下: まだ goto できる");
 
-  toRunning(db, "t1");
+  await toRunning(db, "t1");
   await runTask(db, "t1", workflow, { db, adapter, logRoot: join(root, "logs"), globalLimit: 4 });
-  applyApproval(db, "t1", { approved: false, comment: "2回目" }, workflow);
-  assert.equal(getTask(db, "t1")?.state, "queued", "2回目の却下: まだ goto できる");
+  await applyApproval(db, "t1", { approved: false, comment: "2回目" }, workflow);
+  assert.equal((await getTask(db, "t1"))?.state, "queued", "2回目の却下: まだ goto できる");
 
-  toRunning(db, "t1");
+  await toRunning(db, "t1");
   await runTask(db, "t1", workflow, { db, adapter, logRoot: join(root, "logs"), globalLimit: 4 });
-  applyApproval(db, "t1", { approved: false, comment: "3回目" }, workflow);
-  assert.equal(getTask(db, "t1")?.state, "failed", "3回目の却下: maxAttempts(3) を使い切って failed");
+  await applyApproval(db, "t1", { approved: false, comment: "3回目" }, workflow);
+  assert.equal((await getTask(db, "t1"))?.state, "failed", "3回目の却下: maxAttempts(3) を使い切って failed");
 });
 
 test("却下を重ねると review ステップの step_run.attempt が増えていく", async () => {
@@ -449,12 +451,12 @@ steps:
   const adapter = createMockAdapter({ result: {} });
 
   await runTask(db, "t1", workflow, { db, adapter, logRoot: join(root, "logs"), globalLimit: 4 });
-  applyApproval(db, "t1", { approved: false, comment: "1回目" }, workflow);
-  toRunning(db, "t1");
+  await applyApproval(db, "t1", { approved: false, comment: "1回目" }, workflow);
+  await toRunning(db, "t1");
   await runTask(db, "t1", workflow, { db, adapter, logRoot: join(root, "logs"), globalLimit: 4 });
-  applyApproval(db, "t1", { approved: false, comment: "2回目" }, workflow);
+  await applyApproval(db, "t1", { approved: false, comment: "2回目" }, workflow);
 
-  const reviewRuns = listStepRuns(db, "t1").filter((r) => r.step_id === "review");
+  const reviewRuns = (await listStepRuns(db, "t1")).filter((r) => r.step_id === "review");
   assert.equal(reviewRuns.length, 2);
   assert.ok(reviewRuns[0].attempt < reviewRuns[1].attempt,
     `attempt は増えていくはず: ${reviewRuns.map((r) => r.attempt)}`);
@@ -480,22 +482,22 @@ steps:
 `);
   const adapter = createMockAdapter({ result: {} });
   await runTask(db, "t1", workflow, { db, adapter, logRoot: join(root, "logs"), globalLimit: 4 });
-  applyApproval(db, "t1", { approved: false, comment: "だめ" }, workflow);
+  await applyApproval(db, "t1", { approved: false, comment: "だめ" }, workflow);
   // ここで pending_feed が立っているはず
-  assert.notEqual(getTask(db, "t1")?.pending_feed, null);
+  assert.notEqual((await getTask(db, "t1"))?.pending_feed, null);
 
   // 差し戻し後、implement が resume で feed を受け取り、review へ再度到達して承認する
-  toRunning(db, "t1");
+  await toRunning(db, "t1");
   await runTask(db, "t1", workflow, { db, adapter, logRoot: join(root, "logs"), globalLimit: 4 });
-  applyApproval(db, "t1", { approved: true, comment: "" }, workflow);
-  assert.equal(getTask(db, "t1")?.pending_feed, null, "消費した feed は残らない");
+  await applyApproval(db, "t1", { approved: true, comment: "" }, workflow);
+  assert.equal((await getTask(db, "t1"))?.pending_feed, null, "消費した feed は残らない");
 
   // after ステップまで進む runTask 呼び出し。ここでの implement 呼び出しは
   // もう無い（after は command ステップ）ので、代わりに直近の agent 呼び出し
   // （差し戻し直後の resume）にだけ feed 文字列が含まれていたことを確認する。
-  toRunning(db, "t1");
+  await toRunning(db, "t1");
   await runTask(db, "t1", workflow, { db, adapter, logRoot: join(root, "logs"), globalLimit: 4 });
-  assert.equal(getTask(db, "t1")?.state, "completed");
+  assert.equal((await getTask(db, "t1"))?.state, "completed");
 
   const feedCalls = adapter.calls.filter((c) => c.prompt.includes("XYZ"));
   assert.equal(feedCalls.length, 1, "feed を含む呼び出しは差し戻し直後の1回だけ");
@@ -513,8 +515,8 @@ steps:
     title: "見て"
 `);
   await runTask(db, "t1", workflow, { db, adapter: createMockAdapter({ result: {} }), logRoot: join(root, "logs"), globalLimit: 4 });
-  applyApproval(db, "t1", { approved: true, comment: "" }, workflow);
-  assert.equal(getTask(db, "t1")?.state, "completed");
+  await applyApproval(db, "t1", { approved: true, comment: "" }, workflow);
+  assert.equal((await getTask(db, "t1"))?.state, "completed");
 });
 
 test("ステップ開始時に running の step_run 行が立ち、コールバックへ実IDが渡る", async () => {
@@ -525,14 +527,16 @@ steps:
     type: command
     run: "true"
 `);
-  const started: { id: number; status: string }[] = [];
+  const started: { id: number; status: Promise<string> }[] = [];
   const finished: { id: number; stepId: string; status: string }[] = [];
   await runTask(db, "t1", workflow, {
     db, adapter: createMockAdapter({ result: {} }), logRoot: join(root, "logs"), globalLimit: 4,
     onStepRunStarted: (_taskId, stepRunId, stepId, attempt) => {
       // コールバックの時点でDBに running の行が実在することを確認する
       // （クラッシュ復帰は running のまま止まっている行を目印にする）。
-      started.push({ id: stepRunId, status: getStepRun(db, stepRunId)!.status });
+      // コールバックは同期なので、ここで発行した読み取りを後で待つ。読み取りは
+      // ステップ終了のコミットより先に接続を取るので、この時点の行が見える。
+      started.push({ id: stepRunId, status: getStepRun(db, stepRunId).then((r) => r!.status) });
       assert.equal(stepId, "a");
       assert.equal(attempt, 1);
     },
@@ -542,7 +546,7 @@ steps:
   });
   assert.equal(started.length, 1);
   assert.ok(started[0].id > 0, "step_run_id はプレースホルダーの0ではなく実在の行id");
-  assert.equal(started[0].status, "running");
+  assert.equal(await started[0].status, "running");
   assert.deepEqual(finished, [{ id: started[0].id, stepId: "a", status: "success" }]);
 });
 
@@ -555,8 +559,8 @@ steps:
     title: "見て"
 `);
   await runTask(db, "t1", workflow, { db, adapter: createMockAdapter({ result: {} }), logRoot: join(root, "logs"), globalLimit: 4 });
-  applyApproval(db, "t1", { approved: false, comment: "だめ" }, workflow);
-  assert.equal(getTask(db, "t1")?.state, "failed");
+  await applyApproval(db, "t1", { approved: false, comment: "だめ" }, workflow);
+  assert.equal((await getTask(db, "t1"))?.state, "failed");
 });
 
 test("承認待ちでないタスクに applyApproval を呼ぶと例外を投げ、何も書き込まない", async () => {
@@ -568,11 +572,61 @@ steps:
     title: "見て"
 `);
   // taskFixture は state='running' のまま（runTask を呼んでいないので suspended になっていない）。
-  const before = getTask(db, "t1")!;
+  const before = (await getTask(db, "t1"))!;
   assert.equal(before.state, "running");
 
-  assert.throws(() => applyApproval(db, "t1", { approved: true, comment: "" }, workflow));
+  await assert.rejects(() => applyApproval(db, "t1", { approved: true, comment: "" }, workflow));
 
-  const after = getTask(db, "t1")!;
+  const after = (await getTask(db, "t1"))!;
   assert.deepEqual(after, before, "例外を投げた呼び出しは taskPatch/step_run/outputs のどれも書き込まない");
+});
+
+/**
+ * ループ先頭の「running か」の読み取りとステップ開始のコミットの間には await がある。
+ * その隙に task.cancel が canceled を書いても、ステップを始めてはいけない
+ * （放棄したはずの worktree でエージェントが走り出す）。レースなので普通のテストでは
+ * 再現しないため、読み取りの直後のクエリに cancel を差し込んで窓を固定する。
+ *
+ * ステップ開始コミットの requireState: "running" を外すとこのテストは落ちることを
+ * 確認済み。差し込み先のクエリが変わると窓を外して素通りし得るので、
+ * `injected` の検査を消さないこと。
+ */
+test("状態を読んだ直後に cancel が届いても、runTask はステップを始めず何も書かない", async () => {
+  const root = await mkdtemp(join(tmpdir(), "doctrine-engine-"));
+  roots.push(root);
+  const sqlite = new DatabaseSync(":memory:");
+  const db = await openDbOn(sqlite);
+  const pid = await insertProject(db, { path: root, default_workflow: "f", max_concurrent: 1, base_branch: "main", setup: null });
+  await insertTask(db, { id: "t1", project_id: pid, title: "T", prompt: "p", workflow_name: "f", branch: "b", priority: 2 });
+  await db.updateTable("tasks").set({ state: "running", worktree_path: root }).where("id", "=", "t1").execute();
+  const workflow = parseWorkflow(`
+name: f
+steps:
+  - id: a
+    type: agent
+    prompt: "p"
+`).workflow;
+
+  // runTask はループ先頭で running を読んだ後、テンプレートの文脈を作るために
+  // プロジェクトを読む。その瞬間に別の経路（task.cancel）が canceled を書いたことにする。
+  const prepare = sqlite.prepare.bind(sqlite);
+  let injected = false;
+  sqlite.prepare = ((sql: string) => {
+    if (!injected && sql.startsWith('select * from "projects"')) {
+      injected = true;
+      prepare("UPDATE tasks SET state = 'canceled' WHERE id = 't1'").run();
+    }
+    return prepare(sql);
+  }) as typeof prepare;
+
+  const adapter = createMockAdapter({ result: {} });
+  await runTask(db, "t1", workflow, { db, adapter, logRoot: join(root, "logs"), globalLimit: 4 });
+
+  assert.ok(injected, "窓に cancel を差し込めていない（テストの前提が崩れている）");
+  assert.equal(adapter.calls.length, 0, "cancel 後にエージェントを起動してはいけない");
+  assert.deepEqual(await listStepRuns(db, "t1"), [], "cancel 後に step_runs 行を立ててはいけない");
+  const t = (await getTask(db, "t1"))!;
+  assert.equal(t.state, "canceled");
+  assert.equal(t.current_step_id, null, "ステップ開始のコミットは丸ごと書かれない");
+  assert.equal(t.attempt_counts, "{}");
 });

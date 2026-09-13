@@ -52,8 +52,8 @@ steps:
     run: "echo done > result.txt"
 `;
 
-function context(adapter = createMockAdapter({ result: { ok: true, text: "やりました" } })) {
-  const db = openDb(":memory:");
+async function context(adapter = createMockAdapter({ result: { ok: true, text: "やりました" } })) {
+  const db = await openDb(":memory:");
   const events: ServerEvent[] = [];
   const ctx: DaemonContext = {
     db, adapter, logRoot: join(root, "logs"), globalLimit: 4,
@@ -70,18 +70,18 @@ test("setup → agent → command → approval → 承認 → 完了まで通る
     ".doctrine/project.yaml": "setup: touch marker.txt\ndefaultWorkflow: feature\nmaxConcurrent: 1\nbaseBranch: main\n",
     ".doctrine/workflows/feature.yaml": WORKFLOW,
   });
-  const { ctx, events, handler } = context();
+  const { ctx, events, handler } = await context();
   await handler("project.add", { path: repo }, NOOP_CONN);
   const t = await handler("task.create", { project: repo, title: "マーカーを作る", prompt: "作って" }, NOOP_CONN) as { id: string };
 
   await tick(ctx);
   await until(
-    () => getTask(ctx.db, t.id)?.state === "suspended",
+    async () => (await getTask(ctx.db, t.id))?.state === "suspended",
     5000,
     "承認待ち(suspended)に到達すること（review ステップで止まるはず）",
   );
 
-  const runs = listStepRuns(ctx.db, t.id).map((r) => r.step_id);
+  const runs = (await listStepRuns(ctx.db, t.id)).map((r) => r.step_id);
   assert.deepEqual(runs, ["setup", "implement", "verify"], "setup が先頭に自動挿入されている");
 
   // ブリーフが求める「event が運ぶ id が実際に何かへ解決できる」ことの証明。
@@ -98,7 +98,7 @@ test("setup → agent → command → approval → 承認 → 完了まで通る
     "task.logs", { task_id: t.id, step_run_id: stepRunEvent!.step_run_id }, NOOP_CONN,
   ) as { log_path: string };
   assert.ok(logs.log_path, "イベントに載った step_run_id が実在する step_run に解決する");
-  const resolvedRun = listStepRuns(ctx.db, t.id).find((r) => r.id === stepRunEvent!.step_run_id);
+  const resolvedRun = (await listStepRuns(ctx.db, t.id)).find((r) => r.id === stepRunEvent!.step_run_id);
   assert.ok(resolvedRun, "step_run_id が本当に step_runs テーブルの行を指している");
   assert.equal(
     resolvedRun!.step_id, stepRunEvent!.step_id,
@@ -106,24 +106,24 @@ test("setup → agent → command → approval → 承認 → 完了まで通る
   );
 
   await handler("task.approve", { task_id: t.id }, NOOP_CONN);
-  assert.equal(getTask(ctx.db, t.id)?.state, "queued");
+  assert.equal((await getTask(ctx.db, t.id))?.state, "queued");
 
   await tick(ctx);
   await until(
-    () => getTask(ctx.db, t.id)?.state === "completed",
+    async () => (await getTask(ctx.db, t.id))?.state === "completed",
     5000,
     "承認後の record 実行を経て completed に到達すること",
   );
   // state が completed になった直後は cleanupAfterRun の後始末（.then チェーン）が
   // まだ走っていないことがある。worktree_path が消えるか警告が積まれるまで待つ。
   await until(
-    () => getTask(ctx.db, t.id)?.worktree_path === null || ctx.warnings.length > 0,
+    async () => (await getTask(ctx.db, t.id))?.worktree_path === null || ctx.warnings.length > 0,
     5000,
     "cleanupAfterRun が worktree 削除を試みて完了する（成功で null になるか、拒否されて警告が積まれる）まで待つ",
   );
 
   assert.deepEqual(
-    listStepRuns(ctx.db, t.id).map((r) => r.step_id),
+    (await listStepRuns(ctx.db, t.id)).map((r) => r.step_id),
     ["setup", "implement", "verify", "review", "record"],
     "承認後は verify までの記録を保ったまま record から再開している（先頭からのやり直しではない）",
   );
@@ -132,7 +132,7 @@ test("setup → agent → command → approval → 承認 → 完了まで通る
   // cleanupAfterRun の worktree 削除は UncommittedChangesError で拒否され、worktree は残る。
   // これはエンジンの不備ではなく、この brief のワークフロー例が commit ステップを
   // 持たないために起きる意図された挙動（未コミットの後始末は黙って削除しない）。
-  const wt = getTask(ctx.db, t.id)!.worktree_path;
+  const wt = (await getTask(ctx.db, t.id))!.worktree_path;
   assert.ok(wt, "未コミットの変更があるので worktree は残っているはず");
   assert.equal(ctx.warnings.length, 1, "worktree 削除が拒否されたことが警告として記録される");
   assert.match(ctx.warnings[0], /未コミットの変更/);
@@ -145,22 +145,22 @@ test("却下すると実装ステップへ戻り、コメントがエージェ�
     ".doctrine/workflows/feature.yaml": WORKFLOW,
   });
   const adapter = createMockAdapter({ result: { ok: true, text: "やりました" } });
-  const { ctx, handler } = context(adapter);
+  const { ctx, handler } = await context(adapter);
   await handler("project.add", { path: repo }, NOOP_CONN);
   const t = await handler("task.create", { project: repo, title: "T", prompt: "作って" }, NOOP_CONN) as { id: string };
 
   await tick(ctx);
   await until(
-    () => getTask(ctx.db, t.id)?.state === "suspended",
+    async () => (await getTask(ctx.db, t.id))?.state === "suspended",
     5000,
     "1回目の承認待ちに到達すること",
   );
   await handler("task.reject", { task_id: t.id, comment: "命名が変です" }, NOOP_CONN);
-  assert.equal(getTask(ctx.db, t.id)?.current_step_id, "implement");
+  assert.equal((await getTask(ctx.db, t.id))?.current_step_id, "implement");
 
   await tick(ctx);
   await until(
-    () => getTask(ctx.db, t.id)?.state === "suspended",
+    async () => (await getTask(ctx.db, t.id))?.state === "suspended",
     5000,
     "却下→再実装→再度の承認待ちに到達すること",
   );
@@ -175,19 +175,21 @@ test("プロジェクト枠1のとき、承認待ちのタスクが次のタス�
     ".doctrine/project.yaml": "setup: touch marker.txt\ndefaultWorkflow: feature\nmaxConcurrent: 1\nbaseBranch: main\n",
     ".doctrine/workflows/feature.yaml": WORKFLOW,
   });
-  const { ctx, handler } = context();
+  const { ctx, handler } = await context();
   await handler("project.add", { path: repo }, NOOP_CONN);
   const a = await handler("task.create", { project: repo, title: "A", prompt: "p" }, NOOP_CONN) as { id: string };
-  const b = await handler("task.create", { project: repo, title: "B", prompt: "p" }, NOOP_CONN) as { id: string };
+  // 受付順の FIFO は created_at（ミリ秒精度）で、同じミリ秒に作られると id（ランダムな UUID）で
+  // 決まる。A が先に admit される前提を運に任せないよう、B の優先度を下げて順序を固定する。
+  const b = await handler("task.create", { project: repo, title: "B", prompt: "p", priority: 3 }, NOOP_CONN) as { id: string };
 
   await tick(ctx);
   await until(
-    () => getTask(ctx.db, a.id)?.state === "suspended",
+    async () => (await getTask(ctx.db, a.id))?.state === "suspended",
     5000,
     "タスクAが承認待ちで枠を保持した状態になること",
   );
   await tick(ctx);
-  assert.equal(getTask(ctx.db, b.id)?.state, "queued", "承認待ちの間、同じプロジェクトの次のタスクは走らない");
+  assert.equal((await getTask(ctx.db, b.id))?.state, "queued", "承認待ちの間、同じプロジェクトの次のタスクは走らない");
 });
 
 test("失敗したタスクの worktree は残る", async () => {
@@ -195,20 +197,20 @@ test("失敗したタスクの worktree は残る", async () => {
     ".doctrine/project.yaml": "defaultWorkflow: fail\nmaxConcurrent: 1\nbaseBranch: main\n",
     ".doctrine/workflows/fail.yaml": "name: fail\nsteps:\n  - id: boom\n    type: command\n    run: \"exit 9\"\n",
   });
-  const { ctx, handler } = context();
+  const { ctx, handler } = await context();
   await handler("project.add", { path: repo }, NOOP_CONN);
   const t = await handler("task.create", { project: repo, title: "T", prompt: "p" }, NOOP_CONN) as { id: string };
   await tick(ctx);
   await until(
-    () => getTask(ctx.db, t.id)?.state === "failed",
+    async () => (await getTask(ctx.db, t.id))?.state === "failed",
     5000,
     "exit 9 するステップで failed に到達すること",
   );
 
-  const row = getTask(ctx.db, t.id)!;
+  const row = (await getTask(ctx.db, t.id))!;
   assert.ok(row.worktree_path, "失敗した実行こそ中を見たい");
   await access(row.worktree_path!); // ディスク上に本当に存在する
-  assert.equal(listStepRuns(ctx.db, t.id).at(-1)?.exit_code, 9);
+  assert.equal((await listStepRuns(ctx.db, t.id)).at(-1)?.exit_code, 9);
 });
 
 test("完了したタスクは worktree を消すがブランチは残す", async () => {
@@ -216,22 +218,22 @@ test("完了したタスクは worktree を消すがブランチは残す", asyn
     ".doctrine/project.yaml": "defaultWorkflow: simple\nmaxConcurrent: 1\nbaseBranch: main\n",
     ".doctrine/workflows/simple.yaml": "name: simple\nsteps:\n  - id: ok\n    type: command\n    run: \"echo hi\"\n",
   });
-  const { ctx, handler } = context();
+  const { ctx, handler } = await context();
   await handler("project.add", { path: repo }, NOOP_CONN);
   const t = await handler("task.create", { project: repo, title: "T", prompt: "p" }, NOOP_CONN) as { id: string };
   await tick(ctx);
   await until(
-    () => getTask(ctx.db, t.id)?.state === "completed",
+    async () => (await getTask(ctx.db, t.id))?.state === "completed",
     5000,
     "echo だけのワークフローが completed に到達すること",
   );
   await until(
-    () => getTask(ctx.db, t.id)?.worktree_path === null,
+    async () => (await getTask(ctx.db, t.id))?.worktree_path === null,
     5000,
     "未コミット変更が無いので cleanupAfterRun が worktree を削除し切ること",
   );
 
-  const row = getTask(ctx.db, t.id)!;
+  const row = (await getTask(ctx.db, t.id))!;
   assert.equal(row.worktree_path, null, "completed の worktree は削除される");
   const { stdout } = await execFileAsync("git", ["-C", repo, "branch", "--list", row.branch]);
   assert.match(stdout, new RegExp(row.branch), "ブランチ自体は残る");

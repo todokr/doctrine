@@ -5,7 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn, type ChildProcess } from "node:child_process";
 import { startDaemon, tickCycle } from "../../src/daemon/main.ts";
-import { openDb } from "../../src/db/migrate.ts";
+import { DatabaseSync } from "node:sqlite";
+import { openDbOn } from "../../src/db/migrate.ts";
 import { createMockAdapter } from "../../src/adapter/mock.ts";
 import type { DaemonContext } from "../../src/daemon/handlers.ts";
 
@@ -108,7 +109,8 @@ test("ソケットに繋げるか判定できない（権限拒否など）な�
  * 決して reject せず、代わりに理由を stderr に出す。
  */
 test("スケジューリングの1周が失敗してもデーモンは落ちず、理由が出て次の周期は動く", async () => {
-  const db = openDb(":memory:");
+  const sqlite = new DatabaseSync(":memory:");
+  const db = await openDbOn(sqlite);
   const ctx: DaemonContext = {
     db,
     adapter: createMockAdapter({ result: { ok: true, text: "done" } }),
@@ -124,10 +126,12 @@ test("スケジューリングの1周が失敗してもデーモンは落ちず�
   const realError = console.error;
   console.error = (...args: unknown[]) => { logged.push(args.map(String).join(" ")); };
 
-  const prepare = db.prepare.bind(db);
+  // DBの故障は素の接続（DatabaseSync）の prepare に仕込む。Kysely はクエリごとに
+  // ここを通るので、受付候補を読むクエリ（resumed の降順で並べる唯一のクエリ）だけを落とす。
+  const prepare = sqlite.prepare.bind(sqlite);
   let boom = true;
-  (db as unknown as { prepare: typeof prepare }).prepare = ((sql: string) => {
-    if (boom && sql.includes("state = 'queued'")) throw new Error("DBが壊れた");
+  sqlite.prepare = ((sql: string) => {
+    if (boom && sql.includes('order by "resumed" desc')) throw new Error("DBが壊れた");
     return prepare(sql);
   }) as typeof prepare;
 
@@ -150,6 +154,6 @@ test("スケジューリングの1周が失敗してもデーモンは落ちず�
     assert.equal(logged.length, 0, `正常な周は何も出さない。実際: ${JSON.stringify(logged)}`);
   } finally {
     console.error = realError;
-    db.close();
+    await db.destroy();
   }
 });

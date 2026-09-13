@@ -11,6 +11,7 @@
     "jsr:@std/path@^1.1.5": "1.1.6",
     "jsr:@std/path@^1.1.6": "1.1.6",
     "jsr:@std/testing@^1.0.20": "1.0.20",
+    "npm:kysely@~0.28.17": "0.28.17",
     "npm:yaml@^2.6.0": "2.9.1",
     "npm:zod@^3.24.0": "3.25.76"
   },
@@ -55,6 +56,9 @@
     }
   },
   "npm": {
+    "kysely@0.28.17": {
+      "integrity": "sha512-nbD8lB9EB3wNdMhOCdx5Li8DxnLbvKByylRLcJ1h+4SkrowVeECAyZlyiKMThF7xFdRz0jSQ2MoJr+wXux2y0Q=="
+    },
     "yaml@2.9.1": {
       "integrity": "sha512-3NxN8+78OdzbT7C/WjGsyfPAtJaN3FNDsWxv7Y7mcDsT/oOmgW8BpyQQFFBnvZE3j9Y2Sdz1ULFLezL7Eb2yFw==",
       "bin": true
@@ -67,6 +71,7 @@
     "dependencies": [
       "jsr:@std/path@1",
       "jsr:@std/testing@^1.0.20",
+      "npm:kysely@~0.28.17",
       "npm:yaml@^2.6.0",
       "npm:zod@^3.24.0"
     ]

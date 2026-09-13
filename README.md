@@ -205,14 +205,11 @@ dctl get <task-id>
 
 実装の過程で判明した、まだ直していない・あえて直さないと決めた制約。
 
-- **DBマイグレーションが無い**（[#1](https://github.com/todokr/doctrine/issues/1)）。
-  `src/db/migrate.ts` は `CREATE TABLE IF NOT EXISTS` しか行わない。既存のDBファイルが
-  一度作られた後にカラムを追加しても、そのファイルには決して現れない。スキーマを
-  変更したら、DBファイル（`~/.local/state/doctrine/doctrine.db`）ごと削除すること。
-  ——これが理由で、中断されたステップ実行は本来より正直でない `failed` として
-  閉じられる（本来欲しい値は `interrupted` だが、`step_runs.status` の
-  `CHECK` 制約に新しい値を追加すると、既存のDBファイルでの書き込みがその
-  制約に弾かれて起動できなくなるため、マイグレーション機構ができるまでは避けている）。
+- **中断されたステップ実行は `failed` として閉じられる。** デーモンのクラッシュで
+  `running` のまま残ったステップ実行は、復帰時に本来より正直でない `failed` になる
+  （本来欲しい値は `interrupted`）。マイグレーション機構（`src/db/migrations.ts`）は
+  入ったので値を足すことはできるが、SQLite で `step_runs.status` の `CHECK` 制約を
+  変えるにはテーブル再構築が要るため、別の変更として残している。
 - **完了イベントとworktree後始末の間に競合がある**（[#3](https://github.com/todokr/doctrine/issues/3)）。
   `task.stateChanged`（`completed`）を受け取った直後にクライアントがworktreeを
   見に行くと、まだ削除されずに存在していることがある。また、完了時の

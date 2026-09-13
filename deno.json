@@ -6,6 +6,7 @@
   "imports": {
     "@std/path": "jsr:@std/path@^1",
     "@std/testing": "jsr:@std/testing@^1.0.20",
+    "kysely": "npm:kysely@^0.28.17",
     "yaml": "npm:yaml@^2.6.0",
     "zod": "npm:zod@^3.24.0"
   }

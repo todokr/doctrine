@@ -191,7 +191,7 @@ uncle-jam の `pending` はこれに置き換える
 
 `running` なタスクを数えて導出する。カウンタを持てば必ず状態とズレる。
 
-### DB スキーマ（SQLite / WALモード / `node:sqlite`）
+### DB スキーマ（SQLite / WALモード / `node:sqlite` + Kysely）
 
 - `projects` — `path`, `default_workflow`, `max_concurrent`, `base_branch`, `setup`
 - `tasks` — **これ自体がスナップショット**。`id`, `project_id`, `title`, `prompt`,
@@ -215,14 +215,47 @@ uncle-jam の `pending` はこれに置き換える
   - `status` の実際の値は `running` / `success` / `failed` / `degraded` の4つ
     （`CHECK` 制約で固定）。本来ここに欲しい5つ目の値は `interrupted`
     （デーモンクラッシュ時に `running` のまま閉じるしかなかった行を正直に表す）
-    だが、実装時点でマイグレーション機構が無く（`migrate.ts` は
-    `CREATE TABLE IF NOT EXISTS` のみで、既存のDBファイルにはスキーマ変更が
-    決して反映されない）、`CHECK` に新しい値を足すと、そのDBファイルへの
-    書き込みが既存の制約に弾かれて起動できなくなる。そのため中断された
-    ステップ実行は現状 `failed` として閉じている。マイグレーションが入り次第、
-    `interrupted` を追加すること
+    だが、中断されたステップ実行は現状 `failed` として閉じている。
+    実装時点ではマイグレーション機構が無く、`CHECK` に値を足すと既存のDBファイルへの
+    書き込みが古い制約に弾かれるため避けていた。マイグレーション機構は入った
+    （下記）ので、次は `interrupted` を足すマイグレーションを書く。SQLite では
+    `CHECK` 制約を `ALTER TABLE` で変えられないため、テーブル再構築になる
 - `step_outputs` — 変数展開に使う分だけ（stdout/stderr の末尾）
 - `rate_limit_samples` — Claude Code から流れてくるレート消費率の記録（6章）
+
+**テーブルの形は `src/db/schema.ts` の型が唯一の定義で、クエリは Kysely で書く。**
+手書きSQLの時代は、DDL・行の型・各クエリのSQL文字列とプレースホルダの並びの3箇所に
+テーブルの形が散り、その整合をコンパイラが一切見ていなかった（列を1つ足すたびに
+3箇所を手で揃え、typo は実行時まで出なかった）。今はクエリが型に対して検査される。
+DDL（マイグレーション）と型の整合だけは型で閉じられないので、実DBの列集合を
+型から作った列一覧と突き合わせるテストで押さえる。
+
+**マイグレーションは Kysely の `Migrator` で持つ**（`src/db/migrations.ts`）。
+
+- バージョン付き。適用済みの記録はDBの `kysely_migration` テーブルが持ち、
+  `openDb` が起動のたびに未適用の分を流す。1回分はトランザクションに入るので、
+  失敗すればその回は丸ごと巻き戻る
+- 移行はコミットされたTSのコードで、**実際に流れるDDLを事前にレビューできる**。
+  宣言的差分ツール（sqldef など）は実行時に差分を計算するためこれができず、
+  スキーマ定義に無いものを `DROP` する（古い `dctld` を新しいDBに向けると列が消える）
+  ので採らない。Atlas / dbmate は外部バイナリが増えるわりに、機能は `Migrator` で足りる
+- 移行定義はファイルを動的 import せず、オブジェクトとして静的に持つ
+  （権限が要らず、`deno check` で型検査される）。移行は我々自身のコードであって
+  ユーザーが手で書く設定ではないので、3章の「設定は実行可能コードではない」とは衝突しない
+- **一度コミットした移行は書き換えない。** 適用済みのDBには二度と流れないので、
+  書き換えても新旧のDBで形が分かれる。変更は必ず新しい番号で足す
+- 移行は「最新の形」である `schema.ts` の型を参照しない（`Kysely<any>` で受ける）
+- **SQLite の `ALTER TABLE` の制約**: できるのは列の追加・改名・（制約の無い列の）
+  削除まで。`CHECK` 制約の変更や制約付き列の削除は、新テーブルを作って行をコピーし、
+  旧テーブルを `DROP` して `RENAME` するテーブル再構築で行う。
+  `PRAGMA foreign_keys` はトランザクション内では切り替えられないので、
+  外部キーの整合は `PRAGMA foreign_key_check` で確かめてから終える
+- 最初の移行 `0001_baseline` は、手書きDDL（`CREATE TABLE IF NOT EXISTS`）時代の最終形。
+  機構より前に作られたDBファイルにはテーブルはあるが `kysely_migration` が無く、
+  ベースラインが「未適用」として流れるので、`IF NOT EXISTS` で冪等にしてある。
+  あわせて、手書きDDL時代に後から足したために古いDBファイルには無言で存在しなかった
+  `pending_feed` 列をここで足す。テストは `:memory:` しか使わないとこの経路を通らないので、
+  古いDDLで作ったDBファイルを開くテストを別に持つ
 
 **ログ本文はDBに入れない。** ディスク上のファイル
 （`~/.local/state/doctrine/logs/<task-id>/<step-id>.<attempt>.log`）に書き、
@@ -234,6 +267,32 @@ DBに入れると一覧クエリが道連れで重くなる。
 ステップ境界ごとに、`tasks` の更新と `step_runs` の挿入を**1トランザクション**で書く。
 落ちて失うのは最大1ステップ分。これは uncle-jam から据え置きの保証であり、
 今後も崩さない。
+
+Kysely 経由でもこの保証は変わらない。`node:sqlite` 用の dialect は公式に無いので
+薄いものを自前で持ち（`src/db/dialect.ts`）、次の2点を dialect の責務にしている:
+
+- **トランザクションは `BEGIN IMMEDIATE` で始める。** 公式 SqliteDialect は
+  `BEGIN`（DEFERRED）を発行するが、それだと書き込みロックの取得が最初の書き込み文まで
+  遅れ、別プロセスが同じDBを触っていると途中の文で失敗し得る
+- **接続は1本で、トランザクションは COMMIT / ROLLBACK まで接続を占有する。**
+  Kysely のトランザクションは文と文の間に `await` を挟むので、排他しないとその隙に
+  別の非同期処理のクエリが開いているトランザクションの中で実行されてしまう
+
+**読んでから書く経路は、確認を書き込みと同じトランザクションに入れる。**
+DBアクセスが非同期になると、状態を読んでから書くまでの間に必ず中断点が入る。
+その隙に `task.cancel` / `task.pause` が別の状態を書くと、後から来た書き込みが
+それを黙って上書きする（中止したはずのタスクが次のステップを始める、など）。
+しかもレースなので既存のテストは通り続ける。そのため `commitStepBoundary` は
+`requireState` を受け取り、`UPDATE ... WHERE id = ? AND state = ?` の更新行数が0なら
+何も書かずに巻き戻して `StateConflictError` を投げる。使う箇所:
+
+- `runTask` のステップ開始（`running` でなくなっていれば子を起動せずに降りる）と、
+  完了・失敗・承認待ちへの遷移（先に書かれた状態を上書きしない）
+- `tick` の `queued` → `running`（受付候補を読んだ後に中止されたタスクを走らせない）
+- `applyApproval`、`task.pause` / `task.resume` / `task.cancel`、復帰処理、`tick` の失敗記録
+
+`requireState` を付けない書き込みは、状態を変えないもの（子プロセスの記録、
+ステップ終了時の実行記録、`worktree_path`）に限る。
 
 ### クラッシュ復帰
 
@@ -472,11 +531,15 @@ claude -p --resume <session-id> '<追加指示>' --output-format stream-json --v
   in-process IPC の利点は使わない
   - 子プロセスは `Deno.Command`、Unixソケットは `Deno.listen` / `Deno.connect`
   （`transport: "unix"`）、シグナルは `Deno.kill`
-- **永続化**: SQLite（`node:sqlite`。Deno の Node 互換層が同期APIのまま提供する）
-  - **同期APIであること自体が設計上の前提。** `runTask` の cancel / pause ガードは、
-  状態の読み取りとステップ開始の `commitStepBoundary` の間に `await` が1つも無いことで
-  レース無しになっている。非同期APIのドライバ（Kysely 経由を含む）に替えるとこの区間に
-  中断点が入り TOCTOU に劣化し、**しかも既存のテストは全部通り続ける**
+- **永続化**: SQLite（`node:sqlite`。Deno の Node 互換層が提供する）+ Kysely
+  - `node:sqlite` はネイティブ依存を増やさない（better-sqlite3 は worktree ごとの
+  `setup` コストに直接効くので採らない）。その上に自前の薄い dialect で Kysely を載せる
+  （4章「耐久性モデル」）
+  - DBアクセスは非同期。以前は `node:sqlite` の同期APIに頼って「状態の読み取りと
+  書き込みの間に `await` が無い」ことで cancel / pause とのレースを避けていたが、
+  非同期化でこの区間に中断点が入る。状態の確認は書き込みと同じトランザクションの中で
+  行う（`requireState`、4章）。このレースはテストが自然には踏まないので、
+  窓に書き込みを差し込んで固定するテストで押さえる
   - uncle-jam の「1ジョブ = 1 JSONファイル」は捨てる。実行履歴・横断一覧・枠のカウントは
   クエリしたいデータであり、JSONファイル群では毎回全読みになる。
   書き手はデーモン1つだけなので同時書き込み問題は起きない
@@ -486,10 +549,16 @@ claude -p --resume <session-id> '<追加指示>' --output-format stream-json --v
   - リクエスト/レスポンスに加え、**サーバ→クライアントのイベントプッシュ**
   （状態遷移、ステップ完了、ログ行）を同じ接続で流す。UIはポーリングしない
   - パス: `$XDG_RUNTIME_DIR/doctrine/dctld.sock`
-- **依存パッケージは最小限**: `yaml`（パース）、`zod`（検証）、`@std/path`（パス操作）
+- **依存パッケージは最小限**: `yaml`（パース）、`zod`（検証）、`kysely`（DBアクセスと
+  マイグレーション）、`@std/path`（パス操作）
   - ユーザーが手で書く設定ファイルなので、**エラーメッセージの質が直接UXになる**。
   ここは手書きバリデータで妥協しない
-  - uncle-jam のゼロ依存方針は引き継がない（学習用実装の制約であって本番の制約ではない）
+  - `kysely` はランタイム依存の3つ目。テーブルの形を型1箇所に集めてクエリを型検査させる
+  ことと、バージョン付きマイグレーションを外部バイナリ無しで持つことの両方を1つで満たす
+  （4章）。自身に依存を持たないパッケージで、`node:sqlite` の上に載せるので
+  ネイティブ依存も増えない
+  - uncle-jam のゼロ依存方針は引き継がない（学習用実装の制約であって本番の制約ではない）。
+  `kysely` を足す判断も同じ筋による
 - **テスト**: `deno test` + `@std/testing/bdd`（`test` / `beforeEach` / `afterEach` だけを使う）
   - アサーションは `node:assert/strict` を使う（ランナーを替えても書き方が変わらない。
   実際に vitest からの移行ではアサーションを1行も書き換えていない）

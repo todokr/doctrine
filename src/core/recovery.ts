@@ -1,7 +1,7 @@
-import type { DatabaseSync } from "node:sqlite";
 import { commitStepBoundary, type StepBoundary } from "../db/boundary.ts";
 import { listTasks, type TaskRow } from "../db/tasks.ts";
 import { listStepRuns } from "../db/stepRuns.ts";
+import type { Db } from "../db/schema.ts";
 import { assertTransition } from "./states.ts";
 import type { Workflow } from "../workflow/schema.ts";
 import { runCommand } from "../util/exec.ts";
@@ -19,7 +19,7 @@ export type ProcessProbe = {
  * 復帰時にステップ種別（agent / command）を正しく判別するために使う。
  * ワークフローが引けない場合は undefined を返してよい（呼び出し側は安全側に倒す）。
  */
-export type WorkflowLookup = (task: TaskRow) => Workflow | undefined;
+export type WorkflowLookup = (task: TaskRow) => Promise<Workflow | undefined> | Workflow | undefined;
 
 /**
  * ps の lstart は秒精度なので、既定の許容は2秒。
@@ -120,11 +120,11 @@ export async function killStaleChild(
  * agent を command として再実行しても新しい会話が始まるだけで worktree を
  * 壊さないが、逆に command を resume-agent 扱いする実害の方が大きい。
  */
-function classifyInterruptedStep(
+async function classifyInterruptedStep(
   task: TaskRow, lookupWorkflow: WorkflowLookup,
-): "resume-agent" | "rerun-command" {
+): Promise<"resume-agent" | "rerun-command"> {
   if (task.current_step_id !== null) {
-    const workflow = lookupWorkflow(task);
+    const workflow = await lookupWorkflow(task);
     const step = workflow?.steps.find((s) => s.id === task.current_step_id);
     if (step) return step.type === "agent" ? "resume-agent" : "rerun-command";
   }
@@ -148,18 +148,16 @@ export type RecoveryResult =
  * （taskId につき「最後の running 行」を1つだけ、あれば）。
  *
  * 本来の正直な値は「失敗ではなく中断された」ことを表す別の status
- * （例えば "interrupted"）だが、tasks / step_runs の status は DDL の
- * CHECK 制約で固定されており、このプロジェクトにはまだマイグレーション
- * 機構が無い（既存のDBファイルは古い CHECK のまま起動され続ける — GitHub
- * issue #1 で追跡中）。新しい値を追加すると、既存DBでの書き込みがその
- * CHECK に弾かれて起動できなくなる。現時点で選べる中で最も正直な値は
- * "failed" + ended_at を入れることで、running のまま放置する（＝「まだ
+ * （例えば "interrupted"）だが、step_runs の status は CHECK 制約で固定されている。
+ * マイグレーション機構（src/db/migrations.ts）は入ったので足すこと自体はできるが、
+ * SQLite で CHECK 制約を変えるにはテーブル再構築が要り、別の変更として扱う。
+ * それまでは "failed" + ended_at を入れる。running のまま放置する（＝「まだ
  * 実行中」という明確な嘘を残す）よりはましと判断する。
  *
  * running の行が無ければ何もしない（呼び出し側はこれをエラー扱いしない）。
  */
-function closeDanglingStepRun(db: DatabaseSync, taskId: string): Pick<StepBoundary, "stepRunUpdate"> {
-  const runs = listStepRuns(db, taskId);
+async function closeDanglingStepRun(db: Db, taskId: string): Promise<Pick<StepBoundary, "stepRunUpdate">> {
+  const runs = await listStepRuns(db, taskId);
   const dangling = [...runs].reverse().find((r) => r.status === "running");
   if (!dangling) return {};
   return {
@@ -196,33 +194,37 @@ function closeDanglingStepRun(db: DatabaseSync, taskId: string): Pick<StepBounda
  * failed への書き込み自体が失敗しても掃討は続ける（二重に守る）。
  */
 export async function recoverOnStartup(
-  db: DatabaseSync, probe: ProcessProbe, lookupWorkflow: WorkflowLookup,
+  db: Db, probe: ProcessProbe, lookupWorkflow: WorkflowLookup,
 ): Promise<RecoveryResult[]> {
   const results: RecoveryResult[] = [];
 
-  for (const task of listTasks(db, { state: "running" })) {
+  for (const task of await listTasks(db, { state: "running" })) {
     try {
       await killStaleChild(task, probe, "SIGKILL");
 
-      const action = classifyInterruptedStep(task, lookupWorkflow);
+      const action = await classifyInterruptedStep(task, lookupWorkflow);
 
       // running -> queued は states.ts が明示的に許可している復帰専用の辺。
       // 遷移表を経由せず書き込むと、遷移が壊れた将来の変更を検査なしで通してしまう。
       assertTransition(task.state, "queued");
-      commitStepBoundary(db, {
+      // デーモンは復帰より先にソケットを開いているので、ここまでの await の間に
+      // task.cancel などが届き得る。読んだ running のままであるときだけ書く。
+      await commitStepBoundary(db, {
         taskId: task.id,
+        requireState: task.state,
         taskPatch: { state: "queued", resumed: 1, child_pid: null, child_started_at: null },
-        ...closeDanglingStepRun(db, task.id),
+        ...await closeDanglingStepRun(db, task.id),
       });
       results.push({ taskId: task.id, outcome: "recovered", action });
     } catch (e) {
       const error = e instanceof Error ? e.message : String(e);
       try {
         assertTransition(task.state, "failed");
-        commitStepBoundary(db, {
+        await commitStepBoundary(db, {
           taskId: task.id,
+          requireState: task.state,
           taskPatch: { state: "failed" },
-          ...closeDanglingStepRun(db, task.id),
+          ...await closeDanglingStepRun(db, task.id),
         });
       } catch (e2) {
         // failed への書き込み自体が失敗しても、他タスクの掃討を止めない。

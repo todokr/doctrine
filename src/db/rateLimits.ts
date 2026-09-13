@@ -1,18 +1,15 @@
-import type { DatabaseSync } from "node:sqlite";
+import type { Db, RateLimitRow } from "./schema.ts";
 
-export type RateLimitRow = {
-  id: number; observed_at: string; window: string; utilization: number; resets_at: string | null;
-};
+export type { RateLimitRow } from "./schema.ts";
 
-export function insertRateLimitSample(
-  db: DatabaseSync, s: { window: string; utilization: number; resets_at: string | null },
-): void {
-  db.prepare(
-    "INSERT INTO rate_limit_samples (observed_at, window, utilization, resets_at) VALUES (?, ?, ?, ?)",
-  ).run(new Date().toISOString(), s.window, s.utilization, s.resets_at);
+export async function insertRateLimitSample(
+  db: Db, s: { window: string; utilization: number; resets_at: string | null },
+): Promise<void> {
+  await db.insertInto("rate_limit_samples")
+    .values({ ...s, observed_at: new Date().toISOString() })
+    .execute();
 }
 
-export function recentRateLimitSamples(db: DatabaseSync, limit: number): RateLimitRow[] {
-  return db.prepare("SELECT * FROM rate_limit_samples ORDER BY id DESC LIMIT ?")
-    .all(limit) as RateLimitRow[];
+export function recentRateLimitSamples(db: Db, limit: number): Promise<RateLimitRow[]> {
+  return db.selectFrom("rate_limit_samples").selectAll().orderBy("id", "desc").limit(limit).execute();
 }

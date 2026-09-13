@@ -1,5 +1,5 @@
-import type { DatabaseSync } from "node:sqlite";
 import { getProject, type TaskRow } from "../db/tasks.ts";
+import type { Db } from "../db/schema.ts";
 import { holdsGlobalSlot, holdsProjectSlot } from "./states.ts";
 
 export const DEFAULT_GLOBAL_LIMIT = 4;
@@ -7,10 +7,10 @@ export const DEFAULT_GLOBAL_LIMIT = 4;
 export type SlotUsage = { global: number; byProject: Map<number, number> };
 
 /** カウンタは持たない。状態から数える。持てば必ず状態とズレる。 */
-export function currentUsage(db: DatabaseSync): SlotUsage {
-  const rows = db.prepare(
-    "SELECT project_id, state FROM tasks WHERE state IN ('running','suspended','paused')",
-  ).all() as { project_id: number; state: TaskRow["state"] }[];
+export async function currentUsage(db: Db): Promise<SlotUsage> {
+  const rows = await db.selectFrom("tasks").select(["project_id", "state"])
+    .where("state", "in", ["running", "suspended", "paused"])
+    .execute();
 
   const usage: SlotUsage = { global: 0, byProject: new Map() };
   for (const r of rows) {
@@ -26,23 +26,23 @@ export function currentUsage(db: DatabaseSync): SlotUsage {
  * 受付順: 再開したタスク → 優先度（小さいほど優先） → 作成時刻のFIFO。
  * 両スコープに空きがあるタスクだけを、上限いっぱいまで返す。
  */
-export function selectAdmissible(
-  db: DatabaseSync, globalLimit: number = DEFAULT_GLOBAL_LIMIT,
-): TaskRow[] {
-  const usage = currentUsage(db);
+export async function selectAdmissible(
+  db: Db, globalLimit: number = DEFAULT_GLOBAL_LIMIT,
+): Promise<TaskRow[]> {
+  const usage = await currentUsage(db);
   let globalFree = globalLimit - usage.global;
   if (globalFree <= 0) return [];
 
-  const queued = db.prepare(
-    `SELECT * FROM tasks WHERE state = 'queued'
-     ORDER BY resumed DESC, priority ASC, created_at ASC, id ASC`,
-  ).all() as TaskRow[];
+  const queued = await db.selectFrom("tasks").selectAll()
+    .where("state", "=", "queued")
+    .orderBy("resumed", "desc").orderBy("priority", "asc").orderBy("created_at", "asc").orderBy("id", "asc")
+    .execute();
 
   const admitted: TaskRow[] = [];
   const projectUsed = new Map(usage.byProject);
   for (const task of queued) {
     if (globalFree <= 0) break;
-    const project = getProject(db, task.project_id);
+    const project = await getProject(db, task.project_id);
     if (!project) continue;
     const used = projectUsed.get(task.project_id) ?? 0;
     if (used >= project.max_concurrent) continue;

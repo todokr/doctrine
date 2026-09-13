@@ -1,11 +1,11 @@
 #!/usr/bin/env -S deno run --allow-all
 import { join } from "@std/path";
-import type { DatabaseSync } from "node:sqlite";
 import { openDb } from "../db/migrate.ts";
 import { createClaudeAdapter } from "../adapter/claude.ts";
 import { recoverOnStartup, defaultProbe, type WorkflowLookup } from "../core/recovery.ts";
 import { findOrphans } from "../core/worktree.ts";
 import { getProject, listProjects, listTasks, type TaskRow } from "../db/tasks.ts";
+import type { Db } from "../db/schema.ts";
 import { DEFAULT_GLOBAL_LIMIT } from "../core/scheduler.ts";
 import { parseWorkflow } from "../workflow/schema.ts";
 import { withSetupStep } from "../workflow/project.ts";
@@ -18,18 +18,18 @@ export function stateRoot(): string {
 }
 
 /**
- * recoverOnStartup が要求する同期ルックアップ。ワークフローYAMLが消えている・
+ * recoverOnStartup が要求するルックアップ。ワークフローYAMLが消えている・
  * 壊れている・プロジェクトが見当たらない場合は undefined を返す（呼び出し側は
  * 安全側=rerun-command に倒す）。ここで例外を漏らすと1タスクの不備で
  * recoverOnStartup 全体が落ち、他の stale タスクが救済されずに残る。
  */
-function buildWorkflowLookup(db: DatabaseSync): WorkflowLookup {
-  return (task: TaskRow) => {
+function buildWorkflowLookup(db: Db): WorkflowLookup {
+  return async (task: TaskRow) => {
     try {
-      const project = getProject(db, task.project_id);
+      const project = await getProject(db, task.project_id);
       if (!project) return undefined;
       const path = join(project.path, ".doctrine", "workflows", `${task.workflow_name}.yaml`);
-      const text = Deno.readTextFileSync(path);
+      const text = await Deno.readTextFile(path);
       const workflow = parseWorkflow(text).workflow;
       return withSetupStep(workflow, project.setup ?? undefined);
     } catch {
@@ -113,7 +113,7 @@ export async function startDaemon(o: {
   const resolvedSocketPath = o.socketPath ?? socketPath();
   await assertSocketNotLive(resolvedSocketPath);
 
-  const db = openDb(o.dbPath ?? join(stateRoot(), "doctrine.db"));
+  const db = await openDb(o.dbPath ?? join(stateRoot(), "doctrine.db"));
 
   const ctx: DaemonContext = {
     db,
@@ -144,8 +144,8 @@ export async function startDaemon(o: {
   }
 
   // 孤児の照合（自動削除はしない）
-  for (const project of listProjects(db)) {
-    const known = listTasks(db, { projectId: project.id })
+  for (const project of await listProjects(db)) {
+    const known = (await listTasks(db, { projectId: project.id }))
       .map((t) => t.worktree_path).filter((p): p is string => p !== null);
     for (const orphan of await findOrphans(project.path, known)) {
       console.error(`[orphan] 対応するタスクのない worktree: ${orphan}`);
@@ -159,7 +159,7 @@ export async function startDaemon(o: {
     async stop() {
       clearInterval(timer);
       await server.close();
-      db.close();
+      await db.destroy();
     },
   };
 }

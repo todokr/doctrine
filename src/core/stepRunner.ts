@@ -1,5 +1,5 @@
 import { dirname, join } from "@std/path";
-import type { DatabaseSync } from "node:sqlite";
+import type { Db } from "../db/schema.ts";
 import type { AgentStep, CommandStep } from "../workflow/schema.ts";
 import { expand, type TemplateContext } from "../workflow/template.ts";
 import type { AgentAdapter } from "../adapter/types.ts";
@@ -19,11 +19,13 @@ export type StepOutcome = {
 };
 
 export type RunnerDeps = {
-  db: DatabaseSync;
+  db: Db;
   adapter: AgentAdapter;
   logRoot: string;
-  onChildSpawned?(pid: number, startedAt: string): void;
-  onRateLimit?(s: { window: string; utilization: number; resetsAt: string | null }): void;
+  /** DBに書く呼び出し側がいるので待つ。待たないと書き込みの順序も失敗も宙に浮く。 */
+  onChildSpawned?(pid: number, startedAt: string): void | Promise<void>;
+  onRateLimit?(s: { window: string; utilization: number; resetsAt: string | null }): void | Promise<void>;
+  /** 出力のチャンクごとに同期で呼ぶ。ここでDBを触らないこと（待てない）。 */
   onLogLine?(line: string): void;
 };
 
@@ -116,10 +118,10 @@ export async function runCommandStep(
       }).spawn();
     } catch (e) {
       // 起動失敗（cwd が無いなど）は同期例外で来る。pid は -1 として通知してから伝播させる。
-      o.deps.onChildSpawned?.(-1, startedAt);
+      await o.deps.onChildSpawned?.(-1, startedAt);
       throw e;
     }
-    o.deps.onChildSpawned?.(child.pid, startedAt);
+    await o.deps.onChildSpawned?.(child.pid, startedAt);
 
     let stdout = "";
     let stderr = "";
@@ -171,12 +173,12 @@ export async function runAgentStep(
     const run = o.resume
       ? o.deps.adapter.resume(o.sessionId, prompt, opts)
       : o.deps.adapter.start(prompt, opts);
-    o.deps.onChildSpawned?.(run.pid, run.startedAt);
+    await o.deps.onChildSpawned?.(run.pid, run.startedAt);
 
     for await (const ev of run.events) {
       log.write(JSON.stringify(ev) + "\n");
       if (ev.kind === "rateLimit") {
-        o.deps.onRateLimit?.({ window: ev.window, utilization: ev.utilization, resetsAt: ev.resetsAt });
+        await o.deps.onRateLimit?.({ window: ev.window, utilization: ev.utilization, resetsAt: ev.resetsAt });
       }
       if (ev.kind === "assistant" && ev.text) o.deps.onLogLine?.(ev.text);
     }
