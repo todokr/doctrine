@@ -288,11 +288,49 @@ function failTaskInTick(ctx: DaemonContext, taskId: string, fromState: TaskState
   }
 }
 
-/** 1周: 枠の空きを見て queued を running にし、次に人を待つ地点まで進める。 */
+/**
+ * tick が同時に2周走っているかどうか。DaemonContext ごとに持つ（テストは
+ * 複数の ctx を作る）。module スコープの真偽値にすると別の ctx まで巻き込む。
+ */
+const ticking = new WeakSet<DaemonContext>();
+
+/**
+ * 1周: 枠の空きを見て queued を running にし、次に人を待つ地点まで進める。
+ *
+ * **不変条件**: ある tick が admit したタスクは、その `running` が
+ * DB に書かれるまで、再び admit 候補になってはならず、他のタスクに
+ * その枠を取らせてもならない。
+ *
+ * これを二重に守る:
+ *
+ * 1. **再入ガード** — tick は 1 秒間隔の setInterval から呼ばれるので、
+ *    前の周が終わる前に次の周が始まる。前の周が飛行中なら何もせずに返る。
+ *    ガードは finally で必ず解放する。解放を落とすと、デーモンは何も
+ *    言わずに永久にスケジュールしなくなり、直そうとしたバグより悪い。
+ * 2. **枠の先取り** — 遅い処理（loadWorkflow / createWorktree — git の
+ *    サブプロセスは大きなリポジトリで数秒かかる）に入る前に `running` を
+ *    書く。同時に走る currentUsage から枠が埋まって見えるので、ガードが
+ *    無い経路が将来増えても不変条件は DB 側で保たれる。
+ */
 export async function tick(ctx: DaemonContext): Promise<void> {
+  if (ticking.has(ctx)) return; // 警告は積まない。毎秒積み上がって溢れる。
+  ticking.add(ctx);
+  try {
+    await tickOnce(ctx);
+  } finally {
+    ticking.delete(ctx);
+  }
+}
+
+async function tickOnce(ctx: DaemonContext): Promise<void> {
   for (const task of selectAdmissible(ctx.db, ctx.globalLimit)) {
     if (ctx.running.has(task.id)) continue;
     ctx.running.add(task.id);
+
+    // 遅い処理に入る前に枠を確定させる。ここから先の失敗経路が見る
+    // 「現在の状態」は queued ではなく running である。
+    commitStepBoundary(ctx.db, { taskId: task.id, taskPatch: { state: "running", resumed: 0 } });
+    ctx.broadcast({ event: "task.stateChanged", task_id: task.id, from: task.state, to: "running" });
 
     let workflow: Workflow;
     let worktreePath: string;
@@ -312,16 +350,13 @@ export async function tick(ctx: DaemonContext): Promise<void> {
         });
       }
 
-      commitStepBoundary(ctx.db, {
-        taskId: task.id,
-        taskPatch: { state: "running", worktree_path: worktreePath, resumed: 0 },
-      });
-      ctx.broadcast({ event: "task.stateChanged", task_id: task.id, from: task.state, to: "running" });
+      commitStepBoundary(ctx.db, { taskId: task.id, taskPatch: { worktree_path: worktreePath } });
     } catch (e) {
-      // ワークフローが読めない・worktree が作れないなど、running を書く前に
-      // 何が起きても queued に留めてはいけない。放置するとスケジューラが
+      // ワークフローが読めない・worktree が作れないなど、枠を取った後に
+      // 何が起きても queued に戻してはいけない。放置するとスケジューラが
       // 毎周期リトライし続け、1タスクの不備で他タスクの tick まで止めかねない。
-      failTaskInTick(ctx, task.id, task.state, `実行を開始できませんでした: ${(e as Error).message}`);
+      // 枠は既に先取りしてあるので、現在の状態は running（running -> failed は正当）。
+      failTaskInTick(ctx, task.id, "running", `実行を開始できませんでした: ${(e as Error).message}`);
       ctx.running.delete(task.id);
       continue;
     }

@@ -7,11 +7,13 @@ import { promisify } from "node:util";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openDb } from "../../src/db/migrate.ts";
-import { getTask } from "../../src/db/tasks.ts";
+import { getTask, insertTask } from "../../src/db/tasks.ts";
 import { listStepRuns } from "../../src/db/stepRuns.ts";
 import { createHandler, tick, type DaemonContext } from "../../src/daemon/handlers.ts";
 import { createMockAdapter } from "../../src/adapter/mock.ts";
 import type { ServerEvent } from "../../src/daemon/protocol.ts";
+import { branchNameFor } from "../../src/core/worktree.ts";
+import { randomUUID } from "node:crypto";
 import { until, makeRepo } from "../helpers/repo.ts";
 
 const run = promisify(execFile);
@@ -508,18 +510,17 @@ test("最終ステップの approval でも未コミットの変更が残って�
 // --- tick の再入 ----------------------------------------------------------
 
 /**
- * tick は1秒間隔で呼ばれるので、前の周が終わる前に次の周が始まる。tick は
- * state: "running" を書く前に loadWorkflow と createWorktree を await するため、
- * 2周目の selectAdmissible からは1周目のタスクがまだ queued に見える。
+ * tick は1秒間隔で呼ばれるので、前の周が終わる前に次の周が始まる。
  *
- * それでも枠は溢れない: selectAdmissible は1回の呼び出しの中で projectUsed を
- * 数え上げる（scheduler.ts）ので、maxConcurrent: 1 のプロジェクトからは
- * 常に先頭の1件しか返らない。2周目は同じ先頭タスクを返し、それは
- * ctx.running.has で弾かれる。2件目が繰り上がることはない。
+ * **守られるべき不変条件**: ある tick が admit したタスクは、その `running` が
+ * DB に書かれるまで、再び admit 候補になってはならず、他のタスクにその枠を
+ * 取らせてもならない。
  *
- * これは受付順（resumed DESC, priority ASC, created_at ASC, id ASC）が
- * 決定的であることに依存している。順序が不定なら2周目が別のタスクを先頭として
- * 返し、本当に枠を超える。
+ * 受付順（resumed DESC, priority ASC, created_at ASC, id ASC）が決定的である
+ * ことは、この不変条件の根拠には**ならない**。窓の中に priority のより高い
+ * タスクが入れば、2周目の先頭は決定的に別のタスクになり、それが枠を奪う
+ * （後続の2テストが再現する）。安全性を支えているのは順序ではなく、
+ * tick の再入ガードと、遅い処理の前に `running` を書く枠の先取りである。
  */
 test("tick が重なって呼ばれても maxConcurrent: 1 のプロジェクトで2件が走り出さない", async () => {
   const ctx = context();
@@ -538,8 +539,8 @@ test("tick が重なって呼ばれても maxConcurrent: 1 のプロジェクト
 
   // 1周目が loadWorkflow / createWorktree を await している最中に2周目を始める
   const first = tick(ctx);
-  assert.equal(getTask(ctx.db, a.id)!.state, "queued",
-    "2周目に入る時点で1周目はまだ running を書いていない（これが問題の窓）");
+  assert.equal(getTask(ctx.db, a.id)!.state, "running",
+    "遅い処理に入る前に running を書き切っている（枠の先取り）。ここが queued に戻ると窓が開く");
   const second = tick(ctx);
   await Promise.all([first, second]);
   await until(() => ctx.running.size === 0);
@@ -547,11 +548,135 @@ test("tick が重なって呼ばれても maxConcurrent: 1 のプロジェクト
   const states = [getTask(ctx.db, a.id)!.state, getTask(ctx.db, b.id)!.state];
   const holding = states.filter((s) => s === "running" || s === "suspended" || s === "paused");
   assert.equal(holding.length, 1, `プロジェクト枠は1。実際: ${states.join(",")}`);
-  assert.equal(getTask(ctx.db, a.id)!.state, "suspended", "受付順は決定的で、先頭は常に A");
+  assert.equal(getTask(ctx.db, a.id)!.state, "suspended", "先に admit された A が枠を持ち続ける");
   assert.equal(getTask(ctx.db, b.id)!.state, "queued");
   assert.equal(getTask(ctx.db, b.id)!.worktree_path, null, "走らなかったタスクは worktree も作られない");
 
   // 2周目が同じタスクを二重に開始していないこと（step_runs が重複しない）
   assert.equal(listStepRuns(ctx.db, a.id).length, 0, "approval だけのワークフローに step_runs は無い");
-  assert.equal(admitted.length, 1, "2周目は先頭の同じタスクを返し、ctx.running で弾かれるだけ");
+  assert.equal(admitted.length, 1, "2周目は再入ガードで即座に返り、何も admit しない");
+});
+
+/**
+ * 枠を奪われる窓の再現。修正前の tick は `state: "running"` を書く前に
+ * loadWorkflow / createWorktree を await するので、その間に入った
+ * 優先度の高いタスクが2周目の受付順の先頭に立ち、1周目のタスクを
+ * 押しのけて admit される（1周目のタスクはまだ queued なので枠は空に見え、
+ * 押しのけられた側は ctx.running にも入っていないので弾かれない）。
+ */
+test("窓の中に priority 0 のタスクが入っても maxConcurrent: 1 のプロジェクトで2件が走り出さない", async () => {
+  const ctx = context();
+  const h = createHandler(ctx);
+  const project = await h("project.add", { path: repo }, NOOP_CONN) as { id: number };
+  const a = await h("task.create", { project: repo, title: "A", prompt: "p" }, NOOP_CONN) as { id: string };
+
+  let release!: () => void;
+  const released = new Promise<void>((r) => { release = r; });
+  const bId = randomUUID();
+  const admitted: string[] = [];
+  const inner = ctx.loadWorkflow;
+  let first = true;
+  ctx.loadWorkflow = async (projectPath, name) => {
+    admitted.push(name);
+    if (first) {
+      first = false;
+      // 1周目が await している最中に、より優先度の高いタスクが作られる。
+      // handler 経由だと ctx.loadWorkflow に再入するので直接 insert する。
+      insertTask(ctx.db, {
+        id: bId, project_id: project.id, title: "B", prompt: "p", workflow_name: "feature",
+        branch: branchNameFor(bId, "B"), priority: 0,
+      });
+      await released;
+    }
+    return inner(projectPath, name);
+  };
+
+  const t1 = tick(ctx);
+  const t2 = tick(ctx);
+  release();
+  await Promise.all([t1, t2]);
+  await until(() => ctx.running.size === 0);
+
+  const states = [getTask(ctx.db, a.id)!.state, getTask(ctx.db, bId)!.state];
+  const holding = states.filter((s) => s === "running" || s === "suspended" || s === "paused");
+  assert.equal(holding.length, 1, `プロジェクト枠は1。実際: ${states.join(",")}`);
+  assert.equal(admitted.length, 1, "admit されたのは1件だけ");
+  assert.equal(getTask(ctx.db, bId)!.state, "queued", "後から来た priority 0 は枠が空くまで待つ");
+  assert.equal(getTask(ctx.db, bId)!.worktree_path, null, "走らなかったタスクは worktree も作られない");
+});
+
+/**
+ * 同じ窓は globalLimit も破る。プロジェクトが違えばプロジェクト枠は
+ * 助けにならないので、全体枠だけが最後の砦になる。
+ *
+ * ここは終了状態では判定できない（approval で suspended になったタスクは
+ * holdsGlobalSlot ではない）。admit された回数そのものを見る。
+ */
+test("窓の中に別プロジェクトの priority 0 が入っても globalLimit を超えて admit しない", async () => {
+  const ctx = context();
+  ctx.globalLimit = 1;
+  const h = createHandler(ctx);
+  await h("project.add", { path: repo }, NOOP_CONN);
+  const repo2 = await makeRepo(join(root, "two"), {
+    "README.md": "y\n",
+    ".doctrine/project.yaml": "defaultWorkflow: feature\nmaxConcurrent: 1\nbaseBranch: main\n",
+    ".doctrine/workflows/feature.yaml":
+      "name: feature\nsteps:\n  - id: review\n    type: approval\n    title: 見て\n",
+  });
+  const project2 = await h("project.add", { path: repo2 }, NOOP_CONN) as { id: number };
+  const a = await h("task.create", { project: repo, title: "A", prompt: "p" }, NOOP_CONN) as { id: string };
+
+  let release!: () => void;
+  const released = new Promise<void>((r) => { release = r; });
+  const bId = randomUUID();
+  const admitted: string[] = [];
+  const inner = ctx.loadWorkflow;
+  let first = true;
+  ctx.loadWorkflow = async (projectPath, name) => {
+    admitted.push(projectPath);
+    if (first) {
+      first = false;
+      insertTask(ctx.db, {
+        id: bId, project_id: project2.id, title: "B", prompt: "p", workflow_name: "feature",
+        branch: branchNameFor(bId, "B"), priority: 0,
+      });
+      await released;
+    }
+    return inner(projectPath, name);
+  };
+
+  const t1 = tick(ctx);
+  const t2 = tick(ctx);
+  release();
+  await Promise.all([t1, t2]);
+  await until(() => ctx.running.size === 0);
+
+  assert.equal(admitted.length, 1, `globalLimit は1。admit されたのは: ${admitted.join(",")}`);
+  assert.equal(getTask(ctx.db, bId)!.state, "queued", "全体枠が空くまで待つ");
+  assert.equal(getTask(ctx.db, bId)!.worktree_path, null);
+  assert.equal(getTask(ctx.db, a.id)!.state, "suspended");
+});
+
+test("tick が例外で抜けても再入ガードは解放され、次の周期が止まらない", async () => {
+  const ctx = context();
+  const h = createHandler(ctx);
+  await h("project.add", { path: repo }, NOOP_CONN);
+  const a = await h("task.create", { project: repo, title: "A", prompt: "p" }, NOOP_CONN) as { id: string };
+
+  const prepare = ctx.db.prepare.bind(ctx.db);
+  let boom = true;
+  // selectAdmissible は tick のタスク別 try の外側にあるので、ここでの例外は
+  // tick 自体から漏れる。ガードが finally で解放されていなければ、以後
+  // tick は永久に何もしなくなる。
+  (ctx.db as unknown as { prepare: typeof prepare }).prepare = ((sql: string) => {
+    if (boom && sql.includes("state = 'queued'")) throw new Error("DBが壊れた");
+    return prepare(sql);
+  }) as typeof prepare;
+
+  await assert.rejects(() => tick(ctx), /DBが壊れた/);
+
+  boom = false;
+  await tick(ctx);
+  await until(() => getTask(ctx.db, a.id)!.state === "suspended");
+  assert.equal(getTask(ctx.db, a.id)!.state, "suspended", "次の周期は普通に admit できる");
 });
