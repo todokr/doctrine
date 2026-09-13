@@ -1,4 +1,4 @@
-import { basename, join, resolve } from "@std/path";
+import { basename, isAbsolute, join, resolve } from "@std/path";
 import { runCommand } from "../util/exec.ts";
 import { homeDir } from "../util/home.ts";
 
@@ -38,11 +38,49 @@ export function branchNameFor(taskId: string, title: string): string {
   return slug ? `doctrine/${taskId}-${slug}` : `doctrine/${taskId}`;
 }
 
+/**
+ * 前段のエージェントが worktree 内に書く中間成果物の置き場所。doctrine 自身は
+ * この名前を強制しない（ワークフローの書き手がプロンプトで決める自由な文字列）が、
+ * git に見せないための exclude 設定だけはこの規約に合わせて自動で行う
+ * （step-artifacts spec 4章）。
+ */
+const DOCTRINE_OUT_EXCLUDE_LINE = ".doctrine-out/";
+
+/**
+ * `.doctrine-out/` を `.git/info/exclude` に追記し、git status / task.diff の
+ * write-tree の両方から見えなくする。プロジェクトの `.gitignore` は書き換えない
+ * （project-add が「既存のファイルを上書きしない」原則を持つのと同じ理由）。
+ *
+ * `git rev-parse --git-path` は、リポジトリのルートから呼ぶと相対パスを、
+ * リンクされた worktree から呼ぶと絶対パスを返す（common dir を指すため）。
+ * どちらでも動くよう、絶対パスでなければ repoPath からの相対として解決する。
+ *
+ * 既に同じ行があれば何もしない（複数タスクが同じリポジトリに何度も worktree を
+ * 作るので冪等にする）。
+ */
+export async function ensureDoctrineOutExcluded(repoPath: string): Promise<void> {
+  const { stdout } = await runCommand("git", ["-C", repoPath, "rev-parse", "--git-path", "info/exclude"]);
+  const raw = stdout.trim();
+  const excludePath = isAbsolute(raw) ? raw : join(repoPath, raw);
+
+  let content = "";
+  try {
+    content = await Deno.readTextFile(excludePath);
+  } catch (e) {
+    if (!(e instanceof Deno.errors.NotFound)) throw e;
+  }
+  if (content.split("\n").some((l) => l.trim() === DOCTRINE_OUT_EXCLUDE_LINE)) return;
+
+  const withTrailingNewline = content.length > 0 && !content.endsWith("\n") ? content + "\n" : content;
+  await Deno.writeTextFile(excludePath, withTrailingNewline + DOCTRINE_OUT_EXCLUDE_LINE + "\n");
+}
+
 /** 作成は自前の git worktree add。ライフサイクルの権威を1箇所に保つ。 */
 export async function createWorktree(o: {
   repoPath: string; worktreePath: string; branch: string; baseBranch: string;
 }): Promise<void> {
   await runCommand("git", ["-C", o.repoPath, "worktree", "add", "-b", o.branch, o.worktreePath, o.baseBranch]);
+  await ensureDoctrineOutExcluded(o.repoPath);
 }
 
 export async function hasUncommittedChanges(worktreePath: string): Promise<boolean> {
