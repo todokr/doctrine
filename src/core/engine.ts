@@ -1,11 +1,11 @@
-import type { DatabaseSync } from "node:sqlite";
 import type { Branch, Workflow } from "../workflow/schema.ts";
 import { branchOf } from "../workflow/schema.ts";
 import { expand, type TemplateContext } from "../workflow/template.ts";
-import { commitStepBoundary, type StepBoundary } from "../db/boundary.ts";
+import { commitStepBoundary, StateConflictError, type StepBoundary } from "../db/boundary.ts";
 import { getStepOutputs, type StepRunStatus } from "../db/stepRuns.ts";
 import { attemptCount, getProject, getTask, withAttempt, type TaskRow, type TaskState } from "../db/tasks.ts";
 import { insertRateLimitSample } from "../db/rateLimits.ts";
+import type { Db } from "../db/schema.ts";
 import { assertTransition } from "./states.ts";
 import { logPathFor, runAgentStep, runCommandStep, type RunnerDeps, type StepOutcome } from "./stepRunner.ts";
 
@@ -51,22 +51,32 @@ export type EngineDeps = RunnerDeps & {
   onStepRunFinished?(taskId: string, stepRunId: number, stepId: string, status: StepRunStatus): void;
 };
 
-function contextFor(db: DatabaseSync, task: TaskRow): TemplateContext {
-  const project = getProject(db, task.project_id)!;
+async function contextFor(db: Db, task: TaskRow): Promise<TemplateContext> {
+  const project = (await getProject(db, task.project_id))!;
   return {
     task: { id: task.id, title: task.title, prompt: task.prompt, branch: task.branch },
     worktree: { path: task.worktree_path ?? "" },
     project: { path: project.path },
-    steps: getStepOutputs(db, task.id),
+    steps: await getStepOutputs(db, task.id),
   };
 }
 
-function setState(
-  db: DatabaseSync, task: TaskRow, to: TaskState, deps: EngineDeps,
+/**
+ * task.state から to へ遷移させる。読んだ時点から状態が変わっていたら
+ * （cancel / pause が先に書いた）何も書かずに返る。新しい状態を所有しているのは
+ * 先に書いた側であり、ここで上書きすると中止したはずのタスクが completed などに化ける。
+ */
+async function setState(
+  db: Db, task: TaskRow, to: TaskState, deps: EngineDeps,
   extra: Partial<StepBoundary["taskPatch"]> = {},
-): void {
+): Promise<void> {
   assertTransition(task.state, to);
-  commitStepBoundary(db, { taskId: task.id, taskPatch: { state: to, ...extra } });
+  try {
+    await commitStepBoundary(db, { taskId: task.id, requireState: task.state, taskPatch: { state: to, ...extra } });
+  } catch (e) {
+    if (e instanceof StateConflictError) return;
+    throw e;
+  }
   deps.onStateChanged?.(task.id, task.state, to);
 }
 
@@ -75,9 +85,9 @@ function setState(
  * ステップ境界ごとに1トランザクションで書く。落ちて失うのは最大1ステップ分。
  */
 export async function runTask(
-  db: DatabaseSync, taskId: string, workflow: Workflow, deps: EngineDeps,
+  db: Db, taskId: string, workflow: Workflow, deps: EngineDeps,
 ): Promise<void> {
-  let task = getTask(db, taskId);
+  let task = await getTask(db, taskId);
   if (!task) throw new Error(`タスクがありません: ${taskId}`);
 
   let stepId = task.current_step_id ?? workflow.steps[0].id;
@@ -88,27 +98,31 @@ export async function runTask(
   let pendingFeed: string | null = task.pending_feed ?? null;
 
   while (true) {
-    task = getTask(db, taskId)!;
+    task = (await getTask(db, taskId))!;
     // ループが走り続ける権利を毎周確認する。task.cancel / task.pause は子を
     // SIGTERM して新しい状態を書くが、このループを止める手段は持っていない。
     // ここで降りないと、cancel 後も次のステップの子を spawn して、ユーザーが
     // 捨てたつもりの worktree に書き続ける。pause ではさらに current_step_id を
     // 進めてしまい、後の resume が1ステップ黙って飛ばす。
     // 新しい状態を所有しているのは状態を書いた側なので、ここでは何も書かずに返る。
+    //
+    // この読み取りは早く降りるためのもので、保証ではない。読んでから下の
+    // ステップ開始コミットまでには await があり、その隙に cancel が届き得る。
+    // 保証はステップ開始コミットの requireState: "running" が持つ。
     if (task.state !== "running") return;
     const step = workflow.steps.find((s) => s.id === stepId);
     if (!step) {
-      setState(db, task, "failed", deps);
+      await setState(db, task, "failed", deps);
       return;
     }
 
     if (step.type === "approval") {
-      setState(db, task, "suspended", deps, { current_step_id: step.id, child_pid: null, child_started_at: null });
+      await setState(db, task, "suspended", deps, { current_step_id: step.id, child_pid: null, child_started_at: null });
       return;
     }
 
     const attempt = attemptCount(task, step.id) + 1;
-    const ctx = contextFor(db, task);
+    const ctx = await contextFor(db, task);
     // session id はタスク全体で1つ。「このステップを始める時点で既に会話が
     // あったか」だけが resume すべきかを決める（ステップ内の再試行かどうかでは
     // ない）。agent ステップが2つ並ぶワークフローで2度 start すると、同じ
@@ -119,34 +133,43 @@ export async function runTask(
     const logPath = logPathFor(deps.logRoot, taskId, step.id, attempt);
     // 開始時に running の行を立てる。クラッシュ復帰はこの行を見て、
     // どのステップの途中で落ちたかを知る（Task 11）。
-    const stepRunId = commitStepBoundary(db, {
-      taskId,
-      taskPatch: {
-        current_step_id: step.id, attempt_counts: withAttempt(task, step.id),
-        // 会話を始めるのは agent ステップだけ。command ステップでも書くと、
-        // 一度も start していない id が「会話がある」ことにされ、次の agent が
-        // その id で resume してしまう（project.setup は全ワークフローの
-        // 先頭に command ステップとして入るので、これは常道の形で必ず踏む）。
-        // 既存の非null値を消さないよう、キーごと省く（null を書かない）。
-        ...(step.type === "agent" ? { claude_session_id: sessionId } : {}),
-        pending_feed: null,
-      },
-      stepRun: {
-        step_id: step.id, attempt, status: "running", exit_code: null,
-        started_at: new Date().toISOString(), ended_at: null, log_path: logPath,
-      },
-    })!;
+    let stepRunId: number;
+    try {
+      stepRunId = (await commitStepBoundary(db, {
+        taskId,
+        // 状態の確認と書き込みを同じトランザクションで行う。running でなくなって
+        // いれば（上の読み取りの後に cancel / pause が書いた）何も書かずに降りる。
+        requireState: "running",
+        taskPatch: {
+          current_step_id: step.id, attempt_counts: withAttempt(task, step.id),
+          // 会話を始めるのは agent ステップだけ。command ステップでも書くと、
+          // 一度も start していない id が「会話がある」ことにされ、次の agent が
+          // その id で resume してしまう（project.setup は全ワークフローの
+          // 先頭に command ステップとして入るので、これは常道の形で必ず踏む）。
+          // 既存の非null値を消さないよう、キーごと省く（null を書かない）。
+          ...(step.type === "agent" ? { claude_session_id: sessionId } : {}),
+          pending_feed: null,
+        },
+        stepRun: {
+          step_id: step.id, attempt, status: "running", exit_code: null,
+          started_at: new Date().toISOString(), ended_at: null, log_path: logPath,
+        },
+      }))!;
+    } catch (e) {
+      if (e instanceof StateConflictError) return;
+      throw e;
+    }
     deps.onStepRunStarted?.(taskId, stepRunId, step.id, attempt);
 
     const runnerDeps: RunnerDeps = {
       ...deps,
-      onChildSpawned: (pid, startedAt) => {
-        commitStepBoundary(db, { taskId, taskPatch: { child_pid: pid, child_started_at: startedAt } });
-        deps.onChildSpawned?.(pid, startedAt);
+      onChildSpawned: async (pid, startedAt) => {
+        await commitStepBoundary(db, { taskId, taskPatch: { child_pid: pid, child_started_at: startedAt } });
+        await deps.onChildSpawned?.(pid, startedAt);
       },
-      onRateLimit: (s) => {
-        insertRateLimitSample(db, { window: s.window, utilization: s.utilization, resets_at: s.resetsAt });
-        deps.onRateLimit?.(s);
+      onRateLimit: async (s) => {
+        await insertRateLimitSample(db, { window: s.window, utilization: s.utilization, resets_at: s.resetsAt });
+        await deps.onRateLimit?.(s);
       },
     };
 
@@ -159,7 +182,7 @@ export async function runTask(
             resume: isResume, deps: runnerDeps });
     pendingFeed = null;
 
-    commitStepBoundary(db, {
+    await commitStepBoundary(db, {
       taskId,
       taskPatch: { child_pid: null, child_started_at: null },
       stepRunUpdate: {
@@ -171,7 +194,7 @@ export async function runTask(
     });
     deps.onStepRunFinished?.(taskId, stepRunId, step.id, outcome.status as StepRunStatus);
 
-    task = getTask(db, taskId)!;
+    task = (await getTask(db, taskId))!;
     const decision = decide({
       workflow, currentStepId: step.id, outcome: outcome.status,
       attempts: attemptCount(task, step.id),
@@ -183,16 +206,16 @@ export async function runTask(
         break;
       case "goto":
         stepId = decision.stepId;
-        pendingFeed = decision.feed ? expand(decision.feed, contextFor(db, task)) : null;
+        pendingFeed = decision.feed ? expand(decision.feed, await contextFor(db, task)) : null;
         break;
       case "complete":
-        setState(db, task, "completed", deps);
+        await setState(db, task, "completed", deps);
         return;
       case "fail":
-        setState(db, task, "failed", deps);
+        await setState(db, task, "failed", deps);
         return;
       case "suspend":
-        setState(db, task, "suspended", deps);
+        await setState(db, task, "suspended", deps);
         return;
     }
   }
@@ -201,13 +224,16 @@ export async function runTask(
 /**
  * approval の結果を適用する。却下コメントは approval ステップの stdout として保存する
  * （agent ステップの stdout を最終結果テキストとしたのと同じ扱い。変数の系統を増やさない）。
+ *
+ * 書き込みはすべて requireState: "suspended" 付き。読んでから書くまでの間に
+ * task.cancel などが届いていれば、StateConflictError で何も書かずに失敗する。
  */
-export function applyApproval(
-  db: DatabaseSync, taskId: string,
+export async function applyApproval(
+  db: Db, taskId: string,
   verdict: { approved: boolean; comment: string },
   workflow: Workflow,
-): void {
-  const task = getTask(db, taskId);
+): Promise<void> {
+  const task = await getTask(db, taskId);
   if (!task) throw new Error(`タスクがありません: ${taskId}`);
   if (task.state !== "suspended") throw new Error(`承認待ちではありません: ${task.state}`);
 
@@ -230,8 +256,9 @@ export function applyApproval(
     // 遷移表に反する書き込みを防ぐ。ここで投げれば commitStepBoundary は一切呼ばれず、
     // タスク行・step_run・outputs のどれも書き換わらない（呼び出し前に検査するのが要点）。
     assertTransition(task.state, to);
-    commitStepBoundary(db, {
+    await commitStepBoundary(db, {
       taskId,
+      requireState: "suspended",
       taskPatch: next
         ? { state: "queued", current_step_id: next.id, resumed: 1 }
         : { state: "completed" },
@@ -256,14 +283,15 @@ export function applyApproval(
   // {{ steps.review.stdout }} は却下コメントを指す。DBへ書く前に、これから書く値を
   // 直接コンテキストへ差し込んで展開する（コマンド実行パスが「出力を書いてから
   // 次のステップで参照する」のと同じ意味を、1トランザクション内で再現する）。
-  const ctx = contextFor(db, task);
+  const ctx = await contextFor(db, task);
   ctx.steps[stepId] = { stdout: verdict.comment, stderr: "", exitCode: "1" };
 
   if (decision.kind === "goto") {
     const to: TaskState = "queued";
     assertTransition(task.state, to);
-    commitStepBoundary(db, {
+    await commitStepBoundary(db, {
       taskId,
+      requireState: "suspended",
       taskPatch: {
         state: "queued", current_step_id: decision.stepId, resumed: 1,
         attempt_counts: advancedAttemptCounts,
@@ -279,8 +307,9 @@ export function applyApproval(
   // decision.kind === "fail"（onReject が無い、または maxAttempts を使い切った）
   const to: TaskState = "failed";
   assertTransition(task.state, to);
-  commitStepBoundary(db, {
+  await commitStepBoundary(db, {
     taskId,
+    requireState: "suspended",
     taskPatch: { state: "failed", attempt_counts: advancedAttemptCounts },
     stepRun: { step_id: stepId, attempt: advancedAttempt, status: "failed",
                exit_code: 1, started_at: now, ended_at: now, log_path: "" },

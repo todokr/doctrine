@@ -1,29 +1,23 @@
-import type { DatabaseSync } from "node:sqlite";
+import type { Db, StepRunRow } from "./schema.ts";
 
-export type StepRunStatus = "running" | "success" | "failed" | "degraded";
+export type { StepRunRow, StepRunStatus } from "./schema.ts";
 
-export type StepRunRow = {
-  id: number; task_id: string; step_id: string; attempt: number;
-  status: StepRunStatus; exit_code: number | null;
-  started_at: string; ended_at: string | null; log_path: string;
-  cost_usd: number | null; num_turns: number | null; duration_ms: number | null;
-};
-
-export function listStepRuns(db: DatabaseSync, taskId: string): StepRunRow[] {
-  return db.prepare("SELECT * FROM step_runs WHERE task_id = ? ORDER BY id")
-    .all(taskId) as StepRunRow[];
+export function listStepRuns(db: Db, taskId: string): Promise<StepRunRow[]> {
+  return db.selectFrom("step_runs").selectAll().where("task_id", "=", taskId).orderBy("id").execute();
 }
 
-export function getStepRun(db: DatabaseSync, id: number): StepRunRow | undefined {
-  return db.prepare("SELECT * FROM step_runs WHERE id = ?").get(id) as StepRunRow | undefined;
+export function getStepRun(db: Db, id: number): Promise<StepRunRow | undefined> {
+  return db.selectFrom("step_runs").selectAll().where("id", "=", id).executeTakeFirst();
 }
 
 /** 変数展開に渡す形（exitCode は文字列。テンプレートは文字列しか返さない）。 */
-export function getStepOutputs(
-  db: DatabaseSync, taskId: string,
-): Record<string, { stdout: string; stderr: string; exitCode: string }> {
-  const rows = db.prepare("SELECT step_id, stdout, stderr, exit_code FROM step_outputs WHERE task_id = ?")
-    .all(taskId) as { step_id: string; stdout: string; stderr: string; exit_code: number | null }[];
+export async function getStepOutputs(
+  db: Db, taskId: string,
+): Promise<Record<string, { stdout: string; stderr: string; exitCode: string }>> {
+  const rows = await db.selectFrom("step_outputs")
+    .select(["step_id", "stdout", "stderr", "exit_code"])
+    .where("task_id", "=", taskId)
+    .execute();
   const out: Record<string, { stdout: string; stderr: string; exitCode: string }> = {};
   for (const r of rows) {
     out[r.step_id] = { stdout: r.stdout, stderr: r.stderr, exitCode: String(r.exit_code ?? "") };

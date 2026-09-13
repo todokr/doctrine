@@ -17,9 +17,9 @@ const ctx: TemplateContext = {
   worktree: { path: "/wt" }, project: { path: "/repo" }, steps: {},
 };
 
-function deps(over: Partial<RunnerDeps> = {}): RunnerDeps {
+async function deps(over: Partial<RunnerDeps> = {}): Promise<RunnerDeps> {
   return {
-    db: openDb(":memory:"),
+    db: await openDb(":memory:"),
     adapter: createMockAdapter({ result: { ok: true, text: "やりました" } }),
     logRoot: join(root, "logs"),
     ...over,
@@ -29,7 +29,7 @@ function deps(over: Partial<RunnerDeps> = {}): RunnerDeps {
 test("成功した command は success", async () => {
   const out = await runCommandStep(
     { id: "s", type: "command", run: "echo hello" }, ctx,
-    { cwd: root, taskId: "t1", attempt: 1, deps: deps() });
+    { cwd: root, taskId: "t1", attempt: 1, deps: await deps() });
   assert.equal(out.status, "success");
   assert.equal(out.exitCode, 0);
   assert.match(out.stdout, /hello/);
@@ -38,7 +38,7 @@ test("成功した command は success", async () => {
 test("非0終了でステップ失敗", async () => {
   const out = await runCommandStep(
     { id: "s", type: "command", run: "exit 3" }, ctx,
-    { cwd: root, taskId: "t1", attempt: 1, deps: deps() });
+    { cwd: root, taskId: "t1", attempt: 1, deps: await deps() });
   assert.equal(out.status, "failed");
   assert.equal(out.exitCode, 3);
 });
@@ -46,12 +46,12 @@ test("非0終了でステップ失敗", async () => {
 test("コマンドの変数は実行前に展開される", async () => {
   const out = await runCommandStep(
     { id: "s", type: "command", run: "echo {{ task.branch }}" }, ctx,
-    { cwd: root, taskId: "t1", attempt: 1, deps: deps() });
+    { cwd: root, taskId: "t1", attempt: 1, deps: await deps() });
   assert.match(out.stdout, /doctrine\/t1-t/);
 });
 
 test("ログ本文はファイルに書かれる", async () => {
-  const d = deps();
+  const d = await deps();
   const out = await runCommandStep(
     { id: "s", type: "command", run: "echo ログ行" }, ctx,
     { cwd: root, taskId: "t1", attempt: 2, deps: d });
@@ -63,7 +63,7 @@ test("agent ステップは最終テキストを stdout にする", async () => 
   const adapter = createMockAdapter({ result: { ok: true, text: "できました", costUsd: 0.3, numTurns: 4 } });
   const out = await runAgentStep(
     { id: "a", type: "agent", prompt: "{{ task.prompt }}" }, ctx,
-    { cwd: root, taskId: "t1", attempt: 1, sessionId: "s1", resume: false, deps: deps({ adapter }) });
+    { cwd: root, taskId: "t1", attempt: 1, sessionId: "s1", resume: false, deps: await deps({ adapter }) });
   assert.equal(out.status, "success");
   assert.equal(out.stdout, "できました");
   assert.equal(out.costUsd, 0.3);
@@ -75,7 +75,7 @@ test("resume: true なら resume が呼ばれる", async () => {
   const adapter = createMockAdapter({ result: { ok: true, text: "続きです" } });
   await runAgentStep(
     { id: "a", type: "agent", prompt: "{{ task.prompt }} を直して" }, ctx,
-    { cwd: root, taskId: "t1", attempt: 2, sessionId: "s1", resume: true, deps: deps({ adapter }) });
+    { cwd: root, taskId: "t1", attempt: 2, sessionId: "s1", resume: true, deps: await deps({ adapter }) });
   assert.equal(adapter.calls[0].kind, "resume");
   assert.equal(adapter.calls[0].sessionId, "s1");
   assert.equal(adapter.calls[0].prompt, "直して を直して", "resume でもプロンプトの変数が展開されている");
@@ -85,13 +85,13 @@ test("permission_denials があれば degraded として返る", async () => {
   const adapter = createMockAdapter({ result: { ok: true, degraded: true, text: "何もできず" } });
   const out = await runAgentStep(
     { id: "a", type: "agent", prompt: "p" }, ctx,
-    { cwd: root, taskId: "t1", attempt: 1, sessionId: "s1", resume: false, deps: deps({ adapter }) });
+    { cwd: root, taskId: "t1", attempt: 1, sessionId: "s1", resume: false, deps: await deps({ adapter }) });
   assert.equal(out.status, "degraded", "成功に見えるが何もできていない実行を区別する");
 });
 
 test("子プロセスのpidと開始時刻が通知される", async () => {
   const seen: { pid: number; startedAt: string }[] = [];
-  const d = deps({ onChildSpawned: (pid, startedAt) => seen.push({ pid, startedAt }) });
+  const d = await deps({ onChildSpawned: (pid, startedAt) => { seen.push({ pid, startedAt }); } });
   await runAgentStep(
     { id: "a", type: "agent", prompt: "p" }, ctx,
     { cwd: root, taskId: "t1", attempt: 1, sessionId: "s1", resume: false, deps: d });
@@ -109,13 +109,13 @@ test("rate_limit イベントが通知される", async () => {
   await runAgentStep(
     { id: "a", type: "agent", prompt: "p" }, ctx,
     { cwd: root, taskId: "t1", attempt: 1, sessionId: "s1", resume: false,
-      deps: deps({ adapter, onRateLimit: (s) => samples.push(s) }) });
+      deps: await deps({ adapter, onRateLimit: (s) => { samples.push(s); } }) });
   assert.deepEqual(samples, [{ window: "five_hour", utilization: 0.14, resetsAt: null }]);
 });
 
 test("command ステップでも子プロセスのpidと開始時刻が通知される", async () => {
   const seen: { pid: number; startedAt: string }[] = [];
-  const d = deps({ onChildSpawned: (pid, startedAt) => seen.push({ pid, startedAt }) });
+  const d = await deps({ onChildSpawned: (pid, startedAt) => { seen.push({ pid, startedAt }); } });
   await runCommandStep(
     { id: "s", type: "command", run: "echo x" }, ctx,
     { cwd: root, taskId: "t1", attempt: 1, deps: d });
@@ -128,7 +128,7 @@ test("stdout はexitではなくcloseまで待ってから確定する（大量�
   const n = 200000;
   const out = await runCommandStep(
     { id: "s", type: "command", run: `yes | head -c ${n}` }, ctx,
-    { cwd: root, taskId: "t1", attempt: 1, deps: deps() });
+    { cwd: root, taskId: "t1", attempt: 1, deps: await deps() });
   assert.equal(out.stdout.length, n);
   const logged = await readFile(out.logPath, "utf8");
   assert.equal(logged.length, n);
@@ -138,7 +138,7 @@ test("run に未知の変数を使うとTemplateErrorが伝播する（握りつ
   await assert.rejects(
     runCommandStep(
       { id: "s", type: "command", run: "echo {{ nope.nope }}" }, ctx,
-      { cwd: root, taskId: "t1", attempt: 1, deps: deps() }),
+      { cwd: root, taskId: "t1", attempt: 1, deps: await deps() }),
   );
 });
 
@@ -147,7 +147,7 @@ test("ログ先が書き込み不能でもステップの実行結果には影�
   // ログファイル用の mkdir/createWriteStream を確実に失敗させる。
   const blocker = join(root, "blocker");
   await writeFile(blocker, "not a directory");
-  const d = deps({ logRoot: join(blocker, "logs") });
+  const d = await deps({ logRoot: join(blocker, "logs") });
 
   const out = await runCommandStep(
     { id: "s", type: "command", run: "echo hello" }, ctx,
@@ -163,7 +163,7 @@ test("失敗したagentステップは stderrTail を stderr として返す", a
   });
   const out = await runAgentStep(
     { id: "a", type: "agent", prompt: "p" }, ctx,
-    { cwd: root, taskId: "t1", attempt: 1, sessionId: "s1", resume: false, deps: deps({ adapter }) });
+    { cwd: root, taskId: "t1", attempt: 1, sessionId: "s1", resume: false, deps: await deps({ adapter }) });
   assert.equal(out.status, "failed");
   assert.equal(out.stderr, "Error: something went wrong\n");
 });
