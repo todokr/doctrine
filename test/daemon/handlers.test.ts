@@ -1,6 +1,6 @@
 import { test, beforeEach, afterEach } from "@std/testing/bdd";
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -12,6 +12,7 @@ import { getTask, insertTask } from "../../src/db/tasks.ts";
 import { listStepRuns } from "../../src/db/stepRuns.ts";
 import { createHandler, tick, type DaemonContext } from "../../src/daemon/handlers.ts";
 import { createMockAdapter } from "../../src/adapter/mock.ts";
+import { parseWorkflow } from "../../src/workflow/schema.ts";
 import type { ServerEvent } from "../../src/daemon/protocol.ts";
 import { branchNameFor } from "../../src/core/worktree.ts";
 import { randomUUID } from "node:crypto";
@@ -735,4 +736,146 @@ test("受付候補を読んだ後に cancel が届いたタスクは、running �
   assert.equal(row.worktree_path, null, "見送ったタスクの worktree は作らない");
   assert.deepEqual(loaded, [], "ワークフローの読み込み（実行の開始）に進まない");
   assert.deepEqual(ctx.warnings, [], "見送りは失敗ではない");
+});
+
+// --- project.add は最初に叩くコマンドなので、足りない .doctrine の雛形を作る ---
+
+/** .doctrine を持たない、最初のコミットだけ済んだリポジトリ */
+async function bareRepo(name: string): Promise<string> {
+  return await makeRepo(join(root, name), { "README.md": "x\n" });
+}
+
+test("project.add: .doctrine が無ければ雛形を作り、そのままタスクを作れる", async () => {
+  const bare = await bareRepo("bare");
+  const ctx = await context();
+  const h = createHandler(ctx);
+  const p = await h("project.add", { path: bare }, NOOP_CONN) as {
+    default_workflow: string; created: string[];
+  };
+
+  const projectYaml = join(bare, ".doctrine", "project.yaml");
+  const workflowYaml = join(bare, ".doctrine", "workflows", "default.yaml");
+  assert.ok(existsSync(projectYaml), "project.yaml が作られている");
+  assert.ok(existsSync(workflowYaml), "既定のワークフローが作られている");
+  assert.deepEqual([...p.created].sort(), [projectYaml, workflowYaml].sort(),
+    "作ったファイルをレスポンスで伝える（ユーザーのリポジトリに未追跡ファイルが増えるため）");
+  assert.equal(p.default_workflow, "default");
+
+  // 雛形が検証を通らなければ、ここで落ちる
+  const t = await h("task.create", { project: bare, title: "T", prompt: "直して" }, NOOP_CONN) as { id: string };
+  assert.equal((await getTask(ctx.db, t.id))!.state, "queued");
+});
+
+test("project.add: 既定のワークフローは agent と approval だけで、command を含まない", async () => {
+  const bare = await bareRepo("bare");
+  const h = createHandler(await context());
+  await h("project.add", { path: bare }, NOOP_CONN);
+  const { workflow } = parseWorkflow(
+    await readFile(join(bare, ".doctrine", "workflows", "default.yaml"), "utf8"),
+  );
+  assert.deepEqual(workflow.steps.map((s) => s.type), ["agent", "approval"]);
+});
+
+test("project.add: 雛形の project.yaml に setup を書かない（パッケージマネージャを強制しない）", async () => {
+  const bare = await bareRepo("bare");
+  const h = createHandler(await context());
+  const p = await h("project.add", { path: bare }, NOOP_CONN) as { setup: string | null };
+  assert.equal(p.setup, null);
+  const text = await readFile(join(bare, ".doctrine", "project.yaml"), "utf8");
+  assert.equal(/^\s*setup\s*:/m.test(text), false, "setup キーが書かれていない");
+});
+
+test("project.add: ベースブランチは main 決め打ちではなく git から取る", async () => {
+  const bare = await bareRepo("bare");
+  await run("git", ["-C", bare, "branch", "-m", "trunk"]);
+  const h = createHandler(await context());
+  const p = await h("project.add", { path: bare }, NOOP_CONN) as { base_branch: string };
+  assert.equal(p.base_branch, "trunk");
+  assert.equal(baseBranchWrittenIn(await readFile(join(bare, ".doctrine", "project.yaml"), "utf8")), "trunk");
+});
+
+test("project.add: 既存の project.yaml は上書きしない", async () => {
+  const before = await readFile(join(repo, ".doctrine", "project.yaml"), "utf8");
+  const h = createHandler(await context());
+  const p = await h("project.add", { path: repo }, NOOP_CONN) as { created: string[]; default_workflow: string };
+  assert.equal(await readFile(join(repo, ".doctrine", "project.yaml"), "utf8"), before);
+  assert.deepEqual(p.created, []);
+  assert.equal(p.default_workflow, "feature");
+});
+
+test("project.add: project.yaml が指すワークフローが無ければ、何も作らずに分かる形で失敗する", async () => {
+  const r = await makeRepo(join(root, "partial"), {
+    "README.md": "x\n",
+    ".doctrine/project.yaml": "defaultWorkflow: feature\n",
+  });
+  const h = createHandler(await context());
+  await assert.rejects(
+    () => h("project.add", { path: r }, NOOP_CONN),
+    (e: unknown) => {
+      const m = (e as Error).message;
+      assert.match(m, /feature/, "どのワークフローが無いのか名前を出す");
+      assert.match(m, /workflows/, "どこに置けばいいか分かる");
+      return true;
+    },
+  );
+  assert.equal(existsSync(join(r, ".doctrine", "workflows")), false,
+    "ユーザーが書いていないワークフローを勝手に作らない");
+  assert.equal((await h("project.list", {}, NOOP_CONN) as unknown[]).length, 0);
+});
+
+test("project.add: git リポジトリでなければ .doctrine を作らずに失敗する", async () => {
+  const plain = join(root, "plain");
+  await mkdir(plain);
+  const h = createHandler(await context());
+  await assert.rejects(() => h("project.add", { path: plain }, NOOP_CONN), /git/);
+  assert.equal(existsSync(join(plain, ".doctrine")), false);
+});
+
+test("project.add: リポジトリのサブディレクトリを指したら、ルートを案内して失敗する", async () => {
+  const bare = await bareRepo("bare");
+  const sub = join(bare, "packages", "app");
+  await mkdir(sub, { recursive: true });
+  const h = createHandler(await context());
+  const realRoot = await Deno.realPath(bare);
+  await assert.rejects(
+    () => h("project.add", { path: sub }, NOOP_CONN),
+    (e: unknown) => {
+      // サブディレクトリのパスはルートを前方一致で含むので、それを取り除いた後にも
+      // ルートが残っていることを確かめる — 単に sub のパスを含むエラー（NotFound 等）
+      // では通らないようにする
+      const withoutSub = (e as Error).message.replaceAll(sub, "");
+      assert.ok(withoutSub.includes(realRoot), `リポジトリのルートを案内する: ${(e as Error).message}`);
+      return true;
+    },
+  );
+  assert.equal(existsSync(join(sub, ".doctrine")), false);
+});
+
+test("project.add: 同じパスで2回呼んでも失敗せず、登録済みとして同じプロジェクトを返す", async () => {
+  const h = createHandler(await context());
+  const first = await h("project.add", { path: repo }, NOOP_CONN) as { id: number };
+  const second = await h("project.add", { path: repo }, NOOP_CONN) as { id: number; alreadyRegistered: boolean };
+  assert.equal(second.id, first.id);
+  assert.equal(second.alreadyRegistered, true);
+  assert.equal((await h("project.list", {}, NOOP_CONN) as unknown[]).length, 1);
+});
+
+function baseBranchWrittenIn(text: string): string {
+  const m = /^baseBranch:\s*(\S+)\s*$/m.exec(text);
+  return m ? m[1] : "";
+}
+
+test("project.add: project.yaml が無くても、既にあるワークフローファイルは上書きしない", async () => {
+  const custom = "name: default\nsteps:\n  - id: mine\n    type: approval\n    title: 自分で書いた\n";
+  const r = await makeRepo(join(root, "wfonly"), {
+    "README.md": "x\n",
+    ".doctrine/workflows/default.yaml": custom,
+  });
+  const h = createHandler(await context());
+  const p = await h("project.add", { path: r }, NOOP_CONN) as { created: string[] };
+  assert.equal(
+    await readFile(join(r, ".doctrine", "workflows", "default.yaml"), "utf8"), custom,
+    "ユーザーが書いたワークフローを雛形で潰さない",
+  );
+  assert.deepEqual(p.created, [join(r, ".doctrine", "project.yaml")], "作ったのは project.yaml だけ");
 });

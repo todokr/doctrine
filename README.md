@@ -49,6 +49,18 @@ dctl ls
 dctl get <task-id>
 ```
 
+`project-add` は最初に叩くコマンドで、`.doctrine/` が無ければ雛形を作る。
+
+- `.doctrine/project.yaml` と `.doctrine/workflows/default.yaml`（agent → approval の最小構成）を作り、
+  作ったファイルのパスを `created` に出す。**コミットはしない。** 何をコミットするかは自分で決める
+- `baseBranch` は git から取る（リモートの既定ブランチ、無ければ現在のブランチ）。`setup` は書かない
+  — doctrine はパッケージマネージャを決めないので、必要なら自分で足す
+- **既存のファイルは上書きしない。** `project.yaml` が既にあれば読むだけで、それが指す
+  ワークフローが無ければ何も作らずに失敗する（書いていない手順を勝手に作らない）
+- `--path` には **git リポジトリのルート**を指定する。git リポジトリでない、またはサブディレクトリを
+  指した場合は何も作らずに失敗する（doctrine はタスクごとに git worktree を作るため）
+- 同じパスで2回実行しても失敗しない。登録済み（`alreadyRegistered: true`）と返すだけ
+
 `--workflow <name>` で `project.yaml` の `defaultWorkflow` を上書きできる。
 `--priority 0`（既定は2、P0〜P3）で優先度を指定できる。
 
@@ -60,7 +72,7 @@ dctl get <task-id>
 
 ## 2. ワークフローを書く
 
-配置場所は2つ。
+`dctl project-add` が作った雛形を、プロジェクトに合わせて編集する。配置場所は2つ。
 
 - `<project>/.doctrine/project.yaml` — プロジェクト全体の設定
 - `<project>/.doctrine/workflows/<name>.yaml` — 手順そのもの
