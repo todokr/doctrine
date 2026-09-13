@@ -1,4 +1,4 @@
-import { test } from "vitest";
+import { test } from "@std/testing/bdd";
 import assert from "node:assert/strict";
 import {
   canTransition, assertTransition, holdsGlobalSlot, holdsProjectSlot,

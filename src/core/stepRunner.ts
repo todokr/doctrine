@@ -1,11 +1,9 @@
-import { spawn } from "node:child_process";
-import { createWriteStream } from "node:fs";
-import { mkdir } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname, join } from "@std/path";
 import type { DatabaseSync } from "node:sqlite";
 import type { AgentStep, CommandStep } from "../workflow/schema.ts";
 import { expand, type TemplateContext } from "../workflow/template.ts";
 import type { AgentAdapter } from "../adapter/types.ts";
+import { exitCodeOf } from "../util/exec.ts";
 
 export type StepOutcome = {
   status: "success" | "failed" | "degraded" | "suspended";
@@ -44,45 +42,58 @@ type Log = { write(chunk: string): void; close(): Promise<void> };
  * とどめる — 例外を投げて daemon 全体（他タスクも含む）を落とすことは絶対にしない。
  */
 async function openLog(path: string): Promise<Log> {
-  let stream: ReturnType<typeof createWriteStream> | null = null;
+  let file: Deno.FsFile | null = null;
   let failed = false;
 
   try {
-    await mkdir(dirname(path), { recursive: true });
-    stream = createWriteStream(path, { flags: "a" });
+    await Deno.mkdir(dirname(path), { recursive: true });
+    file = await Deno.open(path, { append: true, create: true });
   } catch (e) {
     failed = true;
     console.error(`ログファイルを開けませんでした（ステップの実行は継続します）: ${path}`, e);
   }
 
-  if (stream) {
-    stream.on("error", (e) => {
-      if (!failed) {
-        console.error(`ログファイルへの書き込みに失敗しました（ステップの実行は継続します）: ${path}`, e);
-      }
-      failed = true;
-    });
-  }
+  // 書き込みは非同期なので、順序を保つために直列につなぐ。
+  const encoder = new TextEncoder();
+  let pending: Promise<void> = Promise.resolve();
 
   return {
     write(chunk: string) {
-      if (failed || !stream) return;
-      try {
-        stream.write(chunk);
-      } catch {
-        failed = true;
-      }
+      if (failed || !file) return;
+      const f = file;
+      const bytes = encoder.encode(chunk);
+      pending = pending
+        .then(async () => {
+          if (failed) return;
+          let offset = 0;
+          while (offset < bytes.length) offset += await f.write(bytes.subarray(offset));
+        })
+        .catch((e) => {
+          if (!failed) {
+            console.error(`ログファイルへの書き込みに失敗しました（ステップの実行は継続します）: ${path}`, e);
+          }
+          failed = true;
+        });
     },
-    close(): Promise<void> {
-      if (failed || !stream) return Promise.resolve();
-      return new Promise((resolve) => {
-        // ここでも reject しない: close 時点でストリームが壊れていても
-        // ステップの結果には影響させない。
-        stream!.once("error", () => resolve());
-        stream!.end(() => resolve());
-      });
+    async close(): Promise<void> {
+      if (!file) return;
+      // ここでも reject しない: close 時点でファイルが壊れていても
+      // ステップの結果には影響させない。
+      await pending;
+      try { file.close(); } catch { /* 既に閉じている */ }
     },
   };
+}
+
+/** 子プロセスの出力を読み切る。マルチバイト文字の途中で割れたチャンクは次のチャンクまで保留する。 */
+async function drain(stream: ReadableStream<Uint8Array>, onText: (text: string) => void): Promise<void> {
+  const decoder = new TextDecoder();
+  for await (const chunk of stream) {
+    const text = decoder.decode(chunk, { stream: true });
+    if (text) onText(text);
+  }
+  const rest = decoder.decode();
+  if (rest) onText(rest);
 }
 
 export async function runCommandStep(
@@ -98,23 +109,28 @@ export async function runCommandStep(
   const startedAt = new Date().toISOString();
 
   try {
-    const child = spawn("sh", ["-c", command], { cwd: o.cwd, stdio: ["ignore", "pipe", "pipe"] });
-    o.deps.onChildSpawned?.(child.pid ?? -1, startedAt);
+    let child: Deno.ChildProcess;
+    try {
+      child = new Deno.Command("sh", {
+        args: ["-c", command], cwd: o.cwd, stdin: "null", stdout: "piped", stderr: "piped",
+      }).spawn();
+    } catch (e) {
+      // 起動失敗（cwd が無いなど）は同期例外で来る。pid は -1 として通知してから伝播させる。
+      o.deps.onChildSpawned?.(-1, startedAt);
+      throw e;
+    }
+    o.deps.onChildSpawned?.(child.pid, startedAt);
 
     let stdout = "";
     let stderr = "";
-    child.stdout.setEncoding("utf8");
-    child.stderr.setEncoding("utf8");
-    child.stdout.on("data", (c: string) => { stdout += c; log.write(c); o.deps.onLogLine?.(c); });
-    child.stderr.on("data", (c: string) => { stderr += c; log.write(c); o.deps.onLogLine?.(c); });
-
-    // "close" は stdio が完全に消費された後に発火する。"exit" はプロセス終了時点で
-    // すぐ発火するが、パイプにまだ読み残しがある可能性があり、それだと出力を
-    // 取りこぼす。だから "close" を使う。
-    const exitCode = await new Promise<number | null>((resolve, reject) => {
-      child.once("error", reject);
-      child.once("close", resolve);
-    });
+    // 終了ステータスだけでなく stdout / stderr を読み切るまで待つ。プロセスの終了時点では
+    // パイプにまだ読み残しがある可能性があり、先に確定させると出力を取りこぼす。
+    const [status] = await Promise.all([
+      child.status,
+      drain(child.stdout, (c) => { stdout += c; log.write(c); o.deps.onLogLine?.(c); }),
+      drain(child.stderr, (c) => { stderr += c; log.write(c); o.deps.onLogLine?.(c); }),
+    ]);
+    const exitCode = exitCodeOf(status);
 
     return {
       status: exitCode === 0 ? "success" : "failed",

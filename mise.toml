@@ -1,11 +1,10 @@
 [tools]
-node = "24.14.1"
-pnpm = "latest"
+deno = "2.9.4"
 
 # worktree 初期化で使う。`mise run setup` を worktree 内で実行する。
 # 注意: 新しい worktree のパスは mise にとって未信頼なので、このタスクを呼ぶ前に
 # `mise trust`（または MISE_TRUSTED_CONFIG_PATHS）が必要。信頼判定は設定の
 # パース時点で走るため、タスク自身が自分の信頼をブートストラップすることはできない
 [tasks.setup]
-description = "worktree を作業可能な状態にする（依存インストール）"
-run = "pnpm install --frozen-lockfile"
+description = "worktree を作業可能な状態にする（依存の取得）"
+run = "deno install --frozen"

@@ -462,11 +462,21 @@ claude -p --resume <session-id> '<追加指示>' --output-format stream-json --v
 
 ## 7. 技術スタック
 
-- **ランタイム**: TypeScript + Node.js 24
+- **ランタイム**: TypeScript + Deno 2.9
   - Rust + 単一バイナリも検討したが、②のUIはどのフレームワークでもレンダラ側はTSになる。
   ワークフロースキーマとイベント型を**デーモンとUIで共有できる**価値が上回る。
-  子プロセス起動と NDJSON の行単位読み取りは Node の得意領域
-- **永続化**: SQLite（`node:sqlite`、組み込み。Node 24 では experimental 警告が出るが動作する）
+  - 当初は Node.js 24 で実装したが、②のUIを Deno Desktop で作ると決めたため
+  （[#6](https://github.com/todokr/doctrine/issues/6)）、デーモンとUIで言語・ランタイム・
+  ツールチェーンを1つに揃えた。デーモンを別プロセスに保つ理由（ウィンドウを閉じても
+  タスクが走り続ける／①をUIなしでテストできる）は変わらないので、Deno Desktop の
+  in-process IPC の利点は使わない
+  - 子プロセスは `Deno.Command`、Unixソケットは `Deno.listen` / `Deno.connect`
+  （`transport: "unix"`）、シグナルは `Deno.kill`
+- **永続化**: SQLite（`node:sqlite`。Deno の Node 互換層が同期APIのまま提供する）
+  - **同期APIであること自体が設計上の前提。** `runTask` の cancel / pause ガードは、
+  状態の読み取りとステップ開始の `commitStepBoundary` の間に `await` が1つも無いことで
+  レース無しになっている。非同期APIのドライバ（Kysely 経由を含む）に替えるとこの区間に
+  中断点が入り TOCTOU に劣化し、**しかも既存のテストは全部通り続ける**
   - uncle-jam の「1ジョブ = 1 JSONファイル」は捨てる。実行履歴・横断一覧・枠のカウントは
   クエリしたいデータであり、JSONファイル群では毎回全読みになる。
   書き手はデーモン1つだけなので同時書き込み問題は起きない
@@ -476,24 +486,22 @@ claude -p --resume <session-id> '<追加指示>' --output-format stream-json --v
   - リクエスト/レスポンスに加え、**サーバ→クライアントのイベントプッシュ**
   （状態遷移、ステップ完了、ログ行）を同じ接続で流す。UIはポーリングしない
   - パス: `$XDG_RUNTIME_DIR/doctrine/dctld.sock`
-- **依存パッケージは2つ**: `yaml`（パース）、`zod`（検証）
+- **依存パッケージは最小限**: `yaml`（パース）、`zod`（検証）、`@std/path`（パス操作）
   - ユーザーが手で書く設定ファイルなので、**エラーメッセージの質が直接UXになる**。
   ここは手書きバリデータで妥協しない
   - uncle-jam のゼロ依存方針は引き継がない（学習用実装の制約であって本番の制約ではない）
-- **テスト**: vitest
-  - 「依存パッケージは2つ」はランタイム依存の話であり、vitest は devDependency なので
-  デーモンの配布物は変わらない。テストの大半が実リポジトリ作成・子プロセス起動・
-  ソケット接続を伴う統合寄りのものになるため、**失敗時に何が違うのかが読めること**と
-  watch モードの価値が組み込みランナーで足りる範囲を上回る
-  - アサーションは `node:assert/strict` を使う（ランナーを替えても書き方が変わらない）
-- **ビルド**: `tsc` のみ
-- **パッケージマネージャ**: pnpm
-  - 5章で述べた worktree ごとの `setup` コストに直接効く。content-addressable store
-  からのハードリンクなので、1タスク1worktree でも依存解決が重くならない
-  - lockfile は `pnpm-lock.yaml` をコミットし、`setup` 相当は
-  `pnpm install --frozen-lockfile`（`npm ci` に相当）で固定する
+- **テスト**: `deno test` + `@std/testing/bdd`（`test` / `beforeEach` / `afterEach` だけを使う）
+  - アサーションは `node:assert/strict` を使う（ランナーを替えても書き方が変わらない。
+  実際に vitest からの移行ではアサーションを1行も書き換えていない）
+  - `deno test` は全テストファイルを1プロセスで走らせる。環境変数
+  （`DOCTRINE_STATE_DIR` など）の書き換えは必ずフックかテスト本体の中で行い、後始末する
+  - `@std/testing/bdd` はファイル直下のフックをテストより前に宣言することを要求する
+- **型チェック**: `deno check`。ビルドは不要（Deno が TS をそのまま実行する）。
+  配布は `deno compile` の単一バイナリを想定（[#5](https://github.com/todokr/doctrine/issues/5)）
+- **依存管理**: `deno.json` の `imports` と `deno.lock`
+  - lockfile はコミットし、`setup` 相当は `deno install --frozen` で固定する
 - **ツールチェーン管理**: mise（`mise.toml` をリポジトリ直下にコミット）
-  - Node.js と pnpm のバージョンをリポジトリに固定する。
+  - Deno のバージョンをリポジトリに固定する。
   デーモンが worktree の中でコマンドを走らせる以上、**worktree でも同じ
   バージョンが解決されなければならない**。`mise.toml` は追跡ファイルなので
   `git worktree add` で一緒に付いてくる（worktree はリポジトリ外に置くが、
@@ -518,6 +526,9 @@ Denoランタイムが終了する）」があり、**常駐トレイ型UIと相
 Rustのブリッジコード（150行程度）が要る
 - **現時点の推奨は Tauri**（成熟度差が唯一の実質的な差であるため）。
 ②に着手する時点で Deno Desktop の安定度を再評価すること
+- **2026-09-13 追記: Deno Desktop に決定した**（[#6](https://github.com/todokr/doctrine/issues/6)）。
+上記の成熟度の懸念（experimental であること、可視ウィンドウ0でランタイムが終了する問題）は
+決定時点で未再評価のまま残っている。②に着手する時点で確認すること
 
 ## 8. デーモンAPI（②との契約）
 

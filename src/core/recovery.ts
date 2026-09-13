@@ -1,17 +1,17 @@
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import type { DatabaseSync } from "node:sqlite";
 import { commitStepBoundary, type StepBoundary } from "../db/boundary.ts";
 import { listTasks, type TaskRow } from "../db/tasks.ts";
 import { listStepRuns } from "../db/stepRuns.ts";
 import { assertTransition } from "./states.ts";
 import type { Workflow } from "../workflow/schema.ts";
+import { runCommand } from "../util/exec.ts";
 
-const run = promisify(execFile);
+/** 子プロセスに送るシグナル。復帰は SIGKILL、pause / cancel は SIGTERM だけを使う。 */
+export type Signal = "SIGTERM" | "SIGKILL";
 
 export type ProcessProbe = {
   startTimeOf(pid: number): Promise<string | null>;
-  kill(pid: number, signal: NodeJS.Signals): void;
+  kill(pid: number, signal: Signal): void;
 };
 
 /**
@@ -50,11 +50,11 @@ export function isSameChild(
  */
 export function psLstartCommand(
   pid: number,
-): { cmd: string; args: string[]; env: NodeJS.ProcessEnv } {
+): { cmd: string; args: string[]; env: Record<string, string> } {
   return {
     cmd: "ps",
     args: ["-o", "lstart=", "-p", String(pid)],
-    env: { ...process.env, LC_ALL: "C", TZ: "UTC" },
+    env: { ...Deno.env.toObject(), LC_ALL: "C", TZ: "UTC" },
   };
 }
 
@@ -63,7 +63,7 @@ export function defaultProbe(): ProcessProbe {
     async startTimeOf(pid) {
       try {
         const { cmd, args, env } = psLstartCommand(pid);
-        const { stdout } = await run(cmd, args, { env });
+        const { stdout } = await runCommand(cmd, args, { env });
         const t = stdout.trim();
         if (!t) return null;
         const parsed = new Date(t);
@@ -74,7 +74,7 @@ export function defaultProbe(): ProcessProbe {
       }
     },
     kill(pid, signal) {
-      try { process.kill(pid, signal); } catch { /* 既に消えている */ }
+      try { Deno.kill(pid, signal); } catch { /* 既に消えている */ }
     },
   };
 }
@@ -89,10 +89,10 @@ export function defaultProbe(): ProcessProbe {
  * 壊し続けてしまうので SIGKILL のままにする。
  */
 export async function killStaleChild(
-  task: TaskRow, probe: ProcessProbe, signal: NodeJS.Signals = "SIGKILL",
+  task: TaskRow, probe: ProcessProbe, signal: Signal = "SIGKILL",
 ): Promise<"killed" | "gone" | "mismatch" | "none"> {
   // child_pid <= 0 は spawn 失敗時の記録（onChildSpawned(child.pid ?? -1, ...)）。
-  // process.kill(-1, ...) はプロセスグループ全体へのシグナルになり得るので、
+  // kill(2) に -1 を渡すと送れる全プロセスへのシグナルになり得るので、
   // ここで弾いて絶対に probe.kill へ渡さない。
   if (task.child_pid === null || task.child_pid <= 0 || task.child_started_at === null) return "none";
   const actual = await probe.startTimeOf(task.child_pid);

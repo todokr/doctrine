@@ -1,4 +1,4 @@
-import { test, beforeEach, afterEach } from "vitest";
+import { test, beforeEach, afterEach } from "@std/testing/bdd";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";

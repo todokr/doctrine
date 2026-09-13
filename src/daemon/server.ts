@@ -1,6 +1,4 @@
-import { createServer as createNetServer, type Socket } from "node:net";
-import { mkdir, unlink } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname, join } from "@std/path";
 import type { Request, Response, ServerEvent } from "./protocol.ts";
 
 export type Connection = {
@@ -17,81 +15,126 @@ export type Handler = (
 
 /** TCPポートは開かない。ファイルパーミッションがそのまま認可になる。 */
 export function socketPath(): string {
-  const base = process.env.XDG_RUNTIME_DIR ?? `/run/user/${process.getuid?.() ?? 1000}`;
+  const base = Deno.env.get("XDG_RUNTIME_DIR") ?? `/run/user/${Deno.uid() ?? 1000}`;
   return join(base, "doctrine", "dctld.sock");
 }
 
+type Client = {
+  conn: Deno.UnixConn;
+  following: Set<string>;
+  closed: boolean;
+  /** 書き込みは非同期なので、応答とイベントの順序を保つために直列につなぐ。 */
+  writing: Promise<void>;
+};
+
 export function createServer(handler: Handler) {
-  const conns = new Map<Socket, Set<string>>();
+  const clients = new Set<Client>();
+  const serving = new Set<Promise<void>>();
+  const encoder = new TextEncoder();
+  let listener: Deno.UnixListener | null = null;
+  let accepting: Promise<void> = Promise.resolve();
 
-  const server = createNetServer((socket) => {
-    const following = new Set<string>();
-    conns.set(socket, following);
+  async function serve(client: Client): Promise<void> {
     const conn: Connection = {
-      follow: (id) => following.add(id),
-      unfollow: (id) => following.delete(id),
-      isFollowing: (id) => following.has(id),
+      follow: (id) => client.following.add(id),
+      unfollow: (id) => client.following.delete(id),
+      isFollowing: (id) => client.following.has(id),
     };
-
+    const decoder = new TextDecoder();
+    const bytes = new Uint8Array(64 * 1024);
     let buf = "";
-    socket.setEncoding("utf8");
-    socket.on("data", (chunk: string) => {
-      buf += chunk;
-      let i: number;
-      while ((i = buf.indexOf("\n")) !== -1) {
-        const line = buf.slice(0, i);
-        buf = buf.slice(i + 1);
-        if (line.trim() === "") continue;
-        void dispatch(line, socket, conn);
+    try {
+      while (true) {
+        const n = await client.conn.read(bytes);
+        if (n === null) break;
+        buf += decoder.decode(bytes.subarray(0, n), { stream: true });
+        let i: number;
+        while ((i = buf.indexOf("\n")) !== -1) {
+          const line = buf.slice(0, i);
+          buf = buf.slice(i + 1);
+          if (line.trim() === "") continue;
+          void dispatch(line, client, conn);
+        }
       }
-    });
-    socket.on("close", () => conns.delete(socket));
-    socket.on("error", () => conns.delete(socket));
-  });
+    } catch {
+      // 相手が切断した、または close() で閉じた
+    } finally {
+      closeClient(client);
+    }
+  }
 
-  async function dispatch(line: string, socket: Socket, conn: Connection) {
+  async function dispatch(line: string, client: Client, conn: Connection) {
     let req: Request;
     try {
       req = JSON.parse(line) as Request;
     } catch {
-      write(socket, { id: null, ok: false, error: "JSONとして読めません" });
+      write(client, { id: null, ok: false, error: "JSONとして読めません" });
       return;
     }
     try {
       const result = await handler(req.method, req.params ?? {}, conn);
-      write(socket, { id: req.id, ok: true, result });
+      write(client, { id: req.id, ok: true, result });
     } catch (e) {
-      write(socket, { id: req.id, ok: false, error: (e as Error).message });
+      write(client, { id: req.id, ok: false, error: (e as Error).message });
     }
   }
 
-  function write(socket: Socket, payload: Response | ServerEvent) {
-    if (socket.writable) socket.write(JSON.stringify(payload) + "\n");
+  function write(client: Client, payload: Response | ServerEvent) {
+    if (client.closed) return;
+    const data = encoder.encode(JSON.stringify(payload) + "\n");
+    client.writing = client.writing
+      .then(async () => {
+        let offset = 0;
+        while (offset < data.length && !client.closed) {
+          offset += await client.conn.write(data.subarray(offset));
+        }
+      })
+      .catch(() => closeClient(client));
+  }
+
+  function closeClient(client: Client) {
+    if (client.closed) return;
+    client.closed = true;
+    clients.delete(client);
+    try { client.conn.close(); } catch { /* 既に閉じている */ }
   }
 
   return {
     async listen(path: string): Promise<void> {
-      await mkdir(dirname(path), { recursive: true, mode: 0o700 });
-      await unlink(path).catch(() => {});
-      await new Promise<void>((resolve, reject) => {
-        server.once("error", reject);
-        server.listen(path, () => {
-          server.removeListener("error", reject);
-          resolve();
-        });
-      });
+      await Deno.mkdir(dirname(path), { recursive: true, mode: 0o700 });
+      await Deno.remove(path).catch(() => {});
+      const l = Deno.listen({ transport: "unix", path });
+      listener = l;
+      accepting = (async () => {
+        try {
+          for await (const conn of l) {
+            const client: Client = { conn, following: new Set(), closed: false, writing: Promise.resolve() };
+            clients.add(client);
+            const p = serve(client);
+            serving.add(p);
+            void p.finally(() => serving.delete(p));
+          }
+        } catch {
+          // close() でリスナーを閉じた
+        }
+      })();
     },
     broadcast(ev: ServerEvent, opts: { taskId?: string; followersOnly?: boolean } = {}): void {
       const key = opts.taskId ?? ("task_id" in ev ? ev.task_id : undefined);
-      for (const [socket, following] of conns) {
-        if (opts.followersOnly && (key === undefined || !following.has(key))) continue;
-        write(socket, ev);
+      for (const client of clients) {
+        if (opts.followersOnly && (key === undefined || !client.following.has(key))) continue;
+        write(client, ev);
       }
     },
+    /** リスナーを閉じるとソケットファイルも消える（Deno がパスを unlink する）。 */
     async close(): Promise<void> {
-      for (const socket of conns.keys()) socket.destroy();
-      conns.clear();
-      await new Promise<void>((resolve) => server.close(() => resolve()));
+      for (const client of [...clients]) closeClient(client);
+      if (listener) {
+        try { listener.close(); } catch { /* 既に閉じている */ }
+        listener = null;
+      }
+      await accepting;
+      await Promise.allSettled([...serving]);
     },
   };
 }

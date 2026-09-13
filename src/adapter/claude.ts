@@ -1,5 +1,5 @@
-import { spawn } from "node:child_process";
 import { readNdjson } from "./ndjson.ts";
+import { exitCodeOf } from "../util/exec.ts";
 import type { AgentAdapter, AgentEvent, AgentResult, AgentRun, StartOptions } from "./types.ts";
 
 /**
@@ -85,15 +85,31 @@ export function resultFrom(resultLine: unknown, exitCode: number | null, stderrT
 
 export function createClaudeAdapter(bin = "claude"): AgentAdapter {
   function launch(args: string[], opts: StartOptions, runSessionId: string): AgentRun {
-    const child = spawn(bin, args, { cwd: opts.cwd, stdio: ["ignore", "pipe", "pipe"] });
+    const startedAt = new Date().toISOString();
+    let child: Deno.ChildProcess;
+    try {
+      child = new Deno.Command(bin, {
+        args, cwd: opts.cwd, stdin: "null", stdout: "piped", stderr: "piped",
+      }).spawn();
+    } catch (e) {
+      // 起動失敗（バイナリや cwd が無い）は同期例外で来る。呼び出し側は
+      // 「pid -1 で通知され、result が reject される」形で扱うので、それに揃える。
+      const result = Promise.reject(e);
+      result.catch(() => {}); // 呼び出し側が await するまでの間に未処理扱いされないように
+      return {
+        sessionId: runSessionId, pid: -1, startedAt,
+        events: (async function* () {})(), result, kill: () => {},
+      };
+    }
     // stderr を消費しないとパイプが埋まって子プロセスがブロックし、
     // headless でハングしないという契約が壊れる。診断用に末尾だけ残す。
     let stderrTail = "";
-    child.stderr.setEncoding("utf8");
-    child.stderr.on("data", (chunk: string) => {
-      stderrTail = (stderrTail + chunk).slice(-4096);
-    });
-    const startedAt = new Date().toISOString();
+    const stderrDone = (async () => {
+      const decoder = new TextDecoder();
+      for await (const chunk of child.stderr) {
+        stderrTail = (stderrTail + decoder.decode(chunk, { stream: true })).slice(-4096);
+      }
+    })();
 
     let resultLine: unknown;
     const queue: AgentEvent[] = [];
@@ -121,20 +137,20 @@ export function createClaudeAdapter(bin = "claude"): AgentAdapter {
       },
     };
 
-    const result = new Promise<AgentResult>((resolve, reject) => {
-      child.once("error", reject);
-      child.once("close", (code) => {
-        pump.then(() => resolve(resultFrom(resultLine, code, stderrTail)), reject);
-      });
-    });
+    // 終了ステータスだけでなく stdout / stderr を読み切るまで待つ。
+    // 先に確定させると、パイプに残った result 行や stderr の末尾を取りこぼす。
+    const result: Promise<AgentResult> = Promise.all([child.status, pump, stderrDone])
+      .then(([status]) => resultFrom(resultLine, exitCodeOf(status), stderrTail));
 
     return {
       sessionId: runSessionId,
-      pid: child.pid ?? -1,
+      pid: child.pid,
       startedAt,
       events,
       result,
-      kill: () => { child.kill("SIGTERM"); },
+      kill: () => {
+        try { child.kill("SIGTERM"); } catch { /* 既に終了している */ }
+      },
     };
   }
 

@@ -1,4 +1,4 @@
-import { test, beforeEach, afterEach } from "vitest";
+import { test, beforeEach, afterEach } from "@std/testing/bdd";
 import assert from "node:assert/strict";
 import { mkdtemp, rm, stat, chmod } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -31,8 +31,8 @@ afterEach(async () => {
  */
 async function bindAndKill(path: string): Promise<void> {
   const child = spawn(
-    process.execPath,
-    ["-e", `require("net").createServer(()=>{}).listen(process.argv[1], () => { process.stdout.write("ready\\n"); }); setInterval(() => {}, 60000);`, path],
+    Deno.execPath(),
+    ["eval", `import { createServer } from "node:net"; createServer(() => {}).listen(Deno.args[0], () => { console.log("ready"); }); setInterval(() => {}, 60000);`, path],
     { stdio: ["ignore", "pipe", "ignore"] },
   );
   children.push(child);

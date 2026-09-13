@@ -1,5 +1,4 @@
 import type { DatabaseSync } from "node:sqlite";
-import { randomUUID } from "node:crypto";
 import type { Branch, Workflow } from "../workflow/schema.ts";
 import { branchOf } from "../workflow/schema.ts";
 import { expand, type TemplateContext } from "../workflow/template.ts";
@@ -115,7 +114,7 @@ export async function runTask(
     // ない）。agent ステップが2つ並ぶワークフローで2度 start すると、同じ
     // --session-id を使い回すことになり、CLI が拒否するか会話が継続しない。
     const hadSession = task.claude_session_id !== null;
-    const sessionId = task.claude_session_id ?? randomUUID();
+    const sessionId = task.claude_session_id ?? crypto.randomUUID();
 
     const logPath = logPathFor(deps.logRoot, taskId, step.id, attempt);
     // 開始時に running の行を立てる。クラッシュ復帰はこの行を見て、

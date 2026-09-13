@@ -1,10 +1,6 @@
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
-import { realpath } from "node:fs/promises";
-import { homedir } from "node:os";
-import { basename, join, resolve } from "node:path";
-
-const run = promisify(execFile);
+import { basename, join, resolve } from "@std/path";
+import { runCommand } from "../util/exec.ts";
+import { homeDir } from "../util/home.ts";
 
 export class UncommittedChangesError extends Error {
   readonly worktreePath: string;
@@ -18,7 +14,7 @@ export class UncommittedChangesError extends Error {
 
 /** テストから差し替えられるよう環境変数を見る。 */
 export function stateDir(): string {
-  return process.env.DOCTRINE_STATE_DIR ?? join(homedir(), ".local", "state", "doctrine");
+  return Deno.env.get("DOCTRINE_STATE_DIR") ?? join(homeDir(), ".local", "state", "doctrine");
 }
 
 export function worktreePathFor(projectPath: string, taskId: string): string {
@@ -46,11 +42,11 @@ export function branchNameFor(taskId: string, title: string): string {
 export async function createWorktree(o: {
   repoPath: string; worktreePath: string; branch: string; baseBranch: string;
 }): Promise<void> {
-  await run("git", ["-C", o.repoPath, "worktree", "add", "-b", o.branch, o.worktreePath, o.baseBranch]);
+  await runCommand("git", ["-C", o.repoPath, "worktree", "add", "-b", o.branch, o.worktreePath, o.baseBranch]);
 }
 
 export async function hasUncommittedChanges(worktreePath: string): Promise<boolean> {
-  const { stdout } = await run("git", ["-C", worktreePath, "status", "--porcelain"]);
+  const { stdout } = await runCommand("git", ["-C", worktreePath, "status", "--porcelain"]);
   return stdout.trim().length > 0;
 }
 
@@ -66,25 +62,25 @@ export async function removeWorktree(o: {
   }
   const args = ["-C", o.repoPath, "worktree", "remove", o.worktreePath];
   if (o.force) args.push("--force");
-  await run("git", args);
+  await runCommand("git", args);
 }
 
 /**
- * path.resolve は字句的な正規化のみでシンボリックリンクを解決しない
+ * resolve は字句的な正規化のみでシンボリックリンクを解決しない
  * （例: macOS の /tmp は /private/tmp への symlink）。git はシンボリックリンク解決後の
  * 実パスを報告するため、比較側も realpath で解決してから揃える。パスが既に
  * 存在しない（削除済みの worktree など）場合は resolve にフォールバックする。
  */
 async function canonical(p: string): Promise<string> {
   try {
-    return await realpath(p);
+    return await Deno.realPath(p);
   } catch {
     return resolve(p);
   }
 }
 
 export async function listWorktrees(repoPath: string): Promise<string[]> {
-  const { stdout } = await run("git", ["-C", repoPath, "worktree", "list", "--porcelain"]);
+  const { stdout } = await runCommand("git", ["-C", repoPath, "worktree", "list", "--porcelain"]);
   const paths: string[] = [];
   for (const line of stdout.split("\n")) {
     if (line.startsWith("worktree ")) paths.push(line.slice("worktree ".length).trim());
