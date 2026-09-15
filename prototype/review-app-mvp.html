@@ -1,0 +1,1282 @@
+<title>doctrine レビュー</title>
+<!-- PROTOTYPE (使い捨て): docs/superpowers/specs/2026-09-13-review-app-design.md の第1段階（MVP）に沿った画面確認用。
+     データはすべてモック、操作はメモリ/localStorage 上のスタブで、デーモンにはつながっていない。
+     「見た」印・コンポーザ・worktree警告ビュー・一時停止再開など、specで第2段階に回した機能は含めていない。 -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+JP:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --ground:#E7EAEE; --surface:#FFFFFF; --side:#F1F3F6; --surface-2:#E9ECF0; --sunken:#E1E5EA;
+  --ink:#181B20; --ink-2:#4B5560; --ink-3:#828C97; --line:#D3D9DF;
+  --accent:#AD7625; --accent-ink:#20140A; --accent-soft:#F1E3C9;  --run:#2E6CA4; --run-bg:#DEEAF5;
+  --danger:#AA3A2C; --danger-bg:#F7E2DD;
+  --degraded:#6C4A9C; --degraded-bg:#EAE2F5;
+  --ok:#296B49; --ok-bg:#DEEFE4;
+  --add-bg:#E1F0E5; --add-gutter:#C9E3D1; --del-bg:#F7E4E0; --del-gutter:#EFC9C2;
+  --kw:#7A4AA0; --str:#2B7A4B; --com:#8B93A0; --num:#A05A22;
+  --shadow:0 12px 32px rgba(20,26,34,.18);
+  --bar:#181B20; --bar-ink:#F1F3F6;
+  --sans:"IBM Plex Sans JP","Hiragino Sans","Noto Sans JP",system-ui,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,"SFMono-Regular",Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ground:#12151A; --surface:#1A1E24; --side:#20242B; --surface-2:#262B33; --sunken:#0F1215;
+    --ink:#E7EAEE; --ink-2:#A7B0BB; --ink-3:#707A85; --line:#2E343D;
+    --accent:#E0A857; --accent-ink:#241804; --accent-soft:#3A2E15;    --run:#7FB2E0; --run-bg:#1D2E3E;
+    --danger:#E38B7B; --danger-bg:#3B211C;
+    --degraded:#B79CE8; --degraded-bg:#2B2140;
+    --ok:#7FCB9E; --ok-bg:#16301F;
+    --add-bg:#173322; --add-gutter:#1F452E; --del-bg:#3A2019; --del-gutter:#4A2921;
+    --kw:#C79EE8; --str:#8FDBA9; --com:#707A85; --num:#E0A067;
+    --shadow:0 12px 32px rgba(0,0,0,.55);
+    --bar:#E7EAEE; --bar-ink:#12151A;
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#12151A; --surface:#1A1E24; --side:#20242B; --surface-2:#262B33; --sunken:#0F1215;
+  --ink:#E7EAEE; --ink-2:#A7B0BB; --ink-3:#707A85; --line:#2E343D;
+  --accent:#E0A857; --accent-ink:#241804; --accent-soft:#3A2E15;  --run:#7FB2E0; --run-bg:#1D2E3E;
+  --danger:#E38B7B; --danger-bg:#3B211C;
+  --degraded:#B79CE8; --degraded-bg:#2B2140;
+  --ok:#7FCB9E; --ok-bg:#16301F;
+  --add-bg:#173322; --add-gutter:#1F452E; --del-bg:#3A2019; --del-gutter:#4A2921;
+  --kw:#C79EE8; --str:#8FDBA9; --com:#707A85; --num:#E0A067;
+  --shadow:0 12px 32px rgba(0,0,0,.55);
+  --bar:#E7EAEE; --bar-ink:#12151A;
+}
+*{box-sizing:border-box}
+body{background:var(--ground);color:var(--ink);font-family:var(--sans);font-size:13px;line-height:1.5;padding-inline:16px;padding-block:12px 78px;margin:0}
+button,input,textarea,select{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.mono{font-family:var(--mono);font-size:11.5px}
+.hint{color:var(--ink-3);font-size:11.5px}
+
+.wrap{max-width:1600px;margin-inline:auto;display:grid;gap:10px}
+
+.banner{background:var(--accent-soft);border:1px solid var(--accent);border-radius:10px;padding:9px 12px;display:flex;gap:10px;align-items:center;color:var(--ink)}
+.banner strong{color:var(--accent-ink);background:var(--accent);border-radius:4px;padding:0 6px;font-size:11px;letter-spacing:.03em}
+.banner p{margin:0;flex:1;min-width:0}
+.banner button{border:0;background:transparent;color:var(--ink-2);font-size:16px;line-height:1;padding:2px 4px}
+
+.app{display:grid;grid-template-columns:52px 288px minmax(0,1fr);height:calc(100vh - 118px);min-height:560px;background:var(--surface);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+@media (max-width:900px){.app{grid-template-columns:1fr;height:auto}}
+
+/* icon rail */
+.rail{background:var(--side);border-right:1px solid var(--line);display:flex;flex-direction:column;align-items:center;gap:6px;padding-block:10px}
+.rail .grow{flex:1}
+.ib{position:relative;width:36px;height:36px;border-radius:9px;border:0;background:transparent;color:var(--ink-2);display:grid;place-items:center}
+.ib:hover{background:var(--surface-2)}
+.ib[aria-pressed="true"]{background:var(--accent-soft);color:var(--accent-ink)}
+.ib svg{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.ib .pip{position:absolute;top:6px;right:6px;width:7px;height:7px;border-radius:50%;background:var(--accent);border:2px solid var(--side)}
+@media (max-width:900px){.rail{flex-direction:row;justify-content:flex-start;padding-inline:8px;border-right:0;border-bottom:1px solid var(--line)}.rail .grow{display:none}}
+
+/* sidebar */
+.side{background:var(--side);border-right:1px solid var(--line);display:flex;flex-direction:column;min-height:0}
+.side-head{display:flex;align-items:center;gap:8px;padding:10px 10px 8px 12px;border-bottom:1px solid var(--line)}
+.side-head select{border:0;background:transparent;font-weight:700;font-size:14px;padding:2px 0;max-width:170px}
+.side-head .count{color:var(--ink-3);font-variant-numeric:tabular-nums}
+.side-head .grow{flex:1}
+.plus{width:28px;height:28px;border-radius:7px;border:1px solid var(--line);background:var(--surface);font-size:16px;line-height:1}
+.plus:hover{border-color:var(--ink-3)}
+.side-scroll{overflow-y:auto;flex:1;padding:6px 6px 10px}
+@media (max-width:900px){.side{border-right:0;border-bottom:1px solid var(--line)}.side-scroll{max-height:320px}}
+.grp{margin-top:8px}
+.grp h3{margin:0;padding:4px 8px;font-size:11.5px;font-weight:700;color:var(--ink-2);display:flex;gap:6px;align-items:center;letter-spacing:.02em}
+.grp h3 .count{color:var(--ink-3);font-weight:400;font-variant-numeric:tabular-nums}
+.it{width:100%;border:0;background:transparent;border-radius:8px;padding:6px 8px 6px 6px;display:grid;grid-template-columns:18px minmax(0,1fr);gap:2px 6px;text-align:left}
+.it:hover{background:var(--surface-2)}
+.it[aria-current="true"]{background:var(--accent-soft);box-shadow:inset 3px 0 0 var(--accent)}
+.it .ico{grid-row:span 2;display:grid;place-items:center;height:20px}
+.it .t{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:500}
+.it .m{display:flex;gap:6px;align-items:center;color:var(--ink-3);font-size:11.5px;min-width:0}
+.it .m .pj{display:inline-flex;align-items:center;gap:5px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.it .m .tm{margin-left:auto;font-variant-numeric:tabular-nums;white-space:nowrap}
+.pjdot{width:7px;height:7px;border-radius:50%;flex:none;display:inline-block}
+.diamond{width:9px;height:9px;background:var(--accent);transform:rotate(45deg);border-radius:1.5px}
+.bang{width:12px;height:12px;border-radius:50%;background:var(--danger);color:var(--surface);font-size:9px;font-weight:700;display:grid;place-items:center;line-height:1}
+.bang.deg{background:var(--degraded)}
+.spin{width:12px;height:12px;border-radius:50%;border:2px dotted var(--run);animation:spin 2.4s linear infinite}
+.ring{width:10px;height:10px;border-radius:50%;border:1.5px solid var(--ink-3)}
+.pause{width:10px;height:10px;border-left:3px solid var(--ink-2);border-right:3px solid var(--ink-2)}
+.check{width:12px;height:12px;border-radius:50%;background:var(--ok);position:relative}
+.xmark{width:12px;height:12px;border-radius:50%;background:var(--ink-3)}
+@keyframes spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.spin{animation:none}}
+.side-foot{border-top:1px solid var(--line);padding:7px 12px;color:var(--ink-3);font-size:11px;display:flex;gap:10px;flex-wrap:wrap;font-variant-numeric:tabular-nums}
+.side-foot b{color:var(--ink-2);font-weight:500;font-family:var(--mono)}
+
+/* main */
+.main{overflow-y:auto;min-height:0;display:flex;flex-direction:column}
+.pad{padding:18px 22px;display:grid;gap:14px;align-content:start}
+.crumbs{display:flex;gap:8px;flex-wrap:wrap;align-items:center;color:var(--ink-3);font-size:11.5px}
+h1{margin:0;font-size:19px;line-height:1.35;text-wrap:balance}
+.headrow{display:flex;gap:8px 12px;flex-wrap:wrap;align-items:center}
+.pill{font-size:11px;font-weight:700;padding:0 7px;border-radius:4px;line-height:19px;white-space:nowrap;display:inline-flex;gap:5px;align-items:center}
+.p-attn{background:var(--accent-soft);color:var(--accent-ink)}
+.p-danger{background:var(--danger-bg);color:var(--danger)}
+.p-deg{background:var(--degraded-bg);color:var(--degraded)}
+.p-run{background:var(--run-bg);color:var(--run)}
+.p-muted{background:var(--surface-2);color:var(--ink-2)}
+.p-ok{background:var(--ok-bg);color:var(--ok)}
+.btn{border:1px solid var(--line);background:var(--surface);border-radius:7px;padding:5px 12px;white-space:nowrap}
+.btn:hover{border-color:var(--ink-3)}
+.btn.sm{padding:3px 9px;font-size:12px}
+.btn.primary{background:var(--ok);border-color:var(--ok);color:var(--surface);font-weight:700}
+.btn.danger{color:var(--danger);border-color:var(--danger)}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.spacer{flex:1}
+.box{border:1px solid var(--line);border-radius:9px;padding:12px 14px;display:grid;gap:8px}
+.box h2{margin:0;font-size:13px}
+.box p{margin:0}
+.box.attn{background:var(--accent-soft);border-color:var(--accent)}
+.box.danger{background:var(--danger-bg);border-color:var(--danger)}
+.box.deg{background:var(--degraded-bg);border-color:var(--degraded)}
+.box.quiet{background:var(--surface-2);border-color:var(--surface-2)}
+pre.block{margin:0;background:var(--sunken);border-radius:7px;padding:10px 12px;font-family:var(--mono);font-size:11.5px;line-height:1.6;overflow-x:auto;white-space:pre;max-height:320px;overflow-y:auto}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:7px;overflow:hidden;background:var(--surface)}
+.seg button{border:0;background:transparent;padding:3px 10px;font-size:12px;border-left:1px solid var(--line)}
+.seg button:first-child{border-left:0}
+.seg button[aria-pressed="true"]{background:var(--ink);color:var(--surface)}
+.actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+details.ctx{border:1px solid var(--line);border-radius:9px;padding:8px 12px;background:var(--surface)}
+details.ctx summary{cursor:pointer;color:var(--ink-2);font-size:12px;font-weight:700;list-style:none}
+details.ctx summary::-webkit-details-marker{display:none}
+details.ctx summary::before{content:"▸ ";color:var(--ink-3)}
+details.ctx[open] summary::before{content:"▾ "}
+details.ctx[open] summary{margin-bottom:8px}
+details.runs summary{cursor:pointer;color:var(--ink-2);font-size:12px;font-weight:700}
+.runtable{overflow-x:auto;margin-top:8px}
+table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}
+th,td{padding:6px 10px;border-top:1px solid var(--line);text-align:left;white-space:nowrap;vertical-align:top}
+th{color:var(--ink-3);font-size:11px;font-weight:500;border-top:0;background:var(--surface-2)}
+.table-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:9px}
+
+/* review */
+.rv-files-md{border:1px solid var(--line);border-radius:9px;overflow:hidden}
+.rv-files-md header{display:flex;gap:8px;align-items:center;padding:7px 12px;background:var(--surface-2);border-bottom:1px solid var(--line)}
+.md{padding:6px 18px 14px;max-width:72ch;line-height:1.75}
+.md h1{font-size:16px;margin:10px 0 4px}
+.md h2{font-size:13.5px;margin:14px 0 2px}
+.md ul,.md ol{margin:4px 0;padding-left:22px}
+.md p{margin:4px 0}
+.md code{font-family:var(--mono);font-size:11.5px;background:var(--surface-2);padding:0 4px;border-radius:3px}
+.rv-body{display:grid;grid-template-columns:232px minmax(0,1fr);gap:14px;align-items:start}
+@media (max-width:1150px){.rv-body{grid-template-columns:1fr}}
+.rv-body.has-guide{grid-template-columns:220px minmax(0,1fr) 360px}
+@media (max-width:1500px){.rv-body.has-guide{grid-template-columns:1fr}}
+@media (max-width:1150px){.rv-body.has-guide{grid-template-columns:1fr}}
+
+/* Review Guide */
+.guide{border:1px solid var(--accent);border-radius:9px;background:var(--surface);padding:14px;display:grid;gap:16px;align-content:start;position:sticky;top:0;max-height:calc(100vh - 160px);overflow-y:auto}
+@media (max-width:1500px){.guide{position:static;max-height:none}}
+.guide-head{display:grid;gap:3px}
+.guide-head b{font-size:13px}
+.g-timeline{display:flex;align-items:center;flex-wrap:wrap;font-size:10.5px;gap:0}
+.g-step{display:flex;align-items:center;gap:4px;color:var(--ink-3);white-space:nowrap}
+.g-step.done{color:var(--ok)}
+.g-step.cur{color:var(--accent-ink);font-weight:700}
+.g-dot{width:6px;height:6px;border-radius:50%;background:currentColor;display:inline-block;flex:none}
+.g-rule{flex:0 0 14px;height:1px;background:var(--line);margin:0 3px}
+.g-sec{display:grid;gap:7px;animation:g-in .45s ease both;animation-delay:calc(var(--gi) * 70ms)}
+.g-sec h3{margin:0;font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:var(--ink-3)}
+.g-sec p{margin:0;line-height:1.75}
+@keyframes g-in{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){.g-sec{animation:none}}
+.g-table{width:100%;border-collapse:collapse;font-size:11.5px}
+.g-table th,.g-table td{padding:4px 6px;border-top:1px solid var(--line);text-align:left;vertical-align:top;white-space:normal}
+.g-table th{background:var(--surface-2);color:var(--ink-3);font-weight:500;border-top:0}
+.g-order{margin:0;padding-left:0;list-style:none;display:grid;gap:5px;counter-reset:go}
+.g-order li{counter-increment:go}
+.g-order button{width:100%;border:1px solid var(--line);background:var(--surface);border-radius:7px;padding:6px 8px;text-align:left;display:grid;gap:1px}
+.g-order button::before{content:counter(go) ". ";color:var(--accent-ink);font-weight:700}
+.g-order button:hover{border-color:var(--ink-3)}
+.g-order .nm{font-family:var(--mono);font-size:11px;overflow-wrap:anywhere}
+.g-warn{background:var(--accent-soft);color:var(--accent-ink);border-radius:7px;padding:6px 8px;font-size:11.5px;margin:0}
+.g-ok{color:var(--ok);font-size:11.5px;margin:0}
+.g-list{margin:0;padding-left:18px;display:grid;gap:7px}
+.g-list li{line-height:1.6}
+.g-list b{display:block;font-size:12px}
+.g-list li span{color:var(--ink-2);font-size:12px}
+.seqd,.reld{width:100%;height:auto;display:block;margin-top:4px}
+.sd-actor{font-family:var(--mono);font-size:10px;fill:var(--ink-2)}
+.sd-life{stroke:var(--line);stroke-width:1}
+.sd-lbl{font-family:var(--sans);font-size:9.5px;fill:var(--ink-3)}
+.sd-arrow{stroke:var(--run);stroke-width:1.6;stroke-dasharray:280;stroke-dashoffset:280;animation:sd-draw .5s ease forwards;animation-delay:var(--d)}
+@keyframes sd-draw{to{stroke-dashoffset:0}}
+@media (prefers-reduced-motion:reduce){.sd-arrow{animation:none;stroke-dashoffset:0}}
+.sd-arrowhead{fill:var(--run)}
+.rel-box{fill:var(--surface-2);stroke:var(--line)}
+.rel-name{font-family:var(--mono);font-size:11px;fill:var(--ink);font-weight:600}
+.rel-field{font-family:var(--mono);font-size:9px;fill:var(--ink-3)}
+.rel-line{stroke:var(--ink-3);stroke-width:1.2}
+.rel-card{font-size:9.5px;fill:var(--ink-3)}
+.g-start{width:100%;border:1px solid var(--accent);background:var(--accent);color:var(--accent-ink);border-radius:7px;padding:7px 10px;font-weight:700;text-align:center}
+.g-start:hover{filter:brightness(1.05)}
+
+/* ステップ表示 */
+.stepmode{display:grid;gap:14px;min-width:0}
+.step-bar{display:flex;gap:8px 12px;align-items:center;flex-wrap:wrap;position:sticky;top:0;z-index:5;background:var(--surface);padding-block:8px;border-bottom:1px solid var(--line)}
+.step-pills{display:flex;gap:4px;flex-wrap:wrap}
+.step-pill{border:1px solid var(--line);background:var(--surface);border-radius:999px;min-width:28px;height:26px;padding:0 9px;font-family:var(--mono);font-size:11.5px;font-variant-numeric:tabular-nums}
+.step-pill.done{background:var(--ok-bg);border-color:var(--ok-bg);color:var(--ok)}
+.step-pill[aria-current="step"]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);font-weight:700}
+.stepcard{border:1px solid var(--accent);border-radius:9px;background:var(--accent-soft);padding:14px 16px;display:grid;gap:8px;animation:g-in .3s ease both}
+@media (prefers-reduced-motion:reduce){.stepcard{animation:none}}
+.stepcard .eyebrow{font-size:11px;letter-spacing:.04em;color:var(--accent-ink);font-family:var(--mono)}
+.stepcard h2{margin:0;font-size:16px;text-wrap:balance}
+.stepcard p{margin:0;line-height:1.8;max-width:72ch}
+.stepcard .dg{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:10px;max-width:520px}
+.stepcard .files{display:flex;gap:6px;flex-wrap:wrap}
+.step-foot{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.step-done{border:1px dashed var(--line);border-radius:9px;padding:12px 14px;display:grid;gap:6px}
+.filelist{border:1px solid var(--line);border-radius:9px;overflow:hidden;position:sticky;top:0}
+.filelist header{padding:7px 10px;background:var(--surface-2);border-bottom:1px solid var(--line);font-size:11.5px;color:var(--ink-2)}
+.fl{width:100%;border:0;border-top:1px solid var(--line);background:var(--surface);padding:6px 10px;display:block;text-align:left}
+.fl:first-of-type{border-top:0}
+.fl:hover{background:var(--surface-2)}
+.fl[aria-current="true"]{background:var(--accent-soft)}
+.fl .nm{font-family:var(--mono);font-size:11.5px;overflow-wrap:anywhere;display:block}
+.fl .st{font-size:10.5px;color:var(--ink-3);display:flex;gap:6px;font-variant-numeric:tabular-nums;margin-top:1px}
+.add{color:var(--ok)} .del{color:var(--danger)}
+.diffs{display:grid;gap:12px;min-width:0}
+.file{border:1px solid var(--line);border-radius:9px;overflow:hidden;min-width:0}
+.file > header{display:flex;gap:8px;align-items:center;padding:6px 10px;background:var(--surface-2);border-bottom:1px solid var(--line);flex-wrap:wrap}
+.file > header .nm{font-family:var(--mono);font-size:12px;font-weight:500;overflow-wrap:anywhere}
+.code{overflow-x:auto;font-family:var(--mono);font-size:12px;line-height:1.6}
+.hunk{background:var(--accent-soft);color:var(--ink-2);padding:2px 10px;font-size:11px}
+.ln{display:grid;grid-template-columns:42px 42px 20px max-content;min-width:100%}
+.ln .o,.ln .n{color:var(--ink-3);text-align:right;padding-right:8px;user-select:none;font-size:11px}
+.ln .c{white-space:pre;padding-right:16px}
+.ln .cm{border:0;background:transparent;color:var(--accent);opacity:0;font-weight:700;padding:0;width:20px}
+.ln:hover .cm,.ln .cm:focus-visible{opacity:1}
+.ln.a{background:var(--add-bg)} .ln.a .o,.ln.a .n{background:var(--add-gutter)}
+.ln.d{background:var(--del-bg)} .ln.d .o,.ln.d .n{background:var(--del-gutter)}
+.tk-kw{color:var(--kw)} .tk-str{color:var(--str)} .tk-com{color:var(--com);font-style:italic} .tk-num{color:var(--num)}
+.lc{margin:4px 10px 6px 104px;border:1px solid var(--line);border-radius:8px;background:var(--surface);padding:8px 10px;display:grid;gap:6px;font-family:var(--sans);font-size:12.5px;max-width:640px}
+.lc .who{font-size:11px;color:var(--ink-3)}textarea{width:100%;border:1px solid var(--line);background:var(--surface);border-radius:7px;padding:7px 9px;resize:vertical;min-height:54px}
+input[type=text],select.field{width:100%;border:1px solid var(--line);background:var(--surface);border-radius:7px;padding:7px 9px}
+.empty-diff{padding:20px;color:var(--ink-3);border:1px dashed var(--line);border-radius:9px;text-align:center}
+.decide{position:sticky;bottom:0;margin-top:auto;background:var(--surface);border-top:1px solid var(--line);padding:10px 22px;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:end;box-shadow:0 -8px 20px rgba(0,0,0,.05)}
+@media (max-width:700px){.decide{grid-template-columns:1fr}}
+.decide .meta{display:flex;gap:12px;flex-wrap:wrap;color:var(--ink-2);font-size:12px;margin-bottom:6px}
+.decide textarea{min-height:40px}
+
+/* modal */
+.scrim{position:fixed;inset:0;background:rgba(10,14,20,.4);z-index:30}
+.modal{position:fixed;z-index:31;left:50%;top:56px;transform:translateX(-50%);width:min(640px,calc(100% - 32px));max-height:calc(100vh - 150px);overflow-y:auto;background:var(--surface);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);padding:18px;display:grid;gap:12px}
+.modal h2{margin:0;font-size:16px}
+
+.protobar{position:fixed;left:50%;bottom:12px;transform:translateX(-50%);z-index:50;background:var(--bar);color:var(--bar-ink);border-radius:999px;padding:5px 12px;display:flex;align-items:center;gap:10px;box-shadow:0 8px 24px rgba(0,0,0,.35);font-size:12px;max-width:calc(100% - 24px);flex-wrap:wrap;justify-content:center}
+.protobar button{border:0;background:color-mix(in srgb,var(--bar-ink) 12%,transparent);color:inherit;border-radius:999px;padding:3px 10px}
+.protobar .tag{font-size:10px;opacity:.6;letter-spacing:.1em}
+.protobar kbd{font-family:var(--mono);font-size:10.5px;border:1px solid color-mix(in srgb,var(--bar-ink) 35%,transparent);border-radius:4px;padding:0 4px}
+.toast{position:fixed;left:50%;bottom:60px;transform:translateX(-50%);z-index:60;background:var(--ink);color:var(--surface);padding:7px 14px;border-radius:8px;font-size:12.5px;max-width:calc(100% - 24px);text-align:center}
+</style>
+
+<div class="wrap" id="root"></div>
+
+<script>
+// ================================================================ 下書きの永続化（UI側のみ・per-viewer）
+function loadDrafts(){ try{ return JSON.parse(localStorage.getItem("doctrine-proto-drafts") || "{}"); }catch{ return {}; } }
+function saveDrafts(d){ try{ localStorage.setItem("doctrine-proto-drafts", JSON.stringify(d)); }catch{} }
+function loadFlag(k){ try{ return localStorage.getItem(k) === "1"; }catch{ return false; } }
+function saveFlag(k, v){ try{ localStorage.setItem(k, v ? "1" : "0"); }catch{} }
+const DRAFTS = loadDrafts();
+
+// ================================================================ モックデータ
+const NOW = Date.parse("2026-09-15T15:00:00+09:00");
+const MIN = 60000;
+const PROJECTS = [
+  { id: "doctrine", color: "#2E6CA4", path: "~/git/doctrine", def: "feature" },
+  { id: "shop-api", color: "#AA3A2C", path: "~/work/shop-api", def: "feature" },
+  { id: "blog", color: "#296B49", path: "~/git/blog", def: "feature" },
+];
+const st = (id, type, extra = {}) => ({ id, type, ...extra });
+const WORKFLOWS = {
+  "doctrine/feature": [st("setup","command"), st("implement","agent"), st("test","command"), st("review","approval",{ title: "差分を確認してください", onReject: "implement" }), st("open-pr","command")],
+  "doctrine/guided": [st("setup","command"), st("plan","agent"), st("plan-approval","approval",{ title: "計画を確認してください", onReject: "plan", review: { files: [".doctrine-out/plan.md"] } }), st("implement","agent"), st("code-review","agent"), st("human-review","approval",{ title: "変更を確認してください", onReject: "implement" }), st("open-pr","command")],
+  "shop-api/feature": [st("setup","command"), st("implement","agent"), st("lint","command"), st("test","command"), st("review","approval",{ title: "差分を確認してください", onReject: "implement" }), st("open-pr","command")],
+  "shop-api/hotfix": [st("setup","command"), st("fix","agent"), st("test","command"), st("confirm","approval",{ title: "本番反映前に確認してください", onReject: "fix" })],
+  "blog/feature": [st("setup","command"), st("implement","agent"), st("build","command"), st("review","approval",{ title: "差分を確認してください", onReject: "implement" }), st("deploy-preview","command")],
+};
+
+const DIFF_2B91 = [
+  { path: "src/daemon/handlers.ts", hunks: [
+    { old: 219, new: 219, body:
+`       case "worktree.list": {
+-        const out: { project: string; orphans: string[] }[] = [];
++        const out: WorktreeEntry[] = [];
+         for (const project of await listProjects(ctx.db)) {
+-          const known = (await listTasks(ctx.db, { projectId: project.id }))
+-            .map((t) => t.worktree_path).filter((p): p is string => p !== null);
+-          out.push({ project: project.path, orphans: await findOrphans(project.path, known) });
++          const tasks = await listTasks(ctx.db, { projectId: project.id });
++          for (const wt of await listDoctrineWorktrees(project.path)) {
++            const task = tasks.find((t) => t.worktree_path === wt.path) ?? null;
++            out.push({
++              project: project.path, path: wt.path, branch: wt.branch,
++              task_id: task?.id ?? null, task_state: task?.state ?? null,
++              dirty: await isDirty(wt.path),
++              age_basis: task ? task.updated_at : wt.mtime,
++            });
++          }
+         }
+         return out;
+       }` },
+    { old: 228, new: 236, body:
+`       case "worktree.remove": {
+-        const taskId = req(params, "task_id");
+-        const task = await getTask(ctx.db, taskId);
+-        if (!task?.worktree_path) throw new Error("worktree がありません");
++        const target = await resolveRemoveTarget(ctx, params);
++        if (target.task && !isTerminal(target.task.state)) {
++          throw new Error("実行中のタスクの worktree は削除できません");
++        }` },
+  ] },
+  { path: "src/core/worktree.ts", hunks: [
+    { old: 88, new: 88, body:
+` export async function findOrphans(repoPath: string, known: string[]) {
+   const all = await listDoctrineWorktrees(repoPath);
+   return all.filter((w) => !known.includes(w.path)).map((w) => w.path);
+ }
++
++export function isUnderStateDir(path: string, stateDir: string): boolean {
++  const rel = relative(join(stateDir, "worktrees"), resolve(path));
++  return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
++}` },
+  ] },
+  { path: "test/daemon/handlers.test.ts", hunks: [
+    { old: 402, new: 402, body:
+`+test("worktree.remove は state 配下にないパスを拒否する", async () => {
++  const { handle } = await setup();
++  await assert.rejects(
++    handle("worktree.remove", { path: "/tmp/elsewhere" }),
++    /state ディレクトリ配下ではありません/,
++  );
++});
++
++test("worktree.remove は実行中のタスクの worktree を force でも拒否する", async () => {
++  const { handle, running } = await setupRunningTask();
++  await assert.rejects(handle("worktree.remove", { task_id: running.id, force: true }));
++});` },
+  ] },
+];
+
+const DIFF_1103 = [
+  { path: "src/stock/reserve.ts", hunks: [
+    { old: 30, new: 30, body:
+` export async function reserve(db: Db, orderId: string, items: Item[]) {
+-  for (const item of items) {
+-    await db.insert("reservations", { orderId, sku: item.sku, qty: item.qty });
+-  }
++  const key = idempotencyKey(orderId, items);
++  return await withRetry(async () => {
++    return await db.transaction(async (tx) => {
++      const existing = await tx.find("reservations", { key });
++      if (existing) return existing;
++      try {
++        return await tx.insert("reservations", { key, orderId, items });
++      } catch (e) {
++        if (isUniqueViolation(e)) return await tx.find("reservations", { key });
++        throw e;
++      }
++    });
++  }, { attempts: 3, backoffMs: 200, jitter: true });
+ }` },
+  ], since: [
+    { old: 35, new: 35, body:
+`       if (existing) return existing;
+-      return await tx.insert("reservations", { key, orderId, items });
++      try {
++        return await tx.insert("reservations", { key, orderId, items });
++      } catch (e) {
++        if (isUniqueViolation(e)) return await tx.find("reservations", { key });
++        throw e;
++      }
+     });
+-  }, { attempts: 3, backoffMs: 200 });
++  }, { attempts: 3, backoffMs: 200, jitter: true });` },
+  ] },
+  { path: "test/stock/reserve.test.ts", hunks: [
+    { old: 0, new: 1, body:
+`+import { assert } from "../helpers.ts";
++
++test("同じ注文の再試行は引当を二重に作らない", async () => {
++  const db = await freshDb();
++  await reserve(db, "o-1", [{ sku: "A", qty: 1 }]);
++  await reserve(db, "o-1", [{ sku: "A", qty: 1 }]);
++  assert.equal(await db.count("reservations"), 1);
++});
++
++test("同時に走った引当は一意制約違反を既存の行として扱う", async () => {
++  const db = await freshDb();
++  await Promise.all([reserve(db, "o-2", items), reserve(db, "o-2", items)]);
++  assert.equal(await db.count("reservations"), 1);
++});` },
+  ], since: [
+    { old: 7, new: 7, body:
+` });
++
++test("同時に走った引当は一意制約違反を既存の行として扱う", async () => {
++  const db = await freshDb();
++  await Promise.all([reserve(db, "o-2", items), reserve(db, "o-2", items)]);
++  assert.equal(await db.count("reservations"), 1);
++});` },
+  ] },
+  { path: "src/stock/idempotency.ts", hunks: [
+    { old: 0, new: 1, body:
+`+import { createHash } from "node:crypto";
++
++export function idempotencyKey(orderId: string, items: Item[]): string {
++  const canonical = items.map((i) => i.sku + ":" + i.qty).sort().join(",");
++  return createHash("sha256").update(orderId + "|" + canonical).digest("hex");
++}` },
+  ] },
+];
+
+const DIFF_B204 = [
+  { path: "src/pages/index.astro", hunks: [
+    { old: 12, new: 12, body:
+` const posts = (await getCollection("blog")).sort(byDate);
++const PAGE_SIZE = 10;
++const page = Number(Astro.url.searchParams.get("page") ?? "1");
++const shown = posts.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+ ---
+-{posts.map((p) => <PostCard post={p} />)}
++{shown.map((p) => <PostCard post={p} />)}
++<Pager page={page} total={Math.ceil(posts.length / PAGE_SIZE)} />` },
+  ] },
+  { path: "src/components/Pager.astro", hunks: [
+    { old: 0, new: 1, body:
+`+---
++const { page, total } = Astro.props;
++---
++<nav class="pager">
++  {page > 1 && <a href={"?page=" + (page - 1)}>前へ</a>}
++  <span>{page} / {total}</span>
++  {page < total && <a href={"?page=" + (page + 1)}>次へ</a>}
++</nav>` },
+  ] },
+];
+
+const DIFF_9F21 = [
+  { path: "src/workflow/schema.ts", hunks: [
+    { old: 41, new: 41, body:
+` const agentStep = baseStep.extend({
+   type: z.literal("agent"),
+   prompt: z.string(),
++  // 同じ role を持つ agent ステップ同士が1本の会話を共有する。省略時は暗黙の既定ロール
++  session: z.string().optional(),
+   permissionMode: z.enum(["default", "acceptEdits", "bypassPermissions"]).optional(),
+ });` },
+  ] },
+  { path: "src/db/migrations.ts", hunks: [
+    { old: 0, new: 1, body:
+`+export const m011_task_sessions: Migration = {
++  id: "011_task_sessions",
++  up: async (db) => {
++    await db.schema.createTable("task_sessions")
++      .addColumn("task_id", "text", (c) => c.notNull())
++      .addColumn("role", "text", (c) => c.notNull())
++      .addColumn("claude_session_id", "text", (c) => c.notNull())
++      .addPrimaryKeyConstraint("pk_task_sessions", ["task_id", "role"])
++      .execute();
++    // 既存の claude_session_id は役割「default」の行へ複写する（過去タスクの会話を失わないため）
++    await copyLegacySessions(db);
++  },
++};` },
+  ] },
+  { path: "src/db/queries.ts", hunks: [
+    { old: 0, new: 1, body:
+`+export async function getSessionId(db: Db, taskId: string, role: string): Promise<string | null> {
++  const row = await db.selectFrom("task_sessions")
++    .select("claude_session_id")
++    .where("task_id", "=", taskId).where("role", "=", role)
++    .executeTakeFirst();
++  return row?.claude_session_id ?? null;
++}
++
++export async function sessionUpsert(db: Db, taskId: string, role: string, sessionId: string) {
++  await db.insertInto("task_sessions")
++    .values({ task_id: taskId, role, claude_session_id: sessionId })
++    .onConflict((oc) => oc.columns(["task_id", "role"]).doUpdateSet({ claude_session_id: sessionId }))
++    .execute();
++}` },
+  ] },
+  { path: "src/core/engine.ts", hunks: [
+    { old: 118, new: 121, body:
+` async function runAgentStep(ctx: Ctx, task: Task, step: AgentStep) {
+-  const sessionId = task.claude_session_id ?? null;
++  const role = step.session ?? "default";
++  const sessionId = await getSessionId(ctx.db, task.id, role);
+   const result = await runClaude(step.prompt, {
+     resume: sessionId,
+     permissionMode: step.permissionMode ?? "default",
+   });
+-  await updateTask(ctx.db, task.id, { claude_session_id: result.session_id });
++  await sessionUpsert(ctx.db, task.id, role, result.session_id);
+   return result;
+ }` },
+  ] },
+  { path: "test/core/engine.test.ts", hunks: [
+    { old: 60, new: 60, body:
+`+test("agent ステップは role 単位でセッションを共有する", async () => {
++  const { ctx, task } = await setupGuidedTask();
++  await runAgentStep(ctx, task, { ...planStep, session: "planner" });
++  await runAgentStep(ctx, task, { ...implementStep, session: "implementer" });
++  const resumed = await runAgentStep(ctx, task, { ...planStep, session: "planner" });
++  assert.equal(resumed.resumedSessionId, await getSessionId(ctx.db, task.id, "planner"));
++});
++
++test("session 省略時は暗黙の既定ロールを使う", async () => {
++  const { ctx, task } = await setupGuidedTask();
++  await runAgentStep(ctx, task, implementStepNoSession);
++  assert.ok(await getSessionId(ctx.db, task.id, "default"));
++});` },
+  ] },
+  { path: "test/db/migrations.test.ts", hunks: [
+    { old: 40, new: 40, body:
+`+test("011_task_sessions は既存の claude_session_id を default ロールへ複写する", async () => {
++  const db = await freshDbAtMigration(10);
++  await db.updateTable("tasks").set({ claude_session_id: "sess-abc" }).where("id", "=", "t1").execute();
++  await runMigration(db, m011_task_sessions);
++  const row = await db.selectFrom("task_sessions").selectAll()
++    .where("task_id", "=", "t1").where("role", "=", "default").executeTakeFirst();
++  assert.equal(row?.claude_session_id, "sess-abc");
++});` },
+  ] },
+];
+
+const GUIDE_9F21 = {
+  why: "差し戻しのたびに implement ステップの会話が単一の暗黙ロールに閉じていたため、plan ステップで積んだ文脈と implement ステップの文脈が同じ会話に混ざっていた。role ごとにセッションを分け、差し戻された agent ステップに戻ったとき、その役割の会話だけを --resume できるようにする。",
+  what: [
+    { path: "src/workflow/schema.ts", desc: "agent ステップに任意の session（役割名）を追加" },
+    { path: "src/db/migrations.ts", desc: "task_sessions テーブルを追加し、既存の claude_session_id を default ロールへ複写" },
+    { path: "src/db/queries.ts", desc: "getSessionId / sessionUpsert を新設" },
+    { path: "src/core/engine.ts", desc: "agent ステップの実行前後で、セッションを role 単位に解決・保存するよう変更" },
+    { path: "test/core/engine.test.ts", desc: "role 単位の resume と、省略時の既定ロールを確認" },
+    { path: "test/db/migrations.test.ts", desc: "既存セッションの複写を確認" },
+  ],
+  sequence: {
+    actors: ["差し戻し", "Engine", "task_sessions", "Claude CLI"],
+    messages: [
+      { from: "差し戻し", to: "Engine", label: "onReject.goto: implement" },
+      { from: "Engine", to: "task_sessions", label: 'getSessionId(taskId, "implementer")' },
+      { from: "task_sessions", to: "Engine", label: "claude_session_id | null" },
+      { from: "Engine", to: "Claude CLI", label: "--resume <id>（無ければ新規）" },
+      { from: "Claude CLI", to: "Engine", label: "session_id" },
+      { from: "Engine", to: "task_sessions", label: "sessionUpsert(...)" },
+    ],
+  },
+  readingOrder: [
+    { title: "入力側: ワークフローに role を足す", paths: ["src/workflow/schema.ts"], diagram: null,
+      explain: "まず入口から。agent ステップに任意の文字列 session を足しただけの変更です。省略すると暗黙の既定ロール default を使うので、既存のワークフロー定義は無変更のまま動きます。" },
+    { title: "保存先: task_sessions テーブルと移行", paths: ["src/db/migrations.ts"], diagram: "relation",
+      explain: "role ごとにセッションIDを持つため、(task_id, role) を主キーにしたテーブルを新設します。これまで tasks.claude_session_id に1本だけ持っていた値は、default ロールの行へ複写して過去の会話を失わないようにしています。" },
+    { title: "中心: セッションの読み書きと、その呼び出し", paths: ["src/db/queries.ts", "src/core/engine.ts"], diagram: "sequence",
+      explain: "今回の変更の心臓部で、2つのファイルを続けて読みます。まず queries.ts で role 単位にセッションIDを引く getSessionId と、保存する sessionUpsert を確認し、次に engine.ts の runAgentStep がそれを実行の前後で呼んでいることを確認します。差し戻し（onReject.goto）で同じ role の agent ステップに戻ると、下の流れで同じ会話が --resume されます。" },
+    { title: "振る舞いの確認: テスト", paths: ["test/core/engine.test.ts"], diagram: null,
+      explain: "role 単位で resume されること、省略時は既定ロールを使うことの2点をテストしています。" },
+  ],
+  decisions: [
+    { title: "session を省略した agent ステップは暗黙の既定ロールを共有する", body: "既存のワークフロー（今までどおり「タスクに会話は1本」）を壊さないため" },
+    { title: "セッションの保存は実行後に行う", body: "実行中にデーモンが落ちても、直前の resume 可能な状態を上書きしない" },
+    { title: "task_sessions の主キーは (task_id, role)", body: "同じ role の2つ目の agent ステップに来ても同じ会話を拾える" },
+  ],
+  risks: [
+    "同じ role に全く違う目的のステップを割り当てると、意図せず古い文脈を引き継ぐ。role を適切に分けるのはワークフローの書き手の責任",
+    "マイグレーションで複写に失敗した行は resume できず新規セッションになる（実害は文脈が失われるだけで、実行自体は止まらない）",
+  ],
+  tests: [
+    { behavior: "差し戻し後に同じ role へ戻ると同一セッションで resume される", test: "engine.test.ts > role単位でセッションを共有する" },
+    { behavior: "session 省略時は暗黙の既定ロールを使う", test: "engine.test.ts > 省略時は既定ロール" },
+    { behavior: "移行後、既存の claude_session_id が default ロールへ複写される", test: "migrations.test.ts > 011が複写する" },
+  ],
+};
+
+const PLAN_MD = `# 計画: Review Guide の保存形式
+## 目的
+③ のレビュー画面が読む Review Guide を、エージェントが worktree に書き出す形式を決める。
+## 変更対象
+- \`.doctrine-out/guide.json\` を新設し、スキーマを zod で定義する
+- \`src/workflow/schema.ts\` は変えない（doctrine はガイドの中身を理解しない）
+## 方針
+1. Why / What / How / Reading Order / Key Decisions / Risks / Tests の7節を持つ JSON にする
+2. Reading Order の各項目に \`path\` と \`lines\` を持たせ、diff と機械的に照合できるようにする
+3. Markdown ではなく JSON にする。照合に構造が要るため
+## リスク
+- エージェントが JSON を壊すと表示できない。検証に失敗したら生の文字列をそのまま出す
+## テスト方針
+- 7節のどれかが欠けた JSON を検証が落とすこと
+- Reading Order に diff に無いパスが入っていたら警告になること`;
+
+const LOG_TEST_FAIL = `$ deno task test
+running 41 tests from ./test/daemon/handlers.test.ts
+  daemon.warning は後始末の失敗を1回だけ送る ... FAILED (9ms)
+
+error: AssertionError: Expected values to be strictly equal:
+  + actual - expected
+  + 2
+  - 1
+    at test/daemon/handlers.test.ts:512:12
+FAILED | 40 passed | 1 failed (7s)
+exit 1`;
+const LOG_DEGRADED = `tool_use Edit src/order/time.ts (+12 −4)
+tool_use Bash "git commit -m 'fix: 注文日時を UTC で保存する'"
+permission_denied: Bash(git commit) は permissionMode=acceptEdits で許可されていません
+assistant: コミットできなかったため、変更はワーキングツリーに残しています
+{"type":"result","subtype":"success","permission_denials":1}
+[test] $ deno task test
+[test] ok | 88 passed | 0 failed (5s)`;
+const LOG_RUNNING = `{"type":"system","subtype":"init","session_id":"4be1…"}
+assistant: src/daemon/protocol.ts の ServerEvent に task.cleanedUp を足します
+tool_use Read src/daemon/protocol.ts
+tool_use Edit src/daemon/protocol.ts (+2 −0)
+tool_use Read src/daemon/handlers.ts`;
+const FOLLOW_POOL = [
+  "assistant: cleanupAfterRun の戻り値に outcome を持たせます",
+  "tool_use Edit src/core/engine.ts (+14 −3)",
+  "tool_use Bash \"deno test test/core/engine.test.ts\"",
+  "ok | 31 passed | 0 failed (3s)",
+  "assistant: 承認経路（task.approve）でも同じイベントを送ります",
+  "tool_use Edit src/daemon/handlers.ts (+6 −1)",
+];
+
+// 状態は doctrine の7状態。degraded / refused はフラグ。
+const TASKS = [
+  { id: "t-9f21", wf: "doctrine/guided", title: "ステップの再開をロール単位のセッションに切り替える", state: "suspended", step: "human-review", attempt: 1, prio: 1, since: NOW - 8 * MIN, diff: DIFF_9F21, guide: GUIDE_9F21, reviews: [],
+    lastCommand: null,
+    lastAgentMessage: "role ごとの task_sessions テーブルを追加し、agent ステップ実行の前後で getSessionId / sessionUpsert を呼ぶように変更しました。既存タスクの claude_session_id は default ロールへ複写するマイグレーションも足しています。テストは通っています。" },
+  { id: "t-2b91", wf: "doctrine/feature", title: "worktree.list をディスク上の全件にする", state: "suspended", step: "review", attempt: 1, prio: 2, since: NOW - 42 * MIN, diff: DIFF_2B91, reviews: [],
+    lastCommand: { step: "test", exitCode: 0, stdout: "running 41 tests from ./test/daemon/handlers.test.ts\nok | 41 passed | 0 failed (6s)", stderr: "" },
+    lastAgentMessage: "worktree.list を、孤児だけでなく管理下の全 worktree を返すように書き換えました。task_id / task_state を突き合わせ、age_basis はタスクがあれば終了時刻、孤児ならディレクトリの mtime を使うようにしています。テストは41件とも通っています。" },
+  { id: "s-1103", wf: "shop-api/feature", title: "在庫引当のリトライを冪等にする", state: "suspended", step: "review", attempt: 2, prio: 1, since: NOW - 15 * MIN, diff: DIFF_1103,
+    reviews: [{ at: NOW - 140 * MIN, comment: "src/stock/reserve.ts:36\n  > return await tx.insert(\"reservations\", { key, orderId, items });\n  同時に2つ走ると一意制約違反で落ちます。既存の行として扱ってください\n\n全体: 同時実行のテストも足してください" }],
+    lastCommand: { step: "test", exitCode: 0, stdout: "running 12 tests from ./test/stock/reserve.test.ts\nok | 12 passed | 0 failed (2s)", stderr: "" },
+    lastAgentMessage: "ご指摘の一意制約違反を、トランザクション内で find してから insert し、失敗時は find し直す形に直しました。同時実行のテストも2本追加しています。" },
+  { id: "t-a1b2", wf: "doctrine/guided", title: "Review Guide の保存形式を試す", state: "suspended", step: "plan-approval", attempt: 1, prio: 2, since: NOW - 130 * MIN, diff: [], reviewFiles: { ".doctrine-out/plan.md": PLAN_MD }, reviews: [],
+    lastCommand: null,
+    lastAgentMessage: "Review Guide の保存形式について JSON 案と Markdown 案を比較し、diff との機械照合のしやすさから JSON を選ぶ計画を .doctrine-out/plan.md に書きました。まだ実装はしていません。" },
+  { id: "b-204", wf: "blog/feature", title: "記事一覧にページネーションを付ける", state: "suspended", step: "review", attempt: 1, prio: 3, since: NOW - 60 * 26 * MIN, diff: DIFF_B204, reviews: [],
+    lastCommand: { step: "build", exitCode: 0, stdout: "$ astro build\n12 page(s) built in 1.8s", stderr: "" },
+    lastAgentMessage: "index.astro にページングを追加し、Pager コンポーネントを新設しました。1ページ10件です。" },
+
+  { id: "t-e812", wf: "doctrine/feature", title: "daemon.warning イベントを追加する", state: "failed", step: "test", attempt: 3, prio: 2, since: NOW - 60 * 26 * MIN, log: LOG_TEST_FAIL, dirty: true },
+  { id: "t-3cd2", wf: "doctrine/feature", title: "gc の確認文言を直す", state: "completed", step: "open-pr", attempt: 1, prio: 2, since: NOW - 95 * MIN, refused: true, dirty: true, log: "$ gh pr create --fill\nhttps://github.com/todokr/doctrine/pull/31\nexit 0" },
+  { id: "s-1202", wf: "shop-api/hotfix", title: "注文日時のタイムゾーンずれ", state: "running", step: "test", attempt: 1, prio: 0, since: NOW - 23 * MIN, degraded: "fix", log: LOG_DEGRADED },
+
+  { id: "t-7f3a", wf: "doctrine/feature", title: "task.cleanedUp イベントを追加する", state: "running", step: "implement", attempt: 1, prio: 1, since: NOW - 11 * MIN, log: LOG_RUNNING },
+  { id: "t-c04d", wf: "doctrine/feature", title: "workflow.list にステップを載せる", state: "running", step: "implement", attempt: 2, prio: 2, since: NOW - 134 * MIN, log: "[test #1] FAILED | 1 failed\nassistant: テストの失敗を受けて setupStep の挿入位置を直します\ntool_use Edit src/workflow/project.ts (+5 −2)" },
+  { id: "s-1102", wf: "shop-api/feature", title: "注文 API にカーソルページングを入れる", state: "running", step: "lint", attempt: 1, prio: 2, since: NOW - 48 * MIN, log: "$ deno lint\nChecked 214 files" },
+
+  { id: "s-1104", wf: "shop-api/feature", title: "価格改定バッチの分割実行", state: "queued", step: null, attempt: 0, prio: 0, since: NOW - 4 * MIN },
+  { id: "t-91e0", wf: "doctrine/feature", title: "ログ追従を1接続1タスクに上書きする", state: "queued", step: null, attempt: 0, prio: 2, since: NOW - 25 * MIN },
+
+  { id: "t-d5e6", wf: "doctrine/guided", title: "step_outputs の全文保持を検討する", state: "paused", step: "plan", attempt: 1, prio: 2, since: NOW - 60 * 5 * MIN, log: "assistant: step_outputs の容量見積もりを出します\n(SIGTERM で一時停止)" },
+
+  { id: "t-0a77", wf: "doctrine/feature", title: "README にデーモン起動手順を書く", state: "completed", step: "open-pr", attempt: 1, prio: 2, since: NOW - 60 * 3 * MIN, log: "exit 0" },
+  { id: "s-1105", wf: "shop-api/feature", title: "決済 Webhook の署名検証", state: "canceled", step: "implement", attempt: 1, prio: 2, since: NOW - 60 * 24 * 9 * MIN, dirty: true, log: "(SIGTERM で中止)" },
+  { id: "b-198", wf: "blog/feature", title: "OGP 画像を記事ごとに生成する", state: "completed", step: "deploy-preview", attempt: 1, prio: 2, since: NOW - 60 * 24 * 2 * MIN, log: "exit 0" },
+];
+TASKS.forEach((t) => {
+  t.project = t.wf.split("/")[0];
+  t.prompt ??= `${t.title}。詳細は issue を参照してください。`;
+  t.branch = `doctrine/${t.id}-${t.title.length}`;
+  const keepWorktree = t.state !== "queued" && (t.state !== "completed" || t.refused);
+  t.worktree = keepWorktree ? `~/.local/state/doctrine/worktrees/${t.project}/${t.id}` : null;
+});
+
+// ================================================================ 表示状態
+const S = {
+  view: "tasks", project: "all", sel: "t-9f21",
+  scope: {}, file: {}, step: {},
+  comments: {}, editing: null, overall: {}, modal: null, toast: null,
+  bannerOpen: !loadFlag("doctrine-proto-banner-dismissed"),
+};
+TASKS.forEach((t) => {
+  const d = DRAFTS[t.id];
+  if (d) { S.comments[t.id] = d.comments ?? []; S.overall[t.id] = d.overall ?? ""; }
+});
+function persistDraft(taskId) {
+  DRAFTS[taskId] = { comments: S.comments[taskId] ?? [], overall: S.overall[taskId] ?? "" };
+  saveDrafts(DRAFTS);
+}
+function clearDraft(taskId) {
+  delete DRAFTS[taskId]; saveDrafts(DRAFTS);
+  S.comments[taskId] = []; S.overall[taskId] = "";
+}
+
+// ================================================================ 導出
+const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+const proj = (id) => PROJECTS.find((p) => p.id === id);
+const stepDef = (t) => WORKFLOWS[t.wf].find((x) => x.id === t.step);
+const isTerminal = (s) => ["completed", "failed", "canceled"].includes(s);
+function clock(ms) { const d = new Date(ms); return `${String(d.getMonth() + 1).padStart(2, "0")}/${String(d.getDate()).padStart(2, "0")} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`; }
+function elapsed(ms) { const m = Math.round((NOW - ms) / MIN); return m < 60 ? `${m}分` : `${Math.floor(m / 60)}時間${String(m % 60).padStart(2, "0")}分`; }
+function ago(ms) { const m = Math.round((NOW - ms) / MIN); if (m < 1) return "たった今"; if (m < 60) return `${m}分前`; if (m < 1440) return `${Math.floor(m / 60)}時間前`; return `${Math.floor(m / 1440)}日前`; }
+
+function groupOf(t) {
+  if (t.state === "suspended") return "review";
+  if (t.state === "failed" || t.refused || (t.degraded && !isTerminal(t.state))) return "check";
+  if (t.state === "running") return "running";
+  if (t.state === "queued") return "queued";
+  if (t.state === "paused") return "paused";
+  return "done";
+}
+const GROUPS = [
+  { key: "review", name: "レビュー待ち", sort: (a, b) => a.since - b.since },
+  { key: "check", name: "要確認", sort: (a, b) => b.since - a.since },
+  { key: "running", name: "実行中", sort: (a, b) => a.since - b.since },
+  { key: "queued", name: "待ち", sort: (a, b) => a.prio - b.prio || a.since - b.since },
+  { key: "paused", name: "一時停止", sort: (a, b) => b.since - a.since },
+];
+const visibleTasks = () => TASKS.filter((t) => S.project === "all" || t.project === S.project);
+function sidebarOrder() {
+  const ts = visibleTasks();
+  if (S.view === "done") return ts.filter((t) => groupOf(t) === "done").sort((a, b) => b.since - a.since);
+  return GROUPS.flatMap((g) => ts.filter((t) => groupOf(t) === g.key).sort(g.sort));
+}
+const countReview = () => TASKS.filter((t) => groupOf(t) === "review").length;
+const countAttn = () => TASKS.filter((t) => ["review", "check"].includes(groupOf(t))).length;
+
+// ================================================================ サイドバー
+const ICONS = {
+  inbox: '<svg viewBox="0 0 24 24"><path d="M3 13h5l1.5 3h5L16 13h5"/><path d="M5 5h14l2 8v6H3v-6z"/></svg>',
+  done: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/></svg>',
+  gear: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>',
+};
+function rail() {
+  return `<nav class="rail" aria-label="ビュー">
+    <button class="ib" title="タスク" aria-pressed="${S.view === "tasks"}" data-act="view" data-v="tasks">${ICONS.inbox}${countReview() ? '<span class="pip"></span>' : ""}</button>
+    <button class="ib" title="終了したタスク" aria-pressed="${S.view === "done"}" data-act="view" data-v="done">${ICONS.done}</button>
+    <span class="grow"></span>
+    <button class="ib" title="設定" data-act="toast" data-msg="設定・通知・トレイはOSに統合されたデスクトップアプリ側の機能で、ブラウザ上のこのプロトタイプでは再現していません">${ICONS.gear}</button>
+  </nav>`;
+}
+function icon(t) {
+  switch (groupOf(t)) {
+    case "review": return '<span class="diamond"></span>';
+    case "check": return t.degraded && !t.refused && t.state !== "failed" ? '<span class="bang deg">!</span>' : '<span class="bang">!</span>';
+    case "running": return '<span class="spin"></span>';
+    case "queued": return '<span class="ring"></span>';
+    case "paused": return '<span class="pause"></span>';
+    default: return t.state === "completed" ? '<span class="check"></span>' : '<span class="xmark"></span>';
+  }
+}
+function timeLabel(t) {
+  const g = groupOf(t);
+  if (g === "review") return clock(t.since);
+  if (g === "running") return elapsed(t.since);
+  if (g === "queued") return `P${t.prio} · ${ago(t.since)}`;
+  return ago(t.since);
+}
+function item(t) {
+  const p = proj(t.project);
+  return `<button class="it" data-act="sel" data-id="${t.id}" aria-current="${S.sel === t.id}">
+    <span class="ico">${icon(t)}</span>
+    <span class="t">${esc(t.title)}</span>
+    <span class="m"><span class="pj"><span class="pjdot" style="background:${p.color}"></span>${esc(p.id)}</span><span class="tm">${timeLabel(t)}</span></span>
+  </button>`;
+}
+function sidebar() {
+  const ts = visibleTasks();
+  const head = `<div class="side-head">
+    <select id="proj-filter" aria-label="プロジェクトで絞り込む">
+      <option value="all" ${S.project === "all" ? "selected" : ""}>${S.view === "done" ? "終了したタスク" : "全タスク"}</option>
+      ${PROJECTS.map((p) => `<option value="${p.id}" ${S.project === p.id ? "selected" : ""}>${p.id}</option>`).join("")}
+    </select>
+    <span class="count">${S.view === "done" ? ts.filter((t) => groupOf(t) === "done").length : ts.filter((t) => groupOf(t) !== "done").length}</span>
+    <span class="grow"></span>
+    <button class="plus" data-act="toast" data-msg="タスクの作成はCLI（dctl add）から行います。UIからの作成（コンポーザ）は第2段階です" title="新しいタスク" aria-label="新しいタスク">＋</button>
+  </div>`;
+  let body;
+  if (S.view === "done") {
+    body = sidebarOrder().map(item).join("") || '<p class="hint" style="padding:8px">ありません</p>';
+  } else {
+    body = GROUPS.map((g) => {
+      const list = ts.filter((t) => groupOf(t) === g.key).sort(g.sort);
+      if (!list.length) return "";
+      return `<section class="grp"><h3>${g.name} <span class="count">${list.length}</span></h3>${list.map(item).join("")}</section>`;
+    }).join("");
+  }
+  return `<aside class="side">${head}<div class="side-scroll">${body}</div>
+    <div class="side-foot"><span>5時間 <b>62%</b></span><span>7日 <b>38%</b></span><span>17:40 リセット</span></div></aside>`;
+}
+
+// ================================================================ diff
+function highlight(code) {
+  const re = /(\/\/.*$)|("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')|\b(const|let|return|if|else|async|await|function|export|import|from|throw|new|for|of|try|catch|type)\b|\b(\d+)\b/g;
+  let out = "", last = 0, m;
+  while ((m = re.exec(code))) {
+    out += esc(code.slice(last, m.index));
+    const cls = m[1] ? "com" : m[2] ? "str" : m[3] ? "kw" : "num";
+    out += `<span class="tk-${cls}">${esc(m[0])}</span>`;
+    last = m.index + m[0].length;
+  }
+  return out + esc(code.slice(last));
+}
+function filesFor(t) {
+  const since = S.scope[t.id] === "since";
+  return since ? t.diff.filter((f) => f.since).map((f) => ({ ...f, hunks: f.since })) : t.diff;
+}
+const stats = (f) => {
+  let a = 0, d = 0;
+  for (const h of f.hunks) for (const l of h.body.split("\n")) { if (l[0] === "+") a++; else if (l[0] === "-") d++; }
+  return { a, d };
+};
+const commentsOf = (t) => (S.comments[t.id] ??= []);
+
+function fileBlock(t, f) {
+  const { a, d } = stats(f);
+  let rows = "";
+  for (const h of f.hunks) {
+    rows += `<div class="hunk">@@ -${h.old} +${h.new} @@</div>`;
+    let o = h.old, n = h.new;
+    for (const raw of h.body.split("\n")) {
+      const kind = raw[0] === "+" ? "a" : raw[0] === "-" ? "d" : "";
+      const text = raw.slice(1);
+      const on = kind === "a" ? "" : o, nn = kind === "d" ? "" : n;
+      const line = kind === "d" ? o : n;
+      rows += `<div class="ln ${kind}"><span class="o">${on}</span><span class="n">${nn}</span><button class="cm" data-act="lc-new" data-path="${esc(f.path)}" data-line="${line}" data-quote="${esc(text.trim())}" aria-label="${line}行目にコメント">+</button><span class="c">${highlight(text)}</span></div>`;
+      rows += lineComments(t, f.path, line);
+      if (kind !== "a") o++;
+      if (kind !== "d") n++;
+    }
+  }
+  return `<section class="file" id="file-${esc(f.path)}">
+    <header><span class="nm">${esc(f.path)}</span><span class="add mono">+${a}</span><span class="del mono">−${d}</span></header>
+    <div class="code">${rows}</div>
+  </section>`;
+}
+function lineComments(t, path, line) {
+  let html = "";
+  commentsOf(t).forEach((c, i) => {
+    if (c.path !== path || c.line !== line) return;
+    html += `<div class="lc"><span class="who">あなた · 送信前の下書き</span><div>${esc(c.text)}</div><div class="actions"><button class="btn sm" data-act="lc-del" data-i="${i}">削除</button></div></div>`;
+  });
+  const e = S.editing;
+  if (e && e.task === t.id && e.path === path && e.line === line) {
+    html += `<div class="lc"><span class="who">${esc(path)}:${line} にコメント</span>
+      <textarea id="lc-text" placeholder="エージェントへの指摘">${esc(e.text)}</textarea>
+      <div class="actions"><button class="btn sm primary" data-act="lc-save">下書きに追加</button><button class="btn sm" data-act="lc-cancel">やめる</button></div></div>`;
+  }
+  return html;
+}
+function composeRejection(t) {
+  const parts = commentsOf(t).map((c) => `${c.path}:${c.line}\n  > ${c.quote}\n  ${c.text}`);
+  const overall = (S.overall[t.id] ?? "").trim();
+  if (overall) parts.push(`全体: ${overall}`);
+  return parts.join("\n\n");
+}
+
+function md(src) {
+  const inline = (s) => esc(s).replace(/`([^`]+)`/g, "<code>$1</code>");
+  let html = "", list = null;
+  const close = () => { if (list) { html += `</${list}>`; list = null; } };
+  for (const line of src.split("\n")) {
+    let m;
+    if ((m = line.match(/^(#{1,2}) (.*)/))) { close(); html += `<h${m[1].length}>${inline(m[2])}</h${m[1].length}>`; }
+    else if ((m = line.match(/^- (.*)/))) { if (list !== "ul") { close(); html += "<ul>"; list = "ul"; } html += `<li>${inline(m[1])}</li>`; }
+    else if ((m = line.match(/^\d+\. (.*)/))) { if (list !== "ol") { close(); html += "<ol>"; list = "ol"; } html += `<li>${inline(m[1])}</li>`; }
+    else if (line.trim()) { close(); html += `<p>${inline(line)}</p>`; }
+  }
+  close();
+  return html;
+}
+
+// ================================================================ Review Guide（右パネル）
+function sequenceSvg(seq) {
+  const W = 320, top = 24, rowH = 40;
+  const actors = seq.actors;
+  const n = actors.length;
+  const xs = actors.map((_, i) => 26 + i * ((W - 52) / (n - 1)));
+  const H = top + rowH * seq.messages.length + 14;
+  let s = `<svg class="seqd" viewBox="0 0 ${W} ${H}" role="img" aria-label="シーケンス図: ${esc(actors.join(" → "))}">`;
+  s += `<defs><marker id="sd-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="sd-arrowhead"/></marker></defs>`;
+  actors.forEach((a, i) => {
+    s += `<text x="${xs[i]}" y="14" text-anchor="middle" class="sd-actor">${esc(a)}</text>`;
+    s += `<line x1="${xs[i]}" y1="20" x2="${xs[i]}" y2="${H - 6}" class="sd-life"/>`;
+  });
+  seq.messages.forEach((m, i) => {
+    const y = top + rowH * (i + 1) - 12;
+    const x1 = xs[actors.indexOf(m.from)], x2 = xs[actors.indexOf(m.to)];
+    const mid = (x1 + x2) / 2;
+    const words = m.label.split(" ");
+    s += `<text x="${mid}" y="${y - 14}" text-anchor="middle" class="sd-lbl">${i + 1}.</text>`;
+    s += `<foreignObject x="${Math.max(2, mid - 92)}" y="${y - 12}" width="184" height="14"><div xmlns="http://www.w3.org/1999/xhtml" style="font:9.5px var(--mono);color:var(--ink-3);text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(m.label)}</div></foreignObject>`;
+    s += `<line x1="${x1}" y1="${y}" x2="${x2}" y2="${y}" class="sd-arrow" marker-end="url(#sd-arrow)" style="--d:${(i * 0.14).toFixed(2)}s"/>`;
+  });
+  s += `</svg>`;
+  return s;
+}
+function relationSvg() {
+  return `<svg class="reld" viewBox="0 0 320 128" role="img" aria-label="tasks と task_sessions の関係">
+    <rect x="8" y="26" width="120" height="80" rx="8" class="rel-box"/>
+    <text x="68" y="42" text-anchor="middle" class="rel-name">tasks</text>
+    <text x="16" y="60" class="rel-field">id (PK)</text>
+    <text x="16" y="74" class="rel-field">claude_session_id</text>
+    <text x="16" y="88" class="rel-field">（廃止予定）</text>
+    <rect x="176" y="10" width="136" height="108" rx="8" class="rel-box"/>
+    <text x="244" y="26" text-anchor="middle" class="rel-name">task_sessions</text>
+    <text x="184" y="44" class="rel-field">task_id (PK, FK)</text>
+    <text x="184" y="58" class="rel-field">role (PK)</text>
+    <text x="184" y="72" class="rel-field">claude_session_id</text>
+    <line x1="128" y1="66" x2="176" y2="64" class="rel-line"/>
+    <text x="134" y="62" class="rel-card">1</text>
+    <text x="160" y="60" class="rel-card">N</text>
+  </svg>`;
+}
+function guidePanel(t) {
+  const g = t.guide;
+  if (!g) return "";
+  const missing = unguidedFiles(t);
+  const steps = WORKFLOWS[t.wf];
+  const curIdx = steps.findIndex((s) => s.id === t.step);
+  const stepDots = steps.map((s, i) => `<span class="g-step ${i < curIdx ? "done" : ""} ${i === curIdx ? "cur" : ""}"><span class="g-dot"></span>${esc(s.id)}</span>`).join('<span class="g-rule"></span>');
+  return `<aside class="guide" aria-label="Review Guide">
+    <div class="guide-head"><b>Review Guide</b></div>
+    <div class="g-timeline">${stepDots}</div>
+    <section class="g-sec" style="--gi:0"><h3>Why</h3><p>${esc(g.why)}</p></section>
+    <section class="g-sec" style="--gi:1"><h3>What</h3>
+      <table class="g-table"><thead><tr><th>ファイル</th><th>変更</th></tr></thead>
+      <tbody>${g.what.map((w) => `<tr><td class="mono">${esc(w.path)}</td><td>${esc(w.desc)}</td></tr>`).join("")}</tbody></table>
+    </section>
+    <section class="g-sec" style="--gi:2"><h3>How</h3>
+      <p class="hint">差し戻し復帰時にセッションを解決する流れ</p>
+      ${sequenceSvg(g.sequence)}
+      <p class="hint">セッションを役割ごとに分けて持つ形</p>
+      ${relationSvg()}
+    </section>
+    <section class="g-sec" style="--gi:3"><h3>Reading Order</h3>
+      <button class="g-start" data-act="step-goto" data-idx="0">ガイドに沿って読む（${g.readingOrder.length}ステップ）▸</button>
+      <ol class="g-order">${g.readingOrder.map((r, i) => `<li><button data-act="step-goto" data-idx="${i}"><span>${esc(r.title)}</span><span class="nm hint">${r.paths.map(esc).join(", ")}</span></button></li>`).join("")}</ol>
+      ${missing.length ? `<p class="g-warn">⚠ diff に含まれるがガイドが触れていないファイルが${missing.length}件: ${missing.map((f) => `<span class="mono">${esc(f.path)}</span>`).join("、")}</p>` : `<p class="g-ok">✓ diff の全ファイルがガイドに触れています</p>`}
+    </section>
+    <section class="g-sec" style="--gi:4"><h3>Key Decisions</h3>
+      <ol class="g-list">${g.decisions.map((d) => `<li><b>${esc(d.title)}</b><span>${esc(d.body)}</span></li>`).join("")}</ol>
+    </section>
+    <section class="g-sec" style="--gi:5"><h3>Risks</h3>
+      <ul class="g-list">${g.risks.map((r) => `<li>${esc(r)}</li>`).join("")}</ul>
+    </section>
+    <section class="g-sec" style="--gi:6"><h3>Tests</h3>
+      <table class="g-table"><thead><tr><th>振る舞い</th><th>テスト</th></tr></thead>
+      <tbody>${g.tests.map((x) => `<tr><td>${esc(x.behavior)}</td><td class="mono">${esc(x.test)}</td></tr>`).join("")}</tbody></table>
+    </section>
+  </aside>`;
+}
+
+function currentStep(t) {
+  if (!t.guide) return null;
+  return S.step[t.id] === undefined ? 0 : S.step[t.id];
+}
+function unguidedFiles(t) {
+  const mentioned = new Set(t.guide.readingOrder.flatMap((r) => r.paths));
+  return t.diff.filter((f) => !mentioned.has(f.path));
+}
+function stepView(t, idx) {
+  const g = t.guide;
+  const steps = g.readingOrder;
+  const step = steps[idx];
+  const files = step.paths.map((p) => t.diff.find((f) => f.path === p)).filter(Boolean);
+  const last = idx === steps.length - 1;
+  const missing = unguidedFiles(t);
+  const diagram = step.diagram === "sequence" ? sequenceSvg(g.sequence) : step.diagram === "relation" ? relationSvg() : "";
+  return `<div class="stepmode">
+    <div class="step-bar">
+      <b>ガイドに沿って読む</b>
+      <span class="step-pills" role="group" aria-label="読むステップ">${steps.map((s, i) => `<button class="step-pill ${i < idx ? "done" : ""}" data-act="step-goto" data-idx="${i}" title="${esc(s.title)}" ${i === idx ? 'aria-current="step"' : ""}>${i + 1}</button>`).join("")}</span>
+      <span class="spacer"></span>
+      <button class="btn sm" data-act="step-exit">全体表示に戻る</button>
+    </div>
+    <section class="stepcard" aria-live="polite">
+      <span class="eyebrow">STEP ${idx + 1} / ${steps.length}</span>
+      <h2>${esc(step.title)}</h2>
+      <p>${esc(step.explain)}</p>
+      ${diagram ? `<div class="dg">${diagram}</div>` : ""}    </section>
+    <div class="diffs">${files.map((f) => fileBlock(t, f)).join("")}</div>
+    ${last ? `<section class="step-done"><b>ガイドのステップはここまでです</b>
+      ${missing.length ? `<p class="g-warn">⚠ diff に含まれるがガイドが触れていないファイルが${missing.length}件あります。判断の前に目を通してください。</p><div class="diffs">${missing.map((f) => fileBlock(t, f)).join("")}</div>` : `<p class="g-ok">✓ diff の全ファイルをガイドのステップで読みました</p>`}
+      <p class="hint">説明がコードと一致していたかを振り返ってから、下で承認か差し戻しを決めてください。</p></section>` : ""}
+    <div class="step-foot">
+      <button class="btn" data-act="step-goto" data-idx="${idx - 1}" ${idx === 0 ? "disabled" : ""}>← 前のステップ</button>
+      ${last ? "" : `<button class="btn" data-act="step-goto" data-idx="${idx + 1}" style="border-color:var(--accent)">次のステップ: ${esc(steps[idx + 1].title)} →</button>`}
+      <span class="hint"><kbd class="mono">[</kbd> <kbd class="mono">]</kbd> でも移動できます</span>
+    </div>
+  </div>`;
+}
+
+// ================================================================ 中央: レビュー画面
+function openButtons(t) {
+  return `<button class="btn sm" data-act="toast" data-msg="エディタ／ターミナルで開くボタンは第2段階です">エディタで開く</button>`;
+}
+function contextBox(t) {
+  const parts = [];
+  parts.push(`<div><b>元の指示</b><pre class="block" style="margin-top:6px;white-space:pre-wrap">${esc(t.prompt)}</pre></div>`);
+  if (t.reviews.length) {
+    parts.push(`<details class="ctx"><summary>これまでのレビュー（${t.reviews.length}件、差し戻し）</summary>
+      <div style="display:grid;gap:8px">${t.reviews.map((r) => `<div><span class="hint">${clock(r.at)} · ${ago(r.at)}</span><pre class="block" style="margin-top:4px">${esc(r.comment)}</pre></div>`).join("")}</div>
+    </details>`);
+  }
+  if (t.lastCommand) {
+    const c = t.lastCommand;
+    parts.push(`<details class="ctx"><summary>直近の command ステップの結果（<span class="mono">${esc(c.step)}</span> · exit ${c.exitCode}）</summary>
+      <pre class="block">${esc(c.stdout)}${c.stderr ? "\n" + esc(c.stderr) : ""}</pre>
+    </details>`);
+  }
+  if (t.lastAgentMessage) {
+    parts.push(`<div><b>エージェントの最後の発言</b><pre class="block" style="margin-top:6px;white-space:pre-wrap">${esc(t.lastAgentMessage)}</pre></div>`);
+  }
+  return `<div style="display:grid;gap:8px">${parts.join("")}</div>`;
+}
+function reviewView(t) {
+  const def = stepDef(t);
+  const p = proj(t.project);
+  const files = filesFor(t);
+  const all = t.diff;
+  const hasSince = t.reviews.length > 0 && all.some((f) => f.since);
+  const scope = S.scope[t.id] ?? "all";
+  const declared = def.review?.files ?? [];
+  const ncom = commentsOf(t).length;
+  const canReject = ncom > 0 || (S.overall[t.id] ?? "").trim().length > 0;
+
+  return `<div class="pad">
+    <div class="crumbs"><span class="pjdot" style="background:${p.color}"></span><span>${esc(p.id)}</span><span class="mono">${esc(t.wf)}</span><span class="mono">${t.id}</span><span class="mono">P${t.prio}</span></div>
+    <h1>${esc(t.title)}</h1>
+    <div class="headrow">
+      <span class="pill p-attn">◆ ${esc(def.title)}</span>
+      ${t.reviews.length ? `<span class="pill p-muted">${t.reviews.length + 1}回目のレビュー</span>` : ""}
+      <span class="hint">${ago(t.since)}から待っています</span>
+      <span class="mono hint">${esc(t.branch)}</span>
+      <span class="spacer"></span>
+      ${openButtons(t)}
+    </div>
+
+    ${contextBox(t)}
+
+    ${declared.map((path) => `<section class="rv-files-md">
+      <header><span class="mono">${esc(path)}</span><span class="hint">このステップが見せるファイル（review.files）</span></header>
+      <div class="md">${md(t.reviewFiles?.[path] ?? "(ファイルがありません)")}</div>
+    </section>`).join("")}
+
+    <div class="headrow">
+      <b>変更</b>
+      <span class="hint">${all.length} ファイル · ベースブランチとの merge-base から worktree の現在まで（未コミットを含む）</span>
+      <span class="spacer"></span>
+      ${hasSince ? `<span class="seg" role="group" aria-label="差分の範囲"><button data-act="scope" data-s="all" aria-pressed="${scope === "all"}">全体</button><button data-act="scope" data-s="since" aria-pressed="${scope === "since"}">前回レビュー以降</button></span>` : ""}
+    </div>
+
+    ${all.length === 0 ? `<div class="empty-diff">コードの変更はまだありません。上の計画を読んで判断してください。</div>` : currentStep(t) !== null ? stepView(t, currentStep(t)) : `
+    <div class="rv-body ${t.guide ? "has-guide" : ""}">
+      <nav class="filelist" aria-label="変更ファイル">
+        <header>${all.length} ファイル</header>
+        ${files.map((f) => { const { a, d } = stats(f); return `<button class="fl" data-act="file" data-path="${esc(f.path)}">
+          <span class="nm">${esc(f.path)}</span>
+          <span class="st"><span class="add">+${a}</span><span class="del">−${d}</span></span>
+        </button>`; }).join("")}
+        ${scope === "since" && all.length > files.length ? `<div class="hint" style="padding:6px 10px">前回から変わっていない ${all.length - files.length} ファイルを隠しています</div>` : ""}
+      </nav>
+      <div class="diffs">${files.map((f) => fileBlock(t, f)).join("")}</div>
+      ${guidePanel(t)}
+    </div>`}
+  </div>
+  <footer class="decide">
+    <div>
+      <div class="meta"><span>行コメント <b>${ncom}</b> 件</span></div>
+      <textarea id="overall" placeholder="全体へのコメント（差し戻すときに行コメントと一緒に送ります）">${esc(S.overall[t.id] ?? "")}</textarea>
+    </div>
+    <div class="actions">
+      <button class="btn danger" id="reject-btn" data-act="reject" ${canReject ? "" : "disabled"}>差し戻す…</button>
+      <button class="btn primary" data-act="approve">承認する</button>
+    </div>
+  </footer>`;
+}
+
+// ================================================================ 中央: タスク画面
+function taskView(t) {
+  const p = proj(t.project);
+  const steps = WORKFLOWS[t.wf];
+  const idx = steps.findIndex((x) => x.id === t.step);
+  const stateTxt = { running: ["実行中", "p-run"], queued: ["待ち", "p-muted"], paused: ["一時停止", "p-muted"], failed: ["失敗", "p-danger"], completed: ["完了", "p-ok"], canceled: ["中止", "p-muted"] }[t.state];
+  const queuePos = TASKS.filter((x) => x.state === "queued").sort((a, b) => a.prio - b.prio || a.since - b.since).findIndex((x) => x.id === t.id) + 1;
+  return `<div class="pad">
+    <div class="crumbs"><span class="pjdot" style="background:${p.color}"></span><span>${esc(p.id)}</span><span class="mono">${esc(t.wf)}</span><span class="mono">${t.id}</span><span class="mono">P${t.prio}</span></div>
+    <h1>${esc(t.title)}</h1>
+    <div class="headrow">
+      <span class="pill ${stateTxt[1]}">${stateTxt[0]}</span>
+      ${t.step ? `<span>ステップ <span class="mono">${esc(t.step)}</span> <span class="hint">（${idx + 1} / ${steps.length}${t.attempt > 1 ? ` · ${t.attempt}回目` : ""}）</span></span>` : ""}
+      <span class="hint">${t.state === "running" ? `${elapsed(t.since)} 経過` : ago(t.since)}</span>
+    </div>
+
+    ${t.state === "failed" ? `<section class="box danger"><h2><span class="mono">${esc(t.step)}</span> で失敗しました（${t.attempt}回目。onFailure の maxAttempts に達しました）</h2><p>worktree は証拠として残しています。中を確認してから、<span class="mono">dctl add</span> で同じ内容を投入し直すか、<span class="mono">dctl gc ${esc(t.id)}</span> で片付けてください（UIでの「同じ内容で投入し直す」は第2段階です）。</p></section>` : ""}
+    ${t.refused ? `<section class="box danger"><h2>worktree の削除を拒否しました</h2><p>完了時に未コミットの変更が残っていました。ワークフローの最終ステップがコミットしていない可能性があります。中を確認してから <span class="mono">dctl gc ${esc(t.id)}</span> で削除してください。</p></section>` : ""}
+    ${t.degraded ? `<section class="box deg"><h2><span class="mono">${esc(t.degraded)}</span> が、権限で拒否された操作を含んだまま成功扱いで終わりました</h2><p>後続のステップは進んでいますが、エージェントが意図した操作（ここではコミット）はされていません。</p></section>` : ""}
+    ${t.state === "queued" ? `<section class="box quiet"><p>実行枠が空くのを待っています（行列の ${queuePos} 番目）。枠が取れた時点で worktree が作られます。</p></section>` : ""}
+    ${t.state === "paused" ? `<section class="box quiet"><p><span class="mono">dctl resume ${esc(t.id)}</span> で再開できます（UIからの一時停止・再開は第2段階です）。</p></section>` : ""}
+
+    <div class="actions">
+      ${!isTerminal(t.state) ? '<button class="btn danger" data-act="cancel">中止</button>' : ""}
+      ${t.worktree ? `${openButtons(t)}<button class="btn sm" data-act="toast" data-msg="パスをコピーしました">パスをコピー</button>` : ""}
+    </div>
+    ${t.worktree ? `<p class="mono hint">${esc(t.worktree)}</p>` : ""}
+
+    ${t.log ? `<div class="headrow"><b>ログ</b><span class="mono hint">${esc(t.step ?? "")}${t.attempt > 1 ? " #" + t.attempt : ""}</span><span class="spacer"></span><span class="hint">${t.state === "running" ? '<span class="spin" style="display:inline-block;vertical-align:-2px"></span> 追従中' : "末尾 200 行"}</span></div>
+    <pre class="block" id="log">${esc(t.log)}</pre>` : ""}
+
+    ${t.step ? `<details class="runs"><summary>実行履歴</summary><div class="runtable"><table>
+      <thead><tr><th>ステップ</th><th>種類</th><th>試行</th><th>状態</th></tr></thead>
+      <tbody>${steps.slice(0, idx + 1).map((s, i) => `<tr><td class="mono">${esc(s.id)}</td><td class="hint">${s.type}</td><td class="mono">#${i === idx ? t.attempt : 1}</td><td>${i < idx ? '<span class="pill p-ok">成功</span>' : `<span class="pill ${stateTxt[1]}">${stateTxt[0]}</span>`}${t.degraded === s.id ? ' <span class="pill p-deg">degraded</span>' : ""}</td></tr>`).join("")}</tbody>
+    </table></div></details>` : ""}
+  </div>`;
+}
+
+// ================================================================ モーダル
+function modal() {
+  if (!S.modal) return "";
+  const t = TASKS.find((x) => x.id === S.sel);
+  let body = "";
+  if (S.modal === "reject-preview") {
+    const def = stepDef(t);
+    body = `<h2>差し戻してエージェントに送る内容</h2>
+      <p class="hint">行コメントと全体へのコメントを1つの文字列にまとめて <span class="mono">task.reject(comment)</span> で送ります。<span class="mono">${esc(def.onReject)}</span> ステップに戻ります。</p>
+      <pre class="block">${esc(composeRejection(t))}</pre>
+      <div class="actions"><button class="btn danger" data-act="reject-do">差し戻す</button><button class="btn" data-act="modal-close">戻る</button></div>`;
+  }
+  return `<div class="scrim" data-act="modal-close"></div><div class="modal" role="dialog">${body}</div>`;
+}
+
+// ================================================================ 描画
+function banner() {
+  if (!S.bannerOpen) return "";
+  return `<div class="banner"><strong>PROTOTYPE</strong>
+    <p>doctrine ② レビューアプリの第1段階（MVP）を確かめるための、UIのみ・ダミーデータのプロトタイプです。デーモンにはつながっていません。気になる点はこのページへのコメントで教えてください。</p>
+    <button data-act="banner-close" aria-label="閉じる">×</button></div>`;
+}
+function render() {
+  const t = TASKS.find((x) => x.id === S.sel);
+  let main;
+  if (!t) main = `<div class="pad"><p class="hint">左からタスクを選んでください</p></div>`;
+  else if (t.state === "suspended") main = reviewView(t);
+  else main = taskView(t);
+  const scrollTop = document.querySelector(".main")?.scrollTop ?? 0;
+  document.getElementById("root").innerHTML = `${banner()}<div class="app">${rail()}${sidebar()}<main class="main">${main}</main></div>${modal()}
+    <div class="protobar" aria-label="プロトタイプ操作（評価対象外）"><span class="tag">PROTOTYPE</span>
+      <span><kbd>j</kbd><kbd>k</kbd> タスク移動 <kbd>n</kbd><kbd>p</kbd> ファイル移動</span>
+      ${S.bannerOpen ? "" : '<button data-act="banner-open">プロトタイプについて</button>'}
+    </div>
+    ${S.toast ? `<div class="toast" role="status">${esc(S.toast)}</div>` : ""}`;
+  const m = document.querySelector(".main");
+  if (m && render.keepScroll) m.scrollTop = scrollTop;
+  render.keepScroll = false;
+  const lc = document.getElementById("lc-text");
+  if (lc && S.editing?.focus) { lc.focus(); S.editing.focus = false; }
+}
+
+// ================================================================ 操作
+function toast(msg) { S.toast = msg; render.keepScroll = true; render(); clearTimeout(toast.h); toast.h = setTimeout(() => { S.toast = null; render.keepScroll = true; render(); }, 2600); }
+function goStep(t, idx) {
+  const n = t.guide.readingOrder.length;
+  if (idx < 0 || idx >= n) return;
+  S.step[t.id] = idx; S.editing = null;
+  render();
+  document.querySelector(".stepmode")?.scrollIntoView({ block: "start" });
+}
+function selectNextReview(except) {
+  const next = sidebarOrder().find((x) => groupOf(x) === "review" && x.id !== except);
+  if (next) S.sel = next.id;
+}
+
+document.addEventListener("change", (e) => {
+  if (e.target.id === "proj-filter") { S.project = e.target.value; render(); }
+});
+document.addEventListener("input", (e) => {
+  if (e.target.id === "overall") {
+    S.overall[S.sel] = e.target.value;
+    persistDraft(S.sel);
+    const t = TASKS.find((x) => x.id === S.sel);
+    document.getElementById("reject-btn").disabled = !(commentsOf(t).length || e.target.value.trim());
+  }
+  if (e.target.id === "lc-text" && S.editing) S.editing.text = e.target.value;
+});
+document.addEventListener("click", (e) => {
+  const el = e.target.closest("[data-act]");
+  if (!el) return;
+  const t = TASKS.find((x) => x.id === S.sel);
+  const act = el.dataset.act;
+  switch (act) {
+    case "view": S.view = el.dataset.v; if (S.view === "done") { const f = sidebarOrder()[0]; if (f) S.sel = f.id; } else if (S.view === "tasks" && groupOf(t) === "done") { const f = sidebarOrder()[0]; if (f) S.sel = f.id; } break;
+    case "sel": S.sel = el.dataset.id; S.editing = null; break;
+    case "toast": return toast(el.dataset.msg);
+    case "banner-close": S.bannerOpen = false; saveFlag("doctrine-proto-banner-dismissed", true); break;
+    case "banner-open": S.bannerOpen = true; saveFlag("doctrine-proto-banner-dismissed", false); break;
+    case "modal-close": S.modal = null; break;
+    case "scope": S.scope[t.id] = el.dataset.s; break;
+    case "step-goto": goStep(t, Number(el.dataset.idx)); return;
+    case "step-exit": S.step[t.id] = null; break;
+    case "file": document.getElementById("file-" + el.dataset.path)?.scrollIntoView({ block: "start", behavior: "smooth" }); return;
+    case "lc-new": S.editing = { task: t.id, path: el.dataset.path, line: Number(el.dataset.line), quote: el.dataset.quote, text: "", focus: true }; render.keepScroll = true; break;
+    case "lc-cancel": S.editing = null; render.keepScroll = true; break;
+    case "lc-save": {
+      const ed = S.editing;
+      if (ed.text.trim()) { commentsOf(t).push({ path: ed.path, line: ed.line, quote: ed.quote, text: ed.text.trim() }); persistDraft(t.id); }
+      S.editing = null; render.keepScroll = true; break;
+    }
+    case "lc-del": commentsOf(t).splice(Number(el.dataset.i), 1); persistDraft(t.id); render.keepScroll = true; break;
+    case "approve": {
+      const steps = WORKFLOWS[t.wf], i = steps.findIndex((x) => x.id === t.step);
+      clearDraft(t.id);
+      if (i === steps.length - 1) { t.state = "completed"; t.worktree = null; }
+      else { t.state = "running"; t.step = steps[i + 1].id; t.attempt = 1; t.log = `$ ${steps[i + 1].id}\n…`; }
+      t.since = NOW; selectNextReview(t.id);
+      return toast(`承認しました: ${t.title}`);
+    }
+    case "reject": S.modal = "reject-preview"; render.keepScroll = true; break;
+    case "reject-do": {
+      const def = stepDef(t);
+      t.reviews.push({ at: NOW, comment: composeRejection(t) });
+      clearDraft(t.id);
+      t.state = "running"; t.step = def.onReject; t.attempt += 1; t.since = NOW; t.log = "assistant: レビューの指摘を読みます\n…";
+      S.modal = null; selectNextReview(t.id);
+      return toast(`差し戻しました: ${t.title}`);
+    }
+    case "cancel": t.state = "canceled"; t.since = NOW; t.dirty = true; return toast("中止しました。worktree は残します");
+  }
+  render();
+});
+document.addEventListener("keydown", (e) => {
+  if (e.target.closest("input,textarea,select,[contenteditable]") || e.metaKey || e.ctrlKey || e.altKey) return;
+  if (e.key === "Escape" && S.modal) { S.modal = null; render(); return; }
+  const t = TASKS.find((x) => x.id === S.sel);
+  if (e.key === "j" || e.key === "k") {
+    const order = sidebarOrder(); const i = order.findIndex((x) => x.id === S.sel);
+    const n = order[Math.max(0, Math.min(order.length - 1, i + (e.key === "j" ? 1 : -1)))];
+    if (n) { S.sel = n.id; S.editing = null; render(); }
+    return;
+  }
+  if (!t || t.state !== "suspended" || !t.diff.length) return;
+  if ((e.key === "[" || e.key === "]") && currentStep(t) !== null) {
+    goStep(t, currentStep(t) + (e.key === "]" ? 1 : -1));
+    return;
+  }
+  if (e.key === "n" || e.key === "p") {
+    const files = filesFor(t);
+    const cur = S.file[t.id] ?? files[0].path;
+    const i = Math.max(0, files.findIndex((f) => f.path === cur));
+    const f = files[(i + (e.key === "n" ? 1 : files.length - 1)) % files.length];
+    S.file[t.id] = f.path;
+    document.getElementById("file-" + f.path)?.scrollIntoView({ block: "start", behavior: "smooth" });
+  }
+});
+setInterval(() => {
+  const t = TASKS.find((x) => x.id === S.sel);
+  const pre = document.getElementById("log");
+  if (!t || t.state !== "running" || !pre) return;
+  t.logIdx = (t.logIdx ?? 0) + 1;
+  t.log += "\n" + FOLLOW_POOL[t.logIdx % FOLLOW_POOL.length];
+  pre.textContent = t.log;
+  pre.scrollTop = pre.scrollHeight;
+}, 1800);
+render();
+</script>
