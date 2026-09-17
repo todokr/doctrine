@@ -1,0 +1,155 @@
+import { ago, canReject, clock, currentStep, diffStats, draftOf, filesFor, stepDef } from "../model";
+import { useNotYet, useStore } from "../store";
+import type { Task } from "../types";
+import { DiffFileBlock, fileAnchor } from "./DiffFileBlock";
+import { GuidePanel, StepView } from "./Guide";
+import { Markdown } from "./text";
+
+export function Crumbs({ t }: { t: Task }) {
+  const { s } = useStore();
+  const p = s.projects.find((x) => x.id === t.project)!;
+  return (
+    <div className="crumbs">
+      <span className="pjdot" style={{ background: p.color }} />
+      <span>{p.id}</span>
+      <span className="mono">{t.wf}</span>
+      <span className="mono">{t.id}</span>
+      <span className="mono">P{t.prio}</span>
+    </div>
+  );
+}
+
+export function OpenInEditor() {
+  const notYet = useNotYet();
+  return <button className="btn sm" onClick={() => notYet("エディタ／ターミナルで開くボタンは第2段階です")}>エディタで開く</button>;
+}
+
+function Context({ t }: { t: Task }) {
+  const { s } = useStore();
+  const c = t.lastCommand;
+  return (
+    <div style={{ display: "grid", gap: 8 }}>
+      <div>
+        <b>元の指示</b>
+        <pre className="block" style={{ marginTop: 6, whiteSpace: "pre-wrap" }}>{t.prompt}</pre>
+      </div>
+      {t.reviews.length > 0 && (
+        <details className="ctx">
+          <summary>これまでのレビュー（{t.reviews.length}件、差し戻し）</summary>
+          <div style={{ display: "grid", gap: 8 }}>
+            {t.reviews.map((r, i) => (
+              <div key={i}>
+                <span className="hint">{clock(r.at)} · {ago(r.at, s.now)}</span>
+                <pre className="block" style={{ marginTop: 4 }}>{r.comment}</pre>
+              </div>
+            ))}
+          </div>
+        </details>
+      )}
+      {c && (
+        <details className="ctx">
+          <summary>直近の command ステップの結果（<span className="mono">{c.step}</span> · exit {c.exitCode}）</summary>
+          <pre className="block">{c.stdout}{c.stderr ? "\n" + c.stderr : ""}</pre>
+        </details>
+      )}
+      {t.lastAgentMessage && (
+        <div>
+          <b>エージェントの最後の発言</b>
+          <pre className="block" style={{ marginTop: 6, whiteSpace: "pre-wrap" }}>{t.lastAgentMessage}</pre>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Diff({ t }: { t: Task }) {
+  const { s } = useStore();
+  const scope = s.scope[t.id] ?? "all";
+  const files = filesFor(t, scope);
+  const all = t.diff;
+  const step = currentStep(s, t);
+
+  if (all.length === 0) return <div className="empty-diff">コードの変更はまだありません。上の計画を読んで判断してください。</div>;
+  if (t.guide && step !== null) return <StepView t={t} guide={t.guide} idx={step} />;
+
+  return (
+    <div className={`rv-body ${t.guide ? "has-guide" : ""}`}>
+      <nav className="filelist" aria-label="変更ファイル">
+        <header>{all.length} ファイル</header>
+        {files.map((f) => {
+          const { add, del } = diffStats(f);
+          return (
+            <button key={f.path} className="fl" onClick={() => document.getElementById(fileAnchor(f.path))?.scrollIntoView({ block: "start", behavior: "smooth" })}>
+              <span className="nm">{f.path}</span>
+              <span className="st"><span className="add">+{add}</span><span className="del">−{del}</span></span>
+            </button>
+          );
+        })}
+        {scope === "since" && all.length > files.length && (
+          <div className="hint" style={{ padding: "6px 10px" }}>前回から変わっていない {all.length - files.length} ファイルを隠しています</div>
+        )}
+      </nav>
+      <div className="diffs">{files.map((f) => <DiffFileBlock key={f.path} t={t} file={f} />)}</div>
+      {t.guide && <GuidePanel t={t} guide={t.guide} />}
+    </div>
+  );
+}
+
+export function ReviewView({ t }: { t: Task }) {
+  const { s, dispatch } = useStore();
+  const def = stepDef(s, t);
+  const draft = draftOf(s, t.id);
+  const scope = s.scope[t.id] ?? "all";
+  const hasSince = t.reviews.length > 0 && t.diff.some((f) => f.since);
+  const declared = def?.review?.files ?? [];
+
+  return (
+    <>
+      <div className="pad">
+        <Crumbs t={t} />
+        <h1>{t.title}</h1>
+        <div className="headrow">
+          <span className="pill p-attn">◆ {def?.title}</span>
+          {t.reviews.length > 0 && <span className="pill p-muted">{t.reviews.length + 1}回目のレビュー</span>}
+          <span className="hint">{ago(t.since, s.now)}から待っています</span>
+          <span className="mono hint">{t.branch}</span>
+          <span className="spacer" />
+          <OpenInEditor />
+        </div>
+
+        <Context t={t} />
+
+        {declared.map((path) => (
+          <section className="rv-files-md" key={path}>
+            <header><span className="mono">{path}</span><span className="hint">このステップが見せるファイル（review.files）</span></header>
+            <div className="md"><Markdown src={t.reviewFiles?.[path] ?? "(ファイルがありません)"} /></div>
+          </section>
+        ))}
+
+        <div className="headrow">
+          <b>変更</b>
+          <span className="hint">{t.diff.length} ファイル · ベースブランチとの merge-base から worktree の現在まで（未コミットを含む）</span>
+          <span className="spacer" />
+          {hasSince && (
+            <span className="seg" role="group" aria-label="差分の範囲">
+              <button aria-pressed={scope === "all"} onClick={() => dispatch({ type: "scope", scope: "all" })}>全体</button>
+              <button aria-pressed={scope === "since"} onClick={() => dispatch({ type: "scope", scope: "since" })}>前回レビュー以降</button>
+            </span>
+          )}
+        </div>
+
+        <Diff t={t} />
+      </div>
+      <footer className="decide">
+        <div>
+          <div className="meta"><span>行コメント <b>{draft.comments.length}</b> 件</span></div>
+          <textarea placeholder="全体へのコメント（差し戻すときに行コメントと一緒に送ります）" value={draft.overall} onChange={(e) => dispatch({ type: "overall", text: e.target.value })} />
+        </div>
+        <div className="actions">
+          <button className="btn danger" disabled={!canReject(draft)} onClick={() => dispatch({ type: "reject.preview" })}>差し戻す…</button>
+          <button className="btn primary" onClick={() => dispatch({ type: "approve" })}>承認する</button>
+        </div>
+      </footer>
+    </>
+  );
+}

@@ -1,5 +1,6 @@
 [tools]
 deno = "2.9.4"
+rust = "stable"
 
 # worktree 初期化で使う。`mise run setup` を worktree 内で実行する。
 # 注意: 新しい worktree のパスは mise にとって未信頼なので、このタスクを呼ぶ前に
