@@ -431,17 +431,64 @@ test("task.list / project.list の応答が protocol.ts の型を満たす", asy
   await h("project.add", { path: repo }, NOOP_CONN);
   await h("task.create", { project: repo, title: "た", prompt: "p" }, NOOP_CONN);
 
-  // 型注釈そのものが表明である（噛み合わなければ deno task check が落ちる）。
-  const tasks: TaskListEntry[] = await h("task.list", {}, NOOP_CONN) as TaskListEntry[];
-  const projects: ProjectSummary[] = await h("project.list", {}, NOOP_CONN) as ProjectSummary[];
+  // Handler は Promise<unknown> を返すので、`as TaskListEntry[]` は形が合って
+  // いようがいまいが通る。キャストは何も表明しない。keyof を鍵にした述語表で、
+  // 欄の抜けはコンパイル時に、実行時の型は述語で捕まえる。
+  const isString = (v: unknown) => typeof v === "string";
+  const isNumber = (v: unknown) => typeof v === "number";
+  const nullable = (f: (v: unknown) => boolean) => (v: unknown) => v === null || f(v);
 
-  // 型が「ある」と言っている欄が実行時にも来ることを確かめる。
-  for (const key of ["id", "state", "branch", "updated_at", "has_degraded"] as const) {
-    assert.ok(key in tasks[0], `task.list に ${key} がありません`);
+  const TASK_SUMMARY_SHAPE: Record<keyof TaskSummary, (v: unknown) => boolean> = {
+    id: isString,
+    project_id: isNumber,
+    title: isString,
+    prompt: isString,
+    workflow_name: isString,
+    state: isString,
+    current_step_id: nullable(isString),
+    branch: isString,
+    worktree_path: nullable(isString),
+    priority: isNumber,
+    created_at: isString,
+    updated_at: isString,
+  };
+  // 2つの表を手で並べると乖離する。片方から作る。
+  const TASK_SHAPE: Record<keyof TaskListEntry, (v: unknown) => boolean> = {
+    ...TASK_SUMMARY_SHAPE,
+    has_degraded: (v: unknown) => typeof v === "boolean",
+  };
+  const PROJECT_SHAPE: Record<keyof ProjectSummary, (v: unknown) => boolean> = {
+    id: isNumber,
+    path: isString,
+    default_workflow: isString,
+    max_concurrent: isNumber,
+    base_branch: isString,
+    setup: nullable(isString),
+  };
+
+  function assertShape(
+    row: Record<string, unknown>,
+    shape: Record<string, (v: unknown) => boolean>,
+    what: string,
+  ) {
+    for (const [key, ok] of Object.entries(shape)) {
+      assert.ok(key in row, `${what} に ${key} がありません`);
+      assert.ok(ok(row[key]), `${what} の ${key} の型が違います: ${JSON.stringify(row[key])}`);
+    }
   }
-  for (const key of ["id", "path", "default_workflow", "base_branch"] as const) {
-    assert.ok(key in projects[0], `project.list に ${key} がありません`);
-  }
+
+  const tasks = await h("task.list", {}, NOOP_CONN) as Record<string, unknown>[];
+  const projects = await h("project.list", {}, NOOP_CONN) as Record<string, unknown>[];
+  assert.ok(tasks.length > 0 && projects.length > 0, "標本が空だと表明が空振りする");
+  assertShape(tasks[0], TASK_SHAPE, "task.list");
+  assertShape(projects[0], PROJECT_SHAPE, "project.list");
+
+  // approve / reject / cancel は has_degraded を持たない TaskSummary を返す
+  const created = await h("task.create", { project: repo, title: "き", prompt: "p" }, NOOP_CONN) as
+    { id: string };
+  const canceled = await h("task.cancel", { task_id: created.id }, NOOP_CONN) as
+    Record<string, unknown>;
+  assertShape(canceled, TASK_SUMMARY_SHAPE, "task.cancel");
 });
 ```
 
