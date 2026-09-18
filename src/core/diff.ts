@@ -1,15 +1,22 @@
 import { runCommand } from "../util/exec.ts";
 
-export type DiffFile = {
-  path: string;
-  /** R のときだけ入る。 */
-  old_path?: string;
-  status: "A" | "M" | "D" | "R";
-  /** バイナリなら 0。 */
-  additions: number;
-  deletions: number;
-  binary: boolean;
-};
+/**
+ * リネームだけが「前のパス」を持つ。他の状態で old_path を読めないようにし、
+ * 「R なのに old_path が無い／R でないのに old_path がある」という不正な状態を
+ * 型で作れなくする。
+ */
+type Renamed = { status: "R"; old_path: string };
+type NotRenamed = { status: "A" | "M" | "D" };
+
+/**
+ * バイナリは行数を数えられない。additions/deletions に 0 を入れると
+ * 「1行も変わっていないテキスト」と見分けがつかなくなるので、
+ * バイナリのときはフィールドごと持たせない。
+ */
+type Counted = { binary: false; additions: number; deletions: number };
+type NotCounted = { binary: true };
+
+export type DiffFile = { path: string } & (Renamed | NotRenamed) & (Counted | NotCounted);
 
 export type DiffResult = { files: DiffFile[]; patch: string; truncated: boolean };
 
@@ -108,11 +115,9 @@ function splitZ(s: string): string[] {
  * C（コピー）は `-C` を渡さない限り出ないが、来ても R として扱う
  * — レビューする人にとって「別の場所から来た」以上の区別に意味が無い。
  */
-function parseNameStatus(
-  out: string,
-): Map<string, { status: DiffFile["status"]; old_path?: string }> {
+function parseNameStatus(out: string): Map<string, Renamed | NotRenamed> {
   const parts = splitZ(out);
-  const result = new Map<string, { status: DiffFile["status"]; old_path?: string }>();
+  const result = new Map<string, Renamed | NotRenamed>();
   for (let i = 0; i < parts.length;) {
     const letter = parts[i][0];
     if (letter === "R" || letter === "C") {
@@ -133,11 +138,9 @@ function parseNameStatus(
  * リネームのときだけ3つ目が空になり、その後に旧・新が NUL 区切りで続く。
  * バイナリは追加・削除が `-` で来る。
  */
-function parseNumstat(
-  out: string,
-): Map<string, { additions: number; deletions: number; binary: boolean }> {
+function parseNumstat(out: string): Map<string, Counted | NotCounted> {
   const parts = splitZ(out);
-  const result = new Map<string, { additions: number; deletions: number; binary: boolean }>();
+  const result = new Map<string, Counted | NotCounted>();
   for (let i = 0; i < parts.length;) {
     const fields = parts[i].split("\t");
     const [add, del] = fields;
@@ -145,11 +148,9 @@ function parseNumstat(
     // （-z ではパスがクォートされず生で出るため）。
     const path = fields.slice(2).join("\t");
     const binary = add === "-";
-    const counts = {
-      additions: binary ? 0 : Number(add),
-      deletions: binary ? 0 : Number(del),
-      binary,
-    };
+    const counts: Counted | NotCounted = binary
+      ? { binary: true }
+      : { binary: false, additions: Number(add), deletions: Number(del) };
     if (path === "") {
       result.set(parts[i + 2], counts);
       i += 3;
@@ -197,13 +198,20 @@ export async function computeDiff(o: {
   // 出力順は一致するが、順序ではなく新しいパスをキーに突き合わせる。
   const files: DiffFile[] = [];
   for (const [path, s] of statuses) {
-    const c = counts.get(path) ?? { additions: 0, deletions: 0, binary: false };
-    files.push({
-      path,
-      ...(s.old_path ? { old_path: s.old_path } : {}),
-      status: s.status,
-      ...c,
-    });
+    const c = counts.get(path);
+    // --name-status に出たパスは --numstat にも必ず出るはずで、無ければ
+    // 2つの git 呼び出しの出力がずれている ＝ このパーサのどこかの前提が崩れている。
+    // ここを 0 件で黙って埋めると「バイナリでも変更0行でもない、パースの取りこぼし」
+    // を「変更なし」に偽装してしまう（過去のレビューで一度指摘済み）ので、
+    // 隠さずに例外にして気付けるようにする。
+    if (c === undefined) {
+      throw new Error(`numstat に ${path} の行数情報が無い（name-status とずれている）`);
+    }
+    files.push(
+      s.status === "R"
+        ? { path, status: "R", old_path: s.old_path, ...c }
+        : { path, status: s.status, ...c },
+    );
   }
 
   const { patch, truncated } = truncatePatch(

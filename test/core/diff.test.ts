@@ -54,12 +54,18 @@ test("未コミットの変更と未追跡のファイルが files に出る", a
   await writeFile(join(repo, "new.txt"), "x\n");
   const d = await diffNow();
   const byPath = new Map(d.files.map((f) => [f.path, f]));
-  assert.equal(byPath.get("README.md")?.status, "M");
-  assert.equal(byPath.get("README.md")?.additions, 1);
-  assert.equal(byPath.get("README.md")?.deletions, 0);
-  assert.equal(byPath.get("README.md")?.binary, false);
-  assert.equal(byPath.get("new.txt")?.status, "A");
-  assert.equal(byPath.get("new.txt")?.additions, 1);
+  const readme = byPath.get("README.md")!;
+  assert.equal(readme.status, "M");
+  assert.equal(readme.binary, false);
+  if (!readme.binary) {
+    assert.equal(readme.additions, 1);
+    assert.equal(readme.deletions, 0);
+  }
+  const newTxt = byPath.get("new.txt")!;
+  assert.equal(newTxt.status, "A");
+  if (!newTxt.binary) {
+    assert.equal(newTxt.additions, 1);
+  }
 });
 
 test("削除とリネームを status と old_path で返す", async () => {
@@ -70,10 +76,14 @@ test("削除とリネームを status と old_path で返す", async () => {
   await rm(join(repo, "README.md"));
   const d = await diffNow();
   const byPath = new Map(d.files.map((f) => [f.path, f]));
-  assert.equal(byPath.get("moved.txt")?.status, "R");
-  assert.equal(byPath.get("moved.txt")?.old_path, "keep.txt");
-  assert.equal(byPath.get("README.md")?.status, "D");
-  assert.equal(byPath.get("README.md")?.old_path, undefined);
+  const moved = byPath.get("moved.txt")!;
+  assert.equal(moved.status, "R");
+  if (moved.status === "R") {
+    assert.equal(moved.old_path, "keep.txt");
+  }
+  const readme = byPath.get("README.md")!;
+  assert.equal(readme.status, "D");
+  assert.ok(!("old_path" in readme), "R 以外は old_path を持たない");
 });
 
 test("バイナリは binary: true にして行数を数えない", async () => {
@@ -81,8 +91,11 @@ test("バイナリは binary: true にして行数を数えない", async () => 
   const d = await diffNow();
   const f = d.files.find((x) => x.path === "b.bin")!;
   assert.equal(f.binary, true);
-  assert.equal(f.additions, 0);
-  assert.equal(f.deletions, 0);
+  // 0 ではなくフィールドごと無いことを確認する
+  // — 0 だと「1行も変わっていないテキスト」と見分けがつかなくなるのが、
+  // この union で無くしたかった不正な状態そのもの。
+  assert.ok(!("additions" in f), "additions を持たない");
+  assert.ok(!("deletions" in f), "deletions を持たない");
 });
 
 test(".doctrine-out/ は diff に出さない", async () => {
@@ -127,7 +140,10 @@ test("上限を超えた patch は改行境界で切って truncated を立て�
   assert.ok(d.patch.endsWith("\n"), "行の途中で切ると unified diff のパーサが壊れる");
   assert.ok(new TextEncoder().encode(d.patch).length <= 300);
   assert.deepEqual(d.files.map((f) => f.path), ["big.txt"], "files は打ち切らない");
-  assert.equal(d.files[0].additions, 300, "行数も打ち切らない");
+  const big = d.files[0];
+  if (!big.binary) {
+    assert.equal(big.additions, 300, "行数も打ち切らない");
+  }
 });
 
 test("上限以内なら truncated は false のまま patch を全部返す", async () => {
