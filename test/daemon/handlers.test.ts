@@ -258,6 +258,23 @@ test("worktree.list は孤児を報告する", async () => {
   assert.ok(Array.isArray(res));
 });
 
+test("DB の worktree_path は worktree.list と同じ表記（実パス）で保存される", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  await h("project.add", { path: repo }, NOOP_CONN);
+  const t = await h("task.create", { project: repo, title: "T", prompt: "p" }, NOOP_CONN) as { id: string };
+  await tick(ctx);
+  await until(() => ctx.running.size === 0);
+  const saved = (await getTask(ctx.db, t.id))!.worktree_path!;
+  // macOS の tmpdir は /var -> /private/var の symlink 配下。未解決のまま保存すると
+  // git が報告するパスと食い違う。
+  assert.equal(saved, await Deno.realPath(saved));
+  // DB から外すと、同じ表記のまま孤児として出てくる
+  await ctx.db.updateTable("tasks").set({ worktree_path: null }).where("id", "=", t.id).execute();
+  const res = await h("worktree.list", {}, NOOP_CONN) as { orphans: string[] }[];
+  assert.deepEqual(res.flatMap((r) => r.orphans), [saved]);
+});
+
 test("未知のメソッドはエラーになる", async () => {
   const ctx = await context();
   await assert.rejects(() => createHandler(ctx)("task.nope", {}, NOOP_CONN));

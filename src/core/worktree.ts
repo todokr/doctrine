@@ -76,12 +76,19 @@ export async function ensureDoctrineOutExcluded(repoPath: string): Promise<void>
   await Deno.writeTextFile(excludePath, withTrailingNewline + DOCTRINE_OUT_EXCLUDE_LINE + "\n");
 }
 
-/** 作成は自前の git worktree add。ライフサイクルの権威を1箇所に保つ。 */
+/**
+ * 作成は自前の git worktree add。ライフサイクルの権威を1箇所に保つ。
+ *
+ * worktree のパスは「シンボリックリンク解決済みの実パス」の表記で持つ。git が
+ * `worktree list` で報告するのがこの表記で、DB に対応のない孤児はこの表記でしか
+ * 得られないため。呼び出し側は渡したパスではなく戻り値を DB に保存する。
+ */
 export async function createWorktree(o: {
   repoPath: string; worktreePath: string; branch: string; baseBranch: string;
-}): Promise<void> {
+}): Promise<string> {
   await runCommand("git", ["-C", o.repoPath, "worktree", "add", "-b", o.branch, o.worktreePath, o.baseBranch]);
   await ensureDoctrineOutExcluded(o.repoPath);
+  return await canonical(o.worktreePath);
 }
 
 export async function hasUncommittedChanges(worktreePath: string): Promise<boolean> {
