@@ -27,6 +27,7 @@ import {
   worktreePathFor,
 } from "../core/worktree.ts";
 import { defaultProbe, killStaleChild } from "../core/recovery.ts";
+import { releaseTrees } from "../core/reviewTree.ts";
 import { assertTransition, isTerminal } from "../core/states.ts";
 import type { AgentAdapter } from "../adapter/types.ts";
 import type { Handler } from "./server.ts";
@@ -290,6 +291,11 @@ export function createHandler(ctx: DaemonContext): Handler {
           worktreePath: task.worktree_path,
           force: params.force === true,
         });
+        // worktree が無くなればレビューの基準点を使う相手もいなくなる。
+        // 参照を残すと、指しているツリーが永久に gc されない。
+        await releaseTrees(project.path, taskId).catch((e: Error) => {
+          ctx.warnings.push(`タスク ${taskId}: レビュー参照を消せませんでした: ${e.message}`);
+        });
         await commitStepBoundary(ctx.db, { taskId, taskPatch: { worktree_path: null } });
         return { removed: task.worktree_path };
       }
@@ -316,6 +322,9 @@ export async function cleanupAfterRun(ctx: DaemonContext, taskId: string): Promi
       repoPath: project.path,
       worktreePath: task.worktree_path,
       force: false,
+    });
+    await releaseTrees(project.path, taskId).catch((e: Error) => {
+      ctx.warnings.push(`タスク ${taskId}: レビュー参照を消せませんでした: ${e.message}`);
     });
     await commitStepBoundary(ctx.db, { taskId, taskPatch: { worktree_path: null } });
   } catch (e) {

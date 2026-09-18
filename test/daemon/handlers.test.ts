@@ -10,6 +10,7 @@ import { DatabaseSync } from "node:sqlite";
 import { openDb, openDbOn } from "../../src/db/migrate.ts";
 import { getTask, insertTask } from "../../src/db/tasks.ts";
 import { listStepRuns } from "../../src/db/stepRuns.ts";
+import { reviewRefName } from "../../src/core/reviewTree.ts";
 import { createHandler, type DaemonContext, tick } from "../../src/daemon/handlers.ts";
 import { createMockAdapter } from "../../src/adapter/mock.ts";
 import { parseWorkflow } from "../../src/workflow/schema.ts";
@@ -1106,4 +1107,59 @@ test("project.add: project.yaml が無くても、既にあるワークフロー
     [join(r, ".doctrine", "project.yaml")],
     "作ったのは project.yaml だけ",
   );
+});
+
+test("worktree を消すとそのタスクのレビュー参照も消える", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  await h("project.add", { path: repo }, NOOP_CONN);
+  const t = await h("task.create", { project: repo, title: "T", prompt: "p" }, NOOP_CONN) as {
+    id: string;
+  };
+  await tick(ctx);
+  await until(async () => (await getTask(ctx.db, t.id))?.state === "suspended");
+  await until(() => ctx.running.size === 0);
+
+  const review = (await listStepRuns(ctx.db, t.id)).find((r) => r.status === "awaiting")!;
+  const ref = reviewRefName(t.id, review.id);
+  const before = await run("git", ["-C", repo, "for-each-ref", "--format=%(refname)", ref]);
+  assert.equal(before.stdout.trim(), ref, "suspended に入った時点で参照が張られている");
+
+  await h("worktree.remove", { task_id: t.id, force: true }, NOOP_CONN);
+
+  const after = await run("git", [
+    "-C",
+    repo,
+    "for-each-ref",
+    "--format=%(refname)",
+    "refs/doctrine/reviews",
+  ]);
+  assert.equal(after.stdout.trim(), "", "worktree と一緒に参照も消える");
+  assert.equal((await getTask(ctx.db, t.id))?.worktree_path, null);
+});
+
+test("削除を拒否されたら参照は残す", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  await h("project.add", { path: repo }, NOOP_CONN);
+  const t = await h("task.create", { project: repo, title: "T", prompt: "p" }, NOOP_CONN) as {
+    id: string;
+  };
+  await tick(ctx);
+  await until(async () => (await getTask(ctx.db, t.id))?.state === "suspended");
+  await until(() => ctx.running.size === 0);
+  const worktree = (await getTask(ctx.db, t.id))!.worktree_path!;
+  await writeFile(join(worktree, "dirty.txt"), "未コミット\n");
+
+  // force を付けなければ、未コミットの変更を理由に削除は拒否される。
+  await assert.rejects(() => h("worktree.remove", { task_id: t.id }, NOOP_CONN));
+
+  const after = await run("git", [
+    "-C",
+    repo,
+    "for-each-ref",
+    "--format=%(refname)",
+    "refs/doctrine/reviews",
+  ]);
+  assert.notEqual(after.stdout.trim(), "", "worktree が残るなら基準点も残す");
 });

@@ -220,6 +220,10 @@ dctl gc <task-id> --force           # 削除が拒否される場合（未コミ
 
 **`--force` を付けると、worktree内の未コミットの作業は失われる。** 確認してから使うこと。
 
+worktree を消すと、そのタスクのレビュー参照（`refs/doctrine/reviews/<task-id>/`）も
+一緒に消える。この参照は「レビュー時点の worktree の中身」を `git gc` から守るために
+doctrine が張っているもので、worktree が無くなれば使う相手もいない。
+
 なお `dctl worktrees` が一覧するのは「対応するタスクが見つからない孤立
 worktree」だけであり、`failed` タスクの（対応するタスクが存在する）worktreeは
 ここには出てこない。上記のとおり `dctl ls --state failed` → `dctl get` の経路で探す。
