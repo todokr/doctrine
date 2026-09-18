@@ -1,7 +1,15 @@
 [tools]
+# CI（.github/workflows/ci.yml）は jdx/mise-action でこの表を読む。ここが
+# 唯一の版の出どころなので、`latest` や `stable` のような動く別名は置かない
+# （手元と CI で違う版が入り、再現しない失敗の原因になる）。
 deno = "2.9.4"
-pnpm = "latest"
-rust = "stable"
+node = "26.8.1"
+# aqua の pnpm レジストリは 11 系の配布物（tarball 化された）に追随できておらず
+# `pnpm = "11.15.1"` だと install が 404 で落ちる。npm 経由なら版を指定できる。
+# app/package.json の packageManager と一致させること（食い違うと pnpm 自身が
+# packageManager 側の版に入れ替わり、ここの指定が効かなくなる）。
+"npm:pnpm" = "11.15.1"
+rust = "1.98.1"
 
 # worktree 初期化で使う。`mise run setup` を worktree 内で実行する。
 # 注意: 新しい worktree のパスは mise にとって未信頼なので、このタスクを呼ぶ前に
