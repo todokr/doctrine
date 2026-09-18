@@ -1,6 +1,6 @@
 import { ago, canReject, clock, currentStep, diffStats, draftOf, filesFor, stepDef } from "../model";
 import { useNotYet, useStore } from "../store";
-import type { Task } from "../types";
+import type { ReviewFile, Task } from "../types";
 import { DiffFileBlock, fileAnchor } from "./DiffFileBlock";
 import { GuidePanel, StepView } from "./Guide";
 import { Markdown } from "./text";
@@ -95,6 +95,22 @@ function Diff({ t }: { t: Task }) {
   );
 }
 
+function FileBody({ file }: { file: ReviewFile | undefined }) {
+  if (!file) return <p className="hint">(このステップは宣言していますが、まだ読めていません)</p>;
+  switch (file.status) {
+    case "ok":
+      return <div className="md"><Markdown src={file.content} /></div>;
+    case "missing":
+      return <p className="hint">(ファイルがありません)</p>;
+    case "too_large":
+      return <p className="hint">(大きすぎるため表示していません · {file.size} バイト)</p>;
+    case "outside_worktree":
+      return <p className="hint">(worktree の外を指しているため読みませんでした)</p>;
+    case "binary":
+      return <p className="hint">(テキストとして読めないため表示していません · {file.size} バイト)</p>;
+  }
+}
+
 export function ReviewView({ t }: { t: Task }) {
   const { s, dispatch } = useStore();
   const def = stepDef(s, t);
@@ -122,7 +138,7 @@ export function ReviewView({ t }: { t: Task }) {
         {declared.map((path) => (
           <section className="rv-files-md" key={path}>
             <header><span className="mono">{path}</span><span className="hint">このステップが見せるファイル（review.files）</span></header>
-            <div className="md"><Markdown src={t.reviewFiles?.[path] ?? "(ファイルがありません)"} /></div>
+            <FileBody file={t.reviewFiles?.find((f) => f.path === path)} />
           </section>
         ))}
 

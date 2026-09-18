@@ -373,7 +373,9 @@ const SEEDS: Seed[] = [
     reviews: [{ at: NOW - 140 * MIN, comment: "src/stock/reserve.ts:36\n  > return await tx.insert(\"reservations\", { key, orderId, items });\n  同時に2つ走ると一意制約違反で落ちます。既存の行として扱ってください\n\n全体: 同時実行のテストも足してください" }],
     lastCommand: { step: "test", exitCode: 0, stdout: "running 12 tests from ./test/stock/reserve.test.ts\nok | 12 passed | 0 failed (2s)", stderr: "" },
     lastAgentMessage: "ご指摘の一意制約違反を、トランザクション内で find してから insert し、失敗時は find し直す形に直しました。同時実行のテストも2本追加しています。" },
-  { id: "t-a1b2", wf: "doctrine/guided", title: "Review Guide の保存形式を試す", state: "suspended", step: "plan-approval", attempt: 1, prio: 2, since: NOW - 130 * MIN, diff: [], reviewFiles: { ".doctrine-out/plan.md": PLAN_MD }, reviews: [],
+  { id: "t-a1b2", wf: "doctrine/guided", title: "Review Guide の保存形式を試す", state: "suspended", step: "plan-approval", attempt: 1, prio: 2, since: NOW - 130 * MIN, diff: [], reviewFiles: [
+      { path: ".doctrine-out/plan.md", status: "ok", content: PLAN_MD, size: PLAN_MD.length },
+    ], reviews: [],
     lastCommand: null,
     lastAgentMessage: "Review Guide の保存形式について JSON 案と Markdown 案を比較し、diff との機械照合のしやすさから JSON を選ぶ計画を .doctrine-out/plan.md に書きました。まだ実装はしていません。" },
   { id: "b-204", wf: "blog/feature", title: "記事一覧にページネーションを付ける", state: "suspended", step: "review", attempt: 1, prio: 3, since: NOW - 60 * 26 * MIN, diff: DIFF_B204, reviews: [],

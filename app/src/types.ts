@@ -15,6 +15,15 @@ export type StepDef = {
 export type Hunk = { old: number; new: number; body: string };
 export type DiffFile = { path: string; hunks: Hunk[]; since?: Hunk[] };
 
+// デーモン側（src/core/reviewFiles.ts）と同じ判別ユニオン。
+export type ReviewFileStatus = "ok" | "missing" | "too_large" | "outside_worktree" | "binary";
+export type ReviewFile =
+  | { path: string; status: "ok"; content: string; size: number }
+  | { path: string; status: "missing" }
+  | { path: string; status: "too_large"; size: number }
+  | { path: string; status: "outside_worktree" }
+  | { path: string; status: "binary"; size: number };
+
 export type Review = { at: number; comment: string };
 export type CommandResult = { step: string; exitCode: number; stdout: string; stderr: string };
 
@@ -46,7 +55,7 @@ export type Task = {
   diff: DiffFile[];
   reviews: Review[];
   guide?: Guide;
-  reviewFiles?: Record<string, string>;
+  reviewFiles?: ReviewFile[];
   lastCommand?: CommandResult | null;
   lastAgentMessage?: string;
   log?: string;
