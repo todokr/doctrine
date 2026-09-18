@@ -151,6 +151,14 @@ mod tests {
     }
 
     #[test]
+    fn empty_state_dir_is_treated_as_unset() {
+        assert_eq!(
+            resolve_state_root(Some("".into()), Some("/home/u".into())).unwrap(),
+            PathBuf::from("/home/u/.local/state/doctrine")
+        );
+    }
+
+    #[test]
     fn state_root_prefers_explicit_dir() {
         assert_eq!(
             resolve_state_root(Some("/x".into()), Some("/home/u".into())).unwrap(),

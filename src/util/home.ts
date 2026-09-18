@@ -19,5 +19,10 @@ export function homeDir(): string {
  * （XDG_RUNTIME_DIR が無く /run が read-only なため）。
  */
 export function stateRoot(): string {
-  return Deno.env.get("DOCTRINE_STATE_DIR") ?? join(homeDir(), ".local", "state", "doctrine");
+  // 空文字は「指定なし」として扱う（`export DOCTRINE_STATE_DIR=` のような
+  // 設定し忘れ）。そのまま使うと状態ディレクトリが相対パスになり、
+  // 起動した場所によって DB とソケットの位置が変わる。
+  const dir = Deno.env.get("DOCTRINE_STATE_DIR");
+  if (dir) return dir;
+  return join(homeDir(), ".local", "state", "doctrine");
 }
