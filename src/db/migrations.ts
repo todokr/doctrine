@@ -78,8 +78,11 @@ const migrations: Record<string, Migration> = {
         .addColumn("task_id", "text", (c) => c.notNull().references("tasks.id"))
         .addColumn("step_id", "text", (c) => c.notNull())
         .addColumn("attempt", "integer", (c) => c.notNull())
-        .addColumn("status", "text", (c) =>
-          c.notNull().check(sql`status IN ('running','success','failed','degraded')`))
+        .addColumn(
+          "status",
+          "text",
+          (c) => c.notNull().check(sql`status IN ('running','success','failed','degraded')`),
+        )
         .addColumn("exit_code", "integer")
         .addColumn("started_at", "text", (c) => c.notNull())
         .addColumn("ended_at", "text")
@@ -145,6 +148,8 @@ export async function migrateToLatest(db: Kysely<any>): Promise<void> {
   if (error !== undefined) {
     const failed = results?.find((r) => r.status === "Error")?.migrationName;
     const reason = error instanceof Error ? error.message : String(error);
-    throw new Error(`マイグレーションに失敗しました${failed ? ` (${failed})` : ""}: ${reason}`, { cause: error });
+    throw new Error(`マイグレーションに失敗しました${failed ? ` (${failed})` : ""}: ${reason}`, {
+      cause: error,
+    });
   }
 }

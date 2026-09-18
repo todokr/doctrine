@@ -1,37 +1,65 @@
 import { test } from "@std/testing/bdd";
 import assert from "node:assert/strict";
 import { openDb } from "../../src/db/migrate.ts";
-import { insertProject, insertTask, getTask } from "../../src/db/tasks.ts";
+import { getTask, insertProject, insertTask } from "../../src/db/tasks.ts";
 import { commitStepBoundary } from "../../src/db/boundary.ts";
 import { listStepRuns } from "../../src/db/stepRuns.ts";
 import type { Workflow } from "../../src/workflow/schema.ts";
 import {
-  isSameChild, killStaleChild, recoverOnStartup, psLstartCommand,
-  type ProcessProbe, type WorkflowLookup,
+  isSameChild,
+  killStaleChild,
+  type ProcessProbe,
+  psLstartCommand,
+  recoverOnStartup,
+  type WorkflowLookup,
 } from "../../src/core/recovery.ts";
 
 async function fixture(taskIds: string[] = ["t1"]) {
   const db = await openDb(":memory:");
-  const p = await insertProject(db, { path: "/repo", default_workflow: "f", max_concurrent: 1, base_branch: "main", setup: null });
+  const p = await insertProject(db, {
+    path: "/repo",
+    default_workflow: "f",
+    max_concurrent: 1,
+    base_branch: "main",
+    setup: null,
+  });
   for (const id of taskIds) {
-    await insertTask(db, { id, project_id: p, title: "T", prompt: "P", workflow_name: "f", branch: "b", priority: 2 });
+    await insertTask(db, {
+      id,
+      project_id: p,
+      title: "T",
+      prompt: "P",
+      workflow_name: "f",
+      branch: "b",
+      priority: 2,
+    });
   }
   return db;
 }
 
-function probe(map: Record<number, string | null>, killed: { pid: number; signal: NodeJS.Signals }[] = []): ProcessProbe {
+function probe(
+  map: Record<number, string | null>,
+  killed: { pid: number; signal: NodeJS.Signals }[] = [],
+): ProcessProbe {
   return {
     startTimeOf: async (pid) => map[pid] ?? null,
-    kill: (pid, signal) => { killed.push({ pid, signal }); },
+    kill: (pid, signal) => {
+      killed.push({ pid, signal });
+    },
   };
 }
 
 test("pidと開始時刻が一致すれば同一のプロセス", () => {
-  assert.ok(isSameChild({ pid: 100, startedAt: "2026-09-12T00:00:00.000Z" }, "2026-09-12T00:00:00.000Z"));
+  assert.ok(
+    isSameChild({ pid: 100, startedAt: "2026-09-12T00:00:00.000Z" }, "2026-09-12T00:00:00.000Z"),
+  );
 });
 
 test("開始時刻が違えば別プロセス（pidの再利用）", () => {
-  assert.equal(isSameChild({ pid: 100, startedAt: "2026-09-12T00:00:00.000Z" }, "2026-09-12T09:00:00.000Z"), false);
+  assert.equal(
+    isSameChild({ pid: 100, startedAt: "2026-09-12T00:00:00.000Z" }, "2026-09-12T09:00:00.000Z"),
+    false,
+  );
 });
 
 test("プロセスが存在しなければ同一ではない", () => {
@@ -39,32 +67,61 @@ test("プロセスが存在しなければ同一ではない", () => {
 });
 
 test("秒未満のずれは許容する", () => {
-  assert.ok(isSameChild({ pid: 1, startedAt: "2026-09-12T00:00:00.000Z" }, "2026-09-12T00:00:01.500Z", 2000));
+  assert.ok(
+    isSameChild(
+      { pid: 1, startedAt: "2026-09-12T00:00:00.000Z" },
+      "2026-09-12T00:00:01.500Z",
+      2000,
+    ),
+  );
 });
 
 test("生き残った子プロセスを殺す", async () => {
   const db = await fixture();
-  await commitStepBoundary(db, { taskId: "t1", taskPatch: { state: "running", child_pid: 4242, child_started_at: "2026-09-12T00:00:00.000Z" } });
+  await commitStepBoundary(db, {
+    taskId: "t1",
+    taskPatch: { state: "running", child_pid: 4242, child_started_at: "2026-09-12T00:00:00.000Z" },
+  });
   const killed: { pid: number; signal: NodeJS.Signals }[] = [];
-  const r = await killStaleChild((await getTask(db, "t1"))!, probe({ 4242: "2026-09-12T00:00:00.000Z" }, killed));
+  const r = await killStaleChild(
+    (await getTask(db, "t1"))!,
+    probe({ 4242: "2026-09-12T00:00:00.000Z" }, killed),
+  );
   assert.equal(r, "killed");
   assert.deepEqual(killed, [{ pid: 4242, signal: "SIGKILL" }]);
 });
 
 test("既定のシグナルは SIGKILL、呼び出し側が指定すればそれが probe.kill に届く", async () => {
   const db = await fixture();
-  await commitStepBoundary(db, { taskId: "t1", taskPatch: { state: "running", child_pid: 4242, child_started_at: "2026-09-12T00:00:00.000Z" } });
+  await commitStepBoundary(db, {
+    taskId: "t1",
+    taskPatch: { state: "running", child_pid: 4242, child_started_at: "2026-09-12T00:00:00.000Z" },
+  });
   const killed: { pid: number; signal: NodeJS.Signals }[] = [];
-  const r = await killStaleChild((await getTask(db, "t1"))!, probe({ 4242: "2026-09-12T00:00:00.000Z" }, killed), "SIGTERM");
+  const r = await killStaleChild(
+    (await getTask(db, "t1"))!,
+    probe({ 4242: "2026-09-12T00:00:00.000Z" }, killed),
+    "SIGTERM",
+  );
   assert.equal(r, "killed");
-  assert.deepEqual(killed, [{ pid: 4242, signal: "SIGTERM" }], "pause/cancel は SIGTERM を渡せる必要がある");
+  assert.deepEqual(
+    killed,
+    [{ pid: 4242, signal: "SIGTERM" }],
+    "pause/cancel は SIGTERM を渡せる必要がある",
+  );
 });
 
 test("pidが再利用されていたら殺さない", async () => {
   const db = await fixture();
-  await commitStepBoundary(db, { taskId: "t1", taskPatch: { state: "running", child_pid: 4242, child_started_at: "2026-09-12T00:00:00.000Z" } });
+  await commitStepBoundary(db, {
+    taskId: "t1",
+    taskPatch: { state: "running", child_pid: 4242, child_started_at: "2026-09-12T00:00:00.000Z" },
+  });
   const killed: { pid: number; signal: NodeJS.Signals }[] = [];
-  const r = await killStaleChild((await getTask(db, "t1"))!, probe({ 4242: "2026-09-12T12:00:00.000Z" }, killed));
+  const r = await killStaleChild(
+    (await getTask(db, "t1"))!,
+    probe({ 4242: "2026-09-12T12:00:00.000Z" }, killed),
+  );
   assert.equal(r, "mismatch");
   assert.deepEqual(killed, [], "無関係のプロセスを殺してはならない");
 });
@@ -77,9 +134,15 @@ test("pidの記録がなければ何もしない", async () => {
 
 test("spawn失敗時の記録（pid <= 0）は絶対に probe.kill へ渡さない", async () => {
   const db = await fixture();
-  await commitStepBoundary(db, { taskId: "t1", taskPatch: { state: "running", child_pid: -1, child_started_at: "2026-09-12T00:00:00.000Z" } });
+  await commitStepBoundary(db, {
+    taskId: "t1",
+    taskPatch: { state: "running", child_pid: -1, child_started_at: "2026-09-12T00:00:00.000Z" },
+  });
   const killed: { pid: number; signal: NodeJS.Signals }[] = [];
-  const r = await killStaleChild((await getTask(db, "t1"))!, probe({ [-1]: "2026-09-12T00:00:00.000Z" }, killed));
+  const r = await killStaleChild(
+    (await getTask(db, "t1"))!,
+    probe({ [-1]: "2026-09-12T00:00:00.000Z" }, killed),
+  );
   assert.equal(r, "none");
   assert.deepEqual(killed, []);
 });
@@ -97,8 +160,22 @@ test("起動時、running のタスクは全部古いものとして扱う（age
   const db = await fixture();
   await commitStepBoundary(db, {
     taskId: "t1",
-    taskPatch: { state: "running", current_step_id: "implement", claude_session_id: "s1", child_pid: 4242, child_started_at: "2026-09-12T00:00:00.000Z" },
-    stepRun: { step_id: "implement", attempt: 1, status: "running", exit_code: null, started_at: "a", ended_at: "b", log_path: "/l" },
+    taskPatch: {
+      state: "running",
+      current_step_id: "implement",
+      claude_session_id: "s1",
+      child_pid: 4242,
+      child_started_at: "2026-09-12T00:00:00.000Z",
+    },
+    stepRun: {
+      step_id: "implement",
+      attempt: 1,
+      status: "running",
+      exit_code: null,
+      started_at: "a",
+      ended_at: "b",
+      log_path: "/l",
+    },
   });
   const actions = await recoverOnStartup(db, probe({ 4242: "2026-09-12T00:00:00.000Z" }), lookupWF);
   assert.deepEqual(actions, [{ taskId: "t1", outcome: "recovered", action: "resume-agent" }]);
@@ -115,7 +192,15 @@ test("command ステップで落ちていたら頭から再実行する（先行
   await commitStepBoundary(db, {
     taskId: "t1",
     taskPatch: { state: "running", current_step_id: "test", claude_session_id: "s1" },
-    stepRun: { step_id: "test", attempt: 1, status: "running", exit_code: null, started_at: "a", ended_at: "b", log_path: "/l" },
+    stepRun: {
+      step_id: "test",
+      attempt: 1,
+      status: "running",
+      exit_code: null,
+      started_at: "a",
+      ended_at: "b",
+      log_path: "/l",
+    },
   });
   const actions = await recoverOnStartup(db, probe({}), lookupWF);
   assert.deepEqual(actions, [{ taskId: "t1", outcome: "recovered", action: "rerun-command" }]);
@@ -126,7 +211,15 @@ test("ワークフローが引けない（YAML削除・壊れたなど）場合�
   await commitStepBoundary(db, {
     taskId: "t1",
     taskPatch: { state: "running", current_step_id: "implement", claude_session_id: "s1" },
-    stepRun: { step_id: "implement", attempt: 1, status: "running", exit_code: null, started_at: "a", ended_at: "b", log_path: "/l" },
+    stepRun: {
+      step_id: "implement",
+      attempt: 1,
+      status: "running",
+      exit_code: null,
+      started_at: "a",
+      ended_at: "b",
+      log_path: "/l",
+    },
   });
   const lookupMissing: WorkflowLookup = () => undefined;
   const actions = await recoverOnStartup(db, probe({}), lookupMissing);
@@ -155,11 +248,22 @@ test("probe.startTimeOf が1件目で例外を投げても、残りは救済さ�
     await commitStepBoundary(db, {
       taskId: id,
       taskPatch: runningTaskPatch("implement"),
-      stepRun: { step_id: "implement", attempt: 1, status: "running", exit_code: null, started_at: "a", ended_at: "b", log_path: "/l" },
+      stepRun: {
+        step_id: "implement",
+        attempt: 1,
+        status: "running",
+        exit_code: null,
+        started_at: "a",
+        ended_at: "b",
+        log_path: "/l",
+      },
     });
   }
   // t1 だけ child_pid を持たせ、probe.startTimeOf がそれに対して例外を投げるようにする。
-  await commitStepBoundary(db, { taskId: "t1", taskPatch: { child_pid: 9999, child_started_at: "2026-09-12T00:00:00.000Z" } });
+  await commitStepBoundary(db, {
+    taskId: "t1",
+    taskPatch: { child_pid: 9999, child_started_at: "2026-09-12T00:00:00.000Z" },
+  });
 
   const throwingProbe: ProcessProbe = {
     startTimeOf: async (pid) => {
@@ -193,7 +297,15 @@ test("lookupWorkflow が1件で例外を投げても、残りは救済され失�
     await commitStepBoundary(db, {
       taskId: id,
       taskPatch: runningTaskPatch("implement"),
-      stepRun: { step_id: "implement", attempt: 1, status: "running", exit_code: null, started_at: "a", ended_at: "b", log_path: "/l" },
+      stepRun: {
+        step_id: "implement",
+        attempt: 1,
+        status: "running",
+        exit_code: null,
+        started_at: "a",
+        ended_at: "b",
+        log_path: "/l",
+      },
     });
   }
 
@@ -231,8 +343,11 @@ test("defaultProbe が使う ps コマンドはロケール・タイムゾーン
  * TZ は V8 がプロセス起動時に読むため、テストプロセス内で切り替えず別プロセスにしている。
  */
 type TzProbeResult = {
-  same: boolean; recorded: string; actual: string | null;
-  killResult: string; exitSignal: string | null;
+  same: boolean;
+  recorded: string;
+  actual: string | null;
+  killResult: string;
+  exitSignal: string | null;
 };
 
 async function killOwnChildUnderTz(tz: string): Promise<TzProbeResult> {
@@ -283,7 +398,15 @@ test("復帰に成功したら、中断した step_runs 行を running のまま
   await commitStepBoundary(db, {
     taskId: "t1",
     taskPatch: { state: "running", current_step_id: "implement" },
-    stepRun: { step_id: "implement", attempt: 1, status: "running", exit_code: null, started_at: "a", ended_at: null, log_path: "/l" },
+    stepRun: {
+      step_id: "implement",
+      attempt: 1,
+      status: "running",
+      exit_code: null,
+      started_at: "a",
+      ended_at: null,
+      log_path: "/l",
+    },
   });
   await recoverOnStartup(db, probe({}), lookupWF);
   const runs = await listStepRuns(db, "t1");
@@ -297,9 +420,19 @@ test("復帰に失敗しても、中断した step_runs 行を running のまま
   await commitStepBoundary(db, {
     taskId: "t1",
     taskPatch: { state: "running", current_step_id: "implement" },
-    stepRun: { step_id: "implement", attempt: 1, status: "running", exit_code: null, started_at: "a", ended_at: null, log_path: "/l" },
+    stepRun: {
+      step_id: "implement",
+      attempt: 1,
+      status: "running",
+      exit_code: null,
+      started_at: "a",
+      ended_at: null,
+      log_path: "/l",
+    },
   });
-  const throwingLookup: WorkflowLookup = () => { throw new Error("壊れている（テスト用）"); };
+  const throwingLookup: WorkflowLookup = () => {
+    throw new Error("壊れている（テスト用）");
+  };
   const results = await recoverOnStartup(db, probe({}), throwingLookup);
   assert.equal(results[0]?.outcome, "failed");
   const runs = await listStepRuns(db, "t1");
@@ -312,7 +445,10 @@ test("running のまま残っている step_runs 行が無ければ、何も書�
   const db = await fixture();
   // current_step_id はあるが、対応する step_runs 行を一切作らない
   // （approval からの queued 経由など、step_run 行が無いまま running になったケースを模す）。
-  await commitStepBoundary(db, { taskId: "t1", taskPatch: { state: "running", current_step_id: "implement" } });
+  await commitStepBoundary(db, {
+    taskId: "t1",
+    taskPatch: { state: "running", current_step_id: "implement" },
+  });
   const actions = await recoverOnStartup(db, probe({}), lookupWF);
   assert.deepEqual(actions, [{ taskId: "t1", outcome: "recovered", action: "resume-agent" }]);
   assert.deepEqual(await listStepRuns(db, "t1"), []);
@@ -323,12 +459,28 @@ test("running の step_runs 行が複数あっても、最後の running 行だ�
   await commitStepBoundary(db, {
     taskId: "t1",
     taskPatch: { current_step_id: "implement" },
-    stepRun: { step_id: "implement", attempt: 1, status: "failed", exit_code: 1, started_at: "a", ended_at: "b", log_path: "/l1" },
+    stepRun: {
+      step_id: "implement",
+      attempt: 1,
+      status: "failed",
+      exit_code: 1,
+      started_at: "a",
+      ended_at: "b",
+      log_path: "/l1",
+    },
   });
   await commitStepBoundary(db, {
     taskId: "t1",
     taskPatch: { state: "running", current_step_id: "implement" },
-    stepRun: { step_id: "implement", attempt: 2, status: "running", exit_code: null, started_at: "c", ended_at: null, log_path: "/l2" },
+    stepRun: {
+      step_id: "implement",
+      attempt: 2,
+      status: "running",
+      exit_code: null,
+      started_at: "c",
+      ended_at: null,
+      log_path: "/l2",
+    },
   });
   await recoverOnStartup(db, probe({}), lookupWF);
   const runs = await listStepRuns(db, "t1");

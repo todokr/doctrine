@@ -36,7 +36,9 @@ function splitArgs(argv: string[]): { flags: Record<string, unknown>; positional
         // `typeof params.x === "number"` チェックを黙って通り抜けて
         // 既定値にフォールバックしてしまう。CLI 自身の引数形式の検証
         // なので、ここで弾いてもデーモンの業務ルールを重複させることにはならない。
-        if (!Number.isFinite(n)) throw new Error(`--${key} には数値を指定してください（渡された値: ${String(value)}）`);
+        if (!Number.isFinite(n)) {
+          throw new Error(`--${key} には数値を指定してください（渡された値: ${String(value)}）`);
+        }
         flags[key] = n;
       } else {
         flags[key] = value;
@@ -119,7 +121,9 @@ export async function call(
       throw err;
     }
     const conn = state.conn;
-    const request = new TextEncoder().encode(JSON.stringify({ id: requestId, method, params }) + "\n");
+    const request = new TextEncoder().encode(
+      JSON.stringify({ id: requestId, method, params }) + "\n",
+    );
     let offset = 0;
     while (offset < request.length) offset += await conn.write(request.subarray(offset));
 
@@ -164,7 +168,9 @@ export async function call(
     return await Promise.race([exchange, timeout]);
   } finally {
     clearTimeout(timer);
-    try { state.conn?.close(); } catch { /* 既に閉じている */ }
+    try {
+      state.conn?.close();
+    } catch { /* 既に閉じている */ }
   }
 }
 

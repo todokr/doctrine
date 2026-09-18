@@ -24,13 +24,20 @@ export type RunnerDeps = {
   logRoot: string;
   /** DBに書く呼び出し側がいるので待つ。待たないと書き込みの順序も失敗も宙に浮く。 */
   onChildSpawned?(pid: number, startedAt: string): void | Promise<void>;
-  onRateLimit?(s: { window: string; utilization: number; resetsAt: string | null }): void | Promise<void>;
+  onRateLimit?(
+    s: { window: string; utilization: number; resetsAt: string | null },
+  ): void | Promise<void>;
   /** 出力のチャンクごとに同期で呼ぶ。ここでDBを触らないこと（待てない）。 */
   onLogLine?(line: string): void;
 };
 
 /** ステップのログファイルパスを決める。エンジンはステップ開始前にこれを呼んで名前を知る。 */
-export function logPathFor(logRoot: string, taskId: string, stepId: string, attempt: number): string {
+export function logPathFor(
+  logRoot: string,
+  taskId: string,
+  stepId: string,
+  attempt: number,
+): string {
   return join(logRoot, taskId, `${stepId}.${attempt}.log`);
 }
 
@@ -72,7 +79,10 @@ async function openLog(path: string): Promise<Log> {
         })
         .catch((e) => {
           if (!failed) {
-            console.error(`ログファイルへの書き込みに失敗しました（ステップの実行は継続します）: ${path}`, e);
+            console.error(
+              `ログファイルへの書き込みに失敗しました（ステップの実行は継続します）: ${path}`,
+              e,
+            );
           }
           failed = true;
         });
@@ -82,13 +92,18 @@ async function openLog(path: string): Promise<Log> {
       // ここでも reject しない: close 時点でファイルが壊れていても
       // ステップの結果には影響させない。
       await pending;
-      try { file.close(); } catch { /* 既に閉じている */ }
+      try {
+        file.close();
+      } catch { /* 既に閉じている */ }
     },
   };
 }
 
 /** 子プロセスの出力を読み切る。マルチバイト文字の途中で割れたチャンクは次のチャンクまで保留する。 */
-async function drain(stream: ReadableStream<Uint8Array>, onText: (text: string) => void): Promise<void> {
+async function drain(
+  stream: ReadableStream<Uint8Array>,
+  onText: (text: string) => void,
+): Promise<void> {
   const decoder = new TextDecoder();
   for await (const chunk of stream) {
     const text = decoder.decode(chunk, { stream: true });
@@ -114,7 +129,11 @@ export async function runCommandStep(
     let child: Deno.ChildProcess;
     try {
       child = new Deno.Command("sh", {
-        args: ["-c", command], cwd: o.cwd, stdin: "null", stdout: "piped", stderr: "piped",
+        args: ["-c", command],
+        cwd: o.cwd,
+        stdin: "null",
+        stdout: "piped",
+        stderr: "piped",
       }).spawn();
     } catch (e) {
       // 起動失敗（cwd が無いなど）は同期例外で来る。pid は -1 として通知してから伝播させる。
@@ -129,8 +148,16 @@ export async function runCommandStep(
     // パイプにまだ読み残しがある可能性があり、先に確定させると出力を取りこぼす。
     const [status] = await Promise.all([
       child.status,
-      drain(child.stdout, (c) => { stdout += c; log.write(c); o.deps.onLogLine?.(c); }),
-      drain(child.stderr, (c) => { stderr += c; log.write(c); o.deps.onLogLine?.(c); }),
+      drain(child.stdout, (c) => {
+        stdout += c;
+        log.write(c);
+        o.deps.onLogLine?.(c);
+      }),
+      drain(child.stderr, (c) => {
+        stderr += c;
+        log.write(c);
+        o.deps.onLogLine?.(c);
+      }),
     ]);
     const exitCode = exitCodeOf(status);
 
@@ -155,8 +182,12 @@ export async function runAgentStep(
   step: AgentStep,
   ctx: TemplateContext,
   o: {
-    cwd: string; taskId: string; attempt: number;
-    sessionId: string; resume: boolean; deps: RunnerDeps;
+    cwd: string;
+    taskId: string;
+    attempt: number;
+    sessionId: string;
+    resume: boolean;
+    deps: RunnerDeps;
   },
 ): Promise<StepOutcome> {
   // expand は未知の変数や壊れたプレースホルダーで TemplateError を投げる。
@@ -165,8 +196,10 @@ export async function runAgentStep(
   const logPath = logPathFor(o.deps.logRoot, o.taskId, step.id, o.attempt);
   const log = await openLog(logPath);
   const opts = {
-    cwd: o.cwd, sessionId: o.sessionId,
-    permissionMode: step.permissionMode, model: step.model,
+    cwd: o.cwd,
+    sessionId: o.sessionId,
+    permissionMode: step.permissionMode,
+    model: step.model,
   };
 
   try {
@@ -178,7 +211,11 @@ export async function runAgentStep(
     for await (const ev of run.events) {
       log.write(JSON.stringify(ev) + "\n");
       if (ev.kind === "rateLimit") {
-        await o.deps.onRateLimit?.({ window: ev.window, utilization: ev.utilization, resetsAt: ev.resetsAt });
+        await o.deps.onRateLimit?.({
+          window: ev.window,
+          utilization: ev.utilization,
+          resetsAt: ev.resetsAt,
+        });
       }
       if (ev.kind === "assistant" && ev.text) o.deps.onLogLine?.(ev.text);
     }
@@ -189,7 +226,11 @@ export async function runAgentStep(
     // degraded（権限で止められたが is_error: false で「成功」に見える）は
     // success に丸めてはいけない — 次のタスクが step_runs.status に記録し、
     // 人間が見分けられるようにする。
-    const status: StepOutcome["status"] = !result.ok ? "failed" : result.degraded ? "degraded" : "success";
+    const status: StepOutcome["status"] = !result.ok
+      ? "failed"
+      : result.degraded
+      ? "degraded"
+      : "success";
     return {
       status,
       exitCode: result.exitCode,

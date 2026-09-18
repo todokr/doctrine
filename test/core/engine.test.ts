@@ -1,14 +1,14 @@
-import { test, afterEach } from "@std/testing/bdd";
+import { afterEach, test } from "@std/testing/bdd";
 import assert from "node:assert/strict";
 import { writeFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { decide, runTask, applyApproval } from "../../src/core/engine.ts";
+import { applyApproval, decide, runTask } from "../../src/core/engine.ts";
 import { parseWorkflow } from "../../src/workflow/schema.ts";
 import { DatabaseSync } from "node:sqlite";
 import { openDb, openDbOn } from "../../src/db/migrate.ts";
-import { insertProject, insertTask, getTask } from "../../src/db/tasks.ts";
+import { getTask, insertProject, insertTask } from "../../src/db/tasks.ts";
 import { getStepOutputs, getStepRun, listStepRuns } from "../../src/db/stepRuns.ts";
 import { createMockAdapter } from "../../src/adapter/mock.ts";
 import type { Db } from "../../src/db/schema.ts";
@@ -44,18 +44,24 @@ steps:
 `).workflow;
 
 test("成功したら次のステップへ", () => {
-  assert.deepEqual(decide({ workflow: wf, currentStepId: "implement", outcome: "success", attempts: 1 }),
-    { kind: "next", stepId: "test" });
+  assert.deepEqual(
+    decide({ workflow: wf, currentStepId: "implement", outcome: "success", attempts: 1 }),
+    { kind: "next", stepId: "test" },
+  );
 });
 
 test("最後のステップが成功したら completed", () => {
-  assert.deepEqual(decide({ workflow: wf, currentStepId: "open-pr", outcome: "success", attempts: 1 }),
-    { kind: "complete" });
+  assert.deepEqual(
+    decide({ workflow: wf, currentStepId: "open-pr", outcome: "success", attempts: 1 }),
+    { kind: "complete" },
+  );
 });
 
 test("degraded でもワークフローは止まらない", () => {
-  assert.deepEqual(decide({ workflow: wf, currentStepId: "implement", outcome: "degraded", attempts: 1 }),
-    { kind: "next", stepId: "test" });
+  assert.deepEqual(
+    decide({ workflow: wf, currentStepId: "implement", outcome: "degraded", attempts: 1 }),
+    { kind: "next", stepId: "test" },
+  );
 });
 
 test("失敗したら onFailure.goto へ戻り、feed を渡す", () => {
@@ -77,8 +83,10 @@ test("onFailure が無いステップの失敗は即 failed", () => {
 });
 
 test("approval ステップに来たら suspend", () => {
-  assert.deepEqual(decide({ workflow: wf, currentStepId: "review", outcome: "suspended", attempts: 1 }),
-    { kind: "suspend" });
+  assert.deepEqual(
+    decide({ workflow: wf, currentStepId: "review", outcome: "suspended", attempts: 1 }),
+    { kind: "suspend" },
+  );
 });
 
 // --- runTask / applyApproval ---------------------------------------------
@@ -87,9 +95,27 @@ async function taskFixture(workflowYaml: string) {
   const root = await mkdtemp(join(tmpdir(), "doctrine-engine-"));
   roots.push(root);
   const db = await openDb(":memory:");
-  const pid = await insertProject(db, { path: root, default_workflow: "f", max_concurrent: 1, base_branch: "main", setup: null });
-  await insertTask(db, { id: "t1", project_id: pid, title: "T", prompt: "直して", workflow_name: "f", branch: "doctrine/t1-t", priority: 2 });
-  await db.updateTable("tasks").set({ state: "running", worktree_path: root }).where("id", "=", "t1").execute();
+  const pid = await insertProject(db, {
+    path: root,
+    default_workflow: "f",
+    max_concurrent: 1,
+    base_branch: "main",
+    setup: null,
+  });
+  await insertTask(db, {
+    id: "t1",
+    project_id: pid,
+    title: "T",
+    prompt: "直して",
+    workflow_name: "f",
+    branch: "doctrine/t1-t",
+    priority: 2,
+  });
+  await db.updateTable("tasks").set({ state: "running", worktree_path: root }).where(
+    "id",
+    "=",
+    "t1",
+  ).execute();
   return { db, root, workflow: parseWorkflow(workflowYaml).workflow };
 }
 
@@ -115,10 +141,16 @@ steps:
     run: "true"
 `);
   await runTask(db, "t1", workflow, {
-    db, adapter: createMockAdapter({ result: {} }), logRoot: join(root, "logs"), globalLimit: 4,
+    db,
+    adapter: createMockAdapter({ result: {} }),
+    logRoot: join(root, "logs"),
+    globalLimit: 4,
   });
   assert.equal((await getTask(db, "t1"))?.state, "completed");
-  assert.deepEqual((await listStepRuns(db, "t1")).map((r) => [r.step_id, r.status]), [["a", "success"], ["b", "success"]]);
+  assert.deepEqual((await listStepRuns(db, "t1")).map((r) => [r.step_id, r.status]), [[
+    "a",
+    "success",
+  ], ["b", "success"]]);
 });
 
 // 元の brief のテストは「テストが失敗したらエージェントに差し戻し、2周目で通る」と
@@ -159,7 +191,11 @@ steps:
   await runTask(db, "t1", workflow, { db, adapter, logRoot: join(root, "logs"), globalLimit: 4 });
 
   const runs = await listStepRuns(db, "t1");
-  assert.equal(runs.filter((r) => r.step_id === "implement").length, 2, "実装ステップへ2回目に戻って成功する");
+  assert.equal(
+    runs.filter((r) => r.step_id === "implement").length,
+    2,
+    "実装ステップへ2回目に戻って成功する",
+  );
   assert.equal((await getTask(db, "t1"))?.state, "completed");
 });
 
@@ -179,11 +215,17 @@ steps:
       feed: "テストが失敗した"
 `);
   await runTask(db, "t1", workflow, {
-    db, adapter: createMockAdapter({ result: { ok: true, text: "やった" } }),
-    logRoot: join(root, "logs"), globalLimit: 4,
+    db,
+    adapter: createMockAdapter({ result: { ok: true, text: "やった" } }),
+    logRoot: join(root, "logs"),
+    globalLimit: 4,
   });
   const runs = await listStepRuns(db, "t1");
-  assert.equal(runs.filter((r) => r.step_id === "test").length, 3, "test ステップは maxAttempts 回まで試す");
+  assert.equal(
+    runs.filter((r) => r.step_id === "test").length,
+    3,
+    "test ステップは maxAttempts 回まで試す",
+  );
   assert.equal((await getTask(db, "t1"))?.state, "failed");
 });
 
@@ -225,8 +267,11 @@ steps:
 
   assert.equal(adapter.calls.length, 2);
   assert.equal(adapter.calls[0].kind, "start");
-  assert.equal(adapter.calls[1].kind, "resume",
-    "同じ session id で2度 start すると、CLI が拒否するか会話が継続しない");
+  assert.equal(
+    adapter.calls[1].kind,
+    "resume",
+    "同じ session id で2度 start すると、CLI が拒否するか会話が継続しない",
+  );
   assert.equal(adapter.calls[1].sessionId, adapter.calls[0].sessionId);
 });
 
@@ -248,8 +293,16 @@ steps:
 
   assert.equal(adapter.calls.length, 2);
   assert.equal(adapter.calls[0].kind, "start");
-  assert.equal(adapter.calls[1].kind, "start", "role が違うので implementer は自分の会話を持たない");
-  assert.notEqual(adapter.calls[1].sessionId, adapter.calls[0].sessionId, "ロールごとに別の session id");
+  assert.equal(
+    adapter.calls[1].kind,
+    "start",
+    "role が違うので implementer は自分の会話を持たない",
+  );
+  assert.notEqual(
+    adapter.calls[1].sessionId,
+    adapter.calls[0].sessionId,
+    "ロールごとに別の session id",
+  );
 });
 
 test("session ごとに独立した会話が保たれる（別ロールを挟んでも取り違えない）", async () => {
@@ -284,7 +337,11 @@ steps:
   assert.equal(adapter.calls[3].kind, "resume");
   assert.equal(adapter.calls[2].sessionId, adapter.calls[0].sessionId, "implementer の会話が続く");
   assert.equal(adapter.calls[3].sessionId, adapter.calls[1].sessionId, "reviewer の会話が続く");
-  assert.notEqual(adapter.calls[0].sessionId, adapter.calls[1].sessionId, "ロールごとに別の session id");
+  assert.notEqual(
+    adapter.calls[0].sessionId,
+    adapter.calls[1].sessionId,
+    "ロールごとに別の session id",
+  );
   assert.equal((await getTask(db, "t1"))?.state, "failed", "maxAttempts を使い切って failed");
 });
 
@@ -303,9 +360,12 @@ steps:
   await runTask(db, "t1", workflow, { db, adapter, logRoot: join(root, "logs"), globalLimit: 4 });
 
   assert.equal(adapter.calls.length, 1);
-  assert.equal(adapter.calls[0].kind, "start",
+  assert.equal(
+    adapter.calls[0].kind,
+    "start",
     "project.setup は全ワークフローの先頭に入る。ここで session を使ったことにすると、" +
-    "最初の agent が一度も start していない id で resume してしまう");
+      "最初の agent が一度も start していない id で resume してしまう",
+  );
 });
 
 test("command ステップの失敗から agent へ goto しても、最初の agent は start", async () => {
@@ -326,8 +386,7 @@ steps:
   const adapter = createMockAdapter({ result: { ok: true, text: "done" } });
   await runTask(db, "t1", workflow, { db, adapter, logRoot: join(root, "logs"), globalLimit: 4 });
 
-  assert.equal(adapter.calls[0].kind, "start",
-    "feed があることは会話が既にあることを意味しない");
+  assert.equal(adapter.calls[0].kind, "start", "feed があることは会話が既にあることを意味しない");
 });
 
 test("承認待ちの間にワークフローが書き換わり、承認ステップが消えたらエラーになる", async () => {
@@ -364,8 +423,11 @@ steps:
   const t = (await getTask(db, "t1"))!;
   assert.equal(t.state, "suspended", "書き込みは一切起きない");
   assert.equal(t.current_step_id, "review");
-  assert.equal((await listStepRuns(db, "t1")).length, runsBefore,
-    "steps[-1 + 1] は steps[0]。黙って先頭からやり直してはいけない");
+  assert.equal(
+    (await listStepRuns(db, "t1")).length,
+    runsBefore,
+    "steps[-1 + 1] は steps[0]。黙って先頭からやり直してはいけない",
+  );
 });
 
 test("approval に来たら suspended で止まる", async () => {
@@ -380,7 +442,10 @@ steps:
     run: "true"
 `);
   await runTask(db, "t1", workflow, {
-    db, adapter: createMockAdapter({ result: {} }), logRoot: join(root, "logs"), globalLimit: 4,
+    db,
+    adapter: createMockAdapter({ result: {} }),
+    logRoot: join(root, "logs"),
+    globalLimit: 4,
   });
   const t = (await getTask(db, "t1"))!;
   assert.equal(t.state, "suspended");
@@ -398,7 +463,12 @@ steps:
     type: command
     run: "true"
 `);
-  await runTask(db, "t1", workflow, { db, adapter: createMockAdapter({ result: {} }), logRoot: join(root, "logs"), globalLimit: 4 });
+  await runTask(db, "t1", workflow, {
+    db,
+    adapter: createMockAdapter({ result: {} }),
+    logRoot: join(root, "logs"),
+    globalLimit: 4,
+  });
   await applyApproval(db, "t1", { approved: true, comment: "" }, workflow);
   const t = (await getTask(db, "t1"))!;
   assert.equal(t.state, "queued");
@@ -421,7 +491,12 @@ steps:
       maxAttempts: 3
       feed: "レビューで却下された:\\n{{ steps.review.stdout }}"
 `);
-  await runTask(db, "t1", workflow, { db, adapter: createMockAdapter({ result: {} }), logRoot: join(root, "logs"), globalLimit: 4 });
+  await runTask(db, "t1", workflow, {
+    db,
+    adapter: createMockAdapter({ result: {} }),
+    logRoot: join(root, "logs"),
+    globalLimit: 4,
+  });
   await applyApproval(db, "t1", { approved: false, comment: "命名が変です" }, workflow);
   const t = (await getTask(db, "t1"))!;
   assert.equal(t.state, "queued");
@@ -488,7 +563,11 @@ steps:
   await toRunning(db, "t1");
   await runTask(db, "t1", workflow, { db, adapter, logRoot: join(root, "logs"), globalLimit: 4 });
   await applyApproval(db, "t1", { approved: false, comment: "3回目" }, workflow);
-  assert.equal((await getTask(db, "t1"))?.state, "failed", "3回目の却下: maxAttempts(3) を使い切って failed");
+  assert.equal(
+    (await getTask(db, "t1"))?.state,
+    "failed",
+    "3回目の却下: maxAttempts(3) を使い切って failed",
+  );
 });
 
 test("却下を重ねると review ステップの step_run.attempt が増えていく", async () => {
@@ -516,8 +595,10 @@ steps:
 
   const reviewRuns = (await listStepRuns(db, "t1")).filter((r) => r.step_id === "review");
   assert.equal(reviewRuns.length, 2);
-  assert.ok(reviewRuns[0].attempt < reviewRuns[1].attempt,
-    `attempt は増えていくはず: ${reviewRuns.map((r) => r.attempt)}`);
+  assert.ok(
+    reviewRuns[0].attempt < reviewRuns[1].attempt,
+    `attempt は増えていくはず: ${reviewRuns.map((r) => r.attempt)}`,
+  );
 });
 
 test("消費した feed は次のステップに漏れない", async () => {
@@ -572,7 +653,12 @@ steps:
     type: approval
     title: "見て"
 `);
-  await runTask(db, "t1", workflow, { db, adapter: createMockAdapter({ result: {} }), logRoot: join(root, "logs"), globalLimit: 4 });
+  await runTask(db, "t1", workflow, {
+    db,
+    adapter: createMockAdapter({ result: {} }),
+    logRoot: join(root, "logs"),
+    globalLimit: 4,
+  });
   await applyApproval(db, "t1", { approved: true, comment: "" }, workflow);
   assert.equal((await getTask(db, "t1"))?.state, "completed");
 });
@@ -588,7 +674,10 @@ steps:
   const started: { id: number; status: Promise<string> }[] = [];
   const finished: { id: number; stepId: string; status: string }[] = [];
   await runTask(db, "t1", workflow, {
-    db, adapter: createMockAdapter({ result: {} }), logRoot: join(root, "logs"), globalLimit: 4,
+    db,
+    adapter: createMockAdapter({ result: {} }),
+    logRoot: join(root, "logs"),
+    globalLimit: 4,
     onStepRunStarted: (_taskId, stepRunId, stepId, attempt) => {
       // コールバックの時点でDBに running の行が実在することを確認する
       // （クラッシュ復帰は running のまま止まっている行を目印にする）。
@@ -616,13 +705,18 @@ steps:
     type: approval
     title: "見て"
 `);
-  await runTask(db, "t1", workflow, { db, adapter: createMockAdapter({ result: {} }), logRoot: join(root, "logs"), globalLimit: 4 });
+  await runTask(db, "t1", workflow, {
+    db,
+    adapter: createMockAdapter({ result: {} }),
+    logRoot: join(root, "logs"),
+    globalLimit: 4,
+  });
   await applyApproval(db, "t1", { approved: false, comment: "だめ" }, workflow);
   assert.equal((await getTask(db, "t1"))?.state, "failed");
 });
 
 test("承認待ちでないタスクに applyApproval を呼ぶと例外を投げ、何も書き込まない", async () => {
-  const { db, root, workflow } = await taskFixture(`
+  const { db, workflow } = await taskFixture(`
 name: f
 steps:
   - id: review
@@ -636,7 +730,11 @@ steps:
   await assert.rejects(() => applyApproval(db, "t1", { approved: true, comment: "" }, workflow));
 
   const after = (await getTask(db, "t1"))!;
-  assert.deepEqual(after, before, "例外を投げた呼び出しは taskPatch/step_run/outputs のどれも書き込まない");
+  assert.deepEqual(
+    after,
+    before,
+    "例外を投げた呼び出しは taskPatch/step_run/outputs のどれも書き込まない",
+  );
 });
 
 /**
@@ -654,9 +752,27 @@ test("状態を読んだ直後に cancel が届いても、runTask はステッ�
   roots.push(root);
   const sqlite = new DatabaseSync(":memory:");
   const db = await openDbOn(sqlite);
-  const pid = await insertProject(db, { path: root, default_workflow: "f", max_concurrent: 1, base_branch: "main", setup: null });
-  await insertTask(db, { id: "t1", project_id: pid, title: "T", prompt: "p", workflow_name: "f", branch: "b", priority: 2 });
-  await db.updateTable("tasks").set({ state: "running", worktree_path: root }).where("id", "=", "t1").execute();
+  const pid = await insertProject(db, {
+    path: root,
+    default_workflow: "f",
+    max_concurrent: 1,
+    base_branch: "main",
+    setup: null,
+  });
+  await insertTask(db, {
+    id: "t1",
+    project_id: pid,
+    title: "T",
+    prompt: "p",
+    workflow_name: "f",
+    branch: "b",
+    priority: 2,
+  });
+  await db.updateTable("tasks").set({ state: "running", worktree_path: root }).where(
+    "id",
+    "=",
+    "t1",
+  ).execute();
   const workflow = parseWorkflow(`
 name: f
 steps:

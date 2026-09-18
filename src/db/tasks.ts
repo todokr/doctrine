@@ -3,8 +3,13 @@ import type { Db, ProjectRow, TaskRow, TaskState } from "./schema.ts";
 export type { ProjectRow, TaskRow, TaskState } from "./schema.ts";
 
 export type NewTask = {
-  id: string; project_id: number; title: string; prompt: string;
-  workflow_name: string; branch: string; priority: number;
+  id: string;
+  project_id: number;
+  title: string;
+  prompt: string;
+  workflow_name: string;
+  branch: string;
+  priority: number;
 };
 
 export async function insertProject(db: Db, p: Omit<ProjectRow, "id">): Promise<number> {

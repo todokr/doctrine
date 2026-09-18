@@ -9,7 +9,13 @@ import type { Generated, Kysely, Selectable } from "kysely";
  */
 
 export type TaskState =
-  | "queued" | "running" | "suspended" | "paused" | "completed" | "failed" | "canceled";
+  | "queued"
+  | "running"
+  | "suspended"
+  | "paused"
+  | "completed"
+  | "failed"
+  | "canceled";
 
 export type StepRunStatus = "running" | "success" | "failed" | "degraded";
 

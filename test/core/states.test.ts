@@ -1,8 +1,12 @@
 import { test } from "@std/testing/bdd";
 import assert from "node:assert/strict";
 import {
-  canTransition, assertTransition, holdsGlobalSlot, holdsProjectSlot,
-  isTerminal, InvalidTransitionError,
+  assertTransition,
+  canTransition,
+  holdsGlobalSlot,
+  holdsProjectSlot,
+  InvalidTransitionError,
+  isTerminal,
 } from "../../src/core/states.ts";
 
 test("正常系の遷移を許す", () => {
@@ -30,14 +34,18 @@ test("queued から直接 suspended にはならない", () => {
 });
 
 test("ワークフローが読めなければ、ステップを1つも実行せずに failed になれる", () => {
-  assert.ok(canTransition("queued", "failed"),
-    "queued のまま残すとスケジューラが毎tickリトライし続ける");
+  assert.ok(
+    canTransition("queued", "failed"),
+    "queued のまま残すとスケジューラが毎tickリトライし続ける",
+  );
   assert.doesNotThrow(() => assertTransition("queued", "failed"));
 });
 
 test("suspended から completed になれる（最後が approval で承認されたとき）", () => {
-  assert.ok(canTransition("suspended", "completed"),
-    "承認されて次のステップが無ければ、そこでタスクは完了している");
+  assert.ok(
+    canTransition("suspended", "completed"),
+    "承認されて次のステップが無ければ、そこでタスクは完了している",
+  );
   assert.doesNotThrow(() => assertTransition("suspended", "completed"));
 });
 

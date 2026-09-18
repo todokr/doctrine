@@ -4,8 +4,13 @@ import { z } from "zod";
 export type Branch = { goto: string; maxAttempts: number; feed?: string };
 export type CommandStep = { id: string; type: "command"; run: string; onFailure?: Branch };
 export type AgentStep = {
-  id: string; type: "agent"; prompt: string; session?: string;
-  permissionMode?: string; model?: string; onFailure?: Branch;
+  id: string;
+  type: "agent";
+  prompt: string;
+  session?: string;
+  permissionMode?: string;
+  model?: string;
+  onFailure?: Branch;
 };
 export type ApprovalStep = { id: string; type: "approval"; title: string; onReject?: Branch };
 export type Step = CommandStep | AgentStep | ApprovalStep;
@@ -15,8 +20,11 @@ export const RESERVED_STEP_IDS = ["setup"] as const;
 
 /** 再実行で二重に効く代表的なコマンド。完全には防げないが、黙って壊れるよりよい。 */
 const NON_IDEMPOTENT = [
-  /\bgh\s+pr\s+create\b/, /\bgh\s+release\s+create\b/,
-  /\bgit\s+push\b/, /\bnpm\s+publish\b/, /\bpnpm\s+publish\b/,
+  /\bgh\s+pr\s+create\b/,
+  /\bgh\s+release\s+create\b/,
+  /\bgit\s+push\b/,
+  /\bnpm\s+publish\b/,
+  /\bpnpm\s+publish\b/,
 ];
 
 export class WorkflowValidationError extends Error {
@@ -28,7 +36,10 @@ export class WorkflowValidationError extends Error {
   }
 }
 
-const stepId = z.string().min(1).regex(/^[a-zA-Z0-9_-]+$/, "ステップidは英数字・ハイフン・アンダースコアのみ");
+const stepId = z.string().min(1).regex(
+  /^[a-zA-Z0-9_-]+$/,
+  "ステップidは英数字・ハイフン・アンダースコアのみ",
+);
 const branch = z.object({
   goto: z.string().min(1),
   maxAttempts: z.number().int().min(1),
@@ -36,13 +47,30 @@ const branch = z.object({
 }).strict();
 
 const stepSchema = z.discriminatedUnion("type", [
-  z.object({ id: stepId, type: z.literal("command"), run: z.string().min(1), onFailure: branch.optional() }).strict(),
   z.object({
-    id: stepId, type: z.literal("agent"), prompt: z.string().min(1),
-    session: z.string().min(1).regex(/^[a-zA-Z0-9_-]+$/, "sessionは英数字・ハイフン・アンダースコアのみ").optional(),
-    permissionMode: z.string().optional(), model: z.string().optional(), onFailure: branch.optional(),
+    id: stepId,
+    type: z.literal("command"),
+    run: z.string().min(1),
+    onFailure: branch.optional(),
   }).strict(),
-  z.object({ id: stepId, type: z.literal("approval"), title: z.string().min(1), onReject: branch.optional() }).strict(),
+  z.object({
+    id: stepId,
+    type: z.literal("agent"),
+    prompt: z.string().min(1),
+    session: z.string().min(1).regex(
+      /^[a-zA-Z0-9_-]+$/,
+      "sessionは英数字・ハイフン・アンダースコアのみ",
+    ).optional(),
+    permissionMode: z.string().optional(),
+    model: z.string().optional(),
+    onFailure: branch.optional(),
+  }).strict(),
+  z.object({
+    id: stepId,
+    type: z.literal("approval"),
+    title: z.string().min(1),
+    onReject: branch.optional(),
+  }).strict(),
 ]);
 
 const workflowSchema = z.object({
@@ -127,7 +155,9 @@ function translateZodIssue(issue: z.ZodIssueOptionalMessage & { message?: string
  * project.yaml のバリデーション（後続タスク）もこの関数を再利用する。
  */
 export function formatZodIssues(error: z.ZodError): string[] {
-  return error.issues.map((issue) => `${issue.path.join(".") || "(root)"}: ${translateZodIssue(issue)}`);
+  return error.issues.map((issue) =>
+    `${issue.path.join(".") || "(root)"}: ${translateZodIssue(issue)}`
+  );
 }
 
 export function parseWorkflow(yamlText: string): { workflow: Workflow; warnings: string[] } {
@@ -150,7 +180,9 @@ export function parseWorkflow(yamlText: string): { workflow: Workflow; warnings:
     if (seen.has(step.id)) issues.push(`ステップidが重複しています: ${step.id}`);
     seen.add(step.id);
     if ((RESERVED_STEP_IDS as readonly string[]).includes(step.id)) {
-      issues.push(`ステップid "${step.id}" は予約語です（project.yaml の setup が自動挿入されます）`);
+      issues.push(
+        `ステップid "${step.id}" は予約語です（project.yaml の setup が自動挿入されます）`,
+      );
     }
   }
   for (const step of workflow.steps) {
@@ -167,7 +199,7 @@ export function parseWorkflow(yamlText: string): { workflow: Workflow; warnings:
     if (NON_IDEMPOTENT.some((re) => re.test(step.run))) {
       warnings.push(
         `ステップ "${step.id}" のコマンドは再実行で二重に効く可能性があります: ${step.run}\n` +
-        `  クラッシュ復帰時、command ステップは頭から再実行されます。`,
+          `  クラッシュ復帰時、command ステップは頭から再実行されます。`,
       );
     }
   }

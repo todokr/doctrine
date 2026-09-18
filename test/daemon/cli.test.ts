@@ -1,10 +1,10 @@
-import { test, beforeEach, afterEach } from "@std/testing/bdd";
+import { afterEach, beforeEach, test } from "@std/testing/bdd";
 import assert from "node:assert/strict";
 import { createServer, type Server, type Socket } from "node:net";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { parseArgv, call } from "../../src/cli/dctl.ts";
+import { call, parseArgv } from "../../src/cli/dctl.ts";
 
 let root: string;
 let sock: string;
@@ -30,11 +30,17 @@ test("dctl add", () => {
 
 test("dctl ls", () => {
   assert.deepEqual(parseArgv(["ls"]), { method: "task.list", params: {} });
-  assert.deepEqual(parseArgv(["ls", "--state", "queued"]), { method: "task.list", params: { state: "queued" } });
+  assert.deepEqual(parseArgv(["ls", "--state", "queued"]), {
+    method: "task.list",
+    params: { state: "queued" },
+  });
 });
 
 test("dctl approve / reject", () => {
-  assert.deepEqual(parseArgv(["approve", "t1"]), { method: "task.approve", params: { task_id: "t1" } });
+  assert.deepEqual(parseArgv(["approve", "t1"]), {
+    method: "task.approve",
+    params: { task_id: "t1" },
+  });
   assert.deepEqual(
     parseArgv(["reject", "t1", "--comment", "命名が変"]),
     { method: "task.reject", params: { task_id: "t1", comment: "命名が変" } },
@@ -49,7 +55,17 @@ test("dctl gc は worktree.remove", () => {
 });
 
 test("priority は数値になる", () => {
-  const { params } = parseArgv(["add", "--project", "/r", "--title", "T", "--prompt", "p", "--priority", "0"]);
+  const { params } = parseArgv([
+    "add",
+    "--project",
+    "/r",
+    "--title",
+    "T",
+    "--prompt",
+    "p",
+    "--priority",
+    "0",
+  ]);
   assert.equal(params.priority, 0);
 });
 
@@ -66,7 +82,8 @@ test("値が繰り返されても positional を誤判定しない（indexOf バ
 
 test("数値フラグに数値でない値を渡すと落ちる", () => {
   assert.throws(
-    () => parseArgv(["add", "--project", "/r", "--title", "T", "--prompt", "p", "--priority", "abc"]),
+    () =>
+      parseArgv(["add", "--project", "/r", "--title", "T", "--prompt", "p", "--priority", "abc"]),
     /--priority.*数値/,
   );
 });
@@ -96,7 +113,10 @@ test("call: null id の応答は確定的に reject する（ハングしない�
 
 test("call: 応答の前に来たイベントは無視し、本来の応答で resolve する", async () => {
   await fakeDaemon((socket) => {
-    socket.write(JSON.stringify({ event: "task.stateChanged", task_id: "t1", from: "queued", to: "running" }) + "\n");
+    socket.write(
+      JSON.stringify({ event: "task.stateChanged", task_id: "t1", from: "queued", to: "running" }) +
+        "\n",
+    );
     socket.write(JSON.stringify({ id: 1, ok: true, result: { ok: true } }) + "\n");
   });
   const result = await call(sock, "task.list", {});
@@ -112,7 +132,10 @@ test("call: JSONとして読めない応答は reject する（プロセスを�
 
 test("call: ソケットが存在しないとデーモン未起動を示すメッセージで reject する", async () => {
   const missing = join(root, "no-such.sock");
-  await assert.rejects(call(missing, "task.list", {}), new RegExp(`デーモンが起動していないようです.*${missing}`));
+  await assert.rejects(
+    call(missing, "task.list", {}),
+    new RegExp(`デーモンが起動していないようです.*${missing}`),
+  );
 });
 
 test("call: 応答が来ないままタイムアウトする（短いタイムアウトを注入）", async () => {

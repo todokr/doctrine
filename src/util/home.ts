@@ -4,6 +4,10 @@
  */
 export function homeDir(): string {
   const home = Deno.env.get("HOME");
-  if (!home) throw new Error("HOME が設定されていません（DOCTRINE_STATE_DIR で状態ディレクトリを指定してください）");
+  if (!home) {
+    throw new Error(
+      "HOME が設定されていません（DOCTRINE_STATE_DIR で状態ディレクトリを指定してください）",
+    );
+  }
   return home;
 }

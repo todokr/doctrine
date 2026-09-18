@@ -1,9 +1,9 @@
-import { test, beforeEach, afterEach } from "@std/testing/bdd";
+import { afterEach, beforeEach, test } from "@std/testing/bdd";
 import assert from "node:assert/strict";
-import { mkdtemp, rm, stat, chmod } from "node:fs/promises";
+import { chmod, mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { spawn, type ChildProcess } from "node:child_process";
+import { type ChildProcess, spawn } from "node:child_process";
 import { startDaemon, tickCycle } from "../../src/daemon/main.ts";
 import { DatabaseSync } from "node:sqlite";
 import { openDbOn } from "../../src/db/migrate.ts";
@@ -19,7 +19,11 @@ beforeEach(async () => {
 });
 afterEach(async () => {
   for (const d of daemons.splice(0)) await d.stop();
-  for (const c of children.splice(0)) { try { c.kill("SIGKILL"); } catch { /* already gone */ } }
+  for (const c of children.splice(0)) {
+    try {
+      c.kill("SIGKILL");
+    } catch { /* already gone */ }
+  }
   await rm(root, { recursive: true, force: true });
 });
 
@@ -33,7 +37,11 @@ afterEach(async () => {
 async function bindAndKill(path: string): Promise<void> {
   const child = spawn(
     Deno.execPath(),
-    ["eval", `import { createServer } from "node:net"; createServer(() => {}).listen(Deno.args[0], () => { console.log("ready"); }); setInterval(() => {}, 60000);`, path],
+    [
+      "eval",
+      `import { createServer } from "node:net"; createServer(() => {}).listen(Deno.args[0], () => { console.log("ready"); }); setInterval(() => {}, 60000);`,
+      path,
+    ],
     { stdio: ["ignore", "pipe", "ignore"] },
   );
   children.push(child);
@@ -49,14 +57,21 @@ async function bindAndKill(path: string): Promise<void> {
 test("生きているデーモンのソケットは横取りせず、二重起動を拒否する", async () => {
   const sock = join(root, "dctld.sock");
   const d1 = await startDaemon({
-    dbPath: join(root, "a.db"), socketPath: sock, logRoot: join(root, "logs-a"), tickMs: 1_000_000,
+    dbPath: join(root, "a.db"),
+    socketPath: sock,
+    logRoot: join(root, "logs-a"),
+    tickMs: 1_000_000,
   });
   daemons.push(d1);
 
   await assert.rejects(
-    () => startDaemon({
-      dbPath: join(root, "b.db"), socketPath: sock, logRoot: join(root, "logs-b"), tickMs: 1_000_000,
-    }),
+    () =>
+      startDaemon({
+        dbPath: join(root, "b.db"),
+        socketPath: sock,
+        logRoot: join(root, "logs-b"),
+        tickMs: 1_000_000,
+      }),
     /既に動作しています/,
   );
 });
@@ -72,7 +87,10 @@ test("ECONNREFUSEDな古いソケットファイルは掃除して起動でき�
   await stat(sock);
 
   const d = await startDaemon({
-    dbPath: join(root, "c.db"), socketPath: sock, logRoot: join(root, "logs-c"), tickMs: 1_000_000,
+    dbPath: join(root, "c.db"),
+    socketPath: sock,
+    logRoot: join(root, "logs-c"),
+    tickMs: 1_000_000,
   });
   daemons.push(d);
   assert.ok(d);
@@ -91,9 +109,13 @@ test("ソケットに繋げるか判定できない（権限拒否など）な�
   await chmod(sock, 0o000);
 
   await assert.rejects(
-    () => startDaemon({
-      dbPath: join(root, "d.db"), socketPath: sock, logRoot: join(root, "logs-d"), tickMs: 1_000_000,
-    }),
+    () =>
+      startDaemon({
+        dbPath: join(root, "d.db"),
+        socketPath: sock,
+        logRoot: join(root, "logs-d"),
+        tickMs: 1_000_000,
+      }),
     (err: Error) => {
       assert.match(err.message, /判定できません/);
       assert.ok(err.message.includes(sock), "パスを名指しする");
@@ -135,14 +157,18 @@ test("スケジューリングの1周が失敗してもデーモンは落ちず�
     logRoot: join(root, "logs"),
     globalLimit: 4,
     broadcast: () => {},
-    loadWorkflow: async () => { throw new Error("使わない"); },
+    loadWorkflow: async () => {
+      throw new Error("使わない");
+    },
     running: new Set(),
     warnings: ["前の周で積まれた警告"],
   };
 
   const logged: string[] = [];
   const realError = console.error;
-  console.error = (...args: unknown[]) => { logged.push(args.map(String).join(" ")); };
+  console.error = (...args: unknown[]) => {
+    logged.push(args.map(String).join(" "));
+  };
 
   // DBの故障は素の接続（DatabaseSync）の prepare に仕込む。Kysely はクエリごとに
   // ここを通るので、受付候補を読むクエリ（resumed の降順で並べる唯一のクエリ）だけを落とす。

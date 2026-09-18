@@ -3,7 +3,13 @@ import { parseWorkflow, type Workflow } from "../workflow/schema.ts";
 import { parseProjectConfig, withSetupStep } from "../workflow/project.ts";
 import { ensureProjectScaffold } from "../workflow/scaffold.ts";
 import {
-  getProject, getProjectByPath, getTask, insertProject, insertTask, listProjects, listTasks,
+  getProject,
+  getProjectByPath,
+  getTask,
+  insertProject,
+  insertTask,
+  listProjects,
+  listTasks,
   type TaskState,
 } from "../db/tasks.ts";
 import { getStepRun, listStepRuns } from "../db/stepRuns.ts";
@@ -13,10 +19,14 @@ import { recentRateLimitSamples } from "../db/rateLimits.ts";
 import { selectAdmissible } from "../core/scheduler.ts";
 import { applyApproval, runTask } from "../core/engine.ts";
 import {
-  branchNameFor, createWorktree, findOrphans, removeWorktree, worktreePathFor,
+  branchNameFor,
+  createWorktree,
+  findOrphans,
+  removeWorktree,
   UncommittedChangesError,
+  worktreePathFor,
 } from "../core/worktree.ts";
-import { killStaleChild, defaultProbe } from "../core/recovery.ts";
+import { defaultProbe, killStaleChild } from "../core/recovery.ts";
 import { assertTransition, isTerminal } from "../core/states.ts";
 import type { AgentAdapter } from "../adapter/types.ts";
 import type { Handler } from "./server.ts";
@@ -28,7 +38,10 @@ export type DaemonContext = {
   logRoot: string;
   globalLimit: number;
   broadcast(ev: ServerEvent, opts?: { taskId?: string; followersOnly?: boolean }): void;
-  loadWorkflow(projectPath: string, name: string): Promise<{ workflow: Workflow; warnings: string[] }>;
+  loadWorkflow(
+    projectPath: string,
+    name: string,
+  ): Promise<{ workflow: Workflow; warnings: string[] }>;
   running: Set<string>;
   /** 後始末を拒否したときなど、人に見せる必要のある警告 */
   warnings: string[];
@@ -41,7 +54,8 @@ function req(params: Record<string, unknown>, key: string): string {
 }
 
 export async function loadWorkflowFromDisk(
-  projectPath: string, name: string,
+  projectPath: string,
+  name: string,
 ): Promise<{ workflow: Workflow; warnings: string[] }> {
   const path = join(projectPath, ".doctrine", "workflows", `${name}.yaml`);
   const text = await Deno.readTextFile(path).catch(() => {
@@ -60,10 +74,15 @@ export function createHandler(ctx: DaemonContext): Handler {
         if (existing) return { ...existing, created: [], alreadyRegistered: true };
 
         const { created } = await ensureProjectScaffold(path);
-        const cfg = parseProjectConfig(await Deno.readTextFile(join(path, ".doctrine", "project.yaml")));
+        const cfg = parseProjectConfig(
+          await Deno.readTextFile(join(path, ".doctrine", "project.yaml")),
+        );
         const id = await insertProject(ctx.db, {
-          path, default_workflow: cfg.defaultWorkflow, max_concurrent: cfg.maxConcurrent,
-          base_branch: cfg.baseBranch, setup: cfg.setup ?? null,
+          path,
+          default_workflow: cfg.defaultWorkflow,
+          max_concurrent: cfg.maxConcurrent,
+          base_branch: cfg.baseBranch,
+          setup: cfg.setup ?? null,
         });
         return { ...(await getProject(ctx.db, id)), created, alreadyRegistered: false };
       }
@@ -73,11 +92,15 @@ export function createHandler(ctx: DaemonContext): Handler {
         const path = req(params, "path");
         const project = await getProjectByPath(ctx.db, path);
         if (!project) throw new Error(`未登録のプロジェクトです: ${path}`);
-        const cfg = parseProjectConfig(await Deno.readTextFile(join(path, ".doctrine", "project.yaml")));
+        const cfg = parseProjectConfig(
+          await Deno.readTextFile(join(path, ".doctrine", "project.yaml")),
+        );
         await ctx.db.updateTable("projects")
           .set({
-            default_workflow: cfg.defaultWorkflow, max_concurrent: cfg.maxConcurrent,
-            base_branch: cfg.baseBranch, setup: cfg.setup ?? null,
+            default_workflow: cfg.defaultWorkflow,
+            max_concurrent: cfg.maxConcurrent,
+            base_branch: cfg.baseBranch,
+            setup: cfg.setup ?? null,
           })
           .where("id", "=", project.id)
           .execute();
@@ -90,12 +113,18 @@ export function createHandler(ctx: DaemonContext): Handler {
         if (!project) throw new Error(`未登録のプロジェクトです: ${projectPath}`);
         const title = req(params, "title");
         const prompt = req(params, "prompt");
-        const workflowName = typeof params.workflow === "string" ? params.workflow : project.default_workflow;
+        const workflowName = typeof params.workflow === "string"
+          ? params.workflow
+          : project.default_workflow;
         // 不正な定義はタスク作成時に落とす
         const { warnings } = await ctx.loadWorkflow(projectPath, workflowName);
         const id = crypto.randomUUID();
         const task = await insertTask(ctx.db, {
-          id, project_id: project.id, title, prompt, workflow_name: workflowName,
+          id,
+          project_id: project.id,
+          title,
+          prompt,
+          workflow_name: workflowName,
           branch: branchNameFor(id, title),
           priority: typeof params.priority === "number" ? params.priority : 2,
         });
@@ -139,7 +168,12 @@ export function createHandler(ctx: DaemonContext): Handler {
         const workflow = withSetupStep(loaded, project.setup ?? undefined);
         await applyApproval(ctx.db, taskId, { approved, comment }, workflow);
         const after = (await getTask(ctx.db, taskId))!;
-        ctx.broadcast({ event: "task.stateChanged", task_id: taskId, from: "suspended", to: after.state });
+        ctx.broadcast({
+          event: "task.stateChanged",
+          task_id: taskId,
+          from: "suspended",
+          to: after.state,
+        });
         // 最終ステップが approval のワークフローは、ここが completed への唯一の
         // 入口であり、tick の runTask().then(cleanupAfterRun) を通らない。
         // 後始末しないと worktree_path が非nullのまま残り、findOrphans は既知の
@@ -168,10 +202,16 @@ export function createHandler(ctx: DaemonContext): Handler {
         // 子を止めている間にタスクが先へ進んでいたら（例: running から suspended）、
         // 検査した遷移はもう成り立たない。上書きせずに失敗させる。
         await commitStepBoundary(ctx.db, {
-          taskId, requireState: task.state,
+          taskId,
+          requireState: task.state,
           taskPatch: { state: "paused", child_pid: null, child_started_at: null },
         });
-        ctx.broadcast({ event: "task.stateChanged", task_id: taskId, from: task.state, to: "paused" });
+        ctx.broadcast({
+          event: "task.stateChanged",
+          task_id: taskId,
+          from: task.state,
+          to: "paused",
+        });
         return await getTask(ctx.db, taskId);
       }
       case "task.resume": {
@@ -183,9 +223,16 @@ export function createHandler(ctx: DaemonContext): Handler {
         }
         // 行列の先頭に入る。進行中の仕事を新規の仕事より先に終わらせる。
         await commitStepBoundary(ctx.db, {
-          taskId, requireState: task.state, taskPatch: { state: "queued", resumed: 1 },
+          taskId,
+          requireState: task.state,
+          taskPatch: { state: "queued", resumed: 1 },
         });
-        ctx.broadcast({ event: "task.stateChanged", task_id: taskId, from: task.state, to: "queued" });
+        ctx.broadcast({
+          event: "task.stateChanged",
+          task_id: taskId,
+          from: task.state,
+          to: "queued",
+        });
         return await getTask(ctx.db, taskId);
       }
       case "task.cancel": {
@@ -199,10 +246,16 @@ export function createHandler(ctx: DaemonContext): Handler {
         await killStaleChild(task, defaultProbe(), "SIGTERM");
         // worktree は残す。失敗・中止した実行こそ中を見たい。
         await commitStepBoundary(ctx.db, {
-          taskId, requireState: task.state,
+          taskId,
+          requireState: task.state,
           taskPatch: { state: "canceled", child_pid: null, child_started_at: null },
         });
-        ctx.broadcast({ event: "task.stateChanged", task_id: taskId, from: task.state, to: "canceled" });
+        ctx.broadcast({
+          event: "task.stateChanged",
+          task_id: taskId,
+          from: task.state,
+          to: "canceled",
+        });
         return await getTask(ctx.db, taskId);
       }
       case "task.logs": {
@@ -233,14 +286,19 @@ export function createHandler(ctx: DaemonContext): Handler {
         // 失敗したタスクの worktree は汚れているのが通常。force を明示しない限り
         // 未コミットの作業は失われず、削除は拒否される。
         await removeWorktree({
-          repoPath: project.path, worktreePath: task.worktree_path, force: params.force === true,
+          repoPath: project.path,
+          worktreePath: task.worktree_path,
+          force: params.force === true,
         });
         await commitStepBoundary(ctx.db, { taskId, taskPatch: { worktree_path: null } });
         return { removed: task.worktree_path };
       }
 
       case "ratelimit.recent":
-        return await recentRateLimitSamples(ctx.db, typeof params.limit === "number" ? params.limit : 50);
+        return await recentRateLimitSamples(
+          ctx.db,
+          typeof params.limit === "number" ? params.limit : 50,
+        );
 
       default:
         throw new Error(`未知のメソッドです: ${method}`);
@@ -254,20 +312,26 @@ export async function cleanupAfterRun(ctx: DaemonContext, taskId: string): Promi
   if (!task || task.state !== "completed" || !task.worktree_path) return;
   const project = (await getProject(ctx.db, task.project_id))!;
   try {
-    await removeWorktree({ repoPath: project.path, worktreePath: task.worktree_path, force: false });
+    await removeWorktree({
+      repoPath: project.path,
+      worktreePath: task.worktree_path,
+      force: false,
+    });
     await commitStepBoundary(ctx.db, { taskId, taskPatch: { worktree_path: null } });
   } catch (e) {
     if (e instanceof UncommittedChangesError) {
       // ワークフローの書き方のバグ。黙って消してよいものではない。
       ctx.warnings.push(
         `タスク ${taskId}: 完了時に未コミットの変更が残っているため worktree を削除しませんでした ` +
-        `(${task.worktree_path}): ${e.message}`,
+          `(${task.worktree_path}): ${e.message}`,
       );
     } else {
       // git worktree remove 自体が失敗した場合など（原因不明）。未コミットの
       // 変更の話にすり替えず、そのまま見せる。
       ctx.warnings.push(
-        `タスク ${taskId}: worktree の削除に失敗しました (${task.worktree_path}): ${(e as Error).message}`,
+        `タスク ${taskId}: worktree の削除に失敗しました (${task.worktree_path}): ${
+          (e as Error).message
+        }`,
       );
     }
   }
@@ -285,12 +349,19 @@ export async function cleanupAfterRun(ctx: DaemonContext, taskId: string): Promi
  * 理由付きで board に見える failed の方がまし、という判断。
  */
 async function failTaskInTick(
-  ctx: DaemonContext, taskId: string, fromState: TaskState, reason: string,
+  ctx: DaemonContext,
+  taskId: string,
+  fromState: TaskState,
+  reason: string,
 ): Promise<void> {
   ctx.warnings.push(`タスク ${taskId}: ${reason}`);
   try {
     assertTransition(fromState, "failed");
-    await commitStepBoundary(ctx.db, { taskId, requireState: fromState, taskPatch: { state: "failed" } });
+    await commitStepBoundary(ctx.db, {
+      taskId,
+      requireState: fromState,
+      taskPatch: { state: "failed" },
+    });
     ctx.broadcast({ event: "task.stateChanged", task_id: taskId, from: fromState, to: "failed" });
   } catch {
     // fromState から failed へ遷移できない（既に終端など）、または読んだ後に
@@ -346,14 +417,21 @@ async function tickOnce(ctx: DaemonContext): Promise<void> {
     // そうでなければこのタスクは見送る。
     try {
       await commitStepBoundary(ctx.db, {
-        taskId: task.id, requireState: "queued", taskPatch: { state: "running", resumed: 0 },
+        taskId: task.id,
+        requireState: "queued",
+        taskPatch: { state: "running", resumed: 0 },
       });
     } catch (e) {
       ctx.running.delete(task.id);
       if (e instanceof StateConflictError) continue;
       throw e;
     }
-    ctx.broadcast({ event: "task.stateChanged", task_id: task.id, from: task.state, to: "running" });
+    ctx.broadcast({
+      event: "task.stateChanged",
+      task_id: task.id,
+      from: task.state,
+      to: "running",
+    });
 
     let workflow: Workflow;
     let worktreePath: string;
@@ -368,17 +446,27 @@ async function tickOnce(ctx: DaemonContext): Promise<void> {
       // worktree はタスク作成時ではなく、実行枠が取れた瞬間に作る
       // DB には createWorktree が返す実パスを保存する（worktree.list が返す表記と揃える）
       worktreePath = task.worktree_path ?? await createWorktree({
-        repoPath: project.path, worktreePath: worktreePathFor(project.path, task.id),
-        branch: task.branch, baseBranch: project.base_branch,
+        repoPath: project.path,
+        worktreePath: worktreePathFor(project.path, task.id),
+        branch: task.branch,
+        baseBranch: project.base_branch,
       });
 
-      await commitStepBoundary(ctx.db, { taskId: task.id, taskPatch: { worktree_path: worktreePath } });
+      await commitStepBoundary(ctx.db, {
+        taskId: task.id,
+        taskPatch: { worktree_path: worktreePath },
+      });
     } catch (e) {
       // ワークフローが読めない・worktree が作れないなど、枠を取った後に
       // 何が起きても queued に戻してはいけない。放置するとスケジューラが
       // 毎周期リトライし続け、1タスクの不備で他タスクの tick まで止めかねない。
       // 枠は既に先取りしてあるので、現在の状態は running（running -> failed は正当）。
-      await failTaskInTick(ctx, task.id, "running", `実行を開始できませんでした: ${(e as Error).message}`);
+      await failTaskInTick(
+        ctx,
+        task.id,
+        "running",
+        `実行を開始できませんでした: ${(e as Error).message}`,
+      );
       ctx.running.delete(task.id);
       continue;
     }
@@ -389,21 +477,41 @@ async function tickOnce(ctx: DaemonContext): Promise<void> {
     let currentStepRunId = 0;
     try {
       void runTask(ctx.db, task.id, workflow, {
-        db: ctx.db, adapter: ctx.adapter, logRoot: ctx.logRoot, globalLimit: ctx.globalLimit,
+        db: ctx.db,
+        adapter: ctx.adapter,
+        logRoot: ctx.logRoot,
+        globalLimit: ctx.globalLimit,
         onStateChanged: (id, from, to) =>
           ctx.broadcast({ event: "task.stateChanged", task_id: id, from, to }),
         onStepRunStarted: (id, stepRunId, stepId) => {
           currentStepRunId = stepRunId;
-          ctx.broadcast({ event: "stepRun.started", task_id: id, step_run_id: stepRunId, step_id: stepId });
+          ctx.broadcast({
+            event: "stepRun.started",
+            task_id: id,
+            step_run_id: stepRunId,
+            step_id: stepId,
+          });
         },
         onStepRunFinished: (id, stepRunId, stepId, status) =>
-          ctx.broadcast({ event: "stepRun.finished", task_id: id, step_run_id: stepRunId, step_id: stepId, status }),
+          ctx.broadcast({
+            event: "stepRun.finished",
+            task_id: id,
+            step_run_id: stepRunId,
+            step_id: stepId,
+            status,
+          }),
         onRateLimit: (s) =>
-          ctx.broadcast({ event: "ratelimit.sample", window: s.window, utilization: s.utilization, resets_at: s.resetsAt }),
+          ctx.broadcast({
+            event: "ratelimit.sample",
+            window: s.window,
+            utilization: s.utilization,
+            resets_at: s.resetsAt,
+          }),
         onLogLine: (line) =>
           ctx.broadcast(
             { event: "log.line", task_id: task.id, step_run_id: currentStepRunId, line },
-            { taskId: task.id, followersOnly: true }),
+            { taskId: task.id, followersOnly: true },
+          ),
       })
         .then(() => cleanupAfterRun(ctx, task.id))
         .catch(async (e) => {
@@ -421,7 +529,9 @@ async function tickOnce(ctx: DaemonContext): Promise<void> {
               ctx.warnings.push(`タスク ${task.id}: ${message}`);
             }
           } catch (e2) {
-            ctx.warnings.push(`タスク ${task.id}: ${message}（failed への記録にも失敗: ${(e2 as Error).message}）`);
+            ctx.warnings.push(
+              `タスク ${task.id}: ${message}（failed への記録にも失敗: ${(e2 as Error).message}）`,
+            );
           }
         })
         .finally(() => ctx.running.delete(task.id));

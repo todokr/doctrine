@@ -14,7 +14,7 @@ test("1行1JSONを読む", async () => {
 });
 
 test("チャンク境界が行の途中でも復元する", async () => {
-  assert.deepEqual(await collect(['{"a":', '1}\n{"b"', ':2}\n']), [{ a: 1 }, { b: 2 }]);
+  assert.deepEqual(await collect(['{"a":', '1}\n{"b"', ":2}\n"]), [{ a: 1 }, { b: 2 }]);
 });
 
 test("行長に上限を仮定しない（1MB超の1行を読む）", async () => {

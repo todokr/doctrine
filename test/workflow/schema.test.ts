@@ -1,6 +1,11 @@
 import { test } from "@std/testing/bdd";
 import assert from "node:assert/strict";
-import { parseWorkflow, WorkflowValidationError, type CommandStep, type AgentStep } from "../../src/workflow/schema.ts";
+import {
+  type AgentStep,
+  type CommandStep,
+  parseWorkflow,
+  WorkflowValidationError,
+} from "../../src/workflow/schema.ts";
 
 const VALID = `
 name: feature

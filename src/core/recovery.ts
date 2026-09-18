@@ -19,7 +19,9 @@ export type ProcessProbe = {
  * 復帰時にステップ種別（agent / command）を正しく判別するために使う。
  * ワークフローが引けない場合は undefined を返してよい（呼び出し側は安全側に倒す）。
  */
-export type WorkflowLookup = (task: TaskRow) => Promise<Workflow | undefined> | Workflow | undefined;
+export type WorkflowLookup = (
+  task: TaskRow,
+) => Promise<Workflow | undefined> | Workflow | undefined;
 
 /**
  * ps の lstart は秒精度なので、既定の許容は2秒。
@@ -80,7 +82,9 @@ export function defaultProbe(): ProcessProbe {
       }
     },
     kill(pid, signal) {
-      try { Deno.kill(pid, signal); } catch { /* 既に消えている */ }
+      try {
+        Deno.kill(pid, signal);
+      } catch { /* 既に消えている */ }
     },
   };
 }
@@ -95,12 +99,16 @@ export function defaultProbe(): ProcessProbe {
  * 壊し続けてしまうので SIGKILL のままにする。
  */
 export async function killStaleChild(
-  task: TaskRow, probe: ProcessProbe, signal: Signal = "SIGKILL",
+  task: TaskRow,
+  probe: ProcessProbe,
+  signal: Signal = "SIGKILL",
 ): Promise<"killed" | "gone" | "mismatch" | "none"> {
   // child_pid <= 0 は spawn 失敗時の記録（onChildSpawned(child.pid ?? -1, ...)）。
   // kill(2) に -1 を渡すと送れる全プロセスへのシグナルになり得るので、
   // ここで弾いて絶対に probe.kill へ渡さない。
-  if (task.child_pid === null || task.child_pid <= 0 || task.child_started_at === null) return "none";
+  if (task.child_pid === null || task.child_pid <= 0 || task.child_started_at === null) {
+    return "none";
+  }
   const actual = await probe.startTimeOf(task.child_pid);
   if (actual === null) return "gone";
   if (!isSameChild({ pid: task.child_pid, startedAt: task.child_started_at }, actual)) {
@@ -127,7 +135,8 @@ export async function killStaleChild(
  * 壊さないが、逆に command を resume-agent 扱いする実害の方が大きい。
  */
 async function classifyInterruptedStep(
-  task: TaskRow, lookupWorkflow: WorkflowLookup,
+  task: TaskRow,
+  lookupWorkflow: WorkflowLookup,
 ): Promise<"resume-agent" | "rerun-command"> {
   if (task.current_step_id !== null) {
     const workflow = await lookupWorkflow(task);
@@ -162,7 +171,10 @@ export type RecoveryResult =
  *
  * running の行が無ければ何もしない（呼び出し側はこれをエラー扱いしない）。
  */
-async function closeDanglingStepRun(db: Db, taskId: string): Promise<Pick<StepBoundary, "stepRunUpdate">> {
+async function closeDanglingStepRun(
+  db: Db,
+  taskId: string,
+): Promise<Pick<StepBoundary, "stepRunUpdate">> {
   const runs = await listStepRuns(db, taskId);
   const dangling = [...runs].reverse().find((r) => r.status === "running");
   if (!dangling) return {};
@@ -200,7 +212,9 @@ async function closeDanglingStepRun(db: Db, taskId: string): Promise<Pick<StepBo
  * failed への書き込み自体が失敗しても掃討は続ける（二重に守る）。
  */
 export async function recoverOnStartup(
-  db: Db, probe: ProcessProbe, lookupWorkflow: WorkflowLookup,
+  db: Db,
+  probe: ProcessProbe,
+  lookupWorkflow: WorkflowLookup,
 ): Promise<RecoveryResult[]> {
   const results: RecoveryResult[] = [];
 
@@ -234,7 +248,10 @@ export async function recoverOnStartup(
         });
       } catch (e2) {
         // failed への書き込み自体が失敗しても、他タスクの掃討を止めない。
-        console.error(`タスク ${task.id} を failed にできませんでした（復帰処理は継続します）:`, e2);
+        console.error(
+          `タスク ${task.id} を failed にできませんでした（復帰処理は継続します）:`,
+          e2,
+        );
       }
       results.push({ taskId: task.id, outcome: "failed", error });
     }
