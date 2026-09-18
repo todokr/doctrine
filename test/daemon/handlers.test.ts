@@ -24,6 +24,16 @@ let repo: string;
 
 const NOOP_CONN = { follow() {}, unfollow() {}, isFollowing: () => false };
 
+// テストが context() で作った DaemonContext をすべて控えておく。approval が
+// suspended に入るときの retainTree（reviewTree.ts）は commitStepBoundary の
+// あとに実際の git を叩くので、DB の状態がもう "suspended" でも、その runTask
+// はまだ ctx.running を持ったまま git サブプロセスを走らせていることがある。
+// テスト本体は「状態が suspended になった」ところで終わってしまうので、
+// 個々のテストに drain を書かせるのではなく、afterEach が rm の前に必ず
+// ここへ控えた全 ctx の running が空になるのを待つ（書き込み中の worktree を
+// 消して ENOTEMPTY になるのを防ぐ）。
+const contexts: DaemonContext[] = [];
+
 beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), "doctrine-daemon-"));
   repo = await makeRepo(root, {
@@ -35,13 +45,15 @@ beforeEach(async () => {
   process.env.DOCTRINE_STATE_DIR = join(root, "state");
 });
 afterEach(async () => {
+  await until(() => contexts.every((c) => c.running.size === 0));
+  contexts.length = 0;
   await rm(root, { recursive: true, force: true });
   delete process.env.DOCTRINE_STATE_DIR;
 });
 
 async function context(events: ServerEvent[] = []): Promise<DaemonContext> {
   const db = await openDb(":memory:");
-  return {
+  const ctx: DaemonContext = {
     db,
     adapter: createMockAdapter({ result: { ok: true, text: "done" } }),
     logRoot: join(root, "logs"),
@@ -57,6 +69,8 @@ async function context(events: ServerEvent[] = []): Promise<DaemonContext> {
     },
     running: new Set(),
   };
+  contexts.push(ctx);
+  return ctx;
 }
 
 test("project.add でプロジェクトを登録し、設定を読む", async () => {

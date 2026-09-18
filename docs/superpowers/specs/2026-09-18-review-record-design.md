@@ -110,8 +110,54 @@ README「既知の制約」の1項目。デーモンのクラッシュで `runni
 `withAttempt` を書いており、approval も「開始 = `suspended` に入った時点」で進める。
 
 結果、`applyApproval` 側は `attemptCount(task, stepId)` をそのまま `decide` に渡すだけに
-なる（今の `attemptCount(task, stepId) + 1` と `withAttempt` が消える）。`maxAttempts` と
-比較される数は変わらないので、**差し戻しの上限の効き方は変わらない**。
+なる（今の `attemptCount(task, stepId) + 1` と `withAttempt` が消える）。
+
+**却下の経路では、`maxAttempts` と比較される数は変わらない。** 旧実装は決定時に
+`attemptCount(task, stepId) + 1` を計算して `decide` に渡していた。新実装は
+`suspended` に入る時点で `withAttempt` が同じ1を進め終えているので、決定時に
+渡すのは進行済みの `attemptCount(task, stepId)` そのものになる。式の形は変わるが、
+渡る値は旧実装の `+ 1` と一致する。差し戻しの上限の効き方はここでは変わらない。
+
+**承認したときにも `attempt_counts` が進むようになるのは、旧実装からの振る舞いの
+変化である。** 旧実装は承認では `attempt_counts` を書かなかった（決定時のコミットに
+`attempt_counts` を含めていたのは却下の分岐だけ）。新実装は `suspended` に入る時点で
+承認・却下の区別なく `withAttempt` を通すので、承認でも `attempt_counts` が1つ進む。
+
+これが利くのは、承認済みの approval ステップへ後続ステップの `onFailure.goto` が
+戻ってくるワークフローだけである。たとえば:
+
+```yaml
+steps:
+  - id: review
+    type: approval
+    title: "差分を確認してください"
+    onReject:
+      goto: implement
+      maxAttempts: 5
+  - id: deploy
+    type: command
+    run: "deploy.sh"
+    onFailure:
+      goto: review
+      maxAttempts: 3
+```
+
+`review` を承認して `deploy` に進み、`deploy` が失敗して `onFailure.goto: review` で
+`review` へ戻ると、`review` の `attempt_counts` は承認1回・却下0回でも「2」になって
+いる（承認の時点で1、2周目の `suspended` 突入でまた1進むため）。旧実装なら承認は
+`attempt_counts` を据え置くので、この2周目でも `attempt` は引き続き1のまま記録
+されていた。`deploy` から `review` への `onFailure.goto` が3回目に `maxAttempts: 3`
+（`review` 自身の `onReject.maxAttempts` ではなく `deploy` 側の設定）を使い切って
+`failed` になる条件そのものは変わらない。変わるのは `review` の履歴側で、承認1回
+ぶん `onReject.maxAttempts` の残り回数を先取りするように見えることである。
+
+**それでもこの新しい振る舞いを正とする。** 承認も却下も「レビュー1回」であり、
+`step_runs.attempt` は `attempt_counts` とちょうど一致していなければならない
+（2章の決定の要約が言う「approval ステップの step_run 1件 = レビュー1回」の帰結）。
+旧実装は承認時に `attempt_counts` を据え置くため、同じ approval ステップに2周目で
+入っても `step_runs.attempt` は `1` のまま記録される。何度目のレビューかという
+履歴そのものが嘘になっていた。新しい振る舞いは、そのステップに何度 `suspended`
+で立ち止まったか（承認・却下を問わず）を正直に数えるほうを選ぶ。
 
 ### 3.5 `awaiting` 行が無いときは例外にする
 
