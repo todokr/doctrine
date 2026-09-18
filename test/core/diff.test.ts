@@ -124,3 +124,19 @@ test("上限以内なら truncated は false のまま patch を全部返す", a
   assert.equal(d.truncated, false);
   assert.match(d.patch, /^\+d$/m);
 });
+
+test("改行がない長い1行は UTF-8 文字境界で切る", async () => {
+  // 日本語テキスト：各漢字は3バイト。
+  // この長い1行は改行を含まず、上限より長い。
+  const longLine = "日".repeat(150); // 150 * 3 = 450 バイト
+  await writeFile(join(repo, "long.txt"), longLine);
+  const limit = 200; // 450 バイト > 200 バイト → 打ち切られる
+  const d = await diffNow(limit);
+  assert.equal(d.truncated, true, "truncated を立てるべき");
+  const patchBytes = new TextEncoder().encode(d.patch);
+  assert.ok(
+    patchBytes.length <= limit,
+    `patch は ${limit} バイト以下のはず（${patchBytes.length}）`,
+  );
+  assert.ok(!d.patch.endsWith("�"), "U+FFFD で終わってはいけない");
+});

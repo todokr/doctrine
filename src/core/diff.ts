@@ -90,7 +90,23 @@ function truncatePatch(
   if (bytes.length <= limitBytes) return { patch, truncated: false };
   const head = bytes.subarray(0, limitBytes);
   const lastLf = head.lastIndexOf(LF);
-  const cut = lastLf >= 0 ? head.subarray(0, lastLf + 1) : head;
+  let cut = lastLf >= 0 ? head.subarray(0, lastLf + 1) : head;
+
+  // 改行がない場合、UTF-8 文字境界まで戻る。マルチバイト文字の途中で切ると、
+  // TextDecoder が U+FFFD に置き換えてしまい、再エンコード時に上限を超える。
+  // 戻り値を再エンコードしても上限を超えない、という保証を守る。
+  if (lastLf < 0) {
+    for (let i = 0; i < 3 && cut.length > 0; i++) {
+      const b = cut[cut.length - 1];
+      if ((b & 0xc0) === 0x80) {
+        // UTF-8 継続バイト — 1バイト削る
+        cut = cut.subarray(0, cut.length - 1);
+      } else {
+        break;
+      }
+    }
+  }
+
   return { patch: new TextDecoder().decode(cut), truncated: true };
 }
 
