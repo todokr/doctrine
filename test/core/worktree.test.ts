@@ -143,7 +143,16 @@ test("DBに対応のない worktree を孤児として報告する", async () =>
   await createWorktree({ repoPath: repo, worktreePath: known, branch: "doctrine/a", baseBranch: "main" });
   await createWorktree({ repoPath: repo, worktreePath: orphan, branch: "doctrine/b", baseBranch: "main" });
   const orphans = await findOrphans(repo, [known]);
-  assert.deepEqual(orphans, [orphan]);
+  // 孤児には DB 側のパスがないので、git が報告する実パスの表記で返る
+  // （macOS の tmpdir は /var -> /private/var の symlink 配下にある）。
+  assert.deepEqual(orphans, [await realpath(orphan)]);
+});
+
+test("createWorktree は DB に保存する表記として実パスを返す", async () => {
+  const wt = join(root, "wt", "t1");
+  const created = await createWorktree({ repoPath: repo, worktreePath: wt, branch: "doctrine/t1-x", baseBranch: "main" });
+  assert.equal(created, await realpath(wt));
+  assert.deepEqual(await listWorktrees(repo), [created]);
 });
 
 test("stateDir は DOCTRINE_STATE_DIR を尊重する", () => {

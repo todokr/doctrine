@@ -366,12 +366,11 @@ async function tickOnce(ctx: DaemonContext): Promise<void> {
       workflow = withSetupStep(loaded, project.setup ?? undefined);
 
       // worktree はタスク作成時ではなく、実行枠が取れた瞬間に作る
-      worktreePath = task.worktree_path ?? worktreePathFor(project.path, task.id);
-      if (!task.worktree_path) {
-        await createWorktree({
-          repoPath: project.path, worktreePath, branch: task.branch, baseBranch: project.base_branch,
-        });
-      }
+      // DB には createWorktree が返す実パスを保存する（worktree.list が返す表記と揃える）
+      worktreePath = task.worktree_path ?? await createWorktree({
+        repoPath: project.path, worktreePath: worktreePathFor(project.path, task.id),
+        branch: task.branch, baseBranch: project.base_branch,
+      });
 
       await commitStepBoundary(ctx.db, { taskId: task.id, taskPatch: { worktree_path: worktreePath } });
     } catch (e) {
