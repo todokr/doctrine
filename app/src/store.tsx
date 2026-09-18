@@ -4,12 +4,14 @@ import {
   useEffect,
   useReducer,
   useRef,
+  useState,
   type Dispatch,
   type ReactNode,
 } from "react";
 import { connectionStatus, onConnection, onDaemonEvent, rpc } from "./daemon/client";
 import { reduce, toProject, toTask, type Action, type State } from "./model";
 import { createRefreshGate } from "./refreshGate";
+import { settleListeners } from "./settleListeners";
 import type { Draft } from "./types";
 
 // 送信前の下書きは閉じても消さない。spec ではアプリのデータディレクトリに置くが、localStorage で代える
@@ -54,7 +56,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   // 取り直しは同時に何本も走る（イベント・15秒・再接続）。古い応答が
   // 新しい応答の後に届くと、画面が一度古い状態に巻き戻る。
   // 最後に始めた1本だけが反映してよい（ロジック自体は refreshGate.ts でテスト済み）
-  const refreshGate = useRef(createRefreshGate()).current;
+  const [refreshGate] = useState(() => createRefreshGate());
 
   useEffect(() => {
     let alive = true;
@@ -85,15 +87,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     async function subscribe() {
       // 先に購読を張り終える。状態の問い合わせを先にすると、その隙間に起きた
       // 接続の変化を取りこぼす
-      const listeners = await Promise.all([
+      const { registered, failedCount } = await settleListeners([
         onConnection((conn) => {
           dispatch({ type: "connection", conn });
           // 再接続したら取り直す。これがイベントの取りこぼしを吸収する
           if (conn.status === "connected") void refresh();
         }),
         onDaemonEvent((ev) => {
-          // 知らないタスクのイベントは、まだ持っていないタスクが動いたということ。
-          // reducer は純関数なので取得できない。ここで取り直す
+          // task_id を持たない ServerEvent は今のところ無い（将来のための備え）。
+          // まだ持っていないタスクの task_id が来たら、reducer は純関数で
+          // そのタスクを持っていないので、ここで取り直す
           if ("task_id" in ev && !latest.current.tasks.some((t) => t.id === ev.task_id)) {
             void refresh();
             return;
@@ -102,10 +105,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         }),
       ]);
       if (!alive) {
-        for (const off of listeners) off();
+        for (const off of registered) off();
         return;
       }
-      unlisteners = listeners;
+      // 片方だけ失敗しても、登録できたぶんは必ず後片付けの対象にする。
+      // 取りこぼしても 15 秒の取り直しが拾うので、ここで止めはしない
+      unlisteners = registered;
+      if (failedCount > 0) {
+        dispatch({
+          type: "toast",
+          message: "イベントの購読に失敗しました。15秒ごとの取り直しだけで動きます",
+        });
+      }
 
       // Rust は WebView が用意できる前に接続を終えている。そのときの
       // daemon-connection は誰も聞いていないので、ここで追いつく。
