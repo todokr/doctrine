@@ -6,11 +6,11 @@ import { GuidePanel, StepView } from "./Guide";
 
 export function Crumbs({ t }: { t: Task }) {
   const { s } = useStore();
-  const p = s.projects.find((x) => x.id === t.project)!;
+  const p = s.projects.find((x) => x.id === t.project);
   return (
     <div className="crumbs">
-      <span className="pjdot" style={{ background: p.color }} />
-      <span>{p.id}</span>
+      {p && <span className="pjdot" style={{ background: p.color }} />}
+      <span>{p?.id ?? t.project}</span>
       <span className="mono">{t.wf}</span>
       <span className="mono">{t.id}</span>
       <span className="mono">P{t.prio}</span>
@@ -118,7 +118,7 @@ export function ReviewView({ t }: { t: Task }) {
 
         <div className="headrow">
           <b>変更</b>
-          <span className="hint">{t.diff.length} ファイル · ベースブランチとの merge-base から worktree の現在まで（未コミットを含む）</span>
+          <span className="hint">diff の取得はまだありません（<span className="mono">task.diff</span> は #44）</span>
           <span className="spacer" />
           {hasSince && (
             <span className="seg" role="group" aria-label="差分の範囲">

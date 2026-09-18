@@ -47,13 +47,16 @@ export function StateIcon({ t }: { t: Task }) {
 
 function Item({ t }: { t: Task }) {
   const { s, dispatch } = useStore();
-  const p = s.projects.find((x) => x.id === t.project)!;
+  const p = s.projects.find((x) => x.id === t.project);
   return (
     <button className="it" aria-current={s.sel === t.id} onClick={() => dispatch({ type: "select", id: t.id })}>
       <span className="ico"><StateIcon t={t} /></span>
       <span className="t">{t.title}</span>
       <span className="m">
-        <span className="pj"><span className="pjdot" style={{ background: p.color }} />{p.id}</span>
+        <span className="pj">
+          <span className="pjdot" style={{ background: p?.color ?? "#666" }} />
+          {p?.id ?? t.project}
+        </span>
         <span className="tm">{timeLabel(t, s.now)}</span>
       </span>
     </button>
@@ -95,7 +98,6 @@ export function Sidebar() {
         )}
         {count === 0 && <p className="hint" style={{ padding: 8 }}>ありません</p>}
       </div>
-      <div className="side-foot"><span>5時間 <b>62%</b></span><span>7日 <b>38%</b></span><span>17:40 リセット</span></div>
     </aside>
   );
 }

@@ -174,6 +174,8 @@ export function toTask(
     worktree: row.worktree_path,
     state: row.state,
     step: row.current_step_id,
+    // 本当の試行回数は task.list の attempt_counts から作る必要があるが、それは別issue。
+    // ここでは常に1を入れる代わりに、UI 側は t.attempt を表示に使わない（使うと常に「1回目」になる）
     attempt: 1,
     prio: row.priority,
     // 「待ち始めた時刻」の記録は #43。それまでは最後に動いた時刻で代える
@@ -186,6 +188,19 @@ export function toTask(
     // has_degraded だけではどのステップか分からないので、分からないと書く
     degraded: row.has_degraded ? (previous?.degraded ?? DEGRADED_UNKNOWN) : undefined,
   };
+}
+
+// ---------------------------------------------------------------- daemon イベントの検証
+const TASK_STATES: ReadonlySet<TaskState> = new Set([
+  "queued", "running", "suspended", "paused", "completed", "failed", "canceled",
+]);
+/**
+ * protocol.ts の ServerEvent#to はデーモン側の都合で単なる string。
+ * 知らない文字列がそのまま Task.state に入ると STATE_PILL[t.state] のような
+ * 総称でないルックアップが undefined を引いて画面が壊れるので、境界で弾く。
+ */
+function isTaskState(x: string): x is TaskState {
+  return (TASK_STATES as ReadonlySet<string>).has(x);
 }
 
 // ---------------------------------------------------------------- 状態
@@ -357,10 +372,11 @@ export function reduce(s: State, a: Action): State {
       // デーモンが先に増えてもここで落ちない
       if (ev.event === "task.stateChanged") {
         if (!s.tasks.some((x) => x.id === ev.task_id)) return s;
+        if (!isTaskState(ev.to)) return s; // 知らない state 文字列は無視する
         return {
           ...s,
           now: a.now,
-          tasks: updateTask(s, ev.task_id, { state: ev.to as TaskState, since: a.now }),
+          tasks: updateTask(s, ev.task_id, { state: ev.to, since: a.now }),
         };
       }
       if (ev.event === "stepRun.started") {

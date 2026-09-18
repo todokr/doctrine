@@ -93,8 +93,6 @@ button{cursor:pointer}
 .xmark{width:12px;height:12px;border-radius:50%;background:var(--ink-3)}
 @keyframes spin{to{transform:rotate(360deg)}}
 @media (prefers-reduced-motion:reduce){.spin{animation:none}}
-.side-foot{border-top:1px solid var(--line);padding:7px 12px;color:var(--ink-3);font-size:11px;display:flex;gap:10px;flex-wrap:wrap;font-variant-numeric:tabular-nums}
-.side-foot b{color:var(--ink-2);font-weight:500;font-family:var(--mono)}
 
 /* main */
 .main{overflow-y:auto;min-height:0;display:flex;flex-direction:column}
