@@ -67,22 +67,15 @@ type ReviewBase = {
   reviewTree: string | null;
 };
 
-/**
- * レビュー1回。**状態ごとに持つものが違う**ので判別ユニオンにする。
- *
- * 1つの形にまとめると「待機中の endedAt は null」「承認の comment は空文字」という
- * 取り決めを型の外に置くことになり、読む側はそれを覚えて守らなければならなくなる。
- * 待機中の回に決定時刻は存在せず、承認にコメントは存在しない — 無いものを
- * null や空文字で埋めるのではなく、フィールドごと持たせない。
- */
+/** レビュー1回。 */
 type ReviewEntry =
-  /** まだ人が見ていない。決定時刻もコメントも無い。 */
+  /** まだ人が見ていない。 */
   | (ReviewBase & { status: "awaiting" })
-  /** 承認された。却下と違いコメントは取らない（task.approve は comment を受けない）。 */
+  /** 承認された。`task.approve` は comment を受けないので、承認にコメントは無い。 */
   | (ReviewBase & { status: "approved"; endedAt: string })
-  /** 却下された。コメントは必ずある（task.reject はコメント必須）。 */
+  /** 却下された。`task.reject` はコメント必須なので、必ずある。 */
   | (ReviewBase & { status: "rejected"; endedAt: string; comment: string })
-  /** 人の決定を待たずに外から閉じられた（cancel / resume）。コメントは無い。 */
+  /** 人の決定を待たずに外から閉じられた（`task.cancel` / `task.resume`）。 */
   | (ReviewBase & { status: "interrupted"; endedAt: string });
 
 type CommandResult = {
@@ -198,16 +191,12 @@ export const MAX_REVIEW_FILE_BYTES = 64 * 1024;
 
 export type ReviewFileStatus = "ok" | "missing" | "too_large" | "outside_worktree" | "binary";
 
-/**
- * 宣言されたファイル1件の読み出し結果。`ReviewEntry` と同じ理由で判別ユニオンにする
- * （`content` は ok のときだけ、`size` は実在したときだけ、という取り決めを
- * 型の外に置かない）。`path` は常に宣言されたとおりの worktree 相対パス。
- */
+/** 宣言されたファイル1件の読み出し結果。`path` は常に宣言されたとおりの worktree 相対パス。 */
 export type ReviewFile =
   | { path: string; status: "ok"; content: string; size: number }
   /** そこに無い。読もうとして予期しない I/O エラーになった場合もここに倒す。 */
   | { path: string; status: "missing" }
-  /** 実在するが 64KB を超えた。中身は返さないが、大きさは判断材料になるので返す。 */
+  /** 実在するが 64KB を超えた。中身は返さず、大きさだけ返す。 */
   | { path: string; status: "too_large"; size: number }
   /** realpath が worktree の外を指した。中身も大きさも読まない。 */
   | { path: string; status: "outside_worktree" }
@@ -349,10 +338,10 @@ export type Task = {
 すべて「ありません」に潰している。これを直すのが status を足す意味なので、
 status ごとの文言を出し分ける。
 
+doctrine はファイルの中身を理解しないが、「なぜ出せないか」は知っている。それは
+人に伝える価値がある。
+
 ```tsx
-// doctrine はファイルの中身を理解しないが、「なぜ出せないか」は知っている。
-// それは人に伝える価値がある。ユニオンを switch で網羅するので、status を
-// 足したときに書き忘れると型検査が落ちる。
 function FileBody({ file }: { file: ReviewFile | undefined }) {
   if (!file) return <p className="hint">(このステップは宣言していますが、まだ読めていません)</p>;
   switch (file.status) {
@@ -370,8 +359,9 @@ function FileBody({ file }: { file: ReviewFile | undefined }) {
 }
 ```
 
-`size` を持つ枝でだけ大きさを併記できるのがユニオンにした効き目である
-（`missing` に「0 バイト」と書いてしまう余地が無い）。
+ユニオンを `switch` で網羅するので、後から status を足したときに書き忘れると型検査が
+落ちる。また `size` を持つ枝でだけ大きさを併記でき、`missing` に「0 バイト」と
+書いてしまう余地が無い。
 
 ## 9. テスト
 
