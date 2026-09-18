@@ -1,5 +1,5 @@
 import { ago, canReject, clock, currentStep, diffStats, draftOf, filesFor } from "../model";
-import { useNotYet, useStore } from "../store";
+import { useDecide, useNotYet, useStore } from "../store";
 import type { Task } from "../types";
 import { DiffFileBlock, fileAnchor } from "./DiffFileBlock";
 import { GuidePanel, StepView } from "./Guide";
@@ -97,6 +97,7 @@ function Diff({ t }: { t: Task }) {
 
 export function ReviewView({ t }: { t: Task }) {
   const { s, dispatch } = useStore();
+  const decide = useDecide();
   const draft = draftOf(s, t.id);
   const scope = s.scope[t.id] ?? "all";
   const hasSince = t.reviews.length > 0 && t.diff.some((f) => f.since);
@@ -138,7 +139,15 @@ export function ReviewView({ t }: { t: Task }) {
         </div>
         <div className="actions">
           <button className="btn danger" disabled={!canReject(draft)} onClick={() => dispatch({ type: "reject.preview" })}>差し戻す…</button>
-          <button className="btn primary" onClick={() => dispatch({ type: "approve" })}>承認する</button>
+          <button
+            className="btn primary"
+            onClick={() => {
+              decide.approve(t.id);
+              dispatch({ type: "approve" });
+            }}
+          >
+            承認する
+          </button>
         </div>
       </footer>
     </>

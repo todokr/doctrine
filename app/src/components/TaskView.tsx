@@ -1,5 +1,5 @@
 import { ago, elapsed, isTerminal } from "../model";
-import { useNotYet, useStore } from "../store";
+import { useDecide, useNotYet, useStore } from "../store";
 import type { Task, TaskState } from "../types";
 import { Crumbs, OpenInEditor } from "./ReviewView";
 
@@ -16,6 +16,7 @@ const STATE_PILL: Record<TaskState, [string, string]> = {
 
 export function TaskView({ t }: { t: Task }) {
   const { s, dispatch } = useStore();
+  const decide = useDecide();
   const notYet = useNotYet();
 
   const [stateName, stateCls] = STATE_PILL[t.state];
@@ -67,7 +68,17 @@ export function TaskView({ t }: { t: Task }) {
       )}
 
       <div className="actions">
-        {!isTerminal(t.state) && <button className="btn danger" onClick={() => dispatch({ type: "cancel" })}>中止</button>}
+        {!isTerminal(t.state) && (
+          <button
+            className="btn danger"
+            onClick={() => {
+              decide.cancel(t.id);
+              dispatch({ type: "cancel" });
+            }}
+          >
+            中止
+          </button>
+        )}
         {t.worktree && (
           <>
             <OpenInEditor />

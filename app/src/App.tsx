@@ -1,16 +1,26 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ConnectionBanner } from "./components/ConnectionBanner";
 import { fileAnchor } from "./components/DiffFileBlock";
 import { ReviewView } from "./components/ReviewView";
 import { Rail, Sidebar } from "./components/Sidebar";
 import { TaskView } from "./components/TaskView";
 import { composeRejection, currentStep, draftOf, filesFor, selectedTask } from "./model";
-import { useStore } from "./store";
+import { useDecide, useStore } from "./store";
 
 function RejectModal() {
   const { s, dispatch } = useStore();
+  const decide = useDecide();
   const t = selectedTask(s);
+  // モーダルが開いている間だけ「送信済み」を保つ。同じタスクをもう一度差し戻す
+  // ときは新たに開き直すので、モーダルの開閉に合わせてリセットしてよい
+  const [sent, setSent] = useState(false);
+  useEffect(() => {
+    if (s.modal !== "reject-preview") setSent(false);
+  }, [s.modal]);
   if (s.modal !== "reject-preview" || !t) return null;
+  // reject.confirm は下書きをクリアするので、送る前にここで読んでおく
+  // （dispatch の後に読むと、消えた下書きから空文字を送ってしまう）
+  const comment = composeRejection(draftOf(s, t.id));
   return (
     <>
       <div className="scrim" onClick={() => dispatch({ type: "modal.close" })} />
@@ -21,9 +31,19 @@ function RejectModal() {
           <span className="mono">task.reject(comment)</span> で送ります。
           戻り先のステップはワークフローの <span className="mono">onReject.goto</span> が決めます。
         </p>
-        <pre className="block">{composeRejection(draftOf(s, t.id))}</pre>
+        <pre className="block">{comment}</pre>
         <div className="actions">
-          <button className="btn danger" onClick={() => dispatch({ type: "reject.confirm" })}>差し戻す</button>
+          <button
+            className="btn danger"
+            disabled={sent}
+            onClick={() => {
+              setSent(true);
+              decide.reject(t.id, comment);
+              dispatch({ type: "reject.confirm" });
+            }}
+          >
+            差し戻す
+          </button>
           <button className="btn" onClick={() => dispatch({ type: "modal.close" })}>戻る</button>
         </div>
       </div>

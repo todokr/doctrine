@@ -166,6 +166,29 @@ export function useStore() {
   return v;
 }
 
+/**
+ * 判断をデーモンへ送る。画面の状態はここで書き換えない。
+ * デーモンが決めた結果は task.stateChanged と取り直しで返ってくる（呼び出し側で
+ * dispatch する approve / reject.confirm / cancel はドラフトのクリアなどの
+ * UI 上の後始末だけを行う）。失敗しても投げっぱなしにはせず、トーストで知らせる。
+ */
+export function useDecide() {
+  const { dispatch } = useStore();
+  const send = (p: Promise<unknown>, failed: string) => {
+    p.catch((e: unknown) => {
+      dispatch({ type: "toast", message: `${failed}: ${String(e)}` });
+    });
+  };
+  return {
+    approve: (taskId: string) =>
+      send(rpc("task.approve", { task_id: taskId }), "承認を送れませんでした"),
+    reject: (taskId: string, comment: string) =>
+      send(rpc("task.reject", { task_id: taskId, comment }), "差し戻しを送れませんでした"),
+    cancel: (taskId: string) =>
+      send(rpc("task.cancel", { task_id: taskId }), "中止を送れませんでした"),
+  };
+}
+
 /** 第2段階に回した操作のボタンが押されたときに出す */
 export function useNotYet() {
   const { dispatch } = useStore();
