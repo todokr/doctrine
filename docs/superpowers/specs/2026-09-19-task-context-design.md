@@ -266,35 +266,27 @@ issue の但し書きは「ログの NDJSON を UI に解釈させない。ア�
 その規約を名前で明示する。
 
 - マイグレーション `0004_step_outputs_last_names` で `stdout` → `last_stdout`、
-  `stderr` → `last_stderr` に改名する（`ALTER TABLE ... RENAME COLUMN`。
-  制約に関わらない列なのでテーブル再構築は要らない）
+  `stderr` → `last_stderr` に改名する。制約に関わらない列なので
+  `ALTER TABLE ... RENAME COLUMN` 2行で済み、テーブル再構築は要らない
+  （マイグレーションを足すのは利用者のための互換ではなく、開発中の手元の DB を
+  作り直さずに済ませるため）
 - テンプレート変数も `{{ steps.<id>.last_stdout }}` / `{{ steps.<id>.last_stderr }}` に
   改名する。`exitCode` は据え置く（終了コードに「最新」という含みを持たせる対象ではない）
 - `last_` が指すのは**読み出し側**の性質である。行そのものは「その回の出力」であって
   最後ではない。`src/db/schema.ts` にこの旨のコメントを置く
 
-### 互換性
+### 移行のための仕掛けは作らない
 
-これは利用者が書いたワークフロー YAML を壊す変更である。`{{ steps.review.stdout }}` は
-README のサンプルにも書かれている。
+doctrine にはまだ利用者がいない。外に出回っているワークフロー YAML は無いので、
+旧名を別名として残すことも、旧名を名指しするエラーを用意することもしない。
+**名前を変えて、リポジトリ内の参照を全部書き換えて終わり**である。
 
-**黙って空文字を渡すのではなく、旧名を名指しして落とす。**
+旧名は `STEP_FIELDS` から消えるので、書き残しがあれば既存の「ステップ出力の
+フィールドは ... のみです」というエラーで落ちる。
 
-```
-{{ steps.review.stdout }}: stdout は last_stdout に変わりました（stderr も last_stderr です）
-```
-
-`expand` はステップ実行の前に走り、`TemplateError` はワークフロー作者に見せる失敗
-として既に扱われている（`runTask` が伝播させ、`tick` が failed に倒して警告に残す）。
-新しい配線は要らない。
-
-書き換えが要る箇所: `README.md`、`docs/superpowers/specs/2026-09-12-agent-orchestrator-core-design.md`、
+書き換えが要る箇所（`grep -rn 'steps\.[a-z-]*\.\(stdout\|stderr\)'` で洗い出せる）:
+`README.md`、`docs/superpowers/specs/2026-09-12-agent-orchestrator-core-design.md`、
 既存のテスト。
-
-#### 採らなかった案
-
-- **旧名を別名として残す**: 移行は楽だが、「最新を指す」ことを名前で明示するという
-  改名の目的がそのまま失われる。2つの名前が同じものを指す状態が恒久的に残る
 
 ## 8. UI 側の型（`app/src/types.ts`）
 
@@ -371,7 +363,7 @@ function FileBody({ file }: { file: ReviewFile | undefined }) {
 | `test/core/reviewFiles.test.ts`（新規） | 本文が返る / 無いファイルが `missing` / 64KB 超が `too_large` で中身を返さない / **worktree 外を指すシンボリックリンクが `outside_worktree`** / 非 UTF-8 が `binary` / `/w/task-evil` が `/w/task` の配下と誤判定されない / 1件の失敗が他を巻き込まない |
 | `test/daemon/handlers.test.ts` | `task.context` が5つとも返す / 承認待ちでないタスクでも呼べて `reviewFiles` が空 / 定義から消えたステップがあっても失敗しない / 待機中の回に `endedAt` の**キーが存在しない**（null が入っているのではない） / 却下の回に `comment` がある / 想定外の `step_runs.status` が来たら例外になる |
 | `test/db/migrate.test.ts` | `0004` で列が改名され、既存の値が残る |
-| `test/workflow/template.test.ts` | 新しい名前が展開される / 旧名が名指しのエラーで落ちる |
+| `test/workflow/template.test.ts` | 新しい名前が展開される |
 | `test/integration/` | 計画を `.doctrine-out/plan.md` に書かせるワークフローで、approval の時点で `task.context` から計画の本文が取れる（**完了条件1**） / 2回差し戻したタスクで両方のレビューが返る（**完了条件2**） |
 | `app/` （`deno task check` 相当の型検査） | `reviewFiles` の型を変えた後も `ReviewView.tsx` と `mock.ts` が通る |
 
