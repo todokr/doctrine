@@ -162,12 +162,9 @@ export type RecoveryResult =
  * 中断された時点で running のまま残っている step_runs 行を閉じる
  * （taskId につき「最後の running 行」を1つだけ、あれば）。
  *
- * 本来の正直な値は「失敗ではなく中断された」ことを表す別の status
- * （例えば "interrupted"）だが、step_runs の status は CHECK 制約で固定されている。
- * マイグレーション機構（src/db/migrations.ts）は入ったので足すこと自体はできるが、
- * SQLite で CHECK 制約を変えるにはテーブル再構築が要り、別の変更として扱う。
- * それまでは "failed" + ended_at を入れる。running のまま放置する（＝「まだ
- * 実行中」という明確な嘘を残す）よりはましと判断する。
+ * 承認待ちの行は status が awaiting であり running ではないので、ここには
+ * 掛からない。人を待っている最中のレビューを、デーモンの再起動だけで閉じては
+ * ならない（待ち始めた時刻が失われる）。
  *
  * running の行が無ければ何もしない（呼び出し側はこれをエラー扱いしない）。
  */
@@ -181,7 +178,7 @@ async function closeDanglingStepRun(
   return {
     stepRunUpdate: {
       id: dangling.id,
-      status: "failed",
+      status: "interrupted",
       exit_code: null,
       ended_at: new Date().toISOString(),
     },
