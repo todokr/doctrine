@@ -30,12 +30,50 @@ const IDENTITY = {
  * 作業中のステージング状態を doctrine が書き換えてはいけない）。
  * `.doctrine-out/` は .git/info/exclude によって最初から入らない。
  */
+/**
+ * HEAD が解決できるか（＝コミットが1つ以上あるか）。最初のコミットがまだ無い
+ * リポジトリでは read-tree HEAD が失敗するので、その前に確かめる。
+ */
+async function hasHead(
+  worktreePath: string,
+  opts: { env: Record<string, string>; clearEnv: boolean },
+): Promise<boolean> {
+  try {
+    await runCommand("git", ["-C", worktreePath, "rev-parse", "--verify", "HEAD"], opts);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function captureTree(worktreePath: string): Promise<string> {
   const dir = await Deno.makeTempDir({ prefix: "doctrine-index-" });
   try {
-    const env = { ...Deno.env.toObject(), GIT_INDEX_FILE: join(dir, "index") };
-    await runCommand("git", ["-C", worktreePath, "add", "-A"], { env });
-    const { stdout } = await runCommand("git", ["-C", worktreePath, "write-tree"], { env });
+    // デーモンの環境に GIT_DIR / GIT_WORK_TREE が入っていると、-C worktreePath が
+    // 効かなくなって**別のリポジトリ**のツリーを記録してしまう。env に渡したものだけを
+    // 環境にして（clearEnv）、この2つを確実に落とす。
+    const env: Record<string, string> = {
+      ...Deno.env.toObject(),
+      GIT_INDEX_FILE: join(dir, "index"),
+    };
+    delete env.GIT_DIR;
+    delete env.GIT_WORK_TREE;
+    const opts = { env, clearEnv: true };
+
+    // 空のインデックスに対する `git add -A` は「ignore されていないファイルを足す」
+    // でしかないので、HEAD に入っているが .gitignore に一致するファイル
+    // （git add -f で追跡させたビルド生成物など）や sparse-checkout のコーン外の
+    // ファイルが落ちる。HEAD からインデックスを起こしてから -A することで、
+    // 「worktree に実際にあるもの」（spec 5.1）を落とさずに記録できる。
+    // 副次的に stat キャッシュが効き、大きな worktree でも全ファイルを
+    // 再ハッシュせずに済む（approval への遷移が止まる時間が縮む）。
+    //
+    // 最初のコミットがまだ無いリポジトリでは HEAD が無いので read-tree は省く。
+    if (await hasHead(worktreePath, opts)) {
+      await runCommand("git", ["-C", worktreePath, "read-tree", "HEAD"], opts);
+    }
+    await runCommand("git", ["-C", worktreePath, "add", "-A"], opts);
+    const { stdout } = await runCommand("git", ["-C", worktreePath, "write-tree"], opts);
     return stdout.trim();
   } finally {
     await Deno.remove(dir, { recursive: true }).catch(() => {});

@@ -1,9 +1,10 @@
 import { afterEach, test } from "@std/testing/bdd";
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { captureTree, releaseTrees, retainTree, reviewRefName } from "../../src/core/reviewTree.ts";
+import { ensureDoctrineOutExcluded } from "../../src/core/worktree.ts";
 import { runCommand } from "../../src/util/exec.ts";
 import { makeRepo } from "../helpers/repo.ts";
 
@@ -29,6 +30,34 @@ test("ツリーには未コミットの変更と未追跡のファイルが入�
   assert.deepEqual(stdout.trim().split("\n").sort(), ["a.txt", "new.txt"]);
   const { stdout: content } = await runCommand("git", ["-C", r, "show", `${tree}:a.txt`]);
   assert.equal(content, "2\n");
+});
+
+test("追跡済みだが .gitignore に一致するファイルもツリーに入る", async () => {
+  const root = await mkdtemp(join(tmpdir(), "doctrine-tree-"));
+  roots.push(root);
+  const r = await makeRepo(root, { ".gitignore": "dist/\n", "a.txt": "1\n" });
+  // git add -f で追跡させたビルド生成物。worktree に実際にあり、HEAD にも入っている。
+  await mkdir(join(r, "dist"), { recursive: true });
+  await writeFile(join(r, "dist", "out.js"), "built\n");
+  await runCommand("git", ["-C", r, "add", "-f", "dist/out.js"]);
+  await runCommand("git", ["-C", r, "commit", "-m", "add dist"]);
+
+  const tree = await captureTree(r);
+
+  const { stdout } = await runCommand("git", ["-C", r, "ls-tree", "-r", "--name-only", tree]);
+  assert.deepEqual(stdout.trim().split("\n").sort(), [".gitignore", "a.txt", "dist/out.js"]);
+});
+
+test(".doctrine-out/ は .git/info/exclude によってツリーに入らない", async () => {
+  const r = await repo();
+  await ensureDoctrineOutExcluded(r);
+  await mkdir(join(r, ".doctrine-out"), { recursive: true });
+  await writeFile(join(r, ".doctrine-out", "plan.md"), "計画\n");
+
+  const tree = await captureTree(r);
+
+  const { stdout } = await runCommand("git", ["-C", r, "ls-tree", "-r", "--name-only", tree]);
+  assert.deepEqual(stdout.trim().split("\n").sort(), ["a.txt"]);
 });
 
 test("worktree の index は汚さない", async () => {
