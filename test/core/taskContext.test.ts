@@ -249,3 +249,34 @@ test("ワークフロー定義が引けなくても、経緯は返る", async ()
   assert.equal(ctx.lastAgentMessage, null);
   assert.deepEqual(ctx.reviewFiles, []);
 });
+
+test("ワークフロー定義が引けないとき、実行中の行は例外にもレビューにもしない", async () => {
+  // engine.ts は command/agent ステップでも current_step_id を書き換えるので、
+  // 定義が無いと「今のステップの行」に running の command/agent が混ざり得る。
+  const db = await fixture();
+  await db.updateTable("tasks").set({ state: "running", current_step_id: "test" })
+    .where("id", "=", "t1").execute();
+  await run(db, { stepId: "test", status: "running", endedAt: null });
+
+  const ctx = await buildTaskContext(db, (await getTask(db, "t1"))!, null);
+  assert.deepEqual(ctx.reviews, []);
+});
+
+test("ワークフロー定義が引けないとき、同じステップidに実行中の行と本物のレビュー行が混ざっても拾うのはレビューらしい status だけ", async () => {
+  const db = await fixture();
+  await db.updateTable("tasks").set({ state: "suspended", current_step_id: "review" })
+    .where("id", "=", "t1").execute();
+  await run(db, {
+    stepId: "review",
+    status: "success",
+    outputs: { last_stdout: "", last_stderr: "", exit_code: 0 },
+  });
+  await run(db, { stepId: "review", status: "awaiting", attempt: 2, endedAt: null });
+
+  const ctx = await buildTaskContext(db, (await getTask(db, "t1"))!, null);
+  // status だけでは command の正常終了と approval の承認を区別できないので、
+  // 定義が無い以上ここまでが限界として両方拾う（ブリーフが許容する粗さ）。
+  assert.equal(ctx.reviews.length, 2);
+  assert.equal(ctx.reviews[0].status, "approved");
+  assert.equal(ctx.reviews[1].status, "awaiting");
+});

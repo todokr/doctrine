@@ -1,10 +1,13 @@
-import type { Db, StepRunRow } from "../db/schema.ts";
+import type { Db, StepRunRow, StepRunStatus } from "../db/schema.ts";
 import type { TaskRow } from "../db/tasks.ts";
 import { listStepOutputs, listStepRuns } from "../db/stepRuns.ts";
 import type { Step, Workflow } from "../workflow/schema.ts";
 import { readReviewFiles, type ReviewFile } from "./reviewFiles.ts";
 
 type StepOutputRow = { last_stdout: string; last_stderr: string; exit_code: number | null };
+
+/** approval 行が取り得る status（engine.ts:204 が awaiting で立て、以降この4つにしか遷移しない）。 */
+const REVIEW_STATUSES = new Set<StepRunStatus>(["awaiting", "success", "failed", "interrupted"]);
 
 type ReviewBase = {
   stepRunId: number;
@@ -59,9 +62,17 @@ export async function buildTaskContext(
   const runs = await listStepRuns(db, task.id);
   const outputs = await listStepOutputs(db, task.id);
 
-  // 定義が引けないときは、今止まっているステップの行だけをレビューとみなす。
+  // 定義が引けないときは、今止まっているステップの行だけをレビューとみなす。ただし
+  // engine.ts は command/agent ステップでも current_step_id を同じ値で書き換えるので、
+  // step_id が一致するだけでは approval 以外の running/degraded 行まで拾ってしまい、
+  // toReview の想定外 status 例外（本来は approval 行が壊れているときだけに使う）を
+  // 正常系で踏んでしまう。status を awaiting/success/failed/interrupted の4つに絞れば
+  // running と degraded は除外できる。success/failed は command の正常終了/異常終了とも
+  // 一致するため、定義が無い以上そこまでの紛れは残るが、経緯を返せなくするよりはよい。
   const isReview = (r: StepRunRow) =>
-    workflow ? types.get(r.step_id) === "approval" : r.step_id === task.current_step_id;
+    workflow
+      ? types.get(r.step_id) === "approval"
+      : r.step_id === task.current_step_id && REVIEW_STATUSES.has(r.status);
 
   return {
     prompt: task.prompt,
@@ -97,6 +108,11 @@ function toReview(r: StepRunRow, outputs: Map<number, StepOutputRow>): ReviewEnt
     case "interrupted":
       return { ...base, status: "interrupted", endedAt: closedAt(r) };
     default:
+      // toReview に渡るのは isReview を通った行だけ。workflow ありの経路では
+      // types.get(r.step_id) === "approval" で絞っているので、ここに来る時点で
+      // 「approval のはずの行に想定外の status」＝doctrine のバグ。workflow なしの
+      // 経路は REVIEW_STATUSES で status をこの4つに絞っているので、そもそも default
+      // には来ない。
       throw new Error(
         `レビューの記録に想定外の status があります: ${r.status}（step_run ${r.id}）`,
       );
