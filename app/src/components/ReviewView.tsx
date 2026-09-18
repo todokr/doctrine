@@ -108,6 +108,12 @@ function FileBody({ file }: { file: ReviewFile | undefined }) {
       return <p className="hint">(worktree の外を指しているため読みませんでした)</p>;
     case "binary":
       return <p className="hint">(テキストとして読めないため表示していません · {file.size} バイト)</p>;
+    default: {
+      // ReviewFile に variant が増えたのにここが未対応だと、tsc がここで落ちる。
+      const _exhaustive: never = file;
+      void _exhaustive;
+      return null;
+    }
   }
 }
 
