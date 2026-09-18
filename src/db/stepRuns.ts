@@ -12,6 +12,23 @@ export function getStepRun(db: Db, id: number): Promise<StepRunRow | undefined> 
 }
 
 /**
+ * 承認待ちのステップ実行（approval が suspended に入った時点で立てた行）。
+ * タスクが suspended なら、この行がちょうど1件ある。
+ */
+export function getAwaitingStepRun(
+  db: Db,
+  taskId: string,
+  stepId: string,
+): Promise<StepRunRow | undefined> {
+  return db.selectFrom("step_runs").selectAll()
+    .where("task_id", "=", taskId)
+    .where("step_id", "=", stepId)
+    .where("status", "=", "awaiting")
+    .orderBy("id desc")
+    .executeTakeFirst();
+}
+
+/**
  * 変数展開に渡す形（exitCode は文字列。テンプレートは文字列しか返さない）。
  *
  * step_outputs は実行1回ごとに1行あるので、ステップidごとに**最新の実行**

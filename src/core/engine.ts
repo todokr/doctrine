@@ -2,7 +2,8 @@ import type { Branch, Workflow } from "../workflow/schema.ts";
 import { branchOf } from "../workflow/schema.ts";
 import { expand, type TemplateContext } from "../workflow/template.ts";
 import { commitStepBoundary, StateConflictError, type StepBoundary } from "../db/boundary.ts";
-import { getStepOutputs, type StepRunStatus } from "../db/stepRuns.ts";
+import { getAwaitingStepRun, getStepOutputs, type StepRunStatus } from "../db/stepRuns.ts";
+import { captureTree, retainTree } from "./reviewTree.ts";
 import {
   attemptCount,
   getProject,
@@ -78,6 +79,11 @@ export type EngineDeps = RunnerDeps & {
     stepId: string,
     status: StepRunStatus,
   ): void;
+  /**
+   * ワークフローは止めないが人に見せるべきこと（レビュー時点のツリーを記録できな
+   * かった等）。デーモンは ctx.warnings に積む。
+   */
+  onWarning?(taskId: string, message: string): void;
 };
 
 async function contextFor(db: Db, task: TaskRow): Promise<TemplateContext> {
@@ -156,11 +162,74 @@ export async function runTask(
     }
 
     if (step.type === "approval") {
-      await setState(db, task, "suspended", deps, {
-        current_step_id: step.id,
-        child_pid: null,
-        child_started_at: null,
-      });
+      // ここから「レビュー1回」が始まる。待ち始めた時刻・そのときのツリーを
+      // 決定時ではなく今の時点で記録する（決定時に作る行は待ち時間を常に0にする）。
+      //
+      // ツリーは判断材料であって承認そのものではないので、取れなくても止めない
+      // （spec 5.3）。欠けるのは次の差し戻しで「前回レビュー以降」が引けないことだけ。
+      let reviewTree: string | null = null;
+      if (task.worktree_path) {
+        try {
+          reviewTree = await captureTree(task.worktree_path);
+        } catch (e) {
+          deps.onWarning?.(
+            taskId,
+            `レビュー時点のツリーを記録できませんでした: ${(e as Error).message}`,
+          );
+        }
+      }
+
+      assertTransition(task.state, "suspended");
+      let stepRunId: number | null;
+      try {
+        stepRunId = await commitStepBoundary(db, {
+          taskId,
+          requireState: "running",
+          taskPatch: {
+            state: "suspended",
+            current_step_id: step.id,
+            // approval も他のステップと同じく「開始時」に attempt を進める。
+            // applyApproval はこの数をそのまま decide へ渡す。
+            attempt_counts: withAttempt(task, step.id),
+            child_pid: null,
+            child_started_at: null,
+          },
+          stepRun: {
+            step_id: step.id,
+            attempt: attemptCount(task, step.id) + 1,
+            status: "awaiting",
+            exit_code: null,
+            started_at: new Date().toISOString(),
+            ended_at: null,
+            // 人の判断にログファイルは無い。
+            log_path: "",
+            review_tree: reviewTree,
+          },
+        });
+      } catch (e) {
+        if (e instanceof StateConflictError) return;
+        throw e;
+      }
+      deps.onStateChanged?.(taskId, task.state, "suspended");
+
+      // 参照は step_run の id を名前に持つので、行を書いた後でしか張れない。
+      // この隙間で落ちるとツリーが gc に刈られ得るが、そのとき欠けるのは基準点
+      // だけで、レビューそのものは回る（spec 5.2）。
+      if (reviewTree !== null && stepRunId !== null) {
+        try {
+          await retainTree({
+            worktreePath: task.worktree_path!,
+            taskId,
+            stepRunId,
+            tree: reviewTree,
+          });
+        } catch (e) {
+          deps.onWarning?.(
+            taskId,
+            `レビュー時点のツリーの参照を張れませんでした: ${(e as Error).message}`,
+          );
+        }
+      }
       return;
     }
 
@@ -331,6 +400,14 @@ export async function applyApproval(
   }
   const now = new Date().toISOString();
 
+  // 「suspended なら awaiting の行がちょうど1件ある」は runTask と 0003 の
+  // マイグレーションが保つ不変条件。無ければ記録が壊れている。ここで started_at =
+  // now の行を作って取り繕うと、待ち時間0という嘘を記録に残すことになる。
+  const awaiting = await getAwaitingStepRun(db, taskId, stepId);
+  if (!awaiting) {
+    throw new Error(`承認待ちのステップ実行がありません: ${taskId} / ${stepId}`);
+  }
+
   if (verdict.approved) {
     const next = workflow.steps[index + 1];
     const to: TaskState = next ? "queued" : "completed";
@@ -343,32 +420,21 @@ export async function applyApproval(
       taskPatch: next
         ? { state: "queued", current_step_id: next.id, resumed: 1 }
         : { state: "completed" },
-      stepRun: {
-        step_id: stepId,
-        attempt: attemptCount(task, stepId) + 1,
-        status: "success",
-        exit_code: 0,
-        started_at: now,
-        ended_at: now,
-        log_path: "",
-      },
+      stepRunUpdate: { id: awaiting.id, status: "success", exit_code: 0, ended_at: now },
       outputs: { stdout: "", stderr: "", exit_code: 0 },
     });
     return;
   }
 
   // 却下は onFailure と同じ「失敗して分岐する」ケースであり、goto/maxAttempts の
-  // 判断はここで作り直さず decide に委ねる。attemptCount(task, stepId) + 1 は
-  // このコミットで attempt_counts に書く値そのものであり、decide に渡す attempts と
-  // 一致させる（この数がそのまま maxAttempts と比較される数、かつ step_runs に
-  // 記録される attempt になる）。
-  const advancedAttempt = attemptCount(task, stepId) + 1;
-  const advancedAttemptCounts = withAttempt(task, stepId);
+  // 判断はここで作り直さず decide に委ねる。attempt は suspended に入った時点で
+  // 既に進んでいるので、attemptCount がそのまま maxAttempts と比較される数であり、
+  // かつ awaiting の行に記録されている attempt と一致する。
   const decision = decide({
     workflow,
     currentStepId: stepId,
     outcome: "failed",
-    attempts: advancedAttempt,
+    attempts: attemptCount(task, stepId),
   });
 
   // {{ steps.review.stdout }} は却下コメントを指す。DBへ書く前に、これから書く値を
@@ -387,18 +453,9 @@ export async function applyApproval(
         state: "queued",
         current_step_id: decision.stepId,
         resumed: 1,
-        attempt_counts: advancedAttemptCounts,
         pending_feed: decision.feed ? expand(decision.feed, ctx) : null,
       },
-      stepRun: {
-        step_id: stepId,
-        attempt: advancedAttempt,
-        status: "failed",
-        exit_code: 1,
-        started_at: now,
-        ended_at: now,
-        log_path: "",
-      },
+      stepRunUpdate: { id: awaiting.id, status: "failed", exit_code: 1, ended_at: now },
       outputs: { stdout: verdict.comment, stderr: "", exit_code: 1 },
     });
     return;
@@ -410,16 +467,8 @@ export async function applyApproval(
   await commitStepBoundary(db, {
     taskId,
     requireState: "suspended",
-    taskPatch: { state: "failed", attempt_counts: advancedAttemptCounts },
-    stepRun: {
-      step_id: stepId,
-      attempt: advancedAttempt,
-      status: "failed",
-      exit_code: 1,
-      started_at: now,
-      ended_at: now,
-      log_path: "",
-    },
+    taskPatch: { state: "failed" },
+    stepRunUpdate: { id: awaiting.id, status: "failed", exit_code: 1, ended_at: now },
     outputs: { stdout: verdict.comment, stderr: "", exit_code: 1 },
   });
 }

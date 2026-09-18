@@ -95,7 +95,9 @@ test("setup → agent → command → approval → 承認 → 完了まで通る
   );
 
   const runs = (await listStepRuns(ctx.db, t.id)).map((r) => r.step_id);
-  assert.deepEqual(runs, ["setup", "implement", "verify"], "setup が先頭に自動挿入されている");
+  // review は suspended に入った時点で awaiting の行を立てるので、承認待ちの
+  // 時点で既に記録に現れる（setup が先頭に自動挿入されていることも合わせて確認）。
+  assert.deepEqual(runs, ["setup", "implement", "verify", "review"]);
 
   // ブリーフが求める「event が運ぶ id が実際に何かへ解決できる」ことの証明。
   // stepRun.started / stepRun.finished が載せる step_run_id を、broadcast された
@@ -126,9 +128,14 @@ test("setup → agent → command → approval → 承認 → 完了まで通る
   await handler("task.approve", { task_id: t.id }, NOOP_CONN);
   assert.equal((await getTask(ctx.db, t.id))?.state, "queued");
 
-  await tick(ctx);
+  // review が suspended に入った1回目の runTask は、実際に git を叩いてツリーを
+  // 記録してから ctx.running を解放する。その解放が終わる前にこの1回の tick が
+  // 素通りすることがあるので、tick を回しながら待つ。
   await until(
-    async () => (await getTask(ctx.db, t.id))?.state === "completed",
+    async () => {
+      await tick(ctx);
+      return (await getTask(ctx.db, t.id))?.state === "completed";
+    },
     5000,
     "承認後の record 実行を経て completed に到達すること",
   );
@@ -181,9 +188,14 @@ test("却下すると実装ステップへ戻り、コメントがエージェ�
   await handler("task.reject", { task_id: t.id, comment: "命名が変です" }, NOOP_CONN);
   assert.equal((await getTask(ctx.db, t.id))?.current_step_id, "implement");
 
-  await tick(ctx);
+  // review は suspended に入るたびに実際の git でツリーを記録する（reviewTree.ts）ので、
+  // 1回目の runTask が ctx.running を解放し終わる前にこの1回の tick が素通りすることが
+  // ある。tick を回しながら待つことで、解放され次第すぐに拾わせる。
   await until(
-    async () => (await getTask(ctx.db, t.id))?.state === "suspended",
+    async () => {
+      await tick(ctx);
+      return (await getTask(ctx.db, t.id))?.state === "suspended";
+    },
     5000,
     "却下→再実装→再度の承認待ちに到達すること",
   );

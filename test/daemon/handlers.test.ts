@@ -183,8 +183,13 @@ test("却下ループを何度回しても task.approve/task.reject は警告を
   for (let i = 0; i < 3; i++) {
     await h("task.reject", { task_id: t.id, comment: `だめ${i}` }, NOOP_CONN);
     assert.equal((await getTask(ctx.db, t.id))?.state, "queued");
-    await tick(ctx);
-    await until(async () => (await getTask(ctx.db, t.id))?.state === "suspended");
+    // suspend するたびに review ステップがツリーを記録する（実際に git を叩く）ので、
+    // 直前の runTask が ctx.running を解放し終わる前にこの1回の tick が素通りする
+    // ことがある。tick を回しながら待つことで、解放され次第すぐに拾わせる。
+    await until(async () => {
+      await tick(ctx);
+      return (await getTask(ctx.db, t.id))?.state === "suspended";
+    });
   }
 
   assert.equal(
@@ -707,11 +712,13 @@ test("tick が重なって呼ばれても maxConcurrent: 1 のプロジェクト
     "走らなかったタスクは worktree も作られない",
   );
 
-  // 2周目が同じタスクを二重に開始していないこと（step_runs が重複しない）
+  // 2周目が同じタスクを二重に開始していないこと（step_runs が重複しない）。
+  // approval も suspended に入る時点で awaiting の行を1つ立てるので、
+  // 重複していなければちょうど1件になる。
   assert.equal(
     (await listStepRuns(ctx.db, a.id)).length,
-    0,
-    "approval だけのワークフローに step_runs は無い",
+    1,
+    "review の awaiting 行が1件だけ（2周目が重複して立てていない）",
   );
   assert.equal(admitted.length, 1, "2周目は再入ガードで即座に返り、何も admit しない");
 });

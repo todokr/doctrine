@@ -804,3 +804,153 @@ steps:
   assert.equal(t.current_step_id, null, "ステップ開始のコミットは丸ごと書かれない");
   assert.equal(t.attempt_counts, "{}");
 });
+
+test("suspended に入った時点で awaiting の行が立ち、待ち始めた時刻が残る", async () => {
+  const { db, root, workflow } = await taskFixture(`
+name: f
+steps:
+  - id: review
+    type: approval
+    title: "見て"
+`);
+  await runTask(db, "t1", workflow, {
+    db,
+    adapter: createMockAdapter({ result: {} }),
+    logRoot: join(root, "logs"),
+    globalLimit: 4,
+  });
+
+  const runs = await listStepRuns(db, "t1");
+  assert.equal(runs.length, 1);
+  assert.equal(runs[0].status, "awaiting");
+  assert.equal(runs[0].step_id, "review");
+  assert.equal(runs[0].attempt, 1);
+  assert.equal(runs[0].ended_at, null);
+  assert.ok(Date.parse(runs[0].started_at) > 0);
+  // attempt の確定は待ち始めた時点へ移った。
+  assert.equal((await getTask(db, "t1"))!.attempt_counts, JSON.stringify({ review: 1 }));
+});
+
+test("承認は awaiting の行を閉じる（新しい行を足さない）", async () => {
+  const { db, root, workflow } = await taskFixture(`
+name: f
+steps:
+  - id: review
+    type: approval
+    title: "見て"
+  - id: after
+    type: command
+    run: "true"
+`);
+  await runTask(db, "t1", workflow, {
+    db,
+    adapter: createMockAdapter({ result: {} }),
+    logRoot: join(root, "logs"),
+    globalLimit: 4,
+  });
+  const started = (await listStepRuns(db, "t1"))[0];
+
+  await applyApproval(db, "t1", { approved: true, comment: "" }, workflow);
+
+  const runs = await listStepRuns(db, "t1");
+  assert.equal(runs.length, 1);
+  assert.equal(runs[0].id, started.id);
+  assert.equal(runs[0].status, "success");
+  assert.equal(runs[0].exit_code, 0);
+  assert.equal(runs[0].started_at, started.started_at);
+  assert.ok(runs[0].ended_at !== null);
+});
+
+test("2回差し戻すと、両方のコメントと待ち時間が残る", async () => {
+  const { db, root, workflow } = await taskFixture(`
+name: f
+steps:
+  - id: implement
+    type: command
+    run: "true"
+  - id: review
+    type: approval
+    title: "見て"
+    onReject:
+      goto: implement
+      maxAttempts: 5
+`);
+  const deps = {
+    db,
+    adapter: createMockAdapter({ result: {} }),
+    logRoot: join(root, "logs"),
+    globalLimit: 4,
+  };
+
+  await runTask(db, "t1", workflow, deps);
+  await applyApproval(db, "t1", { approved: false, comment: "1回目の指摘" }, workflow);
+  await toRunning(db, "t1");
+  await runTask(db, "t1", workflow, deps);
+  await applyApproval(db, "t1", { approved: false, comment: "2回目の指摘" }, workflow);
+
+  const reviews = (await listStepRuns(db, "t1")).filter((r) => r.step_id === "review");
+  assert.equal(reviews.length, 2);
+  assert.deepEqual(reviews.map((r) => r.attempt), [1, 2]);
+  assert.deepEqual(reviews.map((r) => r.status), ["failed", "failed"]);
+  // それぞれの待ち時間が引ける（started_at と ended_at が両方ある）。
+  for (const r of reviews) {
+    assert.ok(r.ended_at !== null);
+    assert.ok(Date.parse(r.ended_at!) >= Date.parse(r.started_at));
+  }
+  // 1回目の待ちは2回目より先に始まっている。
+  assert.ok(Date.parse(reviews[0].started_at) <= Date.parse(reviews[1].started_at));
+
+  const outputs = await db.selectFrom("step_outputs").selectAll()
+    .orderBy("step_run_id").execute();
+  assert.deepEqual(
+    outputs.filter((o) => reviews.some((r) => r.id === o.step_run_id)).map((o) => o.stdout),
+    ["1回目の指摘", "2回目の指摘"],
+  );
+  // テンプレート変数は今までどおり最新の実行を指す。
+  assert.equal((await getStepOutputs(db, "t1")).review.stdout, "2回目の指摘");
+});
+
+test("ツリーを記録できなくても suspended に入り、警告が出る", async () => {
+  const { db, root, workflow } = await taskFixture(`
+name: f
+steps:
+  - id: review
+    type: approval
+    title: "見て"
+`);
+  const warnings: string[] = [];
+  await runTask(db, "t1", workflow, {
+    db,
+    adapter: createMockAdapter({ result: {} }),
+    logRoot: join(root, "logs"),
+    globalLimit: 4,
+    onWarning: (_id, message) => warnings.push(message),
+  });
+
+  assert.equal((await getTask(db, "t1"))!.state, "suspended");
+  assert.equal((await listStepRuns(db, "t1"))[0].review_tree, null);
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /ツリー/);
+});
+
+test("awaiting の行が無ければ承認は失敗する", async () => {
+  const { db, root, workflow } = await taskFixture(`
+name: f
+steps:
+  - id: review
+    type: approval
+    title: "見て"
+`);
+  await runTask(db, "t1", workflow, {
+    db,
+    adapter: createMockAdapter({ result: {} }),
+    logRoot: join(root, "logs"),
+    globalLimit: 4,
+  });
+  await db.deleteFrom("step_runs").where("task_id", "=", "t1").execute();
+
+  await assert.rejects(
+    () => applyApproval(db, "t1", { approved: true, comment: "" }, workflow),
+    /承認待ちのステップ実行がありません/,
+  );
+});

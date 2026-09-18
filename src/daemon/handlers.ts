@@ -483,6 +483,7 @@ async function tickOnce(ctx: DaemonContext): Promise<void> {
         globalLimit: ctx.globalLimit,
         onStateChanged: (id, from, to) =>
           ctx.broadcast({ event: "task.stateChanged", task_id: id, from, to }),
+        onWarning: (id, message) => ctx.warnings.push(`タスク ${id}: ${message}`),
         onStepRunStarted: (id, stepRunId, stepId) => {
           currentStepRunId = stepRunId;
           ctx.broadcast({
