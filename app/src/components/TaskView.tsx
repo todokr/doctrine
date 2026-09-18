@@ -55,7 +55,7 @@ export function TaskView({ t }: { t: Task }) {
       {t.degraded && (
         <section className="box deg">
           <h2><span className="mono">{t.degraded}</span> が、権限で拒否された操作を含んだまま成功扱いで終わりました</h2>
-          <p>後続のステップは進んでいますが、エージェントが意図した操作（ここではコミット）はされていません。</p>
+          <p>後続のステップは進んでいますが、エージェントが意図した操作はされていません。</p>
         </section>
       )}
       {t.state === "queued" && (

@@ -68,7 +68,8 @@ function Diff({ t }: { t: Task }) {
   const all = t.diff;
   const step = currentStep(s, t);
 
-  if (all.length === 0) return <div className="empty-diff">コードの変更はまだありません。上の計画を読んで判断してください。</div>;
+  // diff の取得はまだない（task.diff は #44）。見出し側で既に案内しているので、ここでは何も出さない
+  if (all.length === 0) return null;
   if (t.guide && step !== null) return <StepView t={t} guide={t.guide} idx={step} />;
 
   return (

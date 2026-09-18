@@ -244,7 +244,6 @@ th{color:var(--ink-3);font-size:11px;font-weight:500;border-top:0;background:var
 .lc{margin:4px 10px 6px 104px;border:1px solid var(--line);border-radius:8px;background:var(--surface);padding:8px 10px;display:grid;gap:6px;font-family:var(--sans);font-size:12.5px;max-width:640px}
 .lc .who{font-size:11px;color:var(--ink-3)}textarea{width:100%;border:1px solid var(--line);background:var(--surface);border-radius:7px;padding:7px 9px;resize:vertical;min-height:54px}
 input[type=text],select.field{width:100%;border:1px solid var(--line);background:var(--surface);border-radius:7px;padding:7px 9px}
-.empty-diff{padding:20px;color:var(--ink-3);border:1px dashed var(--line);border-radius:9px;text-align:center}
 .decide{position:sticky;bottom:0;margin-top:auto;background:var(--surface);border-top:1px solid var(--line);padding:10px 22px;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:end;box-shadow:0 -8px 20px rgba(0,0,0,.05)}
 @media (max-width:700px){.decide{grid-template-columns:1fr}}
 .decide .meta{display:flex;gap:12px;flex-wrap:wrap;color:var(--ink-2);font-size:12px;margin-bottom:6px}
