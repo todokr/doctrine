@@ -4,6 +4,7 @@ import { fileAnchor } from "./components/DiffFileBlock";
 import { ReviewView } from "./components/ReviewView";
 import { Rail, Sidebar } from "./components/Sidebar";
 import { TaskView } from "./components/TaskView";
+import { sendDecision } from "./decision";
 import { composeRejection, currentStep, draftOf, filesFor, selectedTask } from "./model";
 import { useDecide, useStore } from "./store";
 
@@ -11,15 +12,16 @@ function RejectModal() {
   const { s, dispatch } = useStore();
   const decide = useDecide();
   const t = selectedTask(s);
-  // モーダルが開いている間だけ「送信済み」を保つ。同じタスクをもう一度差し戻す
-  // ときは新たに開き直すので、モーダルの開閉に合わせてリセットしてよい
-  const [sent, setSent] = useState(false);
+  // 送信中だけボタンを止める（連打対策）。成功したときだけ reject.confirm を
+  // dispatch する（下書きが消えるのはそのときだけ）。失敗したらモーダルは開いたまま、
+  // このフラグを戻して書き直さずに再送できるようにする
+  const [pending, setPending] = useState(false);
   useEffect(() => {
-    if (s.modal !== "reject-preview") setSent(false);
+    if (s.modal !== "reject-preview") setPending(false);
   }, [s.modal]);
   if (s.modal !== "reject-preview" || !t) return null;
-  // reject.confirm は下書きをクリアするので、送る前にここで読んでおく
-  // （dispatch の後に読むと、消えた下書きから空文字を送ってしまう）
+  // reject.confirm は成功したときにだけ下書きをクリアする。その dispatch より前に
+  // ここで読んでおく（消えてから読むと空文字を送ってしまう）
   const comment = composeRejection(draftOf(s, t.id));
   return (
     <>
@@ -35,11 +37,16 @@ function RejectModal() {
         <div className="actions">
           <button
             className="btn danger"
-            disabled={sent}
-            onClick={() => {
-              setSent(true);
-              decide.reject(t.id, comment);
-              dispatch({ type: "reject.confirm" });
+            disabled={pending}
+            onClick={async () => {
+              setPending(true);
+              const r = await sendDecision(decide.reject(t.id, comment), "差し戻しを送れませんでした");
+              if (r.ok) {
+                dispatch({ type: "reject.confirm" });
+              } else {
+                setPending(false);
+                dispatch({ type: "toast", message: r.message });
+              }
             }}
           >
             差し戻す

@@ -168,24 +168,19 @@ export function useStore() {
 
 /**
  * 判断をデーモンへ送る。画面の状態はここで書き換えない。
- * デーモンが決めた結果は task.stateChanged と取り直しで返ってくる（呼び出し側で
- * dispatch する approve / reject.confirm / cancel はドラフトのクリアなどの
- * UI 上の後始末だけを行う）。失敗しても投げっぱなしにはせず、トーストで知らせる。
+ * デーモンが決めた結果は task.stateChanged と取り直しで返ってくる。
+ *
+ * Promise を呼び出し側に返す（ここでは catch しない）。呼び出し側
+ * （ReviewView / RejectModal / TaskView）は decision.ts の `sendDecision` で
+ * 成否を判定し、成功したときだけ approve / reject.confirm / cancel を
+ * dispatch する。下書きの破棄は「送れた」ときにしか起きてはいけないので、
+ * ここで失敗を握って消してしまうと下書きが復元できなくなる。
  */
 export function useDecide() {
-  const { dispatch } = useStore();
-  const send = (p: Promise<unknown>, failed: string) => {
-    p.catch((e: unknown) => {
-      dispatch({ type: "toast", message: `${failed}: ${String(e)}` });
-    });
-  };
   return {
-    approve: (taskId: string) =>
-      send(rpc("task.approve", { task_id: taskId }), "承認を送れませんでした"),
-    reject: (taskId: string, comment: string) =>
-      send(rpc("task.reject", { task_id: taskId, comment }), "差し戻しを送れませんでした"),
-    cancel: (taskId: string) =>
-      send(rpc("task.cancel", { task_id: taskId }), "中止を送れませんでした"),
+    approve: (taskId: string) => rpc("task.approve", { task_id: taskId }),
+    reject: (taskId: string, comment: string) => rpc("task.reject", { task_id: taskId, comment }),
+    cancel: (taskId: string) => rpc("task.cancel", { task_id: taskId }),
   };
 }
 

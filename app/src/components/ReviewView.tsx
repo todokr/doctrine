@@ -1,3 +1,5 @@
+import { useState } from "react";
+import { sendDecision } from "../decision";
 import { ago, canReject, clock, currentStep, diffStats, draftOf, filesFor } from "../model";
 import { useDecide, useNotYet, useStore } from "../store";
 import type { Task } from "../types";
@@ -100,6 +102,9 @@ export function ReviewView({ t }: { t: Task }) {
   const decide = useDecide();
   const draft = draftOf(s, t.id);
   const scope = s.scope[t.id] ?? "all";
+  // 送信中は連打で二重送信しないよう承認ボタンを止める。成功したときだけ
+  // 下書きを消す（approve の dispatch）ので、失敗時はここで再度押せる
+  const [approving, setApproving] = useState(false);
   const hasSince = t.reviews.length > 0 && t.diff.some((f) => f.since);
 
   return (
@@ -141,9 +146,14 @@ export function ReviewView({ t }: { t: Task }) {
           <button className="btn danger" disabled={!canReject(draft)} onClick={() => dispatch({ type: "reject.preview" })}>差し戻す…</button>
           <button
             className="btn primary"
-            onClick={() => {
-              decide.approve(t.id);
-              dispatch({ type: "approve" });
+            disabled={approving}
+            onClick={async () => {
+              setApproving(true);
+              const r = await sendDecision(decide.approve(t.id), "承認を送れませんでした");
+              setApproving(false);
+              // 送れたときだけ下書きを消す。失敗したら行コメント・全体コメントは残す
+              if (r.ok) dispatch({ type: "approve" });
+              else dispatch({ type: "toast", message: r.message });
             }}
           >
             承認する

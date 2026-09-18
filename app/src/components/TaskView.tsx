@@ -1,3 +1,5 @@
+import { useState } from "react";
+import { sendDecision } from "../decision";
 import { ago, elapsed, isTerminal } from "../model";
 import { useDecide, useNotYet, useStore } from "../store";
 import type { Task, TaskState } from "../types";
@@ -18,6 +20,8 @@ export function TaskView({ t }: { t: Task }) {
   const { s, dispatch } = useStore();
   const decide = useDecide();
   const notYet = useNotYet();
+  // 送信中だけ止める。失敗したら「中止しました」は出さず、もう一度押せる
+  const [canceling, setCanceling] = useState(false);
 
   const [stateName, stateCls] = STATE_PILL[t.state];
   const queuePos = s.tasks
@@ -71,9 +75,14 @@ export function TaskView({ t }: { t: Task }) {
         {!isTerminal(t.state) && (
           <button
             className="btn danger"
-            onClick={() => {
-              decide.cancel(t.id);
-              dispatch({ type: "cancel" });
+            disabled={canceling}
+            onClick={async () => {
+              setCanceling(true);
+              const r = await sendDecision(decide.cancel(t.id), "中止を送れませんでした");
+              setCanceling(false);
+              // 送れたときだけ「中止しました」を出す。デーモンが拒否したら黙って戻す
+              if (r.ok) dispatch({ type: "cancel" });
+              else dispatch({ type: "toast", message: r.message });
             }}
           >
             中止
