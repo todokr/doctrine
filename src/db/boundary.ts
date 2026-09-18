@@ -41,6 +41,8 @@ export type StepBoundary = {
     cost_usd?: number | null;
     num_turns?: number | null;
     duration_ms?: number | null;
+    /** approval ステップのみ。suspended に入った時点の worktree 全体のツリー。 */
+    review_tree?: string | null;
   };
   /** ステップ終了時: 開始時の行を同じトランザクションで更新する。 */
   stepRunUpdate?: {
@@ -54,7 +56,11 @@ export type StepBoundary = {
   };
   /** ステップ開始時（agent ステップのみ）: そのロールのセッションを記録する。 */
   sessionUpsert?: { role: string; session_id: string };
-  outputs?: { step_id: string; stdout: string; stderr: string; exit_code: number | null };
+  /**
+   * ステップの出力。この境界で立てた（または閉じた）step_run に紐づく。
+   * step_run も stepRunUpdate も無いのに outputs だけ渡すのは呼び出し側のバグ。
+   */
+  outputs?: { stdout: string; stderr: string; exit_code: number | null };
 };
 
 /** requireState と実際の状態が食い違った。書き込みは一切起きていない。 */
@@ -120,6 +126,7 @@ export function commitStepBoundary(db: Db, b: StepBoundary): Promise<number | nu
           cost_usd: s.cost_usd ?? null,
           num_turns: s.num_turns ?? null,
           duration_ms: s.duration_ms ?? null,
+          review_tree: s.review_tree ?? null,
         })
         .executeTakeFirstOrThrow();
       stepRunId = Number(inserted.insertId);
@@ -154,17 +161,21 @@ export function commitStepBoundary(db: Db, b: StepBoundary): Promise<number | nu
     }
 
     if (b.outputs) {
+      if (stepRunId === null) {
+        throw new Error(
+          "outputs は step_run と一緒にしか書けません（どの実行の出力か決められません）",
+        );
+      }
       const o = b.outputs;
       await trx.insertInto("step_outputs")
         .values({
-          task_id: b.taskId,
-          step_id: o.step_id,
+          step_run_id: stepRunId,
           stdout: tail(o.stdout),
           stderr: tail(o.stderr),
           exit_code: o.exit_code,
         })
         .onConflict((oc) =>
-          oc.columns(["task_id", "step_id"]).doUpdateSet((eb) => ({
+          oc.column("step_run_id").doUpdateSet((eb) => ({
             stdout: eb.ref("excluded.stdout"),
             stderr: eb.ref("excluded.stderr"),
             exit_code: eb.ref("excluded.exit_code"),

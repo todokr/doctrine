@@ -45,7 +45,7 @@ test("タスク更新とステップ実行記録が同時に書かれる", async
       ended_at: "2026-09-12T00:00:01Z",
       log_path: "/logs/t1/test.1.log",
     },
-    outputs: { step_id: "test", stdout: "ok", stderr: "", exit_code: 0 },
+    outputs: { stdout: "ok", stderr: "", exit_code: 0 },
   });
   assert.equal((await getTask(d, "t1"))?.current_step_id, "test");
   assert.equal((await listStepRuns(d, "t1")).length, 1);
@@ -115,7 +115,7 @@ test("開始時に running で挿入し、終了時に同じ行を更新する",
     taskId: "t1",
     taskPatch: {},
     stepRunUpdate: { id, status: "success", exit_code: 0, ended_at: "2026-09-12T00:00:05Z" },
-    outputs: { step_id: "test", stdout: "ok", stderr: "", exit_code: 0 },
+    outputs: { stdout: "ok", stderr: "", exit_code: 0 },
   });
   const rows = await listStepRuns(d, "t1");
   assert.equal(rows.length, 1, "行は増えない");
@@ -145,7 +145,10 @@ test("ステップ実行のidを返す（イベントが載せる id）", async 
   );
 });
 
-test("同じステップの2回目の出力は上書きされる", async () => {
+// step_outputs の主キーが step_run_id になったので、同じステップを2回実行しても
+// 出力は上書きされず2行残る。{{ steps.<id> }} が最新の実行を指すのは getStepOutputs
+// が step_id ごとに最大の step_run_id を選ぶからで、古い行を潰すからではない。
+test("{{ steps.<id> }} は最新の実行の出力を指し、過去の実行の出力も残る", async () => {
   const d = await fixture();
   const base = {
     step_id: "test",
@@ -160,16 +163,19 @@ test("同じステップの2回目の出力は上書きされる", async () => {
     taskId: "t1",
     taskPatch: {},
     stepRun: base,
-    outputs: { step_id: "test", stdout: "1回目", stderr: "", exit_code: 1 },
+    outputs: { stdout: "1回目", stderr: "", exit_code: 1 },
   });
   await commitStepBoundary(d, {
     taskId: "t1",
     taskPatch: {},
     stepRun: { ...base, attempt: 2, status: "success", exit_code: 0 },
-    outputs: { step_id: "test", stdout: "2回目", stderr: "", exit_code: 0 },
+    outputs: { stdout: "2回目", stderr: "", exit_code: 0 },
   });
   assert.equal((await getStepOutputs(d, "t1")).test.stdout, "2回目");
   assert.equal((await listStepRuns(d, "t1")).length, 2);
+  const outputs = await d.selectFrom("step_outputs").select("stdout").orderBy("step_run_id")
+    .execute();
+  assert.deepEqual(outputs.map((o) => o.stdout), ["1回目", "2回目"], "1回目の出力も残る");
 });
 
 test("巨大な出力は末尾だけ保存する", async () => {
@@ -187,7 +193,7 @@ test("巨大な出力は末尾だけ保存する", async () => {
       ended_at: "b",
       log_path: "/l",
     },
-    outputs: { step_id: "test", stdout: huge, stderr: "", exit_code: 0 },
+    outputs: { stdout: huge, stderr: "", exit_code: 0 },
   });
   const saved = (await getStepOutputs(d, "t1")).test.stdout;
   assert.ok(saved.length <= OUTPUT_TAIL_BYTES + 3);
@@ -209,7 +215,7 @@ test("巨大な日本語出力はUTF-8バイト数で末尾を切る", async () 
       ended_at: "b",
       log_path: "/l",
     },
-    outputs: { step_id: "test", stdout: huge, stderr: "", exit_code: 0 },
+    outputs: { stdout: huge, stderr: "", exit_code: 0 },
   });
   const saved = (await getStepOutputs(d, "t1")).test.stdout;
   assert.ok(Buffer.byteLength(saved, "utf8") <= OUTPUT_TAIL_BYTES);
@@ -231,7 +237,7 @@ test("末尾を切った結果に文字化け(U+FFFD)を含まない", async () 
       ended_at: "b",
       log_path: "/l",
     },
-    outputs: { step_id: "test", stdout: huge, stderr: "", exit_code: 0 },
+    outputs: { stdout: huge, stderr: "", exit_code: 0 },
   });
   const saved = (await getStepOutputs(d, "t1")).test.stdout;
   assert.equal(saved.includes("�"), false);
@@ -253,7 +259,7 @@ test("上限ちょうど・未満の出力はそのまま保存される", async
       ended_at: "b",
       log_path: "/l",
     },
-    outputs: { step_id: "a", stdout: exact, stderr: "", exit_code: 0 },
+    outputs: { stdout: exact, stderr: "", exit_code: 0 },
   });
   await commitStepBoundary(d, {
     taskId: "t1",
@@ -267,7 +273,7 @@ test("上限ちょうど・未満の出力はそのまま保存される", async
       ended_at: "b",
       log_path: "/l",
     },
-    outputs: { step_id: "b", stdout: under, stderr: "", exit_code: 0 },
+    outputs: { stdout: under, stderr: "", exit_code: 0 },
   });
   const outputs = await getStepOutputs(d, "t1");
   assert.equal(outputs.a.stdout, exact);
@@ -302,7 +308,7 @@ test("requireState が食い違えば StateConflictError を投げ、タスク�
           ended_at: "b",
           log_path: "/l",
         },
-        outputs: { step_id: "test", stdout: "ok", stderr: "", exit_code: 0 },
+        outputs: { stdout: "ok", stderr: "", exit_code: 0 },
       }),
     (e) => e instanceof StateConflictError && e.expected === "running" && e.actual === "queued",
   );

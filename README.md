@@ -220,6 +220,10 @@ dctl gc <task-id> --force           # 削除が拒否される場合（未コミ
 
 **`--force` を付けると、worktree内の未コミットの作業は失われる。** 確認してから使うこと。
 
+worktree を消すと、そのタスクのレビュー参照（`refs/doctrine/reviews/<task-id>/`）も
+一緒に消える。この参照は「レビュー時点の worktree の中身」を `git gc` から守るために
+doctrine が張っているもので、worktree が無くなれば使う相手もいない。
+
 なお `dctl worktrees` が一覧するのは「対応するタスクが見つからない孤立
 worktree」だけであり、`failed` タスクの（対応するタスクが存在する）worktreeは
 ここには出てこない。上記のとおり `dctl ls --state failed` → `dctl get` の経路で探す。
@@ -244,6 +248,16 @@ dctl get <task-id>
 
 `degraded` を見逃すと、「成功した」と思って進めたタスクが実質何も達成していない、
 という気づきにくい失敗を踏む。
+
+### ステップ実行の状態
+
+`dctl get <task-id>` の `.stepRuns[].status` が取る値。
+
+- `running` — 実行中
+- `awaiting` — `approval` ステップが人の承認・却下を待っている（1行＝レビュー1回）
+- `success` / `failed` — 終わった
+- `degraded` — 成功扱いだが権限拒否があった（5章）
+- `interrupted` — デーモンのクラッシュで中断され、復帰時に閉じられた
 
 ## 6. ステップ間で成果物を渡す
 
@@ -277,11 +291,6 @@ dctl get <task-id>
 
 実装の過程で判明した、まだ直していない・あえて直さないと決めた制約。
 
-- **中断されたステップ実行は `failed` として閉じられる。** デーモンのクラッシュで
-  `running` のまま残ったステップ実行は、復帰時に本来より正直でない `failed` になる
-  （本来欲しい値は `interrupted`）。マイグレーション機構（`src/db/migrations.ts`）は
-  入ったので値を足すことはできるが、SQLite で `step_runs.status` の `CHECK` 制約を
-  変えるにはテーブル再構築が要るため、別の変更として残している。
 - **完了イベントとworktree後始末の間に競合がある**（[#3](https://github.com/todokr/doctrine/issues/3)）。
   `task.stateChanged`（`completed`）を受け取った直後にクライアントがworktreeを
   見に行くと、まだ削除されずに存在していることがある。また、完了時の

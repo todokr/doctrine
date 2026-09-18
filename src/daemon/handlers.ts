@@ -12,8 +12,9 @@ import {
   listTasks,
   type TaskState,
 } from "../db/tasks.ts";
-import { getStepRun, listStepRuns } from "../db/stepRuns.ts";
-import { commitStepBoundary, StateConflictError } from "../db/boundary.ts";
+import { getAwaitingStepRun, getStepRun, listStepRuns } from "../db/stepRuns.ts";
+import { commitStepBoundary, StateConflictError, type StepBoundary } from "../db/boundary.ts";
+import type { TaskRow } from "../db/tasks.ts";
 import type { Db } from "../db/schema.ts";
 import { recentRateLimitSamples } from "../db/rateLimits.ts";
 import { selectAdmissible } from "../core/scheduler.ts";
@@ -27,6 +28,7 @@ import {
   worktreePathFor,
 } from "../core/worktree.ts";
 import { defaultProbe, killStaleChild } from "../core/recovery.ts";
+import { releaseTrees } from "../core/reviewTree.ts";
 import { assertTransition, isTerminal } from "../core/states.ts";
 import type { AgentAdapter } from "../adapter/types.ts";
 import type { Handler } from "./server.ts";
@@ -51,6 +53,35 @@ function req(params: Record<string, unknown>, key: string): string {
   const v = params[key];
   if (typeof v !== "string" || v === "") throw new Error(`${key} は必須です`);
   return v;
+}
+
+/**
+ * `suspended` から、人の決定を待たずに外へ出るとき（task.cancel / task.resume）に、
+ * 開いている `awaiting` 行を閉じるための `stepRunUpdate` を作る。
+ *
+ * `interrupted` の意味は「人の決定を待たずに外から閉じられた」。閉じずに放置すると、
+ * 中止されたタスクや再開されたタスクの記録が「この人はまだレビューを待っている」と
+ * 言い続ける（`running` のまま放置された行と同じ嘘になる）。
+ *
+ * 返り値は状態を書くのと**同じ** `commitStepBoundary` に渡すこと。別トランザクションに
+ * すると、片方だけ書かれた記録が作れてしまう。
+ *
+ * 閉じるべき行が無ければ undefined を返す（`paused` からの resume、`queued` /
+ * `running` からの cancel、`current_step_id` が null のタスクなど）。
+ */
+async function closeAwaitingStepRun(
+  db: Db,
+  task: TaskRow,
+): Promise<StepBoundary["stepRunUpdate"]> {
+  if (task.state !== "suspended" || !task.current_step_id) return undefined;
+  const awaiting = await getAwaitingStepRun(db, task.id, task.current_step_id);
+  if (!awaiting) return undefined;
+  return {
+    id: awaiting.id,
+    status: "interrupted",
+    exit_code: null,
+    ended_at: new Date().toISOString(),
+  };
 }
 
 export async function loadWorkflowFromDisk(
@@ -222,10 +253,16 @@ export function createHandler(ctx: DaemonContext): Handler {
           throw new Error(`再開できる状態ではありません: ${task.state}`);
         }
         // 行列の先頭に入る。進行中の仕事を新規の仕事より先に終わらせる。
+        //
+        // suspended からの resume は approval ステップへ入り直すので、スケジューラが
+        // 拾えば新しい awaiting 行が立ち、attempt がもう1つ進む。これを正とする
+        // （spec 3.4: そのステップに何度 suspended で立ち止まったかを正直に数える）。
+        // 開いていた行は人の決定を待たずに閉じられたので interrupted。
         await commitStepBoundary(ctx.db, {
           taskId,
           requireState: task.state,
           taskPatch: { state: "queued", resumed: 1 },
+          stepRunUpdate: await closeAwaitingStepRun(ctx.db, task),
         });
         ctx.broadcast({
           event: "task.stateChanged",
@@ -245,10 +282,13 @@ export function createHandler(ctx: DaemonContext): Handler {
         // デーモンが生きたまま協調的に止める経路。pause と同じく SIGTERM。
         await killStaleChild(task, defaultProbe(), "SIGTERM");
         // worktree は残す。失敗・中止した実行こそ中を見たい。
+        // suspended からの cancel なら、開いていた awaiting 行も同じトランザクションで
+        // 閉じる（放置すると、中止されたタスクの記録が永久に「レビュー待ち」と言い続ける）。
         await commitStepBoundary(ctx.db, {
           taskId,
           requireState: task.state,
           taskPatch: { state: "canceled", child_pid: null, child_started_at: null },
+          stepRunUpdate: await closeAwaitingStepRun(ctx.db, task),
         });
         ctx.broadcast({
           event: "task.stateChanged",
@@ -290,6 +330,7 @@ export function createHandler(ctx: DaemonContext): Handler {
           worktreePath: task.worktree_path,
           force: params.force === true,
         });
+        await releaseReviewRefs(ctx, project.path, taskId);
         await commitStepBoundary(ctx.db, { taskId, taskPatch: { worktree_path: null } });
         return { removed: task.worktree_path };
       }
@@ -306,6 +347,24 @@ export function createHandler(ctx: DaemonContext): Handler {
   };
 }
 
+/**
+ * worktree を消したタスクのレビュー参照を消す。worktree が無くなればレビューの
+ * 基準点を使う相手もいなくなり、参照を残すと指しているツリーが永久に gc されない。
+ *
+ * worktree の削除自体は既に成功しているので、参照を消せなくても要求は失敗させず
+ * 警告に倒す（spec 5.4）。worktree を消す2箇所（worktree.remove と
+ * cleanupAfterRun）が同じ扱いをするために、ここに1つだけ置く。
+ */
+async function releaseReviewRefs(
+  ctx: DaemonContext,
+  projectPath: string,
+  taskId: string,
+): Promise<void> {
+  await releaseTrees(projectPath, taskId).catch((e: Error) => {
+    ctx.warnings.push(`タスク ${taskId}: レビュー参照を消せませんでした: ${e.message}`);
+  });
+}
+
 /** completed のみ worktree を削除する。failed / canceled は証拠として残す。 */
 export async function cleanupAfterRun(ctx: DaemonContext, taskId: string): Promise<void> {
   const task = await getTask(ctx.db, taskId);
@@ -317,6 +376,7 @@ export async function cleanupAfterRun(ctx: DaemonContext, taskId: string): Promi
       worktreePath: task.worktree_path,
       force: false,
     });
+    await releaseReviewRefs(ctx, project.path, taskId);
     await commitStepBoundary(ctx.db, { taskId, taskPatch: { worktree_path: null } });
   } catch (e) {
     if (e instanceof UncommittedChangesError) {
@@ -483,6 +543,7 @@ async function tickOnce(ctx: DaemonContext): Promise<void> {
         globalLimit: ctx.globalLimit,
         onStateChanged: (id, from, to) =>
           ctx.broadcast({ event: "task.stateChanged", task_id: id, from, to }),
+        onWarning: (id, message) => ctx.warnings.push(`タスク ${id}: ${message}`),
         onStepRunStarted: (id, stepRunId, stepId) => {
           currentStepRunId = stepRunId;
           ctx.broadcast({

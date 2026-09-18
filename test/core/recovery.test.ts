@@ -411,7 +411,7 @@ test("復帰に成功したら、中断した step_runs 行を running のまま
   await recoverOnStartup(db, probe({}), lookupWF);
   const runs = await listStepRuns(db, "t1");
   assert.equal(runs.length, 1);
-  assert.notEqual(runs[0].status, "running");
+  assert.equal(runs[0].status, "interrupted");
   assert.ok(runs[0].ended_at !== null, "ended_at が入っている必要がある");
 });
 
@@ -437,7 +437,7 @@ test("復帰に失敗しても、中断した step_runs 行を running のまま
   assert.equal(results[0]?.outcome, "failed");
   const runs = await listStepRuns(db, "t1");
   assert.equal(runs.length, 1);
-  assert.notEqual(runs[0].status, "running");
+  assert.equal(runs[0].status, "interrupted");
   assert.ok(runs[0].ended_at !== null);
 });
 
@@ -489,6 +489,73 @@ test("running の step_runs 行が複数あっても、最後の running 行だ�
   assert.equal(runs[0].status, "failed");
   assert.equal(runs[0].ended_at, "b");
   // 2件目（running だった行）だけが閉じられている。
-  assert.notEqual(runs[1].status, "running");
+  assert.equal(runs[1].status, "interrupted");
+  assert.ok(runs[1].ended_at !== null);
+});
+
+test("承認待ちの行は復帰処理で閉じない", async () => {
+  const db = await fixture();
+  // approval が suspended に入った時点の行。人を待っている最中であり、
+  // デーモンが再起動しただけで閉じてはならない（待ち始めた時刻が失われる）。
+  await commitStepBoundary(db, {
+    taskId: "t1",
+    taskPatch: { state: "suspended", current_step_id: "review" },
+    stepRun: {
+      step_id: "review",
+      attempt: 1,
+      status: "awaiting",
+      exit_code: null,
+      started_at: "2026-09-18T09:00:00.000Z",
+      ended_at: null,
+      log_path: "",
+      review_tree: null,
+    },
+  });
+
+  await recoverOnStartup(db, probe({}), lookupWF);
+
+  const runs = await listStepRuns(db, "t1");
+  assert.equal(runs.length, 1);
+  assert.equal(runs[0].status, "awaiting");
+  assert.equal(runs[0].ended_at, null);
+  assert.equal((await getTask(db, "t1"))!.state, "suspended");
+});
+
+test("running の行と awaiting の行が混ざっていても、閉じるのは running の行だけ", async () => {
+  const db = await fixture();
+  await commitStepBoundary(db, {
+    taskId: "t1",
+    taskPatch: { current_step_id: "review" },
+    stepRun: {
+      step_id: "review",
+      attempt: 1,
+      status: "awaiting",
+      exit_code: null,
+      started_at: "2026-09-18T09:00:00.000Z",
+      ended_at: null,
+      log_path: "",
+      review_tree: null,
+    },
+  });
+  await commitStepBoundary(db, {
+    taskId: "t1",
+    taskPatch: { state: "running", current_step_id: "implement" },
+    stepRun: {
+      step_id: "implement",
+      attempt: 1,
+      status: "running",
+      exit_code: null,
+      started_at: "2026-09-18T10:00:00.000Z",
+      ended_at: null,
+      log_path: "/l",
+    },
+  });
+
+  await recoverOnStartup(db, probe({}), lookupWF);
+
+  const runs = await listStepRuns(db, "t1");
+  assert.equal(runs[0].status, "awaiting");
+  assert.equal(runs[0].ended_at, null);
+  assert.equal(runs[1].status, "interrupted");
   assert.ok(runs[1].ended_at !== null);
 });

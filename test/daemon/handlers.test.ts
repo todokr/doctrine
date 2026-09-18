@@ -10,19 +10,30 @@ import { DatabaseSync } from "node:sqlite";
 import { openDb, openDbOn } from "../../src/db/migrate.ts";
 import { getTask, insertTask } from "../../src/db/tasks.ts";
 import { listStepRuns } from "../../src/db/stepRuns.ts";
+import { reviewRefName } from "../../src/core/reviewTree.ts";
 import { createHandler, type DaemonContext, tick } from "../../src/daemon/handlers.ts";
 import { createMockAdapter } from "../../src/adapter/mock.ts";
 import { parseWorkflow } from "../../src/workflow/schema.ts";
 import type { ServerEvent } from "../../src/daemon/protocol.ts";
 import { branchNameFor } from "../../src/core/worktree.ts";
 import { randomUUID } from "node:crypto";
-import { makeRepo, until } from "../helpers/repo.ts";
+import { makeRepo, tickWhenIdle, until } from "../helpers/repo.ts";
 
 const run = promisify(execFile);
 let root: string;
 let repo: string;
 
 const NOOP_CONN = { follow() {}, unfollow() {}, isFollowing: () => false };
+
+// テストが context() で作った DaemonContext をすべて控えておく。approval が
+// suspended に入るときの retainTree（reviewTree.ts）は commitStepBoundary の
+// あとに実際の git を叩くので、DB の状態がもう "suspended" でも、その runTask
+// はまだ ctx.running を持ったまま git サブプロセスを走らせていることがある。
+// テスト本体は「状態が suspended になった」ところで終わってしまうので、
+// 個々のテストに drain を書かせるのではなく、afterEach が rm の前に必ず
+// ここへ控えた全 ctx の running が空になるのを待つ（書き込み中の worktree を
+// 消して ENOTEMPTY になるのを防ぐ）。
+const contexts: DaemonContext[] = [];
 
 beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), "doctrine-daemon-"));
@@ -35,13 +46,15 @@ beforeEach(async () => {
   process.env.DOCTRINE_STATE_DIR = join(root, "state");
 });
 afterEach(async () => {
+  await until(() => contexts.every((c) => c.running.size === 0));
+  contexts.length = 0;
   await rm(root, { recursive: true, force: true });
   delete process.env.DOCTRINE_STATE_DIR;
 });
 
 async function context(events: ServerEvent[] = []): Promise<DaemonContext> {
   const db = await openDb(":memory:");
-  return {
+  const ctx: DaemonContext = {
     db,
     adapter: createMockAdapter({ result: { ok: true, text: "done" } }),
     logRoot: join(root, "logs"),
@@ -57,6 +70,8 @@ async function context(events: ServerEvent[] = []): Promise<DaemonContext> {
     },
     running: new Set(),
   };
+  contexts.push(ctx);
+  return ctx;
 }
 
 test("project.add でプロジェクトを登録し、設定を読む", async () => {
@@ -183,7 +198,10 @@ test("却下ループを何度回しても task.approve/task.reject は警告を
   for (let i = 0; i < 3; i++) {
     await h("task.reject", { task_id: t.id, comment: `だめ${i}` }, NOOP_CONN);
     assert.equal((await getTask(ctx.db, t.id))?.state, "queued");
-    await tick(ctx);
+    // suspend するたびに review ステップがツリーを記録する（実際に git を叩く）ので、
+    // 直前の runTask が ctx.running を解放し終わる前にこの1回の tick が素通りする
+    // ことがある。tickWhenIdle が解放を待ってから1回だけ tick する。
+    await tickWhenIdle(ctx);
     await until(async () => (await getTask(ctx.db, t.id))?.state === "suspended");
   }
 
@@ -707,11 +725,13 @@ test("tick が重なって呼ばれても maxConcurrent: 1 のプロジェクト
     "走らなかったタスクは worktree も作られない",
   );
 
-  // 2周目が同じタスクを二重に開始していないこと（step_runs が重複しない）
+  // 2周目が同じタスクを二重に開始していないこと（step_runs が重複しない）。
+  // approval も suspended に入る時点で awaiting の行を1つ立てるので、
+  // 重複していなければちょうど1件になる。
   assert.equal(
     (await listStepRuns(ctx.db, a.id)).length,
-    0,
-    "approval だけのワークフローに step_runs は無い",
+    1,
+    "review の awaiting 行が1件だけ（2周目が重複して立てていない）",
   );
   assert.equal(admitted.length, 1, "2周目は再入ガードで即座に返り、何も admit しない");
 });
@@ -1087,4 +1107,150 @@ test("project.add: project.yaml が無くても、既にあるワークフロー
     [join(r, ".doctrine", "project.yaml")],
     "作ったのは project.yaml だけ",
   );
+});
+
+test("worktree を消すとそのタスクのレビュー参照も消える", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  await h("project.add", { path: repo }, NOOP_CONN);
+  const t = await h("task.create", { project: repo, title: "T", prompt: "p" }, NOOP_CONN) as {
+    id: string;
+  };
+  await tick(ctx);
+  await until(async () => (await getTask(ctx.db, t.id))?.state === "suspended");
+  await until(() => ctx.running.size === 0);
+
+  const review = (await listStepRuns(ctx.db, t.id)).find((r) => r.status === "awaiting")!;
+  const ref = reviewRefName(t.id, review.id);
+  const before = await run("git", ["-C", repo, "for-each-ref", "--format=%(refname)", ref]);
+  assert.equal(before.stdout.trim(), ref, "suspended に入った時点で参照が張られている");
+
+  await h("worktree.remove", { task_id: t.id, force: true }, NOOP_CONN);
+
+  const after = await run("git", [
+    "-C",
+    repo,
+    "for-each-ref",
+    "--format=%(refname)",
+    "refs/doctrine/reviews",
+  ]);
+  assert.equal(after.stdout.trim(), "", "worktree と一緒に参照も消える");
+  assert.equal((await getTask(ctx.db, t.id))?.worktree_path, null);
+});
+
+test("削除を拒否されたら参照は残す", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  await h("project.add", { path: repo }, NOOP_CONN);
+  const t = await h("task.create", { project: repo, title: "T", prompt: "p" }, NOOP_CONN) as {
+    id: string;
+  };
+  await tick(ctx);
+  await until(async () => (await getTask(ctx.db, t.id))?.state === "suspended");
+  await until(() => ctx.running.size === 0);
+  const worktree = (await getTask(ctx.db, t.id))!.worktree_path!;
+  await writeFile(join(worktree, "dirty.txt"), "未コミット\n");
+
+  // force を付けなければ、未コミットの変更を理由に削除は拒否される。
+  await assert.rejects(() => h("worktree.remove", { task_id: t.id }, NOOP_CONN));
+
+  const after = await run("git", [
+    "-C",
+    repo,
+    "for-each-ref",
+    "--format=%(refname)",
+    "refs/doctrine/reviews",
+  ]);
+  assert.notEqual(after.stdout.trim(), "", "worktree が残るなら基準点も残す");
+});
+
+// --- suspended から出る3つの経路が、開いている awaiting 行を必ず閉じる -------
+
+/** beforeEach の feature ワークフロー（approval 1つ）を suspended まで進める。 */
+async function suspendedTask(
+  ctx: DaemonContext,
+  h: ReturnType<typeof createHandler>,
+): Promise<string> {
+  await h("project.add", { path: repo }, NOOP_CONN);
+  const t = await h("task.create", { project: repo, title: "T", prompt: "p" }, NOOP_CONN) as {
+    id: string;
+  };
+  await tick(ctx);
+  await until(async () => (await getTask(ctx.db, t.id))?.state === "suspended");
+  await until(() => ctx.running.size === 0);
+  return t.id;
+}
+
+test("suspended のタスクを cancel すると awaiting 行は interrupted で閉じられる", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  const taskId = await suspendedTask(ctx, h);
+
+  await h("task.cancel", { task_id: taskId }, NOOP_CONN);
+
+  assert.equal((await getTask(ctx.db, taskId))?.state, "canceled");
+  const runs = await listStepRuns(ctx.db, taskId);
+  assert.equal(runs.length, 1);
+  assert.equal(
+    runs[0].status,
+    "interrupted",
+    "中止されたタスクに「まだレビューを待っている」行を残してはいけない",
+  );
+  assert.notEqual(runs[0].ended_at, null, "閉じた時刻が入る");
+});
+
+test("suspended のタスクを resume すると awaiting 行は interrupted で閉じられる", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  const taskId = await suspendedTask(ctx, h);
+
+  await h("task.resume", { task_id: taskId }, NOOP_CONN);
+
+  assert.equal((await getTask(ctx.db, taskId))?.state, "queued");
+  const runs = await listStepRuns(ctx.db, taskId);
+  assert.equal(runs.length, 1);
+  assert.equal(runs[0].status, "interrupted");
+  assert.notEqual(runs[0].ended_at, null);
+});
+
+test("resume 後に再び suspended に入ると新しい awaiting 行が立ち、attempt が2になる", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  const taskId = await suspendedTask(ctx, h);
+
+  await h("task.resume", { task_id: taskId }, NOOP_CONN);
+  await tickWhenIdle(ctx);
+  await until(async () => (await getTask(ctx.db, taskId))?.state === "suspended");
+  await until(() => ctx.running.size === 0);
+
+  const runs = await listStepRuns(ctx.db, taskId);
+  assert.equal(runs.length, 2, "閉じた行と、新しく立った行");
+  assert.equal(runs[0].status, "interrupted");
+  assert.equal(runs[0].attempt, 1);
+  assert.equal(runs[1].status, "awaiting");
+  assert.equal(
+    runs[1].attempt,
+    2,
+    "suspended に立ち止まった回数を正直に数える（resume は1回ぶん消費する）",
+  );
+  assert.equal(
+    JSON.parse((await getTask(ctx.db, taskId))!.attempt_counts).review,
+    2,
+    "attempt_counts は step_runs.attempt とちょうど一致する",
+  );
+});
+
+test("paused のタスクを resume しても、閉じるべき awaiting 行が無いので何も壊れない", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  await h("project.add", { path: repo }, NOOP_CONN);
+  const t = await h("task.create", { project: repo, title: "T", prompt: "p" }, NOOP_CONN) as {
+    id: string;
+  };
+  await h("task.pause", { task_id: t.id }, NOOP_CONN);
+
+  await h("task.resume", { task_id: t.id }, NOOP_CONN);
+
+  assert.equal((await getTask(ctx.db, t.id))?.state, "queued");
+  assert.deepEqual(await listStepRuns(ctx.db, t.id), []);
 });

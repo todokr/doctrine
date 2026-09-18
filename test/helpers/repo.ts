@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { type DaemonContext, tick } from "../../src/daemon/handlers.ts";
 
 const run = promisify(execFile);
 
@@ -40,4 +41,21 @@ export async function until(
   }
   const suffix = description ? `: ${description}` : "";
   throw new Error(`タイムアウト: 条件が満たされませんでした${suffix}`);
+}
+
+/**
+ * ctx.running が空になるのを待ってから tick を1回呼ぶ。
+ *
+ * approval が suspended に入るとき（reviewTree.ts）は実際に git を叩いてツリーを
+ * 記録してから ctx.running を解放するので、同じタスクが2回目以降に suspend する
+ * 場面では「DB の状態はもう次の状態だが、直前の runTask がまだ ctx.running を
+ * 握っている」という窓ができる。その窓の間に tick を呼んでも、スケジューラの
+ * 再入ガード（`if (ctx.running.has(task.id)) continue;`）に阻まれて拾えない。
+ * 解放され次第すぐに拾わせたいので、ここで待ってから1回だけ tick する
+ * （`until` の述語の中で tick を呼び続けると、10ms ごとに最大 500 回近く
+ * tick が走ってしまう）。
+ */
+export async function tickWhenIdle(ctx: DaemonContext): Promise<void> {
+  await until(() => ctx.running.size === 0);
+  await tick(ctx);
 }

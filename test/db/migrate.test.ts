@@ -219,8 +219,9 @@ const COLUMNS = {
     cost_usd: true,
     num_turns: true,
     duration_ms: true,
+    review_tree: true,
   },
-  step_outputs: { task_id: true, step_id: true, stdout: true, stderr: true, exit_code: true },
+  step_outputs: { step_run_id: true, stdout: true, stderr: true, exit_code: true },
   task_sessions: { task_id: true, role: true, session_id: true },
   rate_limit_samples: {
     id: true,
@@ -385,12 +386,20 @@ test("開き直してもマイグレーションは二度流れず、データ�
   const path = await tempDbPath();
   const first = await openDb(path);
   await seed(first);
-  assert.deepEqual(await appliedMigrations(first), ["0001_baseline", "0002_task_sessions"]);
+  assert.deepEqual(await appliedMigrations(first), [
+    "0001_baseline",
+    "0002_task_sessions",
+    "0003_review_records",
+  ]);
   await first.destroy();
 
   const second = await openDb(path);
   try {
-    assert.deepEqual(await appliedMigrations(second), ["0001_baseline", "0002_task_sessions"]);
+    assert.deepEqual(await appliedMigrations(second), [
+      "0001_baseline",
+      "0002_task_sessions",
+      "0003_review_records",
+    ]);
     assert.equal((await second.selectFrom("projects").selectAll().execute()).length, 1);
   } finally {
     await second.destroy();
@@ -415,7 +424,11 @@ test("pending_feed を足す前に作られたDBファイルは、行を保っ�
 
   const d = await openDb(path);
   try {
-    assert.deepEqual(await appliedMigrations(d), ["0001_baseline", "0002_task_sessions"]);
+    assert.deepEqual(await appliedMigrations(d), [
+      "0001_baseline",
+      "0002_task_sessions",
+      "0003_review_records",
+    ]);
     const old = await getTask(d, "old");
     assert.equal(old?.state, "suspended", "既存の行は残る");
     assert.equal(old?.pending_feed, null, "列が足されていて、読める");
@@ -472,4 +485,143 @@ test("手書き DDL 時代のDBを移行した形は、新規に作ったDBの�
       await fresh.destroy();
     }
   }
+});
+
+test("step_runs は awaiting と interrupted を受け付ける", async () => {
+  const d = await db();
+  const pid = await seed(d);
+  await insertTask(d, {
+    id: "t1",
+    project_id: pid,
+    title: "T",
+    prompt: "P",
+    workflow_name: "feature",
+    branch: "b",
+    priority: 2,
+  });
+  for (const status of ["awaiting", "interrupted"] as const) {
+    await d.insertInto("step_runs").values({
+      task_id: "t1",
+      step_id: "review",
+      attempt: 1,
+      status,
+      exit_code: null,
+      started_at: "2026-09-18T00:00:00.000Z",
+      ended_at: null,
+      log_path: "",
+      review_tree: null,
+    }).execute();
+  }
+  const rows = await d.selectFrom("step_runs").select("status").where("task_id", "=", "t1")
+    .execute();
+  assert.deepEqual(rows.map((r) => r.status).sort(), ["awaiting", "interrupted"]);
+});
+
+test("未知の status は CHECK 制約で落ちる", async () => {
+  const d = await db();
+  const pid = await seed(d);
+  await insertTask(d, {
+    id: "t1",
+    project_id: pid,
+    title: "T",
+    prompt: "P",
+    workflow_name: "feature",
+    branch: "b",
+    priority: 2,
+  });
+  await assert.rejects(() =>
+    d.insertInto("step_runs").values({
+      task_id: "t1",
+      step_id: "review",
+      attempt: 1,
+      // deno-lint-ignore no-explicit-any
+      status: "bogus" as any,
+      exit_code: null,
+      started_at: "2026-09-18T00:00:00.000Z",
+      ended_at: null,
+      log_path: "",
+      review_tree: null,
+    }).execute()
+  );
+});
+
+test("既存の step_outputs は同じステップの最新の実行に割り当てられる", async () => {
+  const sqlite = new DatabaseSync(":memory:");
+  sqlite.exec(LEGACY_DDL);
+  sqlite.exec(`
+    INSERT INTO projects (path, default_workflow) VALUES ('/repo', 'f');
+    INSERT INTO tasks (id, project_id, title, prompt, workflow_name, state, branch,
+                       created_at, updated_at)
+      VALUES ('t1', 1, 'T', 'P', 'f', 'running', 'b', '2026-09-18T00:00:00.000Z',
+              '2026-09-18T00:00:00.000Z');
+    INSERT INTO step_runs (id, task_id, step_id, attempt, status, started_at, log_path)
+      VALUES (1, 't1', 'review', 1, 'failed', '2026-09-18T00:00:00.000Z', '');
+    INSERT INTO step_runs (id, task_id, step_id, attempt, status, started_at, log_path)
+      VALUES (2, 't1', 'review', 2, 'failed', '2026-09-18T00:01:00.000Z', '');
+    INSERT INTO step_outputs (task_id, step_id, stdout, stderr, exit_code)
+      VALUES ('t1', 'review', '2回目のコメント', '', 1);
+    INSERT INTO step_outputs (task_id, step_id, stdout, stderr, exit_code)
+      VALUES ('t1', 'gone', '対応する実行が無い', '', 0);
+  `);
+  const d = await openDbOn(sqlite);
+  const rows = await d.selectFrom("step_outputs").selectAll().execute();
+  // node:sqlite が返す行は prototype なしのオブジェクトなので、deepEqual の前に
+  // 素のオブジェクトへ写す（他のテストの selectAll 結果比較と同じ理由）。
+  assert.deepEqual(rows.map((r) => ({ ...r })), [
+    { step_run_id: 2, stdout: "2回目のコメント", stderr: "", exit_code: 1 },
+  ]);
+});
+
+test("移行時点で suspended のタスクには awaiting 行が立ち、attempt_counts が進む", async () => {
+  const sqlite = new DatabaseSync(":memory:");
+  sqlite.exec(LEGACY_DDL);
+  sqlite.exec(`
+    INSERT INTO projects (path, default_workflow) VALUES ('/repo', 'f');
+    INSERT INTO tasks (id, project_id, title, prompt, workflow_name, state, current_step_id,
+                       attempt_counts, branch, created_at, updated_at)
+      VALUES ('t1', 1, 'T', 'P', 'f', 'suspended', 'review', '{"implement":1}', 'b',
+              '2026-09-18T00:00:00.000Z', '2026-09-18T09:00:00.000Z');
+  `);
+  const d = await openDbOn(sqlite);
+  const runs = await d.selectFrom("step_runs").selectAll().where("task_id", "=", "t1").execute();
+  assert.equal(runs.length, 1);
+  assert.equal(runs[0].status, "awaiting");
+  assert.equal(runs[0].step_id, "review");
+  assert.equal(runs[0].attempt, 1);
+  assert.equal(runs[0].started_at, "2026-09-18T09:00:00.000Z");
+  assert.equal(runs[0].ended_at, null);
+  assert.equal(runs[0].review_tree, null);
+  const t = (await getTask(d, "t1"))!;
+  assert.equal(t.attempt_counts, JSON.stringify({ implement: 1, review: 1 }));
+});
+
+test("移行前に一度差し戻されている suspended タスクの awaiting 行は attempt 2 になる", async () => {
+  const sqlite = new DatabaseSync(":memory:");
+  sqlite.exec(LEGACY_DDL);
+  // 1回目のレビューで差し戻され、implement をやり直して再び review で待っている DB。
+  // 旧コードは決定時にしか attempt を進めないので、既存の step_run は1件だけある。
+  sqlite.exec(`
+    INSERT INTO projects (path, default_workflow) VALUES ('/repo', 'f');
+    INSERT INTO tasks (id, project_id, title, prompt, workflow_name, state, current_step_id,
+                       attempt_counts, branch, created_at, updated_at)
+      VALUES ('t1', 1, 'T', 'P', 'f', 'suspended', 'review', '{"implement":2,"review":1}', 'b',
+              '2026-09-18T00:00:00.000Z', '2026-09-18T09:00:00.000Z');
+    INSERT INTO step_runs (id, task_id, step_id, attempt, status, started_at, ended_at, log_path)
+      VALUES (1, 't1', 'review', 1, 'failed', '2026-09-18T01:00:00.000Z',
+              '2026-09-18T02:00:00.000Z', '');
+  `);
+  const d = await openDbOn(sqlite);
+
+  const runs = await d.selectFrom("step_runs").selectAll().where("task_id", "=", "t1")
+    .orderBy("id").execute();
+  assert.equal(runs.length, 2, "既存の行は残り、今待っている回のぶんが1行足される");
+  assert.equal(runs[1].status, "awaiting");
+  assert.equal(runs[1].attempt, 2, "既存の step_run 数 + 1");
+  assert.equal(runs[1].started_at, "2026-09-18T09:00:00.000Z");
+  const t = (await getTask(d, "t1"))!;
+  assert.equal(
+    t.attempt_counts,
+    JSON.stringify({ implement: 2, review: 2 }),
+    "attempt_counts は step_runs.attempt とちょうど一致する",
+  );
 });

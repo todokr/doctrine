@@ -17,7 +17,13 @@ export type TaskState =
   | "failed"
   | "canceled";
 
-export type StepRunStatus = "running" | "success" | "failed" | "degraded";
+export type StepRunStatus =
+  | "running"
+  | "awaiting"
+  | "success"
+  | "failed"
+  | "degraded"
+  | "interrupted";
 
 export interface ProjectsTable {
   id: Generated<number>;
@@ -68,11 +74,12 @@ export interface StepRunsTable {
   cost_usd: number | null;
   num_turns: number | null;
   duration_ms: number | null;
+  /** approval ステップで suspended に入った時点の worktree 全体のツリー（5章）。 */
+  review_tree: string | null;
 }
 
 export interface StepOutputsTable {
-  task_id: string;
-  step_id: string;
+  step_run_id: number;
   stdout: string;
   stderr: string;
   exit_code: number | null;
