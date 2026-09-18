@@ -28,6 +28,17 @@ test("dctl add", () => {
   );
 });
 
+test("dctl diff", () => {
+  assert.deepEqual(
+    parseArgv(["diff", "abc123"]),
+    { method: "task.diff", params: { task_id: "abc123" } },
+  );
+  assert.deepEqual(
+    parseArgv(["diff", "abc123", "--since", "last_review"]),
+    { method: "task.diff", params: { task_id: "abc123", since: "last_review" } },
+  );
+});
+
 test("dctl ls", () => {
   assert.deepEqual(parseArgv(["ls"]), { method: "task.list", params: {} });
   assert.deepEqual(parseArgv(["ls", "--state", "queued"]), {

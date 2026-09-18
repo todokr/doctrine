@@ -214,6 +214,7 @@ $ dctl add --project /path/to/repo --title "PRを作る" --prompt "..." --workfl
 ```bash
 dctl ls --state failed              # 失敗したタスクを探す
 dctl get <task-id>                  # worktree_path を確認する
+dctl diff <task-id>                 # worktree の今の状態の diff（未コミット・未追跡を含む）
 dctl gc <task-id>                   # そのタスクのworktreeを削除する
 dctl gc <task-id> --force           # 削除が拒否される場合（未コミットの変更がある）
 ```

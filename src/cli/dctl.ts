@@ -72,6 +72,8 @@ export function parseArgv(argv: string[]): { method: string; params: Record<stri
       return { method: "task.cancel", params: { task_id: positional[0] } };
     case "logs":
       return { method: "task.logs", params: { task_id: positional[0], ...flags } };
+    case "diff":
+      return { method: "task.diff", params: { task_id: positional[0], ...flags } };
     case "projects":
       return { method: "project.list", params: {} };
     case "project-add":
