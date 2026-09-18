@@ -78,11 +78,15 @@ export function TaskView({ t }: { t: Task }) {
             disabled={canceling}
             onClick={async () => {
               setCanceling(true);
-              const r = await sendDecision(decide.cancel(t.id), "中止を送れませんでした");
-              setCanceling(false);
-              // 送れたときだけ「中止しました」を出す。デーモンが拒否したら黙って戻す
-              if (r.ok) dispatch({ type: "cancel" });
-              else dispatch({ type: "toast", message: r.message });
+              try {
+                const r = await sendDecision(decide.cancel(t.id), "中止を送れませんでした");
+                // cancel も「送れたときの後片付け」。task.stateChanged が先に届いて
+                // t.state が canceled になっていても、送信自体が成功していればトーストは出す
+                if (r.ok) dispatch({ type: "cancel" });
+                else dispatch({ type: "toast", message: r.message });
+              } finally {
+                setCanceling(false);
+              }
             }}
           >
             中止

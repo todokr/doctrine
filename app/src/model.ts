@@ -265,6 +265,10 @@ export type Action =
   | { type: "comment.cancel" }
   | { type: "comment.delete"; index: number }
   | { type: "overall"; text: string }
+  // approve / reject.confirm / cancel は判断そのものではない。ボタン側が rpc を
+  // 送って成功したときにだけ dispatch される。ここでの役目は後片付け
+  // （下書きを消す・次のレビュー待ちを選ぶ・トーストを出す）だけで、
+  // 「送ってよいか」「受理されたか」はもうこの時点で確定している
   | { type: "approve" }
   | { type: "reject.preview" }
   | { type: "reject.confirm" }
@@ -342,17 +346,20 @@ export function reduce(s: State, a: Action): State {
     case "overall":
       return t ? { ...s, drafts: setDraft(s, t.id, { ...draftOf(s, t.id), overall: a.text }) } : s;
     case "approve": {
-      // 実際の遷移はデーモンが決め、task.stateChanged で返ってくる（Task 13 で rpc に繋ぐ）
-      if (!t || t.state !== "suspended") return s;
+      // rpc("task.approve") はもう成功している（呼び出し側が判定済み）。ここでの
+      // 仕事は後片付けだけ。task.stateChanged は RPC の応答より先に届くことがあるので、
+      // ローカルの t.state で「本当に受理されたか」を判定してはいけない
+      // （判定するとイベントが先着した場合に後片付けが素通りし、下書きが古いまま残る）
+      if (!t) return s;
       const next = { ...s, drafts: withoutDraft(s, t.id), editing: null };
       return { ...next, sel: selectNextReview(next, t.id), toast: `承認しました: ${t.title}` };
     }
     case "reject.preview":
       return t && canReject(draftOf(s, t.id)) ? { ...s, modal: "reject-preview" } : s;
     case "reject.confirm": {
-      if (!t || t.state !== "suspended") return s;
-      const d = draftOf(s, t.id);
-      if (!canReject(d)) return s;
+      // 同じ理由で t.state も canReject も見ない。送ってよいかはボタン側が
+      // 送信前に判定済みで、ここに来る時点でコメントはもうエージェントに向かっている
+      if (!t) return s;
       const next = {
         ...s,
         drafts: withoutDraft(s, t.id),
@@ -364,7 +371,9 @@ export function reduce(s: State, a: Action): State {
     case "modal.close":
       return { ...s, modal: null };
     case "cancel":
-      if (!t || isTerminal(t.state)) return s;
+      // 同じ理由で isTerminal も見ない。task.stateChanged が先着して canceled に
+      // なっていても、送信自体は成功しているので「中止しました」は出す
+      if (!t) return s;
       return { ...s, toast: "中止しました。worktree は残します" };
     case "log.append": {
       // どの画面も t.log をもう読まない。task.logs の follow（#47）までの残骸

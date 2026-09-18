@@ -149,11 +149,15 @@ export function ReviewView({ t }: { t: Task }) {
             disabled={approving}
             onClick={async () => {
               setApproving(true);
-              const r = await sendDecision(decide.approve(t.id), "承認を送れませんでした");
-              setApproving(false);
-              // 送れたときだけ下書きを消す。失敗したら行コメント・全体コメントは残す
-              if (r.ok) dispatch({ type: "approve" });
-              else dispatch({ type: "toast", message: r.message });
+              try {
+                const r = await sendDecision(decide.approve(t.id), "承認を送れませんでした");
+                // approve はもう「送れたときの後片付け」。task.stateChanged がこの
+                // await より先に届いて t.state が変わっていても、後片付けは必ず走る
+                if (r.ok) dispatch({ type: "approve" });
+                else dispatch({ type: "toast", message: r.message });
+              } finally {
+                setApproving(false);
+              }
             }}
           >
             承認する

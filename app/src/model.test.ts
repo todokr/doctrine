@@ -164,9 +164,10 @@ describe("reduce", () => {
     expect(s.toast).toBe("承認しました: 在庫引当のリトライを冪等にする");
   });
 
-  test("差し戻しはコメントが無ければ確認画面を開かない", () => {
+  test("差し戻しの確認画面は、コメントが無ければ開かない", () => {
+    // 「送ってよいか」はここ（ボタンを押す前）で決める。reject.confirm 自身は
+    // もう決めない（下の「イベントが先に届いても」テストの通り、無条件で後片付けする）
     expect(reduce(base(), { type: "reject.preview" }).modal).toBeNull();
-    expect(reduce(base(), { type: "reject.confirm" })).toEqual(base());
   });
 
   test("差し戻しも状態を捏造せず、下書きを捨てて次のレビュー待ちを選び toast を出す", () => {
@@ -180,6 +181,31 @@ describe("reduce", () => {
     expect(s.drafts["t-2b91"]).toBeUndefined();
     expect(s.sel).toBe("b-204");
     expect(s.toast).toBe("差し戻しました: worktree.list をディスク上の全件にする");
+  });
+
+  test("承認の後片付けは、イベントが先に届いて状態が変わっていても走る", () => {
+    // デーモンは task.stateChanged を rpc の応答より先に流すことがあるので、
+    // await sendDecision(...) が返る頃には、ローカルの state はもう suspended
+    // ではないかもしれない。それでも「送信は成功した」という事実は変わらないので、
+    // 後片付け（下書きを消す・toast を出す）は必ず走らなければならない
+    const changed = seedTasks().map((x) => (x.id === "t-2b91" ? { ...x, state: "running" as const } : x));
+    const s = base({ tasks: changed, drafts: { "t-2b91": { comments: [], overall: "メモ" } } });
+    const after = reduce(s, { type: "approve" });
+    expect(after.drafts["t-2b91"]).toBeUndefined();
+    expect(after.toast).toBe("承認しました: worktree.list をディスク上の全件にする");
+  });
+
+  test("差し戻しの後片付けも同じ", () => {
+    const changed = seedTasks().map((x) => (x.id === "t-2b91" ? { ...x, state: "running" as const } : x));
+    const s = base({
+      tasks: changed,
+      modal: "reject-preview",
+      drafts: { "t-2b91": { comments: [], overall: "全件返す理由" } },
+    });
+    const after = reduce(s, { type: "reject.confirm" });
+    expect(after.drafts["t-2b91"]).toBeUndefined();
+    expect(after.modal).toBeNull();
+    expect(after.toast).toBe("差し戻しました: worktree.list をディスク上の全件にする");
   });
 
   test("j / k の移動はサイドバーの端で止まる", () => {

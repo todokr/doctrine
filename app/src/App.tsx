@@ -12,13 +12,10 @@ function RejectModal() {
   const { s, dispatch } = useStore();
   const decide = useDecide();
   const t = selectedTask(s);
-  // 送信中だけボタンを止める（連打対策）。成功したときだけ reject.confirm を
-  // dispatch する（下書きが消えるのはそのときだけ）。失敗したらモーダルは開いたまま、
-  // このフラグを戻して書き直さずに再送できるようにする
+  // 送信中だけボタンを止める（連打対策）。成功・失敗のどちらでも finally で必ず戻すので、
+  // dispatch や s.modal の変化に頼らない（頼ると、そのどちらかが起きない・遅れる
+  // 場合にボタンが無効なまま固まる）
   const [pending, setPending] = useState(false);
-  useEffect(() => {
-    if (s.modal !== "reject-preview") setPending(false);
-  }, [s.modal]);
   if (s.modal !== "reject-preview" || !t) return null;
   // reject.confirm は成功したときにだけ下書きをクリアする。その dispatch より前に
   // ここで読んでおく（消えてから読むと空文字を送ってしまう）
@@ -40,12 +37,15 @@ function RejectModal() {
             disabled={pending}
             onClick={async () => {
               setPending(true);
-              const r = await sendDecision(decide.reject(t.id, comment), "差し戻しを送れませんでした");
-              if (r.ok) {
-                dispatch({ type: "reject.confirm" });
-              } else {
+              try {
+                const r = await sendDecision(decide.reject(t.id, comment), "差し戻しを送れませんでした");
+                // reject.confirm はもう「送れたときの後片付け」であって、送ってよいかの
+                // 判定ではない（デーモンからの task.stateChanged がこの await より先に
+                // 届いて t.state が変わっていても、後片付けは必ず走る）
+                if (r.ok) dispatch({ type: "reject.confirm" });
+                else dispatch({ type: "toast", message: r.message });
+              } finally {
                 setPending(false);
-                dispatch({ type: "toast", message: r.message });
               }
             }}
           >
