@@ -9,6 +9,7 @@ import {
   diffStats,
   filesFor,
   groupOf,
+  isTerminal,
   reduce,
   sidebarOrder,
   toProject,
@@ -57,6 +58,15 @@ describe("groupOf", () => {
     expect(groupOf(t({ state: "queued" }))).toBe("queued");
     expect(groupOf(t({ state: "paused" }))).toBe("paused");
     expect(groupOf(t({ state: "completed" }))).toBe("done");
+  });
+  test("unknown（版のずれで知らない state になったタスク）は要確認に入る", () => {
+    expect(groupOf(t({ state: "unknown" }))).toBe("check");
+  });
+});
+
+describe("isTerminal", () => {
+  test("unknown は終端ではない", () => {
+    expect(isTerminal("unknown")).toBe(false);
   });
 });
 
@@ -268,6 +278,15 @@ describe("toProject / toTask", () => {
     const before = { ...t1({ has_degraded: true }), degraded: "implement" };
     expect(toTask(row({ has_degraded: true }), PJ, before).degraded).toBe("implement");
   });
+
+  test("知らない state 文字列はタスクを消さず unknown にする（版のずれ対策）", () => {
+    // TaskListEntry#state は protocol.ts 上は TaskState だが、それはコンパイル時の
+    // 注釈にすぎない。JSON で来る実行時の値は保証されないので、あえて型をはみ出させる
+    const weird = row({ state: "half-migrated" as unknown as TaskListEntry["state"] });
+    const task = toTask(weird, PJ);
+    expect(task.state).toBe("unknown");
+    expect(task.id).toBe(weird.id);
+  });
 });
 
 describe("sync", () => {
@@ -361,6 +380,16 @@ describe("daemon イベント", () => {
       now: 999,
     });
     expect(after.tasks).toEqual(s.tasks);
+  });
+
+  test("知らない to は無視せず unknown にする（イベントを捨てるとサイドバーが古いまま固まる）", () => {
+    const after = reduce(withTask(), {
+      type: "daemon",
+      ev: { event: "task.stateChanged", task_id: "a", from: "running", to: "half-migrated" },
+      now: 999,
+    });
+    expect(after.tasks[0].state).toBe("unknown");
+    expect(after.tasks[0].since).toBe(999);
   });
 
   test("まだ扱わないイベントは無視する", () => {

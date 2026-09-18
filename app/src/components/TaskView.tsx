@@ -11,6 +11,7 @@ const STATE_PILL: Record<TaskState, [string, string]> = {
   failed: ["失敗", "p-danger"],
   completed: ["完了", "p-ok"],
   canceled: ["中止", "p-muted"],
+  unknown: ["不明な状態", "p-danger"],
 };
 
 export function TaskView({ t }: { t: Task }) {

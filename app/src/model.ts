@@ -34,7 +34,7 @@ export type Group = "review" | "check" | "running" | "queued" | "paused" | "done
 
 export function groupOf(t: Task): Group {
   if (t.state === "suspended") return "review";
-  if (t.state === "failed" || t.refused || (t.degraded && !isTerminal(t.state))) return "check";
+  if (t.state === "failed" || t.state === "unknown" || t.refused || (t.degraded && !isTerminal(t.state))) return "check";
   if (t.state === "running") return "running";
   if (t.state === "queued") return "queued";
   if (t.state === "paused") return "paused";
@@ -127,6 +127,29 @@ export function unguidedFiles(t: Task): DiffFile[] {
   return t.diff.filter((f) => !mentioned.has(f.path));
 }
 
+// ---------------------------------------------------------------- デーモンの state 文字列の検証
+const TASK_STATES: ReadonlySet<Exclude<TaskState, "unknown">> = new Set([
+  "queued", "running", "suspended", "paused", "completed", "failed", "canceled",
+]);
+/**
+ * protocol.ts の TaskState / ServerEvent#to は、デーモンから来る JSON に対する
+ * コンパイル時の注釈にすぎず、実行時の保証ではない。新しい dctld と古い画面の
+ * 組み合わせなど版のずれで、知らない文字列が来ることがありうる。
+ */
+function isKnownState(x: string): x is Exclude<TaskState, "unknown"> {
+  return (TASK_STATES as ReadonlySet<string>).has(x);
+}
+
+/**
+ * 知らない state 文字列を "unknown" に落とす。捨てるとタスクが画面から消えたり
+ * 「終了」に紛れたりして、ユーザーが気づけなくなるので、見える状態として残す。
+ */
+function toKnownState(x: string, where: string): TaskState {
+  if (isKnownState(x)) return x;
+  console.warn(`知らない state を受け取った（${where}）: ${x}`);
+  return "unknown";
+}
+
 // ---------------------------------------------------------------- デーモンの形 → 画面の形
 
 /**
@@ -172,7 +195,7 @@ export function toTask(
     prompt: row.prompt,
     branch: row.branch,
     worktree: row.worktree_path,
-    state: row.state,
+    state: toKnownState(row.state, `task.list(${row.id})`),
     step: row.current_step_id,
     // 本当の試行回数は task.list の attempt_counts から作る必要があるが、それは別issue。
     // ここでは常に1を入れる代わりに、UI 側は t.attempt を表示に使わない（使うと常に「1回目」になる）
@@ -188,19 +211,6 @@ export function toTask(
     // has_degraded だけではどのステップか分からないので、分からないと書く
     degraded: row.has_degraded ? (previous?.degraded ?? DEGRADED_UNKNOWN) : undefined,
   };
-}
-
-// ---------------------------------------------------------------- daemon イベントの検証
-const TASK_STATES: ReadonlySet<TaskState> = new Set([
-  "queued", "running", "suspended", "paused", "completed", "failed", "canceled",
-]);
-/**
- * protocol.ts の ServerEvent#to はデーモン側の都合で単なる string。
- * 知らない文字列がそのまま Task.state に入ると STATE_PILL[t.state] のような
- * 総称でないルックアップが undefined を引いて画面が壊れるので、境界で弾く。
- */
-function isTaskState(x: string): x is TaskState {
-  return (TASK_STATES as ReadonlySet<string>).has(x);
 }
 
 // ---------------------------------------------------------------- 状態
@@ -348,6 +358,7 @@ export function reduce(s: State, a: Action): State {
       if (!t || isTerminal(t.state)) return s;
       return { ...s, toast: "中止しました。worktree は残します" };
     case "log.append": {
+      // どの画面も t.log をもう読まない。task.logs の follow（#47）までの残骸
       const target = s.tasks.find((x) => x.id === a.id);
       if (!target || target.state !== "running") return s;
       return { ...s, tasks: updateTask(s, a.id, { log: (target.log ?? "") + "\n" + a.line }) };
@@ -372,11 +383,13 @@ export function reduce(s: State, a: Action): State {
       // デーモンが先に増えてもここで落ちない
       if (ev.event === "task.stateChanged") {
         if (!s.tasks.some((x) => x.id === ev.task_id)) return s;
-        if (!isTaskState(ev.to)) return s; // 知らない state 文字列は無視する
+        // 知らない state 文字列は無視せず "unknown" にする。無視するとサイドバーが
+        // 古いまま固まり、まさに避けたい「気づけない」を起こす
+        const state = toKnownState(ev.to, `task.stateChanged(${ev.task_id})`);
         return {
           ...s,
           now: a.now,
-          tasks: updateTask(s, ev.task_id, { state: ev.to, since: a.now }),
+          tasks: updateTask(s, ev.task_id, { state, since: a.now }),
         };
       }
       if (ev.event === "stepRun.started") {
