@@ -1,6 +1,6 @@
 use std::env;
 use std::fs::OpenOptions;
-use std::os::unix::fs::MetadataExt;
+use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt};
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -112,6 +112,22 @@ pub fn find_dctld() -> Result<PathBuf, String> {
     find_dctld_in(env::var("DOCTRINE_DCTLD").ok(), env::var("PATH").ok())
 }
 
+/// 状態ディレクトリを 0o700 で作る。
+///
+/// ここが緩いと、後から dctld が mode: 0o700 で mkdir しても手遅れになる
+/// （既にあるディレクトリのパーミッションは mkdir では変わらない）。
+/// doctrine は TCP ポートを開かず、ファイルパーミッションがそのまま認可に
+/// なるので（src/daemon/server.ts）、DB・ログ・ソケットの置き場を
+/// 他人から読めるまま作ってはいけない。
+/// 既に存在するディレクトリのモードは（Deno 側と同様）変更しない。
+fn ensure_state_dir(root: &Path) -> Result<(), String> {
+    std::fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(root)
+        .map_err(|e| format!("状態ディレクトリを作れません ({}): {e}", root.display()))
+}
+
 /// dctld を切り離して起動する。アプリを終了しても、ターミナルで Ctrl-C しても残る。
 ///
 /// **Child を返すこと。** 捨てると2つの問題が同時に起きる。(1) dctld が listen する
@@ -123,8 +139,7 @@ pub fn spawn_dctld() -> Result<Child, String> {
     let bin = find_dctld()?;
     let e = current_env();
     let root = resolve_state_root(e.state_dir, e.home)?;
-    std::fs::create_dir_all(&root)
-        .map_err(|e| format!("状態ディレクトリを作れません ({}): {e}", root.display()))?;
+    ensure_state_dir(&root)?;
 
     // 切り離すと stdout / stderr の行き先が無くなる。dctld は起動時の復帰結果・
     // 孤児の検出・tick の失敗をここにしか書かないので、捨てずにログへ追記する。
@@ -132,6 +147,7 @@ pub fn spawn_dctld() -> Result<Child, String> {
     let log = OpenOptions::new()
         .create(true)
         .append(true)
+        .mode(0o600)
         .open(&log_path)
         .map_err(|e| format!("ログを開けません ({}): {e}", log_path.display()))?;
     let err = log
@@ -267,5 +283,15 @@ mod tests {
             err.contains("DOCTRINE_DCTLD"),
             "どの設定が悪いか分からない: {err}"
         );
+    }
+
+    #[test]
+    fn state_dir_is_created_private() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("nested").join("doctrine");
+        ensure_state_dir(&root).unwrap();
+        let mode = std::fs::metadata(&root).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o700, "状態ディレクトリが他人から読める: {mode:o}");
     }
 }
