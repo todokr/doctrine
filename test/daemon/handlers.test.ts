@@ -13,7 +13,7 @@ import { listStepRuns } from "../../src/db/stepRuns.ts";
 import { createHandler, type DaemonContext, tick } from "../../src/daemon/handlers.ts";
 import { createMockAdapter } from "../../src/adapter/mock.ts";
 import { parseWorkflow } from "../../src/workflow/schema.ts";
-import type { ServerEvent } from "../../src/daemon/protocol.ts";
+import type { ProjectSummary, ServerEvent, TaskListEntry } from "../../src/daemon/protocol.ts";
 import { branchNameFor } from "../../src/core/worktree.ts";
 import { randomUUID } from "node:crypto";
 import { makeRepo, until } from "../helpers/repo.ts";
@@ -1115,4 +1115,23 @@ test("task.list は degraded な step_run を持つタスクに has_degraded を
   const rows = await h("task.list", {}, NOOP_CONN) as { id: string; has_degraded: boolean }[];
   assert.equal(rows.find((r) => r.id === dirty.id)?.has_degraded, true);
   assert.equal(rows.find((r) => r.id === clean.id)?.has_degraded, false);
+});
+
+test("task.list / project.list の応答が protocol.ts の型を満たす", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("task.create", { project: repo, title: "た", prompt: "p" }, NOOP_CONN);
+
+  // 型注釈そのものが表明である（噛み合わなければ deno task check が落ちる）。
+  const tasks: TaskListEntry[] = await h("task.list", {}, NOOP_CONN) as TaskListEntry[];
+  const projects: ProjectSummary[] = await h("project.list", {}, NOOP_CONN) as ProjectSummary[];
+
+  // 型が「ある」と言っている欄が実行時にも来ることを確かめる。
+  for (const key of ["id", "state", "branch", "updated_at", "has_degraded"] as const) {
+    assert.ok(key in tasks[0], `task.list に ${key} がありません`);
+  }
+  for (const key of ["id", "path", "default_workflow", "base_branch"] as const) {
+    assert.ok(key in projects[0], `project.list に ${key} がありません`);
+  }
 });
