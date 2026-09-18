@@ -223,6 +223,61 @@ test("defaultProbe が使う ps コマンドはロケール・タイムゾーン
   assert.equal(env.TZ, "UTC");
 });
 
+/**
+ * デーモンを模した Deno プロセスを指定の TZ で起動し、その中で実際に子を spawn して
+ * defaultProbe（＝本物の ps 出力）を通した isSameChild の結果を返す。
+ * ProcessProbe をモックしたテストでは ps 出力のパース経路を通らないので、
+ * 「TZ=UTC の ps 出力をローカルタイムゾーンで解釈してしまう」類のずれを検出できない。
+ * TZ は V8 がプロセス起動時に読むため、テストプロセス内で切り替えず別プロセスにしている。
+ */
+type TzProbeResult = {
+  same: boolean; recorded: string; actual: string | null;
+  killResult: string; exitSignal: string | null;
+};
+
+async function killOwnChildUnderTz(tz: string): Promise<TzProbeResult> {
+  const recoveryUrl = new URL("../../src/core/recovery.ts", import.meta.url).href;
+  // task.pause / task.cancel と同じ呼び方（killStaleChild + defaultProbe + SIGTERM）で、
+  // シグナルが本当に子へ届いたかを子の終了シグナルで確かめる。
+  const script = `
+    import { defaultProbe, isSameChild, killStaleChild } from ${JSON.stringify(recoveryUrl)};
+    const child = new Deno.Command("sleep", { args: ["30"] }).spawn();
+    const recorded = new Date().toISOString();
+    let result;
+    try {
+      const actual = await defaultProbe().startTimeOf(child.pid);
+      const same = isSameChild({ pid: child.pid, startedAt: recorded }, actual);
+      const killResult = await killStaleChild(
+        { child_pid: child.pid, child_started_at: recorded }, defaultProbe(), "SIGTERM",
+      );
+      result = { same, recorded, actual, killResult };
+    } finally {
+      // kill が届いていなければここで後始末する（その場合 exitSignal は SIGKILL になる）。
+      const timer = setTimeout(() => { try { child.kill("SIGKILL"); } catch { /* 既に終了 */ } }, 2000);
+      const status = await child.status;
+      clearTimeout(timer);
+      console.log(JSON.stringify({ ...result, exitSignal: status.signal }));
+    }
+  `;
+  const out = await new Deno.Command(Deno.execPath(), {
+    args: ["eval", "--config", new URL("../../deno.json", import.meta.url).pathname, script],
+    env: { TZ: tz },
+    stdout: "piped",
+    stderr: "piped",
+  }).output();
+  assert.ok(out.success, new TextDecoder().decode(out.stderr));
+  return JSON.parse(new TextDecoder().decode(out.stdout));
+}
+
+for (const tz of ["Asia/Tokyo", "America/Los_Angeles", "UTC"]) {
+  test(`TZ=${tz} のデーモンでも、実際の ps 出力から自分の子を同一と判定し SIGTERM を届けられる`, async () => {
+    const r = await killOwnChildUnderTz(tz);
+    assert.ok(r.same, `記録 ${r.recorded} と ps 由来 ${r.actual} が一致しない`);
+    assert.equal(r.killResult, "killed");
+    assert.equal(r.exitSignal, "SIGTERM", "子が SIGTERM で止まっている必要がある");
+  });
+}
+
 test("復帰に成功したら、中断した step_runs 行を running のまま残さない", async () => {
   const db = await fixture();
   await commitStepBoundary(db, {
