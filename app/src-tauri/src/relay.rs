@@ -77,21 +77,28 @@ impl Relay {
 
     /// Rust は method の中身を見ない。params もそのまま渡す。
     pub async fn call(&self, method: String, params: Value) -> Result<Value, String> {
-        let tx = self
-            .writer
-            .lock()
-            .unwrap()
-            .clone()
-            .ok_or_else(|| "デーモンに接続していません".to_string())?;
-
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let (res_tx, res_rx) = oneshot::channel();
-        self.pending.lock().unwrap().insert(id, res_tx);
 
-        let line = json!({ "id": id, "method": method, "params": params }).to_string();
-        if tx.send(line).is_err() {
-            self.pending.lock().unwrap().remove(&id);
-            return Err("デーモンに接続していません".into());
+        {
+            // writer → pending の順でロックを取る。pump 側の切断処理（下）も同じ順で
+            // writer を掴んでから pending を drain するので、この insert は
+            // 「writer が None になる前」か「後」のどちらか一方に必ず決まる。
+            // 前なら fail_all がこの entry を drain して即座に失敗させる、後なら
+            // ここで None を見て即座に失敗を返す。どちらにせよ pending に取り
+            // 残されることはない。この区間に .await を入れないこと（std::sync::Mutex
+            // を async の向こうまで持ち越すと危険）。
+            let guard = self.writer.lock().unwrap();
+            let tx = match guard.as_ref() {
+                Some(tx) => tx.clone(),
+                None => return Err("デーモンに接続していません".to_string()),
+            };
+            self.pending.lock().unwrap().insert(id, res_tx);
+            let line = json!({ "id": id, "method": method, "params": params }).to_string();
+            if tx.send(line).is_err() {
+                self.pending.lock().unwrap().remove(&id);
+                return Err("デーモンに接続していません".into());
+            }
         }
 
         match tokio::time::timeout(self.options.request_timeout, res_rx).await {
@@ -163,7 +170,9 @@ async fn supervise(relay: Arc<Relay>, socket: PathBuf, emit: Emit) {
                 backoff = relay.options.backoff_initial;
                 emit_status(&relay, &emit, "connected", None);
                 pump(&relay, stream, &emit).await;
-                fail_all(&relay, "接続が切れました");
+                // pump が writer=None と pending の drain を1つのロックの下で
+                // すでに済ませている。ここで二重に drain しても空なので無害だが、
+                // 意味が重複するので呼ばない。
                 emit_status(&relay, &emit, "disconnected", None);
                 announced_connecting = false;
             }
@@ -260,6 +269,15 @@ async fn pump(relay: &Arc<Relay>, stream: UnixStream, emit: &Emit) {
         let _ = sender.send(payload);
     }
 
-    *relay.writer.lock().unwrap() = None;
+    {
+        // writer を None にするのと pending を drain するのを1つのロックの下でやる。
+        // 分けると、call がロックを取って Some を見てから insert するまでの間に
+        // ここが割り込んで drain してしまい、その insert が誰にも捨てられずに
+        // 残る（タイムアウトいっぱい待たされる）レースになる。call 側もこの
+        // 同じ writer ロックを insert の前に取るので、両者は必ず順序が決まる。
+        let mut guard = relay.writer.lock().unwrap();
+        *guard = None;
+        fail_all(relay, "接続が切れました");
+    }
     writer.abort();
 }

@@ -1,6 +1,5 @@
 mod common;
 
-use std::sync::Arc;
 use std::time::Duration;
 
 use common::{collector, until, Fake};
@@ -17,7 +16,7 @@ fn options() -> RelayOptions {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn 応答が逆順で返ってきても取り違えない() {
     let mut fake = Fake::start().await;
     let (emit, seen) = collector();
@@ -58,7 +57,7 @@ async fn 応答が逆順で返ってきても取り違えない() {
     assert_eq!(b.await.unwrap().unwrap(), json!("project.list"));
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn イベントは素通しでemitされる() {
     let mut fake = Fake::start().await;
     let (emit, seen) = collector();
@@ -98,7 +97,7 @@ async fn イベントは素通しでemitされる() {
     assert_eq!(events[0]["task_id"], json!("t1"));
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn エラー応答はerrになる() {
     let mut fake = Fake::start().await;
     let (emit, seen) = collector();
@@ -125,7 +124,7 @@ async fn エラー応答はerrになる() {
     assert_eq!(call.await.unwrap().unwrap_err(), "タスクがありません");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn 壊れた行を飛ばして次の行を処理する() {
     let mut fake = Fake::start().await;
     let (emit, seen) = collector();
@@ -156,7 +155,7 @@ async fn 壊れた行を飛ばして次の行を処理する() {
     assert_eq!(call.await.unwrap().unwrap(), json!("本命"));
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn 応答が来なければタイムアウトする() {
     let fake = Fake::start().await;
     let (emit, seen) = collector();
@@ -173,7 +172,7 @@ async fn 応答が来なければタイムアウトする() {
     assert_eq!(relay.pending_count(), 0, "タイムアウトした要求が残っている");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn 接続していないときの呼び出しは即座に失敗する() {
     let dir = tempfile::tempdir().unwrap();
     let (emit, _seen) = collector();
@@ -185,7 +184,7 @@ async fn 接続していないときの呼び出しは即座に失敗する() {
     assert!(err.contains("接続していません"), "文言が違う: {err}");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn 接続状態は後から問い合わせても分かる() {
     // イベントは購読者が居ない間に流れると消える。画面は起動直後にここを読んで追いつく
     let fake = Fake::start().await;
@@ -208,5 +207,70 @@ async fn 接続状態は後から問い合わせても分かる() {
     .await;
 }
 
-// Arc<Relay> を clone するために使う
-fn _assert_send_sync(_: &Arc<Relay>) {}
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn 切断と同時に投げた要求が_pending_に取り残されない() {
+    // 取り残されると、呼び出し側は「接続が切れました」で即座に失敗する代わりに
+    // タイムアウト（本番で 30 秒）いっぱい待たされる。current_thread ランタイムでは
+    // call の中の「writer を見る」と「pending に insert する」の間に pump の切断処理が
+    // 割り込めないので、このレースは multi_thread でしか再現しない。
+    //
+    // 1 ラウンドだけだと、レースの窓は数命令ぶんしかなく、OS スケジューラが
+    // ちょうどそこに割り込む確率は極めて低い（実測: 単発 1 セット・64 並列の
+    // 呼び出しでは buggy 版に対しても 40 回試して 1 回も落とせなかった）。
+    // fake を繰り返し立て直して「同時に呼ぶ→切る→直後に見る」を何百回も回す
+    // ことで、狂ったタイミングでのスケジュールを実際に踏ませる。
+    // （診断: buggy 版に対して 300 ラウンドなら 20/20 回検出、150 ラウンドでは
+    //  19/20 回、50 ラウンドでは 7/20 回だった。300 ラウンドを採用する。）
+    let mut fake = Fake::start().await;
+    for round in 0..300 {
+        let (emit, seen) = collector();
+        let (relay, driver) = Relay::new(fake.path.clone(), emit, options());
+        tokio::spawn(driver);
+        until(
+            || common::statuses(&seen).contains(&"connected".to_string()),
+            "接続",
+        )
+        .await;
+
+        // 応答は誰も返さない。呼び出しの最中に fake を落として、
+        // 「writer を見る」と「pending に insert する」の間に切断処理が
+        // 挟まる余地を作る。
+        let calls: Vec<_> = (0..32)
+            .map(|_| {
+                let r = relay.clone();
+                tokio::spawn(async move { r.call("task.list".into(), json!({})).await })
+            })
+            .collect();
+
+        let (dir, path) = fake.stop();
+
+        until(
+            || relay.status()["status"] == json!("disconnected"),
+            "切断が状態に載る",
+        )
+        .await;
+
+        // ここが肝心：disconnected を観測した直後に見る。呼び出しの完了を待って
+        // から見ると、レースに乗ってしまった要求もその後 500ms のタイムアウトで
+        // 自然に pending から消えてしまい、バグを覆い隠してしまう
+        // （実際にこれで一度、レースを再現できないテストを書いてしまった）。
+        // disconnected の直後はまだタイムアウトが来ていないはずの時間なので、
+        // ここで残っていたらそれは drain を取りこぼした証拠。
+        let pending = relay.pending_count();
+        assert_eq!(
+            pending, 0,
+            "ラウンド {round}: 切断直後なのに pending に要求が {pending} 件残っている\
+             （drain を取りこぼした = タイムアウトいっぱい待たされる）"
+        );
+
+        for c in calls {
+            let _ = c.await;
+        }
+        fake = Fake::restart(dir, path);
+    }
+}
+
+const _: fn() = || {
+    fn assert_send_sync<T: Send + Sync>() {}
+    assert_send_sync::<Relay>();
+};
