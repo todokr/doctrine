@@ -149,11 +149,15 @@ Expected: FAIL（`resolveSocketPath` が export されていない）
 
 - [ ] **Step 3: stateRoot を src/util/home.ts へ移す**
 
-`src/util/home.ts` の末尾に足す。
+`src/util/home.ts` に足す。**`import` はファイルの先頭に置く**（末尾に足すと `deno lint` が落ちる）。
 
 ```ts
 import { join } from "@std/path";
+```
 
+関数は末尾に足す。
+
+```ts
 /**
  * DB・worktree・ログの置き場。macOS ではソケットもここに置く
  * （XDG_RUNTIME_DIR が無く /run が read-only なため）。
@@ -650,7 +654,7 @@ git commit -m "feat(app): ソケットパスと状態ディレクトリの解決
 - Produces:
   ```rust
   pub fn find_dctld() -> Result<PathBuf, String>
-  pub fn spawn_dctld() -> Result<(), String>
+  pub fn spawn_dctld() -> Result<std::process::Child, String>
   ```
 
 - [ ] **Step 1: 失敗するテストを書く**
@@ -709,7 +713,7 @@ Expected: FAIL（`find_dctld_in` が無い）
 ```rust
 use std::fs::OpenOptions;
 use std::os::unix::process::CommandExt;
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
 
 /// 探索の規則そのもの。環境変数を読まないのでテストできる。
 pub fn find_dctld_in(explicit: Option<String>, path: Option<String>) -> Result<PathBuf, String> {
@@ -736,9 +740,12 @@ pub fn find_dctld() -> Result<PathBuf, String> {
 
 /// dctld を切り離して起動する。アプリを終了しても、ターミナルで Ctrl-C しても残る。
 ///
-/// 子は待たない（待つとアプリが止まる）。dctld が先に死ぬとアプリが終わるまで
-/// ゾンビが1つ残るが、dctld はアプリより長生きする前提なので受け入れる。
-pub fn spawn_dctld() -> Result<(), String> {
+/// **Child を返すこと。** 捨てると2つの問題が同時に起きる。(1) dctld が listen する
+/// までに時間がかかると、呼び出し側が「まだソケットが無い」と見てもう1つ起動し、
+/// どちらも assertSocketNotLive を素通りして**同じ DB に2つのデーモンが書く**
+/// （まさに assertSocketNotLive が防ごうとしている事態）。(2) dctld が先に死ぬと
+/// ゾンビが残る。呼び出し側が Child を持ち、try_wait() で生死を見て両方を防ぐ。
+pub fn spawn_dctld() -> Result<Child, String> {
     let bin = find_dctld()?;
     let root = current_env()?.state_root;
     std::fs::create_dir_all(&root)
@@ -760,7 +767,6 @@ pub fn spawn_dctld() -> Result<(), String> {
         .stdout(Stdio::from(log))
         .stderr(Stdio::from(err))
         .spawn()
-        .map(|_| ())
         .map_err(|e| format!("dctld を起動できません ({}): {e}", bin.display()))
 }
 ```
@@ -807,6 +813,8 @@ process_group(0) で Ctrl-C の巻き添えを断ち、stderr は
       pub fn new(socket: PathBuf, emit: Emit, options: RelayOptions)
           -> (Arc<Relay>, impl Future<Output = ()> + Send + 'static);
       pub async fn call(&self, method: String, params: Value) -> Result<Value, String>;
+      pub fn status(&self) -> Value;        // 最後に emit した接続状態
+      pub fn pending_count(&self) -> usize; // テスト用
   }
   ```
   `new` が返す Future を呼び出し側が spawn する。Tauri は `tauri::async_runtime::spawn`、テストは `tokio::spawn` を使うので、`relay.rs` は tauri に依存しない。
@@ -1064,6 +1072,21 @@ async fn 接続していないときの呼び出しは即座に失敗する() {
     assert!(err.contains("接続していません"), "文言が違う: {err}");
 }
 
+#[tokio::test]
+async fn 接続状態は後から問い合わせても分かる() {
+    // イベントは購読者が居ない間に流れると消える。画面は起動直後にここを読んで追いつく
+    let fake = Fake::start().await;
+    let (emit, seen) = collector();
+    let (relay, driver) = Relay::new(fake.path.clone(), emit, options());
+    tokio::spawn(driver);
+    until(|| common::statuses(&seen).contains(&"connected".to_string()), "接続").await;
+
+    assert_eq!(relay.status()["status"], json!("connected"));
+
+    fake.stop();
+    until(|| relay.status()["status"] == json!("disconnected"), "切断が状態に載る").await;
+}
+
 // Arc<Relay> を clone するために使う
 fn _assert_send_sync(_: &Arc<Relay>) {}
 ```
@@ -1124,6 +1147,11 @@ pub struct Relay {
     pending: Pending,
     /// 接続中だけ Some。切れている間の call はここで弾く
     writer: Arc<Mutex<Option<mpsc::UnboundedSender<String>>>>,
+    /// 最後に emit した接続状態。**イベントだけだと WebView が間に合わない。**
+    /// setup() の接続はミリ秒で終わるが、その時点で listen() を呼んでいる購読者は
+    /// 居ないので connected のイベントは捨てられ、画面は「接続しています…」の
+    /// ままになる。画面は購読を張った後でここを1度読んで追いつく。
+    status: Arc<Mutex<Value>>,
     options: RelayOptions,
 }
 
@@ -1139,6 +1167,7 @@ impl Relay {
             next_id: AtomicU64::new(1),
             pending: Arc::new(Mutex::new(HashMap::new())),
             writer: Arc::new(Mutex::new(None)),
+            status: Arc::new(Mutex::new(json!({ "status": "connecting", "detail": null }))),
             options,
         });
         let driver = supervise(relay.clone(), socket, emit);
@@ -1179,14 +1208,22 @@ impl Relay {
         }
     }
 
+    /// 今の接続状態。画面が購読を張った直後に1度読んで追いつくために使う。
+    pub fn status(&self) -> Value {
+        self.status.lock().unwrap().clone()
+    }
+
     /// テスト用。待ち中の要求の数。
     pub fn pending_count(&self) -> usize {
         self.pending.lock().unwrap().len()
     }
 }
 
-fn emit_status(emit: &Emit, status: &str, detail: Option<String>) {
-    emit("daemon-connection", json!({ "status": status, "detail": detail }));
+/// 流すと同時に覚える。覚えないと、購読が間に合わなかった画面が永久に追いつけない。
+fn emit_status(relay: &Arc<Relay>, emit: &Emit, status: &str, detail: Option<String>) {
+    let payload = json!({ "status": status, "detail": detail });
+    *relay.status.lock().unwrap() = payload.clone();
+    emit("daemon-connection", payload);
 }
 
 fn fail_all(relay: &Arc<Relay>, reason: &str) {
@@ -1199,35 +1236,39 @@ fn fail_all(relay: &Arc<Relay>, reason: &str) {
 async fn supervise(relay: Arc<Relay>, socket: PathBuf, emit: Emit) {
     let mut backoff = relay.options.backoff_initial;
     let mut announced_connecting = false;
+    // 起こした dctld。生きている間は二度と起こさない
+    let mut child: Option<std::process::Child> = None;
 
     loop {
         if !announced_connecting {
-            emit_status(&emit, "connecting", None);
+            emit_status(&relay, &emit, "connecting", None);
             announced_connecting = true;
         }
 
         // ソケットファイルが在るのに繋がらないときは消さない。生きているデーモンを
         // 気づかれずに切り離す危険がある（その判定は dctld の assertSocketNotLive の担当）。
-        if !socket.exists() && relay.options.spawn_daemon {
-            if let Err(e) = daemon::spawn_dctld() {
-                emit_status(&emit, "disconnected", Some(e));
-            } else {
-                wait_for_socket(&socket, relay.options.spawn_grace).await;
+        if !socket.exists() && relay.options.spawn_daemon && !still_starting(&mut child) {
+            match daemon::spawn_dctld() {
+                Ok(c) => {
+                    child = Some(c);
+                    wait_for_socket(&socket, relay.options.spawn_grace).await;
+                }
+                Err(e) => emit_status(&relay, &emit, "disconnected", Some(e)),
             }
         }
 
         match UnixStream::connect(&socket).await {
             Ok(stream) => {
                 backoff = relay.options.backoff_initial;
-                announced_connecting = false;
-                emit_status(&emit, "connected", None);
+                emit_status(&relay, &emit, "connected", None);
                 pump(&relay, stream, &emit).await;
                 fail_all(&relay, "接続が切れました");
-                emit_status(&emit, "disconnected", None);
+                emit_status(&relay, &emit, "disconnected", None);
                 announced_connecting = false;
             }
             Err(e) => {
                 emit_status(
+                    &relay,
                     &emit,
                     "disconnected",
                     Some(format!("{} に接続できません: {e}", socket.display())),
@@ -1237,6 +1278,25 @@ async fn supervise(relay: Arc<Relay>, socket: PathBuf, emit: Emit) {
 
         tokio::time::sleep(backoff).await;
         backoff = (backoff * 2).min(relay.options.backoff_max);
+    }
+}
+
+/// 前に起こした dctld がまだ動いているか。
+///
+/// **これが無いと同じ DB に2つのデーモンが書く。** dctld が listen するまでに
+/// spawn_grace + backoff を超えると、次の周が「ソケットが無い」と見てもう1つ起こす。
+/// どちらもまだ listen していないので assertSocketNotLive は両方を通してしまう。
+/// 終わっていたら try_wait が刈り取る（ゾンビも残らない）。
+fn still_starting(child: &mut Option<std::process::Child>) -> bool {
+    let Some(c) = child.as_mut() else {
+        return false;
+    };
+    match c.try_wait() {
+        Ok(None) => true, // まだ動いている
+        _ => {
+            *child = None;
+            false
+        }
     }
 }
 
@@ -1309,7 +1369,7 @@ async fn pump(relay: &Arc<Relay>, stream: UnixStream, emit: &Emit) {
 - [ ] **Step 6: テストが通ることを確かめる**
 
 Run: `cd app/src-tauri && cargo test --test relay`
-Expected: 6 tests PASS
+Expected: 7 tests PASS
 
 - [ ] **Step 7: commit**
 
@@ -1396,7 +1456,7 @@ async fn 最初からデーモンが居なくても、後から立てれば繋�
 - [ ] **Step 2: テストを走らせる**
 
 Run: `cd app/src-tauri && cargo test --test relay`
-Expected: 8 tests PASS。落ちる場合は `supervise` のバックオフと `announced_connecting` の扱いを直す（テストは実装の誤りを見つけるためにある）
+Expected: 9 tests PASS。落ちる場合は `supervise` のバックオフと `announced_connecting` の扱いを直す（テストは実装の誤りを見つけるためにある）
 
 - [ ] **Step 3: 何度か繰り返して不安定さを確かめる**
 
@@ -1421,7 +1481,7 @@ git commit -m "test(app): 切断と再接続を結合テストで確かめる"
 
 **Interfaces:**
 - Consumes: Task 4〜7 の `daemon::socket_path()` / `Relay::new` / `RelayOptions::default()`
-- Produces: Tauri コマンド `rpc(method: String, params: Value) -> Result<Value, String>`、イベント `daemon-event` と `daemon-connection`
+- Produces: Tauri コマンド `rpc(method, params) -> Result<Value, String>` と `connection_status() -> Value`、イベント `daemon-event` と `daemon-connection`
 
 - [ ] **Step 1: lib.rs を書く**
 
@@ -1447,6 +1507,15 @@ async fn rpc(
     relay.call(method, params).await
 }
 
+/// 今の接続状態。**画面が起動直後に1度読む。**
+/// 接続は setup() の中でミリ秒のうちに終わるので、その時点の daemon-connection は
+/// まだ listen していない WebView に届かず捨てられる。これが無いと、画面は
+/// データが流れているのに「接続しています…」のままになる。
+#[tauri::command]
+fn connection_status(relay: State<'_, Arc<Relay>>) -> Value {
+    relay.status()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -1463,7 +1532,7 @@ pub fn run() {
             app.manage(relay);
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![rpc])
+        .invoke_handler(tauri::generate_handler![rpc, connection_status])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
@@ -1510,6 +1579,7 @@ git commit -m "feat(app): rpc コマンドと daemon-event / daemon-connection �
   export function rpc<M extends Method>(method: M, params: ParamsOf<M>): Promise<ResultOf<M>>;
   export function onDaemonEvent(fn: (ev: ServerEvent) => void): Promise<() => void>;
   export function onConnection(fn: (c: ConnectionStatus) => void): Promise<() => void>;
+  export function connectionStatus(): Promise<ConnectionStatus>;
   ```
 
 - [ ] **Step 1: app の外を読めるようにする**
@@ -1572,6 +1642,15 @@ export function onDaemonEvent(fn: (ev: ServerEvent) => void): Promise<() => void
 export function onConnection(fn: (c: ConnectionStatus) => void): Promise<() => void> {
   return listen<ConnectionStatus>("daemon-connection", (e) => fn(e.payload));
 }
+
+/**
+ * 今の接続状態を1度だけ問い合わせる。
+ * Rust は WebView が用意できる前に接続を終えるので、そのときの
+ * daemon-connection は誰も聞いていない。購読を張った直後にこれで追いつく。
+ */
+export function connectionStatus(): Promise<ConnectionStatus> {
+  return invoke<ConnectionStatus>("connection_status");
+}
 ```
 
 - [ ] **Step 3: 型検査とビルドが通ることを確かめる**
@@ -1620,6 +1699,7 @@ reducer は純関数のまま保ち、ここで全部テストする。副作用
   export function toProject(p: ProjectSummary): Project;
   export function toTask(row: TaskListEntry, projects: ProjectSummary[], previous?: Task): Task;
   export function projectKey(path: string): string;
+  export const DEGRADED_UNKNOWN = "(ステップ不明)";
   // Action に足すもの
   | { type: "sync"; tasks: Task[]; projects: Project[]; now: number }
   | { type: "daemon"; ev: ServerEvent; now: number }
@@ -1647,7 +1727,11 @@ Expected: PASS（まだ何も壊していない）
 
 - [ ] **Step 2: 失敗するテストを書く**
 
-`app/src/model.test.ts` の末尾に足す。先頭の import に足す（`import { projectKey, toProject, toTask } from "./model";` は既存の import 文にまとめる。`import type { ProjectSummary, TaskListEntry } from "../../src/daemon/protocol.ts";` も足す）。
+`app/src/model.test.ts` の末尾に足す。先頭の import も直す。
+
+- `./model` からの import に `DEGRADED_UNKNOWN` / `toProject` / `toTask` を足す
+- `import type { ProjectSummary, TaskListEntry } from "../../src/daemon/protocol.ts";` を足す
+- **`./fixtures` の import から `WORKFLOWS` を落とす**（`State` から `workflows` を消すので未使用になり、`noUnusedLocals` が `pnpm build` を落とす）
 
 ```ts
 const row = (o: Partial<TaskListEntry> = {}): TaskListEntry => ({
@@ -1707,9 +1791,16 @@ describe("toProject / toTask", () => {
     expect(t1({ state: "failed", worktree_path: "/w" }).refused).toBe(false);
   });
 
-  test("has_degraded は degraded に写す", () => {
-    expect(t1({ has_degraded: true }).degraded).toBeTruthy();
-    expect(t1({ has_degraded: false }).degraded).toBeFalsy();
+  test("has_degraded は degraded に写し、要確認に入る", () => {
+    // 空文字にすると groupOf の `t.degraded &&` をすり抜けて要確認から落ちる
+    expect(t1({ has_degraded: true }).degraded).toBe(DEGRADED_UNKNOWN);
+    expect(groupOf(t1({ has_degraded: true, state: "running" }))).toBe("check");
+    expect(t1({ has_degraded: false }).degraded).toBeUndefined();
+  });
+
+  test("イベントで分かったステップ名は取り直しで消えない", () => {
+    const before = { ...t1({ has_degraded: true }), degraded: "implement" };
+    expect(toTask(row({ has_degraded: true }), PJ, before).degraded).toBe("implement");
   });
 });
 
@@ -1901,6 +1992,12 @@ import type { ConnectionStatus } from "./daemon/client";
 ```ts
 // ---------------------------------------------------------------- デーモンの形 → 画面の形
 
+/**
+ * task.list の has_degraded はどのステップかを教えてくれない。
+ * stepRun.finished を受け取れば具体的なステップ名に置き換わる。
+ */
+export const DEGRADED_UNKNOWN = "(ステップ不明)";
+
 /** プロジェクトの表示名。デーモンはパスしか持たないので末尾を使う */
 export function projectKey(path: string): string {
   const parts = path.replace(/\/+$/, "").split("/");
@@ -1948,7 +2045,9 @@ export function toTask(
     reviews: [],
     // 完了したのに worktree が残っているのは、後始末が削除を拒否したということ
     refused: row.state === "completed" && row.worktree_path !== null,
-    degraded: row.has_degraded ? (previous?.degraded ?? row.current_step_id ?? "") : undefined,
+    // groupOf は `t.degraded &&` で見るので、空文字にすると要確認から落ちる。
+    // has_degraded だけではどのステップか分からないので、分からないと書く
+    degraded: row.has_degraded ? (previous?.degraded ?? DEGRADED_UNKNOWN) : undefined,
   };
 }
 ```
@@ -2095,10 +2194,11 @@ import {
   useContext,
   useEffect,
   useReducer,
+  useRef,
   type Dispatch,
   type ReactNode,
 } from "react";
-import { onConnection, onDaemonEvent, rpc } from "./daemon/client";
+import { connectionStatus, onConnection, onDaemonEvent, rpc } from "./daemon/client";
 import { reduce, toProject, toTask, type Action, type State } from "./model";
 import type { Draft } from "./types";
 
@@ -2138,9 +2238,13 @@ const Ctx = createContext<{ s: State; dispatch: Dispatch<Action> } | null>(null)
 
 export function StoreProvider({ children }: { children: ReactNode }) {
   const [s, dispatch] = useReducer(reduce, undefined, initialState);
+  // イベントのハンドラから最新の state を見るため（購読は1回しか張らない）
+  const latest = useRef(s);
+  latest.current = s;
 
   useEffect(() => {
     let alive = true;
+    let unlisteners: (() => void)[] = [];
 
     async function refresh() {
       try {
@@ -2149,10 +2253,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           rpc("task.list", {}),
         ]);
         if (!alive) return;
+        // previous を渡さないと、stepRun.finished で付いた degraded のステップ名が
+        // 15 秒ごとの取り直しのたびに消える
+        const known = latest.current.tasks;
         dispatch({
           type: "sync",
           projects: projects.map(toProject),
-          tasks: tasks.map((row) => toTask(row, projects)),
+          tasks: tasks.map((row) => toTask(row, projects, known.find((t) => t.id === row.id))),
           now: Date.now(),
         });
       } catch {
@@ -2160,30 +2267,50 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       }
     }
 
-    const unlisteners: Promise<() => void>[] = [
-      onConnection((conn) => {
-        dispatch({ type: "connection", conn });
-        // 再接続したら取り直す。これがイベントの取りこぼしを吸収する
-        if (conn.status === "connected") void refresh();
-      }),
-      onDaemonEvent((ev) => {
-        // 知らないタスクのイベントは、まだ持っていないタスクが動いたということ。
-        // reducer は純関数なので取得できない。ここで取り直す
-        if ("task_id" in ev && !latest.tasks.some((t) => t.id === ev.task_id)) {
-          void refresh();
-          return;
-        }
-        dispatch({ type: "daemon", ev, now: Date.now() });
-      }),
-    ];
+    async function subscribe() {
+      // 先に購読を張り終える。状態の問い合わせを先にすると、その隙間に起きた
+      // 接続の変化を取りこぼす
+      const listeners = await Promise.all([
+        onConnection((conn) => {
+          dispatch({ type: "connection", conn });
+          // 再接続したら取り直す。これがイベントの取りこぼしを吸収する
+          if (conn.status === "connected") void refresh();
+        }),
+        onDaemonEvent((ev) => {
+          // 知らないタスクのイベントは、まだ持っていないタスクが動いたということ。
+          // reducer は純関数なので取得できない。ここで取り直す
+          if ("task_id" in ev && !latest.current.tasks.some((t) => t.id === ev.task_id)) {
+            void refresh();
+            return;
+          }
+          dispatch({ type: "daemon", ev, now: Date.now() });
+        }),
+      ]);
+      if (!alive) {
+        for (const off of listeners) off();
+        return;
+      }
+      unlisteners = listeners;
 
-    void refresh();
+      // Rust は WebView が用意できる前に接続を終えている。そのときの
+      // daemon-connection は誰も聞いていないので、ここで追いつく。
+      // これが無いと、データは流れているのにバナーが出たままになる
+      try {
+        const conn = await connectionStatus();
+        if (alive) dispatch({ type: "connection", conn });
+      } catch {
+        // 取れなくても、次の変化はイベントで届く
+      }
+      void refresh();
+    }
+
+    void subscribe();
     const timer = setInterval(() => void refresh(), REFRESH_MS);
 
     return () => {
       alive = false;
       clearInterval(timer);
-      for (const u of unlisteners) void u.then((f) => f());
+      for (const off of unlisteners) off();
     };
     // 購読は1回だけ張る
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2218,16 +2345,6 @@ export function useNotYet() {
   return (message: string) => dispatch({ type: "toast", message });
 }
 ```
-
-`latest` は定義していない。イベントハンドラから最新の state を見るために `useRef` を足す。`StoreProvider` の先頭に:
-
-```tsx
-  const [s, dispatch] = useReducer(reduce, undefined, initialState);
-  const latest = useRef(s);
-  latest.current = s;
-```
-
-`useEffect` の中の `latest.tasks` を `latest.current.tasks` に直す。`useRef` を import に足す。
 
 - [ ] **Step 2: バナーを書く**
 
@@ -2682,13 +2799,26 @@ Expected: バナーが消え、サイドバーが自動で埋まり直す
 
 - [ ] **Step 5: 本物の応答が返ることを確かめる**
 
+**doctrine の作業ツリーでは試さない。** `project-add` は `.doctrine/` を書き込み、`add` したタスクは次の tick（1 秒）で本物の Claude Code アダプタを走らせる。使い捨てのリポジトリを作る。
+
 アプリを起動したまま別のターミナルで:
 
 ```bash
-dctl project-add --path "$(pwd)"
-dctl add --project "$(pwd)" --title "中継の確認" --prompt "何もしない"
+SANDBOX=$(mktemp -d) && git -C "$SANDBOX" init -q && \
+  echo x > "$SANDBOX/README.md" && git -C "$SANDBOX" add -A && \
+  git -C "$SANDBOX" -c user.email=t@example.com -c user.name=t commit -qm init
+dctl project-add --path "$SANDBOX"
+dctl add --project "$SANDBOX" --title "中継の確認" --prompt "何もしない"
 ```
-Expected: 15 秒以内にサイドバーの「待ち」に「中継の確認」が出る（`task.create` はイベントを出さないので、取り直しで拾う）
+Expected: 15 秒以内にサイドバーの「待ち」か「実行中」に「中継の確認」が出る（`task.create` はイベントを出さないので、取り直しで拾う）
+
+確かめたらすぐ止めて片付ける。
+
+```bash
+dctl ls | grep -B2 中継の確認     # id を控える
+dctl cancel <id>
+rm -rf "$SANDBOX"
+```
 
 - [ ] **Step 6: README に起動手順を書く**
 
@@ -2786,4 +2916,7 @@ EOF
 - `toTask(row, projects, previous?)` の `projects` は `ProjectSummary[]`（rpc の生の応答）である。Task 11 の `store.tsx` は `project.list` の結果をそのまま渡し、Task 10 のテストは `PJ` を渡す
 - `Emit` は `Arc<dyn Fn(&str, Value) + Send + Sync>`。Task 6 の `collector()` と Task 8 の `AppHandle` 版が同じ型
 - `Relay::new` は `(Arc<Relay>, impl Future)` を返す。テスト（`tokio::spawn`）と Tauri（`tauri::async_runtime::spawn`）が同じ形で使う
+- `Relay::status()` / `connection_status` / `connectionStatus()` は Task 6・8・9 で同じ 1 本の経路。Task 11 の `store.tsx` が購読の後に 1 度だけ読む
+- `spawn_dctld` は `Result<Child, String>` を返し、`supervise` の `still_starting()` が持つ（Task 5 で定義、Task 6 で消費）
+- `DEGRADED_UNKNOWN` は空文字にしない。`groupOf` が `t.degraded &&` で見るため（Task 10 のテストが縛る）
 - `stepDef(s, t)` は Task 10 以降つねに `undefined`。呼び出し側は `def?.` で受けている（`App.tsx` は Task 11 で参照ごと外す、`ReviewView.tsx` は Task 12 で既定値を入れる）
