@@ -1254,3 +1254,65 @@ test("paused のタスクを resume しても、閉じるべき awaiting 行が�
   assert.equal((await getTask(ctx.db, t.id))?.state, "queued");
   assert.deepEqual(await listStepRuns(ctx.db, t.id), []);
 });
+
+test("task.diff は worktree の未コミット・未追跡の変更を返す", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  await h("project.add", { path: repo }, NOOP_CONN);
+  const t = await h("task.create", { project: repo, title: "T", prompt: "直して" }, NOOP_CONN) as {
+    id: string;
+  };
+  await tick(ctx);
+  await until(
+    async () => (await getTask(ctx.db, t.id))?.state === "suspended",
+    5000,
+    "approval で止まるまで",
+  );
+  const wt = (await getTask(ctx.db, t.id))!.worktree_path!;
+  await writeFile(join(wt, "added.txt"), "x\n");
+  await writeFile(join(wt, "README.md"), "y\n");
+
+  const d = await h("task.diff", { task_id: t.id }, NOOP_CONN) as {
+    base: { branch: string; merge_base: string };
+    since_step_run_id: number | null;
+    files: { path: string; status: string }[];
+    patch: string;
+    truncated: boolean;
+  };
+  assert.equal(d.base.branch, "main");
+  assert.match(d.base.merge_base, /^[0-9a-f]{40}$/);
+  assert.equal(d.since_step_run_id, null);
+  const byPath = new Map(d.files.map((f) => [f.path, f.status]));
+  assert.equal(byPath.get("added.txt"), "A", "未追跡のファイルが含まれる");
+  assert.equal(byPath.get("README.md"), "M", "未コミットの変更が含まれる");
+  assert.equal(d.truncated, false);
+  assert.match(d.patch, /added\.txt/);
+});
+
+test("worktree の無いタスクの task.diff は失敗する", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  await h("project.add", { path: repo }, NOOP_CONN);
+  const t = await h("task.create", { project: repo, title: "T", prompt: "直して" }, NOOP_CONN) as {
+    id: string;
+  };
+  await assert.rejects(
+    () => h("task.diff", { task_id: t.id }, NOOP_CONN),
+    /worktree がありません/,
+    "空の diff を返すと「変更なし」と区別がつかない",
+  );
+});
+
+test("since に未知の値を渡すと失敗する", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  await h("project.add", { path: repo }, NOOP_CONN);
+  const t = await h("task.create", { project: repo, title: "T", prompt: "直して" }, NOOP_CONN) as {
+    id: string;
+  };
+  await assert.rejects(
+    () => h("task.diff", { task_id: t.id, since: "yesterday" }, NOOP_CONN),
+    /since に指定できるのは/,
+    "黙って全体に倒すと、画面が範囲を取り違えたまま承認に進む",
+  );
+});

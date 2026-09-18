@@ -1,4 +1,5 @@
 import { join } from "@std/path";
+import { computeDiff, mergeBase, writeWorktreeTree } from "../core/diff.ts";
 import { parseWorkflow, type Workflow } from "../workflow/schema.ts";
 import { parseProjectConfig, withSetupStep } from "../workflow/project.ts";
 import { ensureProjectScaffold } from "../workflow/scaffold.ts";
@@ -307,6 +308,35 @@ export function createHandler(ctx: DaemonContext): Handler {
         const text = await Deno.readTextFile(run.log_path).catch(() => "");
         const tailLines = typeof params.tail === "number" ? params.tail : 200;
         return { log_path: run.log_path, lines: text.split("\n").slice(-tailLines) };
+      }
+      case "task.diff": {
+        const taskId = req(params, "task_id");
+        const task = await getTask(ctx.db, taskId);
+        if (!task) throw new Error("タスクがありません");
+        // 範囲の取り違えは承認の取り違えになる。知らない値は黙って全体に倒さず落とす。
+        if (params.since !== undefined && params.since !== "last_review") {
+          throw new Error(`since に指定できるのは last_review だけです: ${String(params.since)}`);
+        }
+        // 完了して削除済み、またはまだ実行枠が取れていない。空の diff を返すと
+        // 「変更なし」と区別がつかないので、はっきり失敗させる。
+        if (!task.worktree_path) throw new Error("worktree がありません");
+        const project = (await getProject(ctx.db, task.project_id))!;
+
+        const merge_base = await mergeBase(task.worktree_path, project.base_branch);
+        const toRef = await writeWorktreeTree(task.worktree_path);
+        const { files, patch, truncated } = await computeDiff({
+          worktreePath: task.worktree_path,
+          fromRef: merge_base,
+          toRef,
+        });
+        return {
+          base: { branch: project.base_branch, merge_base },
+          // 「前回レビュー以降」の基準点は #43 の review_tree に載る。
+          since_step_run_id: null,
+          files,
+          patch,
+          truncated,
+        };
       }
 
       case "worktree.list": {
