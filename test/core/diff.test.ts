@@ -6,7 +6,8 @@ import { promisify } from "node:util";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { computeDiff, mergeBase, truncatePatch, writeWorktreeTree } from "../../src/core/diff.ts";
+import { computeDiff, mergeBase, truncatePatch } from "../../src/core/diff.ts";
+import { captureTree } from "../../src/core/reviewTree.ts";
 import { ensureDoctrineOutExcluded } from "../../src/core/worktree.ts";
 import { makeRepo } from "../helpers/repo.ts";
 
@@ -22,15 +23,10 @@ afterEach(async () => {
   await rm(root, { recursive: true, force: true });
 });
 
-test("write-tree は未コミットと未追跡を含めた今の状態を返す", async () => {
-  await writeFile(join(repo, "README.md"), "a\nb\nc\nd\n");
-  await writeFile(join(repo, "new.txt"), "x\n");
-  const tree = await writeWorktreeTree(repo);
-  const { stdout } = await run("git", ["-C", repo, "ls-tree", "-r", "--name-only", tree]);
-  assert.deepEqual(stdout.trim().split("\n").sort(), ["README.md", "new.txt"]);
-  const { stdout: blob } = await run("git", ["-C", repo, "show", `${tree}:README.md`]);
-  assert.equal(blob, "a\nb\nc\nd\n", "コミット済みの内容ではなく worktree の今の内容");
-});
+// captureTree 自身の振る舞い（未コミット・未追跡を含む、本物の index を汚さない等）は
+// #43 の test/core/reviewTree.test.ts が検証済みなので、ここでは重複させない。
+// ただし「index が一度も作られていないリポジトリ」のケースは #43 側に無いので、
+// captureTree に張り替えて残す。
 
 test("index が一度も作られていないリポジトリでも空のツリーとして扱う", async () => {
   // makeRepo は最初のコミットまで済ませてしまい、その時点で index ができてしまう。
@@ -38,16 +34,8 @@ test("index が一度も作られていないリポジトリでも空のツリ�
   const bare = join(root, "no-index");
   await mkdir(bare, { recursive: true });
   await run("git", ["init", "-b", "main", bare]);
-  const tree = await writeWorktreeTree(bare);
+  const tree = await captureTree(bare);
   assert.equal(tree, "4b825dc642cb6eb9a060e54bf8d69288fbee4904", "空のツリーの既知の SHA");
-});
-
-test("write-tree は本物の index を汚さない", async () => {
-  await writeFile(join(repo, "new.txt"), "x\n");
-  const before = (await run("git", ["-C", repo, "status", "--porcelain"])).stdout;
-  await writeWorktreeTree(repo);
-  const after = (await run("git", ["-C", repo, "status", "--porcelain"])).stdout;
-  assert.equal(after, before, "エージェントが同時に走っている worktree を壊さない");
 });
 
 /** テストの定型: merge-base から今の worktree まで。 */
@@ -55,7 +43,7 @@ function diffNow(patchLimitBytes?: number) {
   return (async () => {
     const [fromRef, toRef] = await Promise.all([
       mergeBase(repo, "main"),
-      writeWorktreeTree(repo),
+      captureTree(repo),
     ]);
     return await computeDiff({ worktreePath: repo, fromRef, toRef, patchLimitBytes });
   })();

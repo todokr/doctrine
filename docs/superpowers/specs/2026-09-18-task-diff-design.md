@@ -41,13 +41,21 @@ worktree に残る。コミット済みの分だけを見せると、人は空�
 
 ```
 daemon/handlers.ts   task.diff — DB から worktree_path / base_branch / review_tree を解決する薄い口
-  └ core/diff.ts     git だけを触る層（DB を知らない。テストは使い捨ての git リポジトリだけで書ける）
-       ├ writeWorktreeTree(worktreePath): Promise<string>
+  ├ core/reviewTree.ts   captureTree(worktreePath): Promise<string>（#43 由来）
+  └ core/diff.ts         git だけを触る層（DB を知らない。テストは使い捨ての git リポジトリだけで書ける）
        └ computeDiff({ worktreePath, fromRef, toRef, patchLimitBytes }): Promise<DiffResult>
 ```
 
-`diff.ts` が DB を知らないことには実利がある。#43 が `review_tree` をどう保存するかが
-変わっても、`computeDiff` は「2つの ref を比べる」ままで影響を受けない。
+`diff.ts` が DB を知らないことには実利がある。`review_tree` をどう保存するかが変わっても、
+`computeDiff` は「2つの ref を比べる」ままで影響を受けない。
+
+「今の状態」をツリーにする関数は自前で持たず、#43 が `refs/doctrine/reviews/` の記録用に
+書いた `captureTree` に寄せる。`since: "last_review"` の diff は片側が `captureTree` の
+記録した `review_tree`、もう片側が「今」のツリーであり、この2つを別の関数で作ると
+将来どちらかだけが変わったときに実際には何も変わっていないファイルが差分に出かねない。
+加えて `captureTree` はデーモンの環境に残った `GIT_DIR` / `GIT_WORK_TREE` を
+`clearEnv: true` で確実に落とす（残っていると `-C <worktree>` が効かず別のリポジトリの
+ツリーを記録してしまう）という、自前実装には無かった防御を持つ。
 
 ### 返す形（②spec 9章のとおり）
 
@@ -76,23 +84,29 @@ export type TaskDiff = {
 ## 4. 「今の状態」をツリーにする
 
 未追跡のファイルは commit にも index にも無いので、`git diff` の相手にできる形が無い。
-worktree 全体を一度ツリーにしてから比べる（②spec 9章）。
+worktree 全体を一度ツリーにしてから比べる（②spec 9章）。実体は `src/core/reviewTree.ts`
+の `captureTree`（#43 由来）で、一時ディレクトリに一時 index を作って進める。
 
 ```
-cp "$(git -C <worktree> rev-parse --git-path index)" $TMP   # あれば
-GIT_INDEX_FILE=$TMP git -C <worktree> add -A
-GIT_INDEX_FILE=$TMP git -C <worktree> write-tree
+GIT_INDEX_FILE=$TMP/index git -C <worktree> read-tree HEAD   # HEAD があれば
+GIT_INDEX_FILE=$TMP/index git -C <worktree> add -A
+GIT_INDEX_FILE=$TMP/index git -C <worktree> write-tree
 ```
 
 - **本物の `.git/index` には書かない。** エージェントが同時に走っている worktree に対して
   レビュー画面が diff を要求するのは普通に起きる。本物の index に `add -A` すると、
   エージェントが次に打つ `git commit` の中身を doctrine が黙って変えてしまう
-- **一時 index は本物のコピーから始める。** 空から始めると毎回すべてのファイルを
-  再ハッシュすることになり、大きなリポジトリではレビューのたびに数秒かかる。コピーすれば
-  git の stat キャッシュが効く（`git stash create` が使うのと同じ手）。リンクされた
-  worktree では index は共通ディレクトリではなく worktree 側にあるので、パスは
-  `git rev-parse --git-path index` で引く
-- 一時 index は `Deno.makeTempFile()` で作り、`finally` で必ず消す
+- **一時 index は `HEAD` から `read-tree` で起こしてから `add -A` する。** 空のまま
+  `add -A` すると、追跡済みだが `.gitignore` に一致するファイル（`git add -f` された
+  ビルド生成物など）や sparse-checkout のコーン外のファイルが落ちる。`read-tree HEAD` を
+  挟むことで「worktree に実際にあるもの」を落とさずに記録でき、副次的に stat キャッシュも
+  効く。最初のコミットがまだ無いリポジトリでは `HEAD` が無いので `read-tree` は省く
+- 一時 index は `Deno.makeTempDir()` で作った一時ディレクトリの下に置き、`finally` で
+  必ず消す。`Deno.makeTempFile()` が作る0バイトのファイルを直接 `GIT_INDEX_FILE` に
+  渡すと git が「index file smaller than expected」で死ぬ問題が、一時ディレクトリなら
+  起きない
+- デーモンの環境に残った `GIT_DIR` / `GIT_WORK_TREE` があると `-C <worktree>` が効かず
+  別のリポジトリのツリーを記録してしまうので、`clearEnv: true` と `delete` で確実に落とす
 - `git add -A` は `.gitignore` と `.git/info/exclude` を尊重する。`createWorktree` が
   呼ぶ `ensureDoctrineOutExcluded` で `.doctrine-out/` は exclude 済みなので、
   中間成果物はツリーに入らない（成果物 spec 4章）
@@ -120,15 +134,7 @@ GIT_INDEX_FILE=$TMP git -C <worktree> write-tree
   倒さずエラーにする。画面が範囲を取り違えたまま承認に進むのが一番まずい
 
 **#43 との境界**: `diff.ts` は ref 文字列を2つ受け取るだけで、`review_tree` の取り出しは
-`handlers.ts` が行う。#43 がマージされるまでこの経路は書けないので、実装は #43 の後に着手する。
-
-**現状（#43 が入るまで）**: 上の表は実装の終着点であり、今はまだそこにいない。
-`since: "last_review"` は受け付けず、明示的にエラーで拒否する。黙って merge-base の
-全体 diff にフォールバックすると、そのレスポンスは「差し戻しの記録がまだ無いので
-全体を返した」という正当なケースと区別が付かない。前者は「実装が無いので拒否された」、
-後者は「前回レビュー以降＝今回が初めてのレビュー」であり、意味がまったく違うのに
-レスポンスの形は同じになってしまう。区別が付かない以上、レビュー画面の実装者に
-どちらなのか判断させるのは無理なので、実装が入るまでは拒否する。
+`handlers.ts` が行う。
 
 ## 6. ファイル一覧と patch
 
@@ -185,7 +191,7 @@ numstat:      -\t-\tb.bin\0  1\t0\t\0old.txt\0new.txt\0  1\t0\tuntracked.txt\0
 - **base ブランチが worktree から見えない**（リモート追跡が消えた等）→ `merge-base` の
   失敗がそのまま上がる
 - **タスクがない** → 既存の各ハンドラと同じく `タスクがありません`
-- **エージェントが動いている最中に呼ばれる** → `writeWorktreeTree` の `git add -A` は
+- **エージェントが動いている最中に呼ばれる** → `captureTree` の `git add -A` は
   スキャン中にファイルが消えると失敗しうる（`Command failed: git … add -A`）。
   エージェントが同時にファイルを書き換え・削除している間に `task.diff` を呼ぶのが
   この機能の主目的である普通の使い方なので、この失敗は稀な例外ではなく、日常的に

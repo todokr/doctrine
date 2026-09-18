@@ -48,6 +48,7 @@ dctl add --project /path/to/your/repo --title "ログイン画面を実装" --pr
 dctl ls
 dctl get <task-id>
 dctl diff <task-id>                 # worktree の今の状態の diff（未コミット・未追跡を含む）
+dctl diff <task-id> --since last_review  # 直近の差し戻し以降だけの diff
 ```
 
 `dctl diff` は JSON を返すので、patch をテキストとして読むには
