@@ -1,0 +1,247 @@
+name: CI
+
+# develop への push と、develop 宛ての PR で走る。
+# ここで見るのは「手元で流すテストと同じものが、push 済みのブランチでも通るか」。
+# doctrine のワークフロー（手元で人を挟んで流すもの）を置き換えるものではない。
+on:
+  push:
+    branches: [develop]
+  pull_request:
+    branches: [develop]
+
+# 同じ PR に続けて push したら古い実行は捨てる。develop への push は捨てない
+# （develop が緑であることを完了条件にしているので、履歴を残す）。
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # 変更のない側のジョブを飛ばすためのパス判定。
+  # `on:` の paths フィルタではなく job の if で飛ばしているのは、
+  # ワークフローごと起動しないと必須チェックが永久に pending のままになるため。
+  # if でスキップしたジョブは「成功」として扱われる。
+  changes:
+    name: 変更範囲の判定
+    runs-on: ubuntu-latest
+    outputs:
+      core: ${{ steps.filter.outputs.core }}
+      app: ${{ steps.filter.outputs.app }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # PR では refs/pull/N/merge（base と head のマージコミット）が checkout
+          # される。その第1親が base の先端なので、親2つ分あれば差分が取れる。
+          fetch-depth: 2
+
+      - id: filter
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+
+          run_all() {
+            echo "core=true" >> "$GITHUB_OUTPUT"
+            echo "app=true" >> "$GITHUB_OUTPUT"
+            echo "理由: $1 のため全ジョブを流す" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          }
+
+          # develop への push では全部流す（マージ後の develop が緑であることを見たい）。
+          [ "$EVENT_NAME" = "pull_request" ] || run_all "push イベント"
+
+          # マージコミットでなければ差分の起点が決められない。安全側に倒して全部流す。
+          parents=$(git rev-list --parents -n 1 HEAD | wc -w)
+          [ "$parents" -ge 3 ] || run_all "マージコミットではない checkout"
+
+          changed=$(git diff --name-only HEAD^1 HEAD)
+          echo "変更されたファイル:" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "$changed" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+          matches() { echo "$changed" | grep -qE "$1"; }
+
+          # ワークフロー自身と mise.toml（ツールの版）は両方に効くので、
+          # 触ったら両方流す。
+          common='^(\.github/|mise\.toml$)'
+
+          core=false
+          if matches "$common" || matches '^(src/|test/|deno\.json$|deno\.lock$)'; then
+            core=true
+          fi
+
+          app=false
+          # src/daemon/protocol.ts は #42 でアプリと共有し始める。共有後は
+          # コア側の変更でアプリも壊れうるので、今のうちから対象に入れておく。
+          if matches "$common" || matches '^(app/|src/daemon/protocol\.ts$)'; then
+            app=true
+          fi
+
+          echo "core=$core" >> "$GITHUB_OUTPUT"
+          echo "app=$app" >> "$GITHUB_OUTPUT"
+
+  # 整形・lint・型検査・バイナリのビルド。テストと違って OS・TZ に依存しないので
+  # 1 回だけ流す。
+  core-check:
+    name: コア（整形・型・ビルド）
+    needs: changes
+    if: needs.changes.outputs.core == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: jdx/mise-action@v4
+        with:
+          # ツールの版は mise.toml が正。ここには書かない。
+          install_args: deno
+
+      - name: Deno の依存をキャッシュ
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/deno
+          key: deno-${{ runner.os }}-${{ hashFiles('deno.lock') }}
+          restore-keys: deno-${{ runner.os }}-
+
+      # --frozen は deno.lock と実際の依存の食い違いをここで落とす
+      # （lock の更新を忘れた PR が develop に入らないようにするため）。
+      - run: deno install --frozen
+
+      - run: deno fmt --check
+      - run: deno lint
+      - run: deno task check
+
+      # deno compile が通ることまで見る。アプリに dctld を同梱する段階で要る。
+      - run: deno task build
+
+  core-test:
+    # TZ は UTC 以外でも流す。ランナーの既定が UTC なので、#39 のような
+    # タイムゾーン依存のバグは UTC だけでは再現しない。
+    name: コアのテスト (TZ=${{ matrix.tz }})
+    needs: changes
+    if: needs.changes.outputs.core == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        tz: [UTC, Asia/Tokyo]
+    env:
+      TZ: ${{ matrix.tz }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: jdx/mise-action@v4
+        with:
+          install_args: deno
+
+      - name: Deno の依存をキャッシュ
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/deno
+          key: deno-${{ runner.os }}-${{ hashFiles('deno.lock') }}
+          restore-keys: deno-${{ runner.os }}-
+
+      - run: deno install --frozen
+
+      # テストは実際に git worktree を作り、子プロセスを起動する。
+      # リポジトリと author はテスト側（test/helpers/repo.ts）が毎回作る
+      # 使い捨てのものを使うので、ランナー側の git config は要らない。
+      - run: deno task test
+
+  app:
+    name: アプリ（Web と Tauri）
+    needs: changes
+    if: needs.changes.outputs.app == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: jdx/mise-action@v4
+        with:
+          install_args: node npm:pnpm rust
+
+      # Tauri が Linux で必要とするシステム依存。cargo check でも
+      # webkit2gtk などの pkg-config が引かれるので、ビルド前に入れる。
+      - name: Tauri のシステム依存を入れる
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libxdo-dev \
+            libssl-dev \
+            patchelf
+
+      - name: pnpm store の場所を得る
+        id: pnpm-store
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - name: pnpm の依存をキャッシュ
+        uses: actions/cache@v6
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-${{ runner.os }}-${{ hashFiles('app/pnpm-lock.yaml') }}
+          restore-keys: pnpm-${{ runner.os }}-
+
+      - name: cargo の依存とビルド結果をキャッシュ
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            app/src-tauri/target
+          key: cargo-${{ runner.os }}-${{ hashFiles('app/src-tauri/Cargo.lock') }}
+          restore-keys: cargo-${{ runner.os }}-
+
+      - run: pnpm install --frozen-lockfile
+
+      # tsc の型検査と vite のビルド。
+      # tauri.conf.json の frontendDist が ../dist を指しているので、
+      # Rust 側より先にここを通しておく。
+      - run: pnpm build
+
+      - run: pnpm test
+
+      # 配布物（pnpm tauri build）までは流さない。release profile は
+      # lto = true / codegen-units = 1 で毎 PR に載せるには重く、
+      # 署名・公証・配布は #69 の範囲外。配布を考える段階で足す。
+      - name: cargo check
+        working-directory: app/src-tauri
+        run: cargo check --locked --all-targets
+
+      - name: cargo test
+        working-directory: app/src-tauri
+        run: cargo test --locked
+
+  # develop のブランチ保護はこのジョブ 1 つだけを必須チェックにする。
+  # パスフィルタでスキップされたジョブがあっても、ここが緑ならマージしてよい。
+  ci:
+    name: CI
+    if: always()
+    needs: [changes, core-check, core-test, app]
+    runs-on: ubuntu-latest
+    steps:
+      - name: 落ちたジョブがないか確かめる
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          set -euo pipefail
+          echo "各ジョブの結果: $RESULTS"
+          for r in $RESULTS; do
+            # skipped はパスフィルタで飛ばした分なので通す。
+            case "$r" in
+              success|skipped) ;;
+              *) echo "落ちた、または中断されたジョブがある"; exit 1 ;;
+            esac
+          done
