@@ -76,8 +76,10 @@ function validatePlaceholders(template: string): void {
 
 function resolve(expr: string, ctx: TemplateContext): string {
   const parts = expr.split(".");
-  if (parts[0] === "task" && parts.length === 2
-      && (TASK_FIELDS as readonly string[]).includes(parts[1])) {
+  if (
+    parts[0] === "task" && parts.length === 2 &&
+    (TASK_FIELDS as readonly string[]).includes(parts[1])
+  ) {
     return ctx.task[parts[1] as (typeof TASK_FIELDS)[number]];
   }
   if (expr === "worktree.path") return ctx.worktree.path;
@@ -96,7 +98,9 @@ function resolve(expr: string, ctx: TemplateContext): string {
     const out = ctx.steps[parts[1]];
     if (!out) {
       throw new TemplateError(
-        `{{ ${expr} }}: ステップ "${parts[1]}" の出力がありません（まだ実行されていないか、idが違います）`,
+        `{{ ${expr} }}: ステップ "${
+          parts[1]
+        }" の出力がありません（まだ実行されていないか、idが違います）`,
       );
     }
     if (!(STEP_FIELDS as readonly string[]).includes(parts[2])) {

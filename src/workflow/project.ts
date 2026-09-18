@@ -1,6 +1,11 @@
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
-import { WorkflowValidationError, formatZodIssues, type CommandStep, type Workflow } from "./schema.ts";
+import {
+  type CommandStep,
+  formatZodIssues,
+  type Workflow,
+  WorkflowValidationError,
+} from "./schema.ts";
 
 export type ProjectConfig = {
   setup?: string;

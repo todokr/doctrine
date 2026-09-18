@@ -1,10 +1,10 @@
-import { test, afterEach } from "@std/testing/bdd";
+import { afterEach, test } from "@std/testing/bdd";
 import assert from "node:assert/strict";
 import { join } from "@std/path";
 import { DatabaseSync } from "node:sqlite";
 import { sql } from "kysely";
 import { openDb, openDbOn } from "../../src/db/migrate.ts";
-import { insertProject, insertTask, getTask, listTasks } from "../../src/db/tasks.ts";
+import { getTask, insertProject, insertTask, listTasks } from "../../src/db/tasks.ts";
 import type { Database, Db } from "../../src/db/schema.ts";
 
 const dirs: string[] = [];
@@ -24,7 +24,11 @@ function db() {
 
 function seed(d: Db) {
   return insertProject(d, {
-    path: "/repo", default_workflow: "feature", max_concurrent: 1, base_branch: "main", setup: null,
+    path: "/repo",
+    default_workflow: "feature",
+    max_concurrent: 1,
+    base_branch: "main",
+    setup: null,
   });
 }
 
@@ -174,42 +178,105 @@ CREATE TABLE IF NOT EXISTS rate_limit_samples (
  * これで「DDL（マイグレーション）と型」の食い違いが実行時まで隠れない。
  */
 const COLUMNS = {
-  projects: { id: true, path: true, default_workflow: true, max_concurrent: true, base_branch: true, setup: true },
+  projects: {
+    id: true,
+    path: true,
+    default_workflow: true,
+    max_concurrent: true,
+    base_branch: true,
+    setup: true,
+  },
   tasks: {
-    id: true, project_id: true, title: true, prompt: true, workflow_name: true, state: true,
-    current_step_id: true, attempt_counts: true, branch: true, worktree_path: true,
-    claude_session_id: true, child_pid: true, child_started_at: true, pending_feed: true,
-    priority: true, resumed: true, created_at: true, updated_at: true,
+    id: true,
+    project_id: true,
+    title: true,
+    prompt: true,
+    workflow_name: true,
+    state: true,
+    current_step_id: true,
+    attempt_counts: true,
+    branch: true,
+    worktree_path: true,
+    claude_session_id: true,
+    child_pid: true,
+    child_started_at: true,
+    pending_feed: true,
+    priority: true,
+    resumed: true,
+    created_at: true,
+    updated_at: true,
   },
   step_runs: {
-    id: true, task_id: true, step_id: true, attempt: true, status: true, exit_code: true,
-    started_at: true, ended_at: true, log_path: true, cost_usd: true, num_turns: true, duration_ms: true,
+    id: true,
+    task_id: true,
+    step_id: true,
+    attempt: true,
+    status: true,
+    exit_code: true,
+    started_at: true,
+    ended_at: true,
+    log_path: true,
+    cost_usd: true,
+    num_turns: true,
+    duration_ms: true,
   },
   step_outputs: { task_id: true, step_id: true, stdout: true, stderr: true, exit_code: true },
   task_sessions: { task_id: true, role: true, session_id: true },
-  rate_limit_samples: { id: true, observed_at: true, window: true, utilization: true, resets_at: true },
+  rate_limit_samples: {
+    id: true,
+    observed_at: true,
+    window: true,
+    utilization: true,
+    resets_at: true,
+  },
 } satisfies { [T in keyof Database]: { [C in keyof Database[T]]: true } };
 
-type ColumnInfo = { name: string; type: string; notnull: number; dflt_value: string | null; pk: number };
+type ColumnInfo = {
+  name: string;
+  type: string;
+  notnull: number;
+  dflt_value: string | null;
+  pk: number;
+};
 
 async function columnsOf(d: Db, table: string): Promise<ColumnInfo[]> {
-  const { rows } = await sql<ColumnInfo>`SELECT name, type, "notnull", dflt_value, pk FROM pragma_table_info(${table})`
+  const { rows } = await sql<
+    ColumnInfo
+  >`SELECT name, type, "notnull", dflt_value, pk FROM pragma_table_info(${table})`
     .execute(d);
-  return rows.map((r) => ({ name: r.name, type: r.type, notnull: r.notnull, dflt_value: r.dflt_value, pk: r.pk }))
+  return rows.map((r) => ({
+    name: r.name,
+    type: r.type,
+    notnull: r.notnull,
+    dflt_value: r.dflt_value,
+    pk: r.pk,
+  }))
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
 async function appliedMigrations(d: Db): Promise<string[]> {
-  const { rows } = await sql<{ name: string }>`SELECT name FROM kysely_migration ORDER BY name`.execute(d);
+  const { rows } = await sql<{ name: string }>`SELECT name FROM kysely_migration ORDER BY name`
+    .execute(d);
   return rows.map((r) => r.name);
 }
 
 test("マイグレーションで6つのテーブルができる", async () => {
   const d = await db();
-  const { rows } = await sql<{ name: string }>`SELECT name FROM sqlite_master WHERE type='table' ORDER BY name`
+  const { rows } = await sql<
+    { name: string }
+  >`SELECT name FROM sqlite_master WHERE type='table' ORDER BY name`
     .execute(d);
   const names = rows.map((r) => r.name);
-  for (const t of ["projects", "rate_limit_samples", "step_outputs", "step_runs", "task_sessions", "tasks"]) {
+  for (
+    const t of [
+      "projects",
+      "rate_limit_samples",
+      "step_outputs",
+      "step_runs",
+      "task_sessions",
+      "tasks",
+    ]
+  ) {
     assert.ok(names.includes(t), `${t} が無い: ${names.join(",")}`);
   }
 });
@@ -226,8 +293,13 @@ test("タスクは queued で作られる", async () => {
   const d = await db();
   const pid = await seed(d);
   const t = await insertTask(d, {
-    id: "t1", project_id: pid, title: "T", prompt: "P",
-    workflow_name: "feature", branch: "doctrine/t1-t", priority: 2,
+    id: "t1",
+    project_id: pid,
+    title: "T",
+    prompt: "P",
+    workflow_name: "feature",
+    branch: "doctrine/t1-t",
+    priority: 2,
   });
   assert.equal(t.state, "queued");
   assert.equal(t.worktree_path, null);
@@ -239,8 +311,24 @@ test("タスクは queued で作られる", async () => {
 test("state でフィルタできる", async () => {
   const d = await db();
   const pid = await seed(d);
-  await insertTask(d, { id: "t1", project_id: pid, title: "a", prompt: "p", workflow_name: "f", branch: "b1", priority: 2 });
-  await insertTask(d, { id: "t2", project_id: pid, title: "b", prompt: "p", workflow_name: "f", branch: "b2", priority: 2 });
+  await insertTask(d, {
+    id: "t1",
+    project_id: pid,
+    title: "a",
+    prompt: "p",
+    workflow_name: "f",
+    branch: "b1",
+    priority: 2,
+  });
+  await insertTask(d, {
+    id: "t2",
+    project_id: pid,
+    title: "b",
+    prompt: "p",
+    workflow_name: "f",
+    branch: "b2",
+    priority: 2,
+  });
   await d.updateTable("tasks").set({ state: "running" }).where("id", "=", "t2").execute();
   assert.deepEqual((await listTasks(d, { state: "queued" })).map((t) => t.id), ["t1"]);
 });
@@ -248,8 +336,26 @@ test("state でフィルタできる", async () => {
 test("同じidのタスクは作れない", async () => {
   const d = await db();
   const pid = await seed(d);
-  await insertTask(d, { id: "t1", project_id: pid, title: "a", prompt: "p", workflow_name: "f", branch: "b1", priority: 2 });
-  await assert.rejects(() => insertTask(d, { id: "t1", project_id: pid, title: "a", prompt: "p", workflow_name: "f", branch: "b1", priority: 2 }));
+  await insertTask(d, {
+    id: "t1",
+    project_id: pid,
+    title: "a",
+    prompt: "p",
+    workflow_name: "f",
+    branch: "b1",
+    priority: 2,
+  });
+  await assert.rejects(() =>
+    insertTask(d, {
+      id: "t1",
+      project_id: pid,
+      title: "a",
+      prompt: "p",
+      workflow_name: "f",
+      branch: "b1",
+      priority: 2,
+    })
+  );
 });
 
 test("ファイルのDBは WAL で開き、外部キー制約が効いている", async () => {
@@ -258,7 +364,16 @@ test("ファイルのDBは WAL で開き、外部キー制約が効いている"
     const { rows: [mode] } = await sql<{ journal_mode: string }>`PRAGMA journal_mode`.execute(d);
     assert.equal(mode.journal_mode, "wal");
     await assert.rejects(
-      () => insertTask(d, { id: "t1", project_id: 999, title: "a", prompt: "p", workflow_name: "f", branch: "b", priority: 2 }),
+      () =>
+        insertTask(d, {
+          id: "t1",
+          project_id: 999,
+          title: "a",
+          prompt: "p",
+          workflow_name: "f",
+          branch: "b",
+          priority: 2,
+        }),
       /FOREIGN KEY/,
     );
   } finally {
@@ -311,7 +426,7 @@ test("pending_feed を足す前に作られたDBファイルは、行を保っ�
   }
 });
 
-test("claude_session_id を持つ既存タスクは role \"default\" として task_sessions に移される", async () => {
+test('claude_session_id を持つ既存タスクは role "default" として task_sessions に移される', async () => {
   const path = await tempDbPath();
   const legacy = new DatabaseSync(path);
   legacy.exec(LEGACY_DDL);
@@ -329,7 +444,10 @@ test("claude_session_id を持つ既存タスクは role \"default\" として t
   const d = await openDb(path);
   try {
     const rows = await d.selectFrom("task_sessions").selectAll().execute();
-    assert.deepEqual(rows.map((r) => ({ task_id: r.task_id, role: r.role, session_id: r.session_id })), [{ task_id: "old", role: "default", session_id: "sess-1" }]);
+    assert.deepEqual(
+      rows.map((r) => ({ task_id: r.task_id, role: r.role, session_id: r.session_id })),
+      [{ task_id: "old", role: "default", session_id: "sess-1" }],
+    );
   } finally {
     await d.destroy();
   }
@@ -343,7 +461,11 @@ test("手書き DDL 時代のDBを移行した形は、新規に作ったDBの�
     const fresh = await db();
     try {
       for (const table of Object.keys(COLUMNS)) {
-        assert.deepEqual(await columnsOf(migrated, table), await columnsOf(fresh, table), `${table} の形が違う`);
+        assert.deepEqual(
+          await columnsOf(migrated, table),
+          await columnsOf(fresh, table),
+          `${table} の形が違う`,
+        );
       }
     } finally {
       await migrated.destroy();

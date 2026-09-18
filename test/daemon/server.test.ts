@@ -1,7 +1,7 @@
-import { test, beforeEach, afterEach } from "@std/testing/bdd";
+import { afterEach, beforeEach, test } from "@std/testing/bdd";
 import assert from "node:assert/strict";
 import { connect, type Socket } from "node:net";
-import { mkdtemp, rm, writeFile, stat } from "node:fs/promises";
+import { mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer } from "../../src/daemon/server.ts";

@@ -1,6 +1,6 @@
-import { test, beforeEach, afterEach } from "@std/testing/bdd";
+import { afterEach, beforeEach, test } from "@std/testing/bdd";
 import assert from "node:assert/strict";
-import { mkdtemp, rm, readFile, access } from "node:fs/promises";
+import { access, mkdtemp, readFile, rm } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { tmpdir } from "node:os";
@@ -8,7 +8,12 @@ import { join } from "node:path";
 import { openDb } from "../../src/db/migrate.ts";
 import { getTask } from "../../src/db/tasks.ts";
 import { listStepRuns } from "../../src/db/stepRuns.ts";
-import { createHandler, tick, loadWorkflowFromDisk, type DaemonContext } from "../../src/daemon/handlers.ts";
+import {
+  createHandler,
+  type DaemonContext,
+  loadWorkflowFromDisk,
+  tick,
+} from "../../src/daemon/handlers.ts";
 import { createMockAdapter } from "../../src/adapter/mock.ts";
 import type { ServerEvent } from "../../src/daemon/protocol.ts";
 import { makeRepo, until } from "../helpers/repo.ts";
@@ -56,7 +61,10 @@ async function context(adapter = createMockAdapter({ result: { ok: true, text: "
   const db = await openDb(":memory:");
   const events: ServerEvent[] = [];
   const ctx: DaemonContext = {
-    db, adapter, logRoot: join(root, "logs"), globalLimit: 4,
+    db,
+    adapter,
+    logRoot: join(root, "logs"),
+    globalLimit: 4,
     broadcast: (ev) => events.push(ev),
     loadWorkflow: loadWorkflowFromDisk,
     running: new Set(),
@@ -67,12 +75,17 @@ async function context(adapter = createMockAdapter({ result: { ok: true, text: "
 
 test("setup → agent → command → approval → 承認 → 完了まで通る", async () => {
   const repo = await makeRepo(root, {
-    ".doctrine/project.yaml": "setup: touch marker.txt\ndefaultWorkflow: feature\nmaxConcurrent: 1\nbaseBranch: main\n",
+    ".doctrine/project.yaml":
+      "setup: touch marker.txt\ndefaultWorkflow: feature\nmaxConcurrent: 1\nbaseBranch: main\n",
     ".doctrine/workflows/feature.yaml": WORKFLOW,
   });
   const { ctx, events, handler } = await context();
   await handler("project.add", { path: repo }, NOOP_CONN);
-  const t = await handler("task.create", { project: repo, title: "マーカーを作る", prompt: "作って" }, NOOP_CONN) as { id: string };
+  const t = await handler("task.create", {
+    project: repo,
+    title: "マーカーを作る",
+    prompt: "作って",
+  }, NOOP_CONN) as { id: string };
 
   await tick(ctx);
   await until(
@@ -95,13 +108,18 @@ test("setup → agent → command → approval → 承認 → 完了まで通る
   assert.ok(stepRunEvent, "stepRun.started イベントが broadcast されている");
   assert.notEqual(stepRunEvent!.step_run_id, 0, "step_run_id がプレースホルダの0のままではない");
   const logs = await handler(
-    "task.logs", { task_id: t.id, step_run_id: stepRunEvent!.step_run_id }, NOOP_CONN,
+    "task.logs",
+    { task_id: t.id, step_run_id: stepRunEvent!.step_run_id },
+    NOOP_CONN,
   ) as { log_path: string };
   assert.ok(logs.log_path, "イベントに載った step_run_id が実在する step_run に解決する");
-  const resolvedRun = (await listStepRuns(ctx.db, t.id)).find((r) => r.id === stepRunEvent!.step_run_id);
+  const resolvedRun = (await listStepRuns(ctx.db, t.id)).find((r) =>
+    r.id === stepRunEvent!.step_run_id
+  );
   assert.ok(resolvedRun, "step_run_id が本当に step_runs テーブルの行を指している");
   assert.equal(
-    resolvedRun!.step_id, stepRunEvent!.step_id,
+    resolvedRun!.step_id,
+    stepRunEvent!.step_id,
     "イベントが名乗った step_id と、id で引いた実際の行の step_id が一致する",
   );
 
@@ -141,13 +159,18 @@ test("setup → agent → command → approval → 承認 → 完了まで通る
 
 test("却下すると実装ステップへ戻り、コメントがエージェントに渡る", async () => {
   const repo = await makeRepo(root, {
-    ".doctrine/project.yaml": "setup: touch marker.txt\ndefaultWorkflow: feature\nmaxConcurrent: 1\nbaseBranch: main\n",
+    ".doctrine/project.yaml":
+      "setup: touch marker.txt\ndefaultWorkflow: feature\nmaxConcurrent: 1\nbaseBranch: main\n",
     ".doctrine/workflows/feature.yaml": WORKFLOW,
   });
   const adapter = createMockAdapter({ result: { ok: true, text: "やりました" } });
   const { ctx, handler } = await context(adapter);
   await handler("project.add", { path: repo }, NOOP_CONN);
-  const t = await handler("task.create", { project: repo, title: "T", prompt: "作って" }, NOOP_CONN) as { id: string };
+  const t = await handler(
+    "task.create",
+    { project: repo, title: "T", prompt: "作って" },
+    NOOP_CONN,
+  ) as { id: string };
 
   await tick(ctx);
   await until(
@@ -172,15 +195,22 @@ test("却下すると実装ステップへ戻り、コメントがエージェ�
 
 test("プロジェクト枠1のとき、承認待ちのタスクが次のタスクを止める", async () => {
   const repo = await makeRepo(root, {
-    ".doctrine/project.yaml": "setup: touch marker.txt\ndefaultWorkflow: feature\nmaxConcurrent: 1\nbaseBranch: main\n",
+    ".doctrine/project.yaml":
+      "setup: touch marker.txt\ndefaultWorkflow: feature\nmaxConcurrent: 1\nbaseBranch: main\n",
     ".doctrine/workflows/feature.yaml": WORKFLOW,
   });
   const { ctx, handler } = await context();
   await handler("project.add", { path: repo }, NOOP_CONN);
-  const a = await handler("task.create", { project: repo, title: "A", prompt: "p" }, NOOP_CONN) as { id: string };
+  const a = await handler("task.create", { project: repo, title: "A", prompt: "p" }, NOOP_CONN) as {
+    id: string;
+  };
   // 受付順の FIFO は created_at（ミリ秒精度）で、同じミリ秒に作られると id（ランダムな UUID）で
   // 決まる。A が先に admit される前提を運に任せないよう、B の優先度を下げて順序を固定する。
-  const b = await handler("task.create", { project: repo, title: "B", prompt: "p", priority: 3 }, NOOP_CONN) as { id: string };
+  const b = await handler(
+    "task.create",
+    { project: repo, title: "B", prompt: "p", priority: 3 },
+    NOOP_CONN,
+  ) as { id: string };
 
   await tick(ctx);
   await until(
@@ -189,17 +219,24 @@ test("プロジェクト枠1のとき、承認待ちのタスクが次のタス�
     "タスクAが承認待ちで枠を保持した状態になること",
   );
   await tick(ctx);
-  assert.equal((await getTask(ctx.db, b.id))?.state, "queued", "承認待ちの間、同じプロジェクトの次のタスクは走らない");
+  assert.equal(
+    (await getTask(ctx.db, b.id))?.state,
+    "queued",
+    "承認待ちの間、同じプロジェクトの次のタスクは走らない",
+  );
 });
 
 test("失敗したタスクの worktree は残る", async () => {
   const repo = await makeRepo(root, {
     ".doctrine/project.yaml": "defaultWorkflow: fail\nmaxConcurrent: 1\nbaseBranch: main\n",
-    ".doctrine/workflows/fail.yaml": "name: fail\nsteps:\n  - id: boom\n    type: command\n    run: \"exit 9\"\n",
+    ".doctrine/workflows/fail.yaml":
+      'name: fail\nsteps:\n  - id: boom\n    type: command\n    run: "exit 9"\n',
   });
   const { ctx, handler } = await context();
   await handler("project.add", { path: repo }, NOOP_CONN);
-  const t = await handler("task.create", { project: repo, title: "T", prompt: "p" }, NOOP_CONN) as { id: string };
+  const t = await handler("task.create", { project: repo, title: "T", prompt: "p" }, NOOP_CONN) as {
+    id: string;
+  };
   await tick(ctx);
   await until(
     async () => (await getTask(ctx.db, t.id))?.state === "failed",
@@ -216,11 +253,14 @@ test("失敗したタスクの worktree は残る", async () => {
 test("完了したタスクは worktree を消すがブランチは残す", async () => {
   const repo = await makeRepo(root, {
     ".doctrine/project.yaml": "defaultWorkflow: simple\nmaxConcurrent: 1\nbaseBranch: main\n",
-    ".doctrine/workflows/simple.yaml": "name: simple\nsteps:\n  - id: ok\n    type: command\n    run: \"echo hi\"\n",
+    ".doctrine/workflows/simple.yaml":
+      'name: simple\nsteps:\n  - id: ok\n    type: command\n    run: "echo hi"\n',
   });
   const { ctx, handler } = await context();
   await handler("project.add", { path: repo }, NOOP_CONN);
-  const t = await handler("task.create", { project: repo, title: "T", prompt: "p" }, NOOP_CONN) as { id: string };
+  const t = await handler("task.create", { project: repo, title: "T", prompt: "p" }, NOOP_CONN) as {
+    id: string;
+  };
   await tick(ctx);
   await until(
     async () => (await getTask(ctx.db, t.id))?.state === "completed",

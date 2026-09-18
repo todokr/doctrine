@@ -42,7 +42,9 @@ export async function ensureProjectScaffold(path: string): Promise<{ created: st
     await Deno.writeTextFile(workflowYaml, DEFAULT_WORKFLOW_YAML, { createNew: true });
     created.push(workflowYaml);
   }
-  await Deno.writeTextFile(projectYaml, projectYamlFor(await detectBaseBranch(path)), { createNew: true });
+  await Deno.writeTextFile(projectYaml, projectYamlFor(await detectBaseBranch(path)), {
+    createNew: true,
+  });
   created.push(projectYaml);
   return { created };
 }
@@ -59,7 +61,9 @@ async function assertRepoRoot(path: string): Promise<void> {
   }
   // git はシンボリックリンク解決後の実パスを返すので、こちらも揃えてから比べる
   if (await Deno.realPath(path) !== top) {
-    throw new Error(`リポジトリのルートを指定してください: ${top}（${path} はそのサブディレクトリです）`);
+    throw new Error(
+      `リポジトリのルートを指定してください: ${top}（${path} はそのサブディレクトリです）`,
+    );
   }
 }
 
@@ -70,14 +74,16 @@ async function assertRepoRoot(path: string): Promise<void> {
  */
 async function detectBaseBranch(root: string): Promise<string | undefined> {
   try {
-    const ref = (await runCommand("git", ["-C", root, "symbolic-ref", "--short", "refs/remotes/origin/HEAD"]))
-      .stdout.trim();
+    const ref =
+      (await runCommand("git", ["-C", root, "symbolic-ref", "--short", "refs/remotes/origin/HEAD"]))
+        .stdout.trim();
     if (ref.startsWith("origin/")) return ref.slice("origin/".length);
   } catch {
     // origin が無い、または origin/HEAD が設定されていない
   }
   try {
-    const current = (await runCommand("git", ["-C", root, "branch", "--show-current"])).stdout.trim();
+    const current = (await runCommand("git", ["-C", root, "branch", "--show-current"])).stdout
+      .trim();
     if (current) return current;
   } catch {
     // 取れなければ既定値に任せる

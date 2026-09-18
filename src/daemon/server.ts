@@ -96,7 +96,9 @@ export function createServer(handler: Handler) {
     if (client.closed) return;
     client.closed = true;
     clients.delete(client);
-    try { client.conn.close(); } catch { /* 既に閉じている */ }
+    try {
+      client.conn.close();
+    } catch { /* 既に閉じている */ }
   }
 
   return {
@@ -108,7 +110,12 @@ export function createServer(handler: Handler) {
       accepting = (async () => {
         try {
           for await (const conn of l) {
-            const client: Client = { conn, following: new Set(), closed: false, writing: Promise.resolve() };
+            const client: Client = {
+              conn,
+              following: new Set(),
+              closed: false,
+              writing: Promise.resolve(),
+            };
             clients.add(client);
             const p = serve(client);
             serving.add(p);
@@ -130,7 +137,9 @@ export function createServer(handler: Handler) {
     async close(): Promise<void> {
       for (const client of [...clients]) closeClient(client);
       if (listener) {
-        try { listener.close(); } catch { /* 既に閉じている */ }
+        try {
+          listener.close();
+        } catch { /* 既に閉じている */ }
         listener = null;
       }
       await accepting;

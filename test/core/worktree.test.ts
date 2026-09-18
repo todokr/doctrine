@@ -1,14 +1,21 @@
-import { test, beforeEach, afterEach } from "@std/testing/bdd";
+import { afterEach, beforeEach, test } from "@std/testing/bdd";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { mkdtemp, rm, writeFile, stat, realpath, mkdir, readFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, basename, sep } from "node:path";
+import { basename, join, sep } from "node:path";
 import {
-  createWorktree, removeWorktree, hasUncommittedChanges, findOrphans,
-  branchNameFor, slugify, UncommittedChangesError,
-  stateDir, worktreePathFor, listWorktrees, ensureDoctrineOutExcluded,
+  branchNameFor,
+  createWorktree,
+  findOrphans,
+  hasUncommittedChanges,
+  listWorktrees,
+  removeWorktree,
+  slugify,
+  stateDir,
+  UncommittedChangesError,
+  worktreePathFor,
 } from "../../src/core/worktree.ts";
 
 const run = promisify(execFile);
@@ -43,7 +50,12 @@ test("ブランチ名を作る", () => {
 
 test("baseBranch から worktree とブランチを生やす", async () => {
   const wt = join(root, "wt", "t1");
-  await createWorktree({ repoPath: repo, worktreePath: wt, branch: "doctrine/t1-x", baseBranch: "main" });
+  await createWorktree({
+    repoPath: repo,
+    worktreePath: wt,
+    branch: "doctrine/t1-x",
+    baseBranch: "main",
+  });
   assert.ok((await stat(join(wt, "README.md"))).isFile());
   const { stdout } = await run("git", ["-C", wt, "rev-parse", "--abbrev-ref", "HEAD"]);
   assert.equal(stdout.trim(), "doctrine/t1-x");
@@ -51,7 +63,12 @@ test("baseBranch から worktree とブランチを生やす", async () => {
 
 test("worktree作成時に .doctrine-out/ を .git/info/exclude に追記する", async () => {
   const wt = join(root, "wt", "t1");
-  await createWorktree({ repoPath: repo, worktreePath: wt, branch: "doctrine/t1-x", baseBranch: "main" });
+  await createWorktree({
+    repoPath: repo,
+    worktreePath: wt,
+    branch: "doctrine/t1-x",
+    baseBranch: "main",
+  });
   const content = await readFile(join(repo, ".git", "info", "exclude"), "utf8");
   assert.match(content, /^\.doctrine-out\/$/m);
 });
@@ -59,14 +76,24 @@ test("worktree作成時に .doctrine-out/ を .git/info/exclude に追記する"
 test(".git/info/ が存在しなくても worktree作成時に .git/info/exclude を作成する", async () => {
   await rm(join(repo, ".git", "info"), { recursive: true, force: true });
   const wt = join(root, "wt", "t1b");
-  await createWorktree({ repoPath: repo, worktreePath: wt, branch: "doctrine/t1b-x", baseBranch: "main" });
+  await createWorktree({
+    repoPath: repo,
+    worktreePath: wt,
+    branch: "doctrine/t1b-x",
+    baseBranch: "main",
+  });
   const content = await readFile(join(repo, ".git", "info", "exclude"), "utf8");
   assert.match(content, /^\.doctrine-out\/$/m);
 });
 
 test(".doctrine-out/ 配下の変更は hasUncommittedChanges で無視される", async () => {
   const wt = join(root, "wt", "t2");
-  await createWorktree({ repoPath: repo, worktreePath: wt, branch: "doctrine/t2-x", baseBranch: "main" });
+  await createWorktree({
+    repoPath: repo,
+    worktreePath: wt,
+    branch: "doctrine/t2-x",
+    baseBranch: "main",
+  });
   await mkdir(join(wt, ".doctrine-out"), { recursive: true });
   await writeFile(join(wt, ".doctrine-out", "plan.md"), "plan\n");
   assert.equal(await hasUncommittedChanges(wt), false);
@@ -75,8 +102,18 @@ test(".doctrine-out/ 配下の変更は hasUncommittedChanges で無視される
 test("2回 createWorktree しても info/exclude の行は重複しない", async () => {
   const wt1 = join(root, "wt", "a");
   const wt2 = join(root, "wt", "b");
-  await createWorktree({ repoPath: repo, worktreePath: wt1, branch: "doctrine/a", baseBranch: "main" });
-  await createWorktree({ repoPath: repo, worktreePath: wt2, branch: "doctrine/b", baseBranch: "main" });
+  await createWorktree({
+    repoPath: repo,
+    worktreePath: wt1,
+    branch: "doctrine/a",
+    baseBranch: "main",
+  });
+  await createWorktree({
+    repoPath: repo,
+    worktreePath: wt2,
+    branch: "doctrine/b",
+    baseBranch: "main",
+  });
   const content = await readFile(join(repo, ".git", "info", "exclude"), "utf8");
   const matches = content.match(/^\.doctrine-out\/$/gm) ?? [];
   assert.equal(matches.length, 1);
@@ -104,7 +141,12 @@ test("worktreePathFor はリポジトリの外のパスを組み立てる", asyn
 
 test("未コミットの変更を検出する", async () => {
   const wt = join(root, "wt", "t1");
-  await createWorktree({ repoPath: repo, worktreePath: wt, branch: "doctrine/t1-x", baseBranch: "main" });
+  await createWorktree({
+    repoPath: repo,
+    worktreePath: wt,
+    branch: "doctrine/t1-x",
+    baseBranch: "main",
+  });
   assert.equal(await hasUncommittedChanges(wt), false);
   await writeFile(join(wt, "dirty.txt"), "x");
   assert.equal(await hasUncommittedChanges(wt), true);
@@ -112,7 +154,12 @@ test("未コミットの変更を検出する", async () => {
 
 test("未コミットの変更があるとき force なしの削除は拒否する", async () => {
   const wt = join(root, "wt", "t1");
-  await createWorktree({ repoPath: repo, worktreePath: wt, branch: "doctrine/t1-x", baseBranch: "main" });
+  await createWorktree({
+    repoPath: repo,
+    worktreePath: wt,
+    branch: "doctrine/t1-x",
+    baseBranch: "main",
+  });
   await writeFile(join(wt, "dirty.txt"), "x");
   await assert.rejects(
     () => removeWorktree({ repoPath: repo, worktreePath: wt, force: false }),
@@ -123,7 +170,12 @@ test("未コミットの変更があるとき force なしの削除は拒否す�
 
 test("force なら汚れた worktree も削除する", async () => {
   const wt = join(root, "wt", "t1");
-  await createWorktree({ repoPath: repo, worktreePath: wt, branch: "doctrine/t1-x", baseBranch: "main" });
+  await createWorktree({
+    repoPath: repo,
+    worktreePath: wt,
+    branch: "doctrine/t1-x",
+    baseBranch: "main",
+  });
   await writeFile(join(wt, "dirty.txt"), "x");
   await removeWorktree({ repoPath: repo, worktreePath: wt, force: true });
   await assert.rejects(() => stat(wt));
@@ -131,7 +183,12 @@ test("force なら汚れた worktree も削除する", async () => {
 
 test("worktree を削除してもブランチは残る", async () => {
   const wt = join(root, "wt", "t1");
-  await createWorktree({ repoPath: repo, worktreePath: wt, branch: "doctrine/t1-x", baseBranch: "main" });
+  await createWorktree({
+    repoPath: repo,
+    worktreePath: wt,
+    branch: "doctrine/t1-x",
+    baseBranch: "main",
+  });
   await removeWorktree({ repoPath: repo, worktreePath: wt, force: false });
   const { stdout } = await run("git", ["-C", repo, "branch", "--list", "doctrine/t1-x"]);
   assert.match(stdout, /doctrine\/t1-x/);
@@ -140,8 +197,18 @@ test("worktree を削除してもブランチは残る", async () => {
 test("DBに対応のない worktree を孤児として報告する", async () => {
   const known = join(root, "wt", "known");
   const orphan = join(root, "wt", "orphan");
-  await createWorktree({ repoPath: repo, worktreePath: known, branch: "doctrine/a", baseBranch: "main" });
-  await createWorktree({ repoPath: repo, worktreePath: orphan, branch: "doctrine/b", baseBranch: "main" });
+  await createWorktree({
+    repoPath: repo,
+    worktreePath: known,
+    branch: "doctrine/a",
+    baseBranch: "main",
+  });
+  await createWorktree({
+    repoPath: repo,
+    worktreePath: orphan,
+    branch: "doctrine/b",
+    baseBranch: "main",
+  });
   const orphans = await findOrphans(repo, [known]);
   // 孤児には DB 側のパスがないので、git が報告する実パスの表記で返る
   // （macOS の tmpdir は /var -> /private/var の symlink 配下にある）。
@@ -150,7 +217,12 @@ test("DBに対応のない worktree を孤児として報告する", async () =>
 
 test("createWorktree は DB に保存する表記として実パスを返す", async () => {
   const wt = join(root, "wt", "t1");
-  const created = await createWorktree({ repoPath: repo, worktreePath: wt, branch: "doctrine/t1-x", baseBranch: "main" });
+  const created = await createWorktree({
+    repoPath: repo,
+    worktreePath: wt,
+    branch: "doctrine/t1-x",
+    baseBranch: "main",
+  });
   assert.equal(created, await realpath(wt));
   assert.deepEqual(await listWorktrees(repo), [created]);
 });
@@ -176,7 +248,12 @@ test("listWorktrees はメインの作業ツリーを除外する", async () => 
   assert.deepEqual(await listWorktrees(repo), []);
 
   const wt = join(root, "wt", "t1");
-  await createWorktree({ repoPath: repo, worktreePath: wt, branch: "doctrine/t1-x", baseBranch: "main" });
+  await createWorktree({
+    repoPath: repo,
+    worktreePath: wt,
+    branch: "doctrine/t1-x",
+    baseBranch: "main",
+  });
 
   const worktrees = await listWorktrees(repo);
   assert.equal(worktrees.length, 1);

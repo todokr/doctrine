@@ -59,7 +59,13 @@ const DOCTRINE_OUT_EXCLUDE_LINE = ".doctrine-out/";
  * 作るので冪等にする）。
  */
 export async function ensureDoctrineOutExcluded(repoPath: string): Promise<void> {
-  const { stdout } = await runCommand("git", ["-C", repoPath, "rev-parse", "--git-path", "info/exclude"]);
+  const { stdout } = await runCommand("git", [
+    "-C",
+    repoPath,
+    "rev-parse",
+    "--git-path",
+    "info/exclude",
+  ]);
   const raw = stdout.trim();
   const excludePath = isAbsolute(raw) ? raw : join(repoPath, raw);
 
@@ -71,7 +77,9 @@ export async function ensureDoctrineOutExcluded(repoPath: string): Promise<void>
   }
   if (content.split("\n").some((l) => l.trim() === DOCTRINE_OUT_EXCLUDE_LINE)) return;
 
-  const withTrailingNewline = content.length > 0 && !content.endsWith("\n") ? content + "\n" : content;
+  const withTrailingNewline = content.length > 0 && !content.endsWith("\n")
+    ? content + "\n"
+    : content;
   await Deno.mkdir(dirname(excludePath), { recursive: true });
   await Deno.writeTextFile(excludePath, withTrailingNewline + DOCTRINE_OUT_EXCLUDE_LINE + "\n");
 }
@@ -84,9 +92,21 @@ export async function ensureDoctrineOutExcluded(repoPath: string): Promise<void>
  * 得られないため。呼び出し側は渡したパスではなく戻り値を DB に保存する。
  */
 export async function createWorktree(o: {
-  repoPath: string; worktreePath: string; branch: string; baseBranch: string;
+  repoPath: string;
+  worktreePath: string;
+  branch: string;
+  baseBranch: string;
 }): Promise<string> {
-  await runCommand("git", ["-C", o.repoPath, "worktree", "add", "-b", o.branch, o.worktreePath, o.baseBranch]);
+  await runCommand("git", [
+    "-C",
+    o.repoPath,
+    "worktree",
+    "add",
+    "-b",
+    o.branch,
+    o.worktreePath,
+    o.baseBranch,
+  ]);
   await ensureDoctrineOutExcluded(o.repoPath);
   return await canonical(o.worktreePath);
 }
@@ -101,7 +121,9 @@ export async function hasUncommittedChanges(worktreePath: string): Promise<boole
  * 削除を拒否する — ワークフローの書き方のバグであり、黙って消してよいものではない。
  */
 export async function removeWorktree(o: {
-  repoPath: string; worktreePath: string; force: boolean;
+  repoPath: string;
+  worktreePath: string;
+  force: boolean;
 }): Promise<void> {
   if (!o.force && await hasUncommittedChanges(o.worktreePath)) {
     throw new UncommittedChangesError(o.worktreePath);

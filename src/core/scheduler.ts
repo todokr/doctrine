@@ -27,7 +27,8 @@ export async function currentUsage(db: Db): Promise<SlotUsage> {
  * 両スコープに空きがあるタスクだけを、上限いっぱいまで返す。
  */
 export async function selectAdmissible(
-  db: Db, globalLimit: number = DEFAULT_GLOBAL_LIMIT,
+  db: Db,
+  globalLimit: number = DEFAULT_GLOBAL_LIMIT,
 ): Promise<TaskRow[]> {
   const usage = await currentUsage(db);
   let globalFree = globalLimit - usage.global;
@@ -35,7 +36,10 @@ export async function selectAdmissible(
 
   const queued = await db.selectFrom("tasks").selectAll()
     .where("state", "=", "queued")
-    .orderBy("resumed", "desc").orderBy("priority", "asc").orderBy("created_at", "asc").orderBy("id", "asc")
+    .orderBy("resumed", "desc").orderBy("priority", "asc").orderBy("created_at", "asc").orderBy(
+      "id",
+      "asc",
+    )
     .execute();
 
   const admitted: TaskRow[] = [];

@@ -6,7 +6,9 @@
  * マルチバイト文字の途中でチャンクが割れても、TextDecoder の stream モードが
  * 不完全なバイト列を次のチャンクまで保留するので文字化けしない。
  */
-export async function* readNdjson(stream: AsyncIterable<string | Uint8Array>): AsyncGenerator<unknown> {
+export async function* readNdjson(
+  stream: AsyncIterable<string | Uint8Array>,
+): AsyncGenerator<unknown> {
   const decoder = new TextDecoder();
   let buffer = "";
   for await (const chunk of stream) {

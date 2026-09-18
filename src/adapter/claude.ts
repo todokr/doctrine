@@ -38,7 +38,10 @@ export function normalize(line: unknown): AgentEvent[] {
       return [{ kind: "result" }];
     case "rate_limit_event": {
       const info = (o.rate_limit_info ?? {}) as Record<string, unknown>;
-      const windows = (info.unifiedWindows ?? {}) as Record<string, { utilization?: number; resetsAt?: string }>;
+      const windows = (info.unifiedWindows ?? {}) as Record<
+        string,
+        { utilization?: number; resetsAt?: string }
+      >;
       return Object.entries(windows).map(([window, w]) => ({
         kind: "rateLimit" as const,
         window,
@@ -61,11 +64,22 @@ function extractText(o: Record<string, unknown>): string {
  * result 行が権威。終了コードは補助。
  * --permission-prompts none の下では、権限で弾かれた実行も is_error: false で帰ってくる。
  */
-export function resultFrom(resultLine: unknown, exitCode: number | null, stderrTail = ""): AgentResult {
+export function resultFrom(
+  resultLine: unknown,
+  exitCode: number | null,
+  stderrTail = "",
+): AgentResult {
   if (typeof resultLine !== "object" || resultLine === null) {
     return {
-      ok: false, degraded: false, text: "", costUsd: null, numTurns: null,
-      durationMs: null, permissionDenials: [], exitCode, stderrTail,
+      ok: false,
+      degraded: false,
+      text: "",
+      costUsd: null,
+      numTurns: null,
+      durationMs: null,
+      permissionDenials: [],
+      exitCode,
+      stderrTail,
     };
   }
   const o = resultLine as Record<string, unknown>;
@@ -89,7 +103,11 @@ export function createClaudeAdapter(bin = "claude"): AgentAdapter {
     let child: Deno.ChildProcess;
     try {
       child = new Deno.Command(bin, {
-        args, cwd: opts.cwd, stdin: "null", stdout: "piped", stderr: "piped",
+        args,
+        cwd: opts.cwd,
+        stdin: "null",
+        stdout: "piped",
+        stderr: "piped",
       }).spawn();
     } catch (e) {
       // 起動失敗（バイナリや cwd が無い）は同期例外で来る。呼び出し側は
@@ -97,8 +115,12 @@ export function createClaudeAdapter(bin = "claude"): AgentAdapter {
       const result = Promise.reject(e);
       result.catch(() => {}); // 呼び出し側が await するまでの間に未処理扱いされないように
       return {
-        sessionId: runSessionId, pid: -1, startedAt,
-        events: (async function* () {})(), result, kill: () => {},
+        sessionId: runSessionId,
+        pid: -1,
+        startedAt,
+        events: (async function* () {})(),
+        result,
+        kill: () => {},
       };
     }
     // stderr を消費しないとパイプが埋まって子プロセスがブロックし、
@@ -131,7 +153,9 @@ export function createClaudeAdapter(bin = "claude"): AgentAdapter {
         while (true) {
           while (queue.length > 0) yield queue.shift()!;
           if (done) return;
-          await new Promise<void>((r) => { waiter.notify = r; });
+          await new Promise<void>((r) => {
+            waiter.notify = r;
+          });
           waiter.notify = null;
         }
       },
@@ -149,13 +173,16 @@ export function createClaudeAdapter(bin = "claude"): AgentAdapter {
       events,
       result,
       kill: () => {
-        try { child.kill("SIGTERM"); } catch { /* 既に終了している */ }
+        try {
+          child.kill("SIGTERM");
+        } catch { /* 既に終了している */ }
       },
     };
   }
 
   return {
     start: (prompt, opts) => launch(buildArgs(prompt, opts), opts, opts.sessionId),
-    resume: (sessionId, prompt, opts) => launch(buildArgs(prompt, opts, sessionId), opts, sessionId),
+    resume: (sessionId, prompt, opts) =>
+      launch(buildArgs(prompt, opts, sessionId), opts, sessionId),
   };
 }

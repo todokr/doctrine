@@ -1,31 +1,41 @@
 import { test } from "@std/testing/bdd";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, chmodSync, rmSync } from "node:fs";
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { buildArgs, normalize, resultFrom, createClaudeAdapter } from "../../src/adapter/claude.ts";
+import { buildArgs, createClaudeAdapter, normalize, resultFrom } from "../../src/adapter/claude.ts";
 
 test("起動フラグは実測した契約どおりに並ぶ", () => {
   const args = buildArgs("やって", {
-    cwd: "/wt", sessionId: "11111111-1111-4111-8111-111111111111",
-    permissionMode: "acceptEdits", model: "claude-opus-5",
+    cwd: "/wt",
+    sessionId: "11111111-1111-4111-8111-111111111111",
+    permissionMode: "acceptEdits",
+    model: "claude-opus-5",
   });
   assert.deepEqual(args, [
-    "-p", "やって",
-    "--output-format", "stream-json",
+    "-p",
+    "やって",
+    "--output-format",
+    "stream-json",
     "--verbose",
-    "--session-id", "11111111-1111-4111-8111-111111111111",
-    "--permission-mode", "acceptEdits",
-    "--permission-prompts", "none",
-    "--model", "claude-opus-5",
+    "--session-id",
+    "11111111-1111-4111-8111-111111111111",
+    "--permission-mode",
+    "acceptEdits",
+    "--permission-prompts",
+    "none",
+    "--model",
+    "claude-opus-5",
   ]);
 });
 
 test("stream-json には必ず --verbose が付く", () => {
   const args = buildArgs("x", { cwd: "/wt", sessionId: "s" });
   const i = args.indexOf("--output-format");
-  assert.ok(i !== -1 && args.includes("--verbose"),
-    "--verbose がないと 'requires --verbose' で即座に終了する");
+  assert.ok(
+    i !== -1 && args.includes("--verbose"),
+    "--verbose がないと 'requires --verbose' で即座に終了する",
+  );
 });
 
 test("再開は --resume を使い --fork-session を使わない", () => {
@@ -37,10 +47,15 @@ test("再開は --resume を使い --fork-session を使わない", () => {
 test("再開の引数順序は実測どおり: プロンプトは --resume <id> の直後、他フラグの前", () => {
   const args = buildArgs("追加で直して", { cwd: "/wt", sessionId: "s1" }, "s1");
   assert.deepEqual(args, [
-    "-p", "--resume", "s1", "追加で直して",
-    "--output-format", "stream-json",
+    "-p",
+    "--resume",
+    "s1",
+    "追加で直して",
+    "--output-format",
+    "stream-json",
     "--verbose",
-    "--permission-prompts", "none",
+    "--permission-prompts",
+    "none",
   ]);
 });
 
@@ -48,7 +63,8 @@ test("rate_limit_event を正規化する", () => {
   const ev = normalize({
     type: "rate_limit_event",
     rate_limit_info: {
-      status: "allowed", rateLimitType: "five_hour",
+      status: "allowed",
+      rateLimitType: "five_hour",
       unifiedWindows: {
         five_hour: { utilization: 0.14, resetsAt: "2026-09-12T05:00:00Z" },
         seven_day: { utilization: 0.04, resetsAt: "2026-09-19T00:00:00Z" },
@@ -63,9 +79,15 @@ test("rate_limit_event を正規化する", () => {
 
 test("result 行から成否・テキスト・コストを取る", () => {
   const r = resultFrom({
-    type: "result", subtype: "success", is_error: false,
-    result: "できました", total_cost_usd: 0.42, num_turns: 7, duration_ms: 12000,
-    permission_denials: [], terminal_reason: "completed",
+    type: "result",
+    subtype: "success",
+    is_error: false,
+    result: "できました",
+    total_cost_usd: 0.42,
+    num_turns: 7,
+    duration_ms: 12000,
+    permission_denials: [],
+    terminal_reason: "completed",
   }, 0);
   assert.equal(r.ok, true);
   assert.equal(r.degraded, false);
@@ -77,7 +99,10 @@ test("result 行から成否・テキスト・コストを取る", () => {
 
 test("permission_denials が空でなければ degraded", () => {
   const r = resultFrom({
-    type: "result", subtype: "success", is_error: false, result: "やれませんでした",
+    type: "result",
+    subtype: "success",
+    is_error: false,
+    result: "やれませんでした",
     permission_denials: [{ tool_name: "Bash" }],
   }, 0);
   assert.equal(r.ok, true, "ワークフローは止めない");
@@ -109,12 +134,15 @@ test("result行なしでstderrに出力して死んだプロセスは失敗＆st
   const dir = mkdtempSync(join(tmpdir(), "doctrine-adapter-test-"));
   try {
     const script = join(dir, "fake-claude.sh");
-    writeFileSync(script, [
-      "#!/usr/bin/env bash",
-      'echo "boom: something went wrong" 1>&2',
-      'echo \'{"type":"system","subtype":"init"}\'',
-      "exit 7",
-    ].join("\n"));
+    writeFileSync(
+      script,
+      [
+        "#!/usr/bin/env bash",
+        'echo "boom: something went wrong" 1>&2',
+        'echo \'{"type":"system","subtype":"init"}\'',
+        "exit 7",
+      ].join("\n"),
+    );
     chmodSync(script, 0o755);
 
     const adapter = createClaudeAdapter(script);
@@ -123,8 +151,10 @@ test("result行なしでstderrに出力して死んだプロセスは失敗＆st
 
     assert.equal(r.ok, false);
     assert.equal(r.exitCode, 7);
-    assert.ok(r.stderrTail.includes("boom: something went wrong"),
-      `stderrTail に証拠が残っているはず: ${r.stderrTail}`);
+    assert.ok(
+      r.stderrTail.includes("boom: something went wrong"),
+      `stderrTail に証拠が残っているはず: ${r.stderrTail}`,
+    );
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

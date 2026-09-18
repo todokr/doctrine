@@ -1,8 +1,17 @@
 import type { DatabaseSync, SQLInputValue } from "node:sqlite";
 import {
-  CompiledQuery, SqliteAdapter, SqliteIntrospector, SqliteQueryCompiler,
-  type DatabaseConnection, type DatabaseIntrospector, type Dialect, type DialectAdapter,
-  type Driver, type Kysely, type QueryCompiler, type QueryResult,
+  CompiledQuery,
+  type DatabaseConnection,
+  type DatabaseIntrospector,
+  type Dialect,
+  type DialectAdapter,
+  type Driver,
+  type Kysely,
+  type QueryCompiler,
+  type QueryResult,
+  SqliteAdapter,
+  SqliteIntrospector,
+  SqliteQueryCompiler,
 } from "kysely";
 
 /**
@@ -124,7 +133,9 @@ class ConnectionMutex {
 
   async lock(): Promise<void> {
     while (this.#promise) await this.#promise;
-    this.#promise = new Promise((resolve) => { this.#resolve = resolve; });
+    this.#promise = new Promise((resolve) => {
+      this.#resolve = resolve;
+    });
   }
 
   unlock(): void {

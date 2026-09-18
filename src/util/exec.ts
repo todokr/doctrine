@@ -8,7 +8,12 @@ export async function runCommand(
   opts: { cwd?: string; env?: Record<string, string> } = {},
 ): Promise<{ stdout: string; stderr: string }> {
   const out = await new Deno.Command(cmd, {
-    args, cwd: opts.cwd, env: opts.env, stdin: "null", stdout: "piped", stderr: "piped",
+    args,
+    cwd: opts.cwd,
+    env: opts.env,
+    stdin: "null",
+    stdout: "piped",
+    stderr: "piped",
   }).output();
   const decoder = new TextDecoder();
   const stdout = decoder.decode(out.stdout);

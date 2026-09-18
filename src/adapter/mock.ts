@@ -13,14 +13,26 @@ export type MockAdapter = AgentAdapter & {
 };
 
 const DEFAULT: AgentResult = {
-  ok: true, degraded: false, text: "", costUsd: 0, numTurns: 1,
-  durationMs: 1, permissionDenials: [], exitCode: 0, stderrTail: "",
+  ok: true,
+  degraded: false,
+  text: "",
+  costUsd: 0,
+  numTurns: 1,
+  durationMs: 1,
+  permissionDenials: [],
+  exitCode: 0,
+  stderrTail: "",
 };
 
 export function createMockAdapter(script: MockScript): MockAdapter {
   const calls: MockAdapter["calls"] = [];
 
-  function make(kind: "start" | "resume", prompt: string, sessionId: string, opts: StartOptions): AgentRun {
+  function make(
+    kind: "start" | "resume",
+    prompt: string,
+    sessionId: string,
+    opts: StartOptions,
+  ): AgentRun {
     const n = calls.length;
     calls.push({ kind, prompt, sessionId, opts });
     const partial = script.sequence?.[n] ?? script.result;
@@ -29,9 +41,12 @@ export function createMockAdapter(script: MockScript): MockAdapter {
       sessionId,
       pid: 424242,
       startedAt: new Date().toISOString(),
-      events: (async function* () { for (const e of events) yield e; })(),
+      events: (async function* () {
+        for (const e of events) yield e;
+      })(),
       result: new Promise((resolve) =>
-        setTimeout(() => resolve({ ...DEFAULT, ...partial }), script.delayMs ?? 0)),
+        setTimeout(() => resolve({ ...DEFAULT, ...partial }), script.delayMs ?? 0)
+      ),
       kill: () => {},
     };
   }

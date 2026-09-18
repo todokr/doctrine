@@ -1,6 +1,6 @@
 import { test } from "@std/testing/bdd";
 import assert from "node:assert/strict";
-import { expand, TemplateError, type TemplateContext } from "../../src/workflow/template.ts";
+import { expand, type TemplateContext, TemplateError } from "../../src/workflow/template.ts";
 
 const ctx: TemplateContext = {
   task: { id: "t1", title: "ログイン修正", prompt: "直して", branch: "doctrine/t1-login" },
@@ -23,7 +23,10 @@ test("空白の有無を問わない", () => {
 });
 
 test("1つの文字列に複数個埋められる", () => {
-  assert.equal(expand("テストが失敗した:\n{{ steps.test.stderr }}", ctx), "テストが失敗した:\n3 failing");
+  assert.equal(
+    expand("テストが失敗した:\n{{ steps.test.stderr }}", ctx),
+    "テストが失敗した:\n3 failing",
+  );
 });
 
 test("未知の系統は落とす", () => {

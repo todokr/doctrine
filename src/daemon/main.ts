@@ -2,7 +2,7 @@
 import { dirname, join } from "@std/path";
 import { openDb } from "../db/migrate.ts";
 import { createClaudeAdapter } from "../adapter/claude.ts";
-import { recoverOnStartup, defaultProbe, type WorkflowLookup } from "../core/recovery.ts";
+import { defaultProbe, recoverOnStartup, type WorkflowLookup } from "../core/recovery.ts";
 import { findOrphans } from "../core/worktree.ts";
 import { getProject, listProjects, listTasks, type TaskRow } from "../db/tasks.ts";
 import type { Db } from "../db/schema.ts";
@@ -10,7 +10,7 @@ import { DEFAULT_GLOBAL_LIMIT } from "../core/scheduler.ts";
 import { parseWorkflow } from "../workflow/schema.ts";
 import { withSetupStep } from "../workflow/project.ts";
 import { createServer, socketPath } from "./server.ts";
-import { createHandler, loadWorkflowFromDisk, tick, type DaemonContext } from "./handlers.ts";
+import { createHandler, type DaemonContext, loadWorkflowFromDisk, tick } from "./handlers.ts";
 import { homeDir } from "../util/home.ts";
 
 export function stateRoot(): string {
@@ -76,7 +76,7 @@ async function assertSocketNotLive(path: string): Promise<void> {
   if (result.kind === "unknown") {
     throw new Error(
       `ソケット (${path}) の状態を判定できませんでした（${result.code}）。` +
-      `デーモンが生きている可能性を否定できないため、起動を拒否します。`,
+        `デーモンが生きている可能性を否定できないため、起動を拒否します。`,
     );
   }
   // 古いソケットファイル。次の listen() が改めて unlink するが、ここで消しておいても害はない。
@@ -98,7 +98,11 @@ export async function tickCycle(ctx: DaemonContext): Promise<void> {
   try {
     await tick(ctx);
   } catch (e) {
-    console.error(`[tick] スケジューリングの1周に失敗しました（次の周期で再試行します）: ${(e as Error).message}`);
+    console.error(
+      `[tick] スケジューリングの1周に失敗しました（次の周期で再試行します）: ${
+        (e as Error).message
+      }`,
+    );
   }
   // 警告は溜めっぱなしにしない。見えていれば直せる。失敗した周でも吐く
   // （tick は途中まで進んで警告を積んでから落ちることがある）。
@@ -108,7 +112,11 @@ export async function tickCycle(ctx: DaemonContext): Promise<void> {
 }
 
 export async function startDaemon(o: {
-  dbPath?: string; socketPath?: string; logRoot?: string; globalLimit?: number; tickMs?: number;
+  dbPath?: string;
+  socketPath?: string;
+  logRoot?: string;
+  globalLimit?: number;
+  tickMs?: number;
 } = {}): Promise<{ stop(): Promise<void> }> {
   const resolvedSocketPath = o.socketPath ?? socketPath();
   await assertSocketNotLive(resolvedSocketPath);
@@ -156,7 +164,9 @@ export async function startDaemon(o: {
     }
   }
 
-  const timer = setInterval(() => { void tickCycle(ctx); }, o.tickMs ?? 1000);
+  const timer = setInterval(() => {
+    void tickCycle(ctx);
+  }, o.tickMs ?? 1000);
   Deno.unrefTimer(timer);
 
   return {
