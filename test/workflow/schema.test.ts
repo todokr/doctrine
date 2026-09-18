@@ -2,6 +2,7 @@ import { test } from "@std/testing/bdd";
 import assert from "node:assert/strict";
 import {
   type AgentStep,
+  type ApprovalStep,
   type CommandStep,
   parseWorkflow,
   WorkflowValidationError,
@@ -220,6 +221,78 @@ steps:
     type: command
     run: "true"
     session: x
+`;
+  assert.throws(() => parseWorkflow(yaml), WorkflowValidationError);
+});
+
+const WITH_REVIEW = `
+name: guided
+steps:
+  - id: plan
+    type: agent
+    prompt: "計画を書いて"
+  - id: plan-approval
+    type: approval
+    title: "計画を確認してください"
+    review:
+      files:
+        - .doctrine-out/plan.md
+        - docs/adr/0001.md
+`;
+
+test("approval の review.files を読む", () => {
+  const { workflow } = parseWorkflow(WITH_REVIEW);
+  const step = workflow.steps[1] as ApprovalStep;
+  assert.deepEqual(step.review?.files, [".doctrine-out/plan.md", "docs/adr/0001.md"]);
+});
+
+test("review を書かない approval は今までどおり通る", () => {
+  const { workflow } = parseWorkflow(VALID);
+  assert.equal((workflow.steps[2] as ApprovalStep).review, undefined);
+});
+
+const withFiles = (files: string) => `
+name: g
+steps:
+  - id: a
+    type: approval
+    title: "見て"
+    review:
+      files: ${files}
+`;
+
+test("worktree の外を指せるパスは落とす", () => {
+  for (
+    const [files, pattern] of [
+      ['["/etc/passwd"]', /絶対パス/],
+      ['["../secrets.md"]', /\.\./],
+      ['["a/../../b.md"]', /\.\./],
+      ['["~/.ssh/id_rsa"]', /~/],
+      ['[""]', /空/],
+    ] as const
+  ) {
+    assert.throws(
+      () => parseWorkflow(withFiles(files)),
+      (e: Error) => e instanceof WorkflowValidationError && pattern.test(e.message),
+      `落ちるべき: ${files}`,
+    );
+  }
+});
+
+test("files が空の宣言は落とす", () => {
+  assert.throws(() => parseWorkflow(withFiles("[]")), WorkflowValidationError);
+});
+
+test("review に知らないキーがあれば落とす", () => {
+  const yaml = `
+name: g
+steps:
+  - id: a
+    type: approval
+    title: "見て"
+    review:
+      files: ["a.md"]
+      diff: true
 `;
   assert.throws(() => parseWorkflow(yaml), WorkflowValidationError);
 });
