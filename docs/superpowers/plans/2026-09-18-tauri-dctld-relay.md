@@ -1658,11 +1658,16 @@ git commit -m "feat(app): rpc コマンドと daemon-event / daemon-connection �
 
 - [ ] **Step 1: app の外を読めるようにする**
 
-`app/tsconfig.json` の `include` を変える。
+`app/tsconfig.json` の `include` を変える。**ディレクトリごとではなく `protocol.ts` の 1 ファイルだけ**にする。
+`src/daemon/` には Deno 専用のファイル（`server.ts` / `main.ts` / `handlers.ts`）があり、ディレクトリを
+含めると Deno・kysely・zod・yaml が解決できずに `tsc` が 60 個以上のエラーで落ちる。
 
 ```json
-  "include": ["src", "../src/daemon"],
+  "include": ["src", "../src/daemon/protocol.ts"],
 ```
+
+なお `moduleResolution: "bundler"` は `import type` の先を `include` に関係なく辿るので、この行は
+実質的に「どこから型を借りているか」の記録である。
 
 `app/vite.config.ts` の `server` に足す。
 
