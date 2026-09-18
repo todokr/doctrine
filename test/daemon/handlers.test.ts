@@ -1088,3 +1088,31 @@ test("project.add: project.yaml が無くても、既にあるワークフロー
     "作ったのは project.yaml だけ",
   );
 });
+
+test("task.list は degraded な step_run を持つタスクに has_degraded を立てる", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  await h("project.add", { path: repo }, NOOP_CONN);
+
+  const clean = await h("task.create", { project: repo, title: "き", prompt: "p" }, NOOP_CONN) as {
+    id: string;
+  };
+  const dirty = await h("task.create", { project: repo, title: "よ", prompt: "p" }, NOOP_CONN) as {
+    id: string;
+  };
+
+  await ctx.db.insertInto("step_runs").values({
+    task_id: dirty.id,
+    step_id: "review",
+    attempt: 1,
+    status: "degraded",
+    exit_code: 0,
+    started_at: new Date().toISOString(),
+    ended_at: new Date().toISOString(),
+    log_path: join(root, "logs", "x.log"),
+  }).execute();
+
+  const rows = await h("task.list", {}, NOOP_CONN) as { id: string; has_degraded: boolean }[];
+  assert.equal(rows.find((r) => r.id === dirty.id)?.has_degraded, true);
+  assert.equal(rows.find((r) => r.id === clean.id)?.has_degraded, false);
+});
