@@ -17,6 +17,8 @@ export default defineConfig(() => ({
     port: 1420,
     strictPort: true,
     host: host || false,
+    // 型の正本はリポジトリルートの src/daemon/protocol.ts にある（app の外）
+    fs: { allow: [".."] },
     hmr: host
       ? {
           protocol: "ws",
