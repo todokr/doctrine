@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import { NOW, PROJECTS, seedTasks } from "./fixtures";
 import {
   canReject,
@@ -286,6 +286,25 @@ describe("toProject / toTask", () => {
     const task = toTask(weird, PJ);
     expect(task.state).toBe("unknown");
     expect(task.id).toBe(weird.id);
+  });
+
+  test("知っている状態はそのまま通す", () => {
+    // 「全部 unknown にする」という壊し方を、既存のテストは捕まえられない
+    for (const state of ["queued", "running", "suspended", "paused", "completed", "failed", "canceled"] as const) {
+      expect(t1({ state }).state).toBe(state);
+    }
+  });
+
+  test("知らない state の警告は同じ値では1回だけ出す（15秒ごとの取り直しでコンソールを埋めない）", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const weird = { state: "never-seen-before" as unknown as TaskListEntry["state"] };
+      toTask(row(weird), PJ);
+      toTask(row(weird), PJ);
+      expect(warn).toHaveBeenCalledTimes(1);
+    } finally {
+      warn.mockRestore();
+    }
   });
 });
 

@@ -141,12 +141,21 @@ function isKnownState(x: string): x is Exclude<TaskState, "unknown"> {
 }
 
 /**
+ * 同じ値で何度も警告しない。15 秒ごとの取り直しが同じ行を読み直すので、
+ * 絞らないとコンソールが埋まり、次の本物の警告が見えなくなる。
+ */
+const warnedStates = new Set<string>();
+
+/**
  * 知らない state 文字列を "unknown" に落とす。捨てるとタスクが画面から消えたり
  * 「終了」に紛れたりして、ユーザーが気づけなくなるので、見える状態として残す。
  */
 function toKnownState(x: string, where: string): TaskState {
   if (isKnownState(x)) return x;
-  console.warn(`知らない state を受け取った（${where}）: ${x}`);
+  if (!warnedStates.has(x)) {
+    warnedStates.add(x);
+    console.warn(`知らない state を受け取った（${where}）: ${x}`);
+  }
   return "unknown";
 }
 
