@@ -1254,3 +1254,242 @@ test("paused のタスクを resume しても、閉じるべき awaiting 行が�
   assert.equal((await getTask(ctx.db, t.id))?.state, "queued");
   assert.deepEqual(await listStepRuns(ctx.db, t.id), []);
 });
+
+test("task.diff は worktree の未コミット・未追跡の変更を返す", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  await h("project.add", { path: repo }, NOOP_CONN);
+  const t = await h("task.create", { project: repo, title: "T", prompt: "直して" }, NOOP_CONN) as {
+    id: string;
+  };
+  await tick(ctx);
+  await until(
+    async () => (await getTask(ctx.db, t.id))?.state === "suspended",
+    5000,
+    "approval で止まるまで",
+  );
+  const wt = (await getTask(ctx.db, t.id))!.worktree_path!;
+  await writeFile(join(wt, "added.txt"), "x\n");
+  await writeFile(join(wt, "README.md"), "y\n");
+
+  const d = await h("task.diff", { task_id: t.id }, NOOP_CONN) as {
+    base: { branch: string; merge_base: string };
+    since_step_run_id: number | null;
+    files: { path: string; status: string }[];
+    patch: string;
+    truncated: boolean;
+  };
+  assert.equal(d.base.branch, "main");
+  assert.match(d.base.merge_base, /^[0-9a-f]{40}$/);
+  assert.equal(d.since_step_run_id, null);
+  const byPath = new Map(d.files.map((f) => [f.path, f.status]));
+  assert.equal(byPath.get("added.txt"), "A", "未追跡のファイルが含まれる");
+  assert.equal(byPath.get("README.md"), "M", "未コミットの変更が含まれる");
+  assert.equal(d.truncated, false);
+  assert.match(d.patch, /added\.txt/);
+});
+
+test("worktree の無いタスクの task.diff は失敗する", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  await h("project.add", { path: repo }, NOOP_CONN);
+  const t = await h("task.create", { project: repo, title: "T", prompt: "直して" }, NOOP_CONN) as {
+    id: string;
+  };
+  await assert.rejects(
+    () => h("task.diff", { task_id: t.id }, NOOP_CONN),
+    /worktree がありません/,
+    "空の diff を返すと「変更なし」と区別がつかない",
+  );
+});
+
+test("since に未知の値を渡すと失敗する", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  await h("project.add", { path: repo }, NOOP_CONN);
+  const t = await h("task.create", { project: repo, title: "T", prompt: "直して" }, NOOP_CONN) as {
+    id: string;
+  };
+  // このタスクには worktree が無いのに「worktree がありません」ではなく since のエラーで
+  // 落ちる、というのが since のチェックが worktree_path のチェックより先に走っている証拠。
+  // チェックの順序が入れ替わると、このテストは意味の異なるエラーで失敗するようになる。
+  await assert.rejects(
+    () => h("task.diff", { task_id: t.id, since: "yesterday" }, NOOP_CONN),
+    /since に指定できるのは/,
+    "黙って全体に倒すと、画面が範囲を取り違えたまま承認に進む",
+  );
+});
+
+test("差し戻し後、since: last_review は前回レビュー以降の差分だけを返す", async () => {
+  await writeFile(
+    join(repo, ".doctrine", "workflows", "loop.yaml"),
+    "name: loop\nsteps:\n" +
+      "  - id: work\n    type: command\n    run: 'echo 1 > first.txt'\n" +
+      "  - id: review\n    type: approval\n    title: 見て\n" +
+      "    onReject:\n      goto: work\n      maxAttempts: 3\n",
+  );
+  const ctx = await context();
+  const h = createHandler(ctx);
+  await h("project.add", { path: repo }, NOOP_CONN);
+  const t = await h(
+    "task.create",
+    { project: repo, title: "T", prompt: "直して", workflow: "loop" },
+    NOOP_CONN,
+  ) as { id: string };
+  await tick(ctx);
+  await until(
+    async () => (await getTask(ctx.db, t.id))?.state === "suspended",
+    5000,
+    "1回目の承認待ち",
+  );
+  await until(() => ctx.running.size === 0);
+
+  const wt = (await getTask(ctx.db, t.id))!.worktree_path!;
+
+  // 1回目の差し戻し。mid.txt は「2回目のスナップショットが captureTree される前」に
+  // 置く必要がある — work は差し戻しのたびに first.txt を同じ内容で上書きするだけなので、
+  // ここで足しておかないと2回目・3回目のツリーが区別できず、基準を取り違えても
+  // 同じ diff になってテストがすり抜けてしまう。
+  await h("task.reject", { task_id: t.id, comment: "やり直し" }, NOOP_CONN);
+  await writeFile(join(wt, "mid.txt"), "mid\n");
+  await tick(ctx);
+  await until(
+    async () => (await getTask(ctx.db, t.id))?.state === "suspended",
+    5000,
+    "2回目の承認待ち",
+  );
+  await until(() => ctx.running.size === 0);
+
+  // 2回目の差し戻し。基準にすべきは「直近の」＝この2回目（review_tree に mid.txt を
+  // 含む）である。1回目（mid.txt を含まない）を基準に取り違えると mid.txt が since に
+  // 混ざって出る。
+  await h("task.reject", { task_id: t.id, comment: "もう一回" }, NOOP_CONN);
+  await tick(ctx);
+  await until(
+    async () => (await getTask(ctx.db, t.id))?.state === "suspended",
+    5000,
+    "3回目の承認待ち",
+  );
+  await until(() => ctx.running.size === 0);
+
+  // 3回目のレビュー時点より後に足した分。
+  await writeFile(join(wt, "second.txt"), "2\n");
+
+  const all = await h("task.diff", { task_id: t.id }, NOOP_CONN) as {
+    since_step_run_id: number | null;
+    files: { path: string }[];
+  };
+  assert.deepEqual(
+    all.files.map((f) => f.path).sort(),
+    ["first.txt", "mid.txt", "second.txt"],
+    "since 無しは merge-base から全部",
+  );
+  assert.equal(all.since_step_run_id, null);
+
+  const since = await h("task.diff", { task_id: t.id, since: "last_review" }, NOOP_CONN) as {
+    since_step_run_id: number | null;
+    files: { path: string }[];
+  };
+  // 基準を1回目の差し戻し（古い方）に取り違えると mid.txt も出てしまう。
+  // second.txt だけが出ることが「直近の」差し戻しを基準にできている証拠になる。
+  assert.deepEqual(since.files.map((f) => f.path), ["second.txt"], "前回レビュー以降だけ");
+  const rejected = (await listStepRuns(ctx.db, t.id))
+    .filter((r) => r.review_tree !== null && r.status === "failed");
+  assert.equal(rejected.length, 2, "差し戻しは2回起きている");
+  assert.equal(since.since_step_run_id, rejected[1].id, "基準は直近（2回目）の差し戻し");
+});
+
+test("差し戻し後に承認が挟まっても since: last_review の基準は差し戻しのままで、承認後の変更も含む", async () => {
+  // lastRejectedReview は status = 'failed' の行しか見ない。承認（success）で基準を
+  // 進めてしまうと、承認後に積んだ成果がレビュー対象から消える（B節の理由）。
+  // ここでは「差し戻し→承認→さらに別のステップの成果」という順で進め、承認後に
+  // 増えた分も since に出ること（＝基準が承認では進まないこと）を確かめる。
+  await writeFile(
+    join(repo, ".doctrine", "workflows", "keep.yaml"),
+    "name: keep\nsteps:\n" +
+      "  - id: work\n    type: command\n    run: 'echo 1 > first.txt'\n" +
+      "  - id: review\n    type: approval\n    title: 見て\n" +
+      "    onReject:\n      goto: work\n      maxAttempts: 3\n" +
+      "  - id: after\n    type: command\n    run: 'echo 2 > after.txt'\n" +
+      "  - id: final\n    type: approval\n    title: 確認\n",
+  );
+  const ctx = await context();
+  const h = createHandler(ctx);
+  await h("project.add", { path: repo }, NOOP_CONN);
+  const t = await h(
+    "task.create",
+    { project: repo, title: "T", prompt: "直して", workflow: "keep" },
+    NOOP_CONN,
+  ) as { id: string };
+  await tick(ctx);
+  await until(
+    async () => (await getTask(ctx.db, t.id))?.state === "suspended",
+    5000,
+    "1回目の承認待ち",
+  );
+  await until(() => ctx.running.size === 0);
+
+  const wt = (await getTask(ctx.db, t.id))!.worktree_path!;
+
+  // 差し戻す。この review_run が唯一の failed 行になる。
+  await h("task.reject", { task_id: t.id, comment: "やり直し" }, NOOP_CONN);
+  // extra.txt は「差し戻し後・2回目のレビュー時点より前」に置く。1回目（failed）の
+  // review_tree には入らないが、2回目（この後 approve される）の review_tree には入る
+  // — 基準が承認された回に引きずられていないかを見分けるための仕込み。
+  await writeFile(join(wt, "extra.txt"), "extra\n");
+  await tick(ctx);
+  await until(
+    async () => (await getTask(ctx.db, t.id))?.state === "suspended",
+    5000,
+    "2回目の承認待ち",
+  );
+  await until(() => ctx.running.size === 0);
+
+  // 承認する。この review_run は success で閉じるので lastRejectedReview の対象外になる。
+  await h("task.approve", { task_id: t.id }, NOOP_CONN);
+  await tick(ctx);
+  await until(
+    async () => (await getTask(ctx.db, t.id))?.state === "suspended",
+    5000,
+    "final の承認待ち",
+  );
+  await until(() => ctx.running.size === 0);
+
+  const since = await h("task.diff", { task_id: t.id, since: "last_review" }, NOOP_CONN) as {
+    since_step_run_id: number | null;
+    files: { path: string }[];
+  };
+  const failed = (await listStepRuns(ctx.db, t.id))
+    .filter((r) => r.review_tree !== null && r.status === "failed");
+  assert.equal(failed.length, 1, "差し戻しは1回だけ");
+  assert.equal(since.since_step_run_id, failed[0].id, "承認された回では基準が進まない");
+  // extra.txt（承認された回の後に足したが、なお1回目の failed の後）と
+  // after.txt（承認後のステップの成果）の両方が出る。first.txt は failed の
+  // 時点で既にツリーに入っているので出ない。
+  assert.deepEqual(
+    since.files.map((f) => f.path).sort(),
+    ["after.txt", "extra.txt"],
+    "承認をまたいでも、差し戻し以降の変更は取りこぼさない",
+  );
+});
+
+test("差し戻しの記録が無ければ since: last_review は全体に倒す", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  await h("project.add", { path: repo }, NOOP_CONN);
+  const t = await h("task.create", { project: repo, title: "T", prompt: "直して" }, NOOP_CONN) as {
+    id: string;
+  };
+  await tick(ctx);
+  await until(async () => (await getTask(ctx.db, t.id))?.state === "suspended", 5000, "承認待ち");
+  await until(() => ctx.running.size === 0);
+  const wt = (await getTask(ctx.db, t.id))!.worktree_path!;
+  await writeFile(join(wt, "only.txt"), "x\n");
+
+  const d = await h("task.diff", { task_id: t.id, since: "last_review" }, NOOP_CONN) as {
+    since_step_run_id: number | null;
+    files: { path: string }[];
+  };
+  assert.equal(d.since_step_run_id, null, "承認済みの回は基準にしない");
+  assert.deepEqual(d.files.map((f) => f.path), ["only.txt"]);
+});
