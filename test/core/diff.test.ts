@@ -106,3 +106,21 @@ test("base ブランチが worktree の後に進んでも merge-base を基準�
   const d = await diffNow();
   assert.deepEqual(d.files.map((f) => f.path), ["mine.txt"], "base 側のコミットは混ざらない");
 });
+
+test("上限を超えた patch は改行境界で切って truncated を立てる", async () => {
+  const lines = Array.from({ length: 300 }, (_, i) => `line ${i}\n`).join("");
+  await writeFile(join(repo, "big.txt"), lines);
+  const d = await diffNow(300);
+  assert.equal(d.truncated, true);
+  assert.ok(d.patch.endsWith("\n"), "行の途中で切ると unified diff のパーサが壊れる");
+  assert.ok(new TextEncoder().encode(d.patch).length <= 300);
+  assert.deepEqual(d.files.map((f) => f.path), ["big.txt"], "files は打ち切らない");
+  assert.equal(d.files[0].additions, 300, "行数も打ち切らない");
+});
+
+test("上限以内なら truncated は false のまま patch を全部返す", async () => {
+  await writeFile(join(repo, "README.md"), "a\nb\nc\nd\n");
+  const d = await diffNow();
+  assert.equal(d.truncated, false);
+  assert.match(d.patch, /^\+d$/m);
+});

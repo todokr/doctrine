@@ -66,6 +66,35 @@ export type DiffResult = { files: DiffFile[]; patch: string; truncated: boolean 
 const PATHSPEC = [".", ":(exclude).doctrine-out/"];
 
 /**
+ * patch のバイト数の上限。ファイル数では打ち切らない — 1個の巨大な生成ファイルという
+ * 一番効く形を守れないため。守りたいのはデーモンのメモリと画面の描画であり、
+ * それを直接測っているのはバイト数である。
+ *
+ * 2 MiB は普通のタスクなら絶対に当たらない大きさ（40バイト/行として約5万行）。
+ * 当たったときは truncated を見て人が worktree を直接見に行けばよい、という割り切り。
+ */
+export const PATCH_LIMIT_BYTES = 2 * 1024 * 1024;
+
+const LF = 0x0a;
+
+/**
+ * 上限以内の最後の改行の直後で切る。行の途中で切ると unified diff のパーサが壊れ、
+ * 画面が「壊れた diff」ではなく「間違った diff」を描きかねない。
+ * 上限以内に改行が1つも無い（極端に長い1行）ときだけ、上限でそのまま切る。
+ */
+function truncatePatch(
+  patch: string,
+  limitBytes: number,
+): { patch: string; truncated: boolean } {
+  const bytes = new TextEncoder().encode(patch);
+  if (bytes.length <= limitBytes) return { patch, truncated: false };
+  const head = bytes.subarray(0, limitBytes);
+  const lastLf = head.lastIndexOf(LF);
+  const cut = lastLf >= 0 ? head.subarray(0, lastLf + 1) : head;
+  return { patch: new TextDecoder().decode(cut), truncated: true };
+}
+
+/**
  * base ブランチとの共通祖先。worktree を作った後に base が進んでいても
  * 正しい基準になるよう、毎回取り直す。
  */
@@ -190,5 +219,9 @@ export async function computeDiff(o: {
     });
   }
 
-  return { files, patch: rawPatch, truncated: false };
+  const { patch, truncated } = truncatePatch(
+    rawPatch,
+    o.patchLimitBytes ?? PATCH_LIMIT_BYTES,
+  );
+  return { files, patch, truncated };
 }
