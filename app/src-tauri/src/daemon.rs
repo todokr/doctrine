@@ -1,6 +1,9 @@
 use std::env;
+use std::fs::OpenOptions;
 use std::os::unix::fs::MetadataExt;
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
+use std::process::{Child, Command, Stdio};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Os {
@@ -81,6 +84,67 @@ pub fn current_env() -> PathEnv {
 
 pub fn socket_path() -> Result<PathBuf, String> {
     resolve_socket_path(&current_env())
+}
+
+/// 探索の規則そのもの。環境変数を読まないのでテストできる。
+pub fn find_dctld_in(explicit: Option<String>, path: Option<String>) -> Result<PathBuf, String> {
+    if let Some(p) = explicit.filter(|s| !s.is_empty()) {
+        let p = PathBuf::from(p);
+        return if p.is_file() {
+            Ok(p)
+        } else {
+            Err(format!(
+                "DOCTRINE_DCTLD が指すファイルがありません: {}",
+                p.display()
+            ))
+        };
+    }
+    for dir in env::split_paths(&path.unwrap_or_default()) {
+        let candidate = dir.join("dctld");
+        if candidate.is_file() {
+            return Ok(candidate);
+        }
+    }
+    Err("dctld が見つかりません（deno task install で入ります）".into())
+}
+
+pub fn find_dctld() -> Result<PathBuf, String> {
+    find_dctld_in(env::var("DOCTRINE_DCTLD").ok(), env::var("PATH").ok())
+}
+
+/// dctld を切り離して起動する。アプリを終了しても、ターミナルで Ctrl-C しても残る。
+///
+/// **Child を返すこと。** 捨てると2つの問題が同時に起きる。(1) dctld が listen する
+/// までに時間がかかると、呼び出し側が「まだソケットが無い」と見てもう1つ起動し、
+/// どちらも assertSocketNotLive を素通りして**同じ DB に2つのデーモンが書く**
+/// （まさに assertSocketNotLive が防ごうとしている事態）。(2) dctld が先に死ぬと
+/// ゾンビが残る。呼び出し側が Child を持ち、try_wait() で生死を見て両方を防ぐ。
+pub fn spawn_dctld() -> Result<Child, String> {
+    let bin = find_dctld()?;
+    let e = current_env();
+    let root = resolve_state_root(e.state_dir, e.home)?;
+    std::fs::create_dir_all(&root)
+        .map_err(|e| format!("状態ディレクトリを作れません ({}): {e}", root.display()))?;
+
+    // 切り離すと stdout / stderr の行き先が無くなる。dctld は起動時の復帰結果・
+    // 孤児の検出・tick の失敗をここにしか書かないので、捨てずにログへ追記する。
+    let log_path = root.join("dctld.log");
+    let log = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+        .map_err(|e| format!("ログを開けません ({}): {e}", log_path.display()))?;
+    let err = log
+        .try_clone()
+        .map_err(|e| format!("ログを複製できません: {e}"))?;
+
+    Command::new(&bin)
+        .process_group(0) // Ctrl-C は前面プロセスグループ全体に届く。そこから抜ける
+        .stdin(Stdio::null())
+        .stdout(Stdio::from(log))
+        .stderr(Stdio::from(err))
+        .spawn()
+        .map_err(|e| format!("dctld を起動できません ({}): {e}", bin.display()))
 }
 
 #[cfg(test)]
@@ -169,5 +233,39 @@ mod tests {
             PathBuf::from("/home/u/.local/state/doctrine")
         );
         assert!(resolve_state_root(None, None).is_err());
+    }
+
+    #[test]
+    fn finds_dctld_on_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let bin = dir.path().join("dctld");
+        std::fs::write(&bin, "#!/bin/sh\n").unwrap();
+        let found = find_dctld_in(None, Some(dir.path().to_string_lossy().into_owned()));
+        assert_eq!(found.unwrap(), bin);
+    }
+
+    #[test]
+    fn explicit_override_wins() {
+        let dir = tempfile::tempdir().unwrap();
+        let bin = dir.path().join("mydctld");
+        std::fs::write(&bin, "#!/bin/sh\n").unwrap();
+        let found = find_dctld_in(Some(bin.to_string_lossy().into_owned()), None);
+        assert_eq!(found.unwrap(), bin);
+    }
+
+    #[test]
+    fn missing_dctld_says_how_to_install() {
+        let dir = tempfile::tempdir().unwrap();
+        let err = find_dctld_in(None, Some(dir.path().to_string_lossy().into_owned())).unwrap_err();
+        assert!(err.contains("deno task install"), "案内が無い: {err}");
+    }
+
+    #[test]
+    fn explicit_override_that_is_missing_is_an_error() {
+        let err = find_dctld_in(Some("/nope/dctld".into()), None).unwrap_err();
+        assert!(
+            err.contains("DOCTRINE_DCTLD"),
+            "どの設定が悪いか分からない: {err}"
+        );
     }
 }
