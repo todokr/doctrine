@@ -45,20 +45,43 @@ async function readOne(root: string, path: string): Promise<ReviewFile> {
   // /w/task-evil/x が配下として通る。
   if (!real.startsWith(root + SEPARATOR)) return { path, status: "outside_worktree" };
 
-  let bytes: Uint8Array;
+  // realPath 解決から open までの間に real の指す先が差し替えられる窓は塞げないが、
+  // 承認待ちに入った時点で書き手のステップは既に終了しているため、ここでレースする
+  // 書き手は現在のアーキテクチャには存在しない。open 以降は同一ハンドルで
+  // stat と読み出しを行い、その窓だけは塞ぐ。
+  let file: Deno.FsFile;
   try {
-    const stat = await Deno.stat(real);
-    if (!stat.isFile) return { path, status: "missing" };
-    if (stat.size > MAX_REVIEW_FILE_BYTES) return { path, status: "too_large", size: stat.size };
-    bytes = await Deno.readFile(real);
+    file = await Deno.open(real, { read: true });
   } catch {
     return { path, status: "missing" };
   }
 
   try {
-    const content = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-    return { path, status: "ok", content, size: bytes.byteLength };
+    const stat = await file.stat();
+    if (!stat.isFile) return { path, status: "missing" };
+    if (stat.size > MAX_REVIEW_FILE_BYTES) return { path, status: "too_large", size: stat.size };
+
+    const bytes = new Uint8Array(await new Response(file.readable).arrayBuffer());
+    // stat から読み出しまでの間にファイルが伸びている可能性があるので、実際に
+    // 読めたバイト数でも上限を再判定する。
+    if (bytes.byteLength > MAX_REVIEW_FILE_BYTES) {
+      return { path, status: "too_large", size: bytes.byteLength };
+    }
+
+    try {
+      const content = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+      return { path, status: "ok", content, size: bytes.byteLength };
+    } catch {
+      return { path, status: "binary", size: bytes.byteLength };
+    }
   } catch {
-    return { path, status: "binary", size: bytes.byteLength };
+    return { path, status: "missing" };
+  } finally {
+    try {
+      file.close();
+    } catch {
+      // file.readable を最後まで読むと Deno 側で既に fd が閉じられている場合があるため、
+      // 二重 close のエラーは無視する。
+    }
   }
 }
