@@ -67,3 +67,30 @@ export async function getStepOutputs(
   }
   return out;
 }
+
+/**
+ * そのタスクのステップ出力を step_run_id 引きで返す。listStepRuns と突き合わせて
+ * 「どの実行の出力か」を解く側（taskContext）が使う。
+ */
+export async function listStepOutputs(
+  db: Db,
+  taskId: string,
+): Promise<Map<number, { last_stdout: string; last_stderr: string; exit_code: number | null }>> {
+  const rows = await db.selectFrom("step_outputs")
+    .innerJoin("step_runs", "step_runs.id", "step_outputs.step_run_id")
+    .select([
+      "step_outputs.step_run_id",
+      "step_outputs.last_stdout",
+      "step_outputs.last_stderr",
+      "step_outputs.exit_code",
+    ])
+    .where("step_runs.task_id", "=", taskId)
+    .execute();
+  return new Map(
+    rows.map((r) => [r.step_run_id, {
+      last_stdout: r.last_stdout,
+      last_stderr: r.last_stderr,
+      exit_code: r.exit_code,
+    }]),
+  );
+}

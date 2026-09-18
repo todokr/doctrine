@@ -1254,3 +1254,80 @@ test("paused のタスクを resume しても、閉じるべき awaiting 行が�
   assert.equal((await getTask(ctx.db, t.id))?.state, "queued");
   assert.deepEqual(await listStepRuns(ctx.db, t.id), []);
 });
+
+test("task.context は承認待ちのタスクの経緯を返す", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  await h("project.add", { path: repo }, NOOP_CONN);
+  const t = await h(
+    "task.create",
+    { project: repo, title: "T", prompt: "在庫の引当を冪等にして" },
+    NOOP_CONN,
+  ) as { id: string };
+  await tick(ctx);
+  await until(async () => (await getTask(ctx.db, t.id))?.state === "suspended", 5000, "承認待ち");
+
+  const got = await h("task.context", { task_id: t.id }, NOOP_CONN) as {
+    prompt: string;
+    reviews: { status: string }[];
+    reviewFiles: unknown[];
+  };
+  assert.equal(got.prompt, "在庫の引当を冪等にして");
+  assert.equal(got.reviews.length, 1);
+  assert.equal(got.reviews[0].status, "awaiting");
+  assert.deepEqual(got.reviewFiles, [], "このワークフローは review.files を宣言していない");
+});
+
+test("task.context は承認待ちでないタスクでも呼べる", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  await h("project.add", { path: repo }, NOOP_CONN);
+  const t = await h(
+    "task.create",
+    { project: repo, title: "T", prompt: "やって" },
+    NOOP_CONN,
+  ) as { id: string };
+
+  const got = await h("task.context", { task_id: t.id }, NOOP_CONN) as {
+    prompt: string;
+    reviews: unknown[];
+    lastCommand: unknown;
+    reviewFiles: unknown[];
+  };
+  assert.equal(got.prompt, "やって");
+  assert.deepEqual(got.reviews, []);
+  assert.equal(got.lastCommand, null);
+  assert.deepEqual(got.reviewFiles, []);
+});
+
+test("task.context はワークフローが読めなくても経緯を返す", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  await h("project.add", { path: repo }, NOOP_CONN);
+  const t = await h(
+    "task.create",
+    { project: repo, title: "T", prompt: "やって" },
+    NOOP_CONN,
+  ) as { id: string };
+  await tick(ctx);
+  await until(async () => (await getTask(ctx.db, t.id))?.state === "suspended", 5000, "承認待ち");
+
+  // 承認待ちの間にワークフローが消える
+  await rm(join(repo, ".doctrine", "workflows", "feature.yaml"));
+
+  const got = await h("task.context", { task_id: t.id }, NOOP_CONN) as {
+    prompt: string;
+    reviews: { status: string }[];
+  };
+  assert.equal(got.prompt, "やって");
+  assert.equal(got.reviews.length, 1, "current_step_id の行をレビューとして拾う");
+});
+
+test("task.context は無いタスクを名指しで断る", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  await assert.rejects(
+    () => h("task.context", { task_id: "nope" }, NOOP_CONN),
+    /タスクがありません/,
+  );
+});
