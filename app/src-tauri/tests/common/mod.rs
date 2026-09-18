@@ -24,8 +24,7 @@ impl Fake {
         Fake::listen(dir, path)
     }
 
-    /// 同じパスで立て直す（再接続のテスト用。Task 7 で使う）。
-    #[allow(dead_code)]
+    /// 同じパスで立て直す（再接続のテスト用）。
     pub fn restart(dir: tempfile::TempDir, path: PathBuf) -> Fake {
         let _ = std::fs::remove_file(&path);
         Fake::listen(dir, path)

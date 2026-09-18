@@ -270,6 +270,102 @@ async fn 切断と同時に投げた要求が_pending_に取り残されない()
     }
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn 切断で待ち中の要求が失敗し_立て直すと復帰する() {
+    let fake = Fake::start().await;
+    let (emit, seen) = collector();
+    let (relay, driver) = Relay::new(fake.path.clone(), emit, options());
+    let driver = tokio::spawn(driver);
+    until(
+        || common::statuses(&seen).contains(&"connected".to_string()),
+        "最初の接続",
+    )
+    .await;
+
+    // 応答を返さないまま落とす
+    let waiting = {
+        let r = relay.clone();
+        tokio::spawn(async move { r.call("task.list".into(), json!({})).await })
+    };
+    until(|| relay.pending_count() == 1, "要求が届く").await;
+    let (dir, path) = fake.stop();
+
+    assert_eq!(waiting.await.unwrap().unwrap_err(), "接続が切れました");
+    until(
+        || common::statuses(&seen).contains(&"disconnected".to_string()),
+        "切断の通知",
+    )
+    .await;
+    assert_eq!(relay.pending_count(), 0, "切断後も要求が残っている");
+
+    // 立て直すと自動で復帰する
+    let mut fake = Fake::restart(dir, path);
+    until(
+        || {
+            common::statuses(&seen)
+                .iter()
+                .filter(|s| *s == "connected")
+                .count()
+                == 2
+        },
+        "再接続",
+    )
+    .await;
+
+    let call = {
+        let r = relay.clone();
+        tokio::spawn(async move { r.call("task.list".into(), json!({})).await })
+    };
+    let line = fake.sent.recv().await.unwrap();
+    let id = serde_json::from_str::<Value>(&line).unwrap()["id"]
+        .as_u64()
+        .unwrap();
+    fake.reply
+        .send(json!({ "id": id, "ok": true, "result": "復帰" }).to_string())
+        .unwrap();
+    assert_eq!(call.await.unwrap().unwrap(), json!("復帰"));
+
+    driver.abort();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn 最初からデーモンが居なくても_後から立てれば繋がる() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("dctld.sock");
+    let (emit, seen) = collector();
+    let (relay, driver) = Relay::new(path.clone(), emit, options());
+    let driver = tokio::spawn(driver);
+
+    until(
+        || common::statuses(&seen).contains(&"disconnected".to_string()),
+        "繋がらない通知",
+    )
+    .await;
+    assert!(relay.call("task.list".into(), json!({})).await.is_err());
+
+    let mut fake = Fake::restart(dir, path);
+    until(
+        || common::statuses(&seen).contains(&"connected".to_string()),
+        "後から接続",
+    )
+    .await;
+
+    let call = {
+        let r = relay.clone();
+        tokio::spawn(async move { r.call("task.list".into(), json!({})).await })
+    };
+    let line = fake.sent.recv().await.unwrap();
+    let id = serde_json::from_str::<Value>(&line).unwrap()["id"]
+        .as_u64()
+        .unwrap();
+    fake.reply
+        .send(json!({ "id": id, "ok": true, "result": [] }).to_string())
+        .unwrap();
+    assert_eq!(call.await.unwrap().unwrap(), json!([]));
+
+    driver.abort();
+}
+
 const _: fn() = || {
     fn assert_send_sync<T: Send + Sync>() {}
     assert_send_sync::<Relay>();
