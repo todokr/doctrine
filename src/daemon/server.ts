@@ -17,7 +17,10 @@ export type Handler = (
 export type SocketEnv = {
   doctrineSocket?: string;
   xdgRuntimeDir?: string;
-  stateRoot: string;
+  /** macOS の分岐でしか要らないので、呼ばれたときだけ解決する。
+   *  先に解決すると、XDG_RUNTIME_DIR はあるが HOME が無い環境で
+   *  stateRoot() が投げ、繋がるはずの経路まで落ちる。 */
+  stateRoot: () => string;
   uid: number;
   os: "darwin" | "linux";
 };
@@ -29,7 +32,7 @@ export function resolveSocketPath(env: SocketEnv): string {
   // macOS には XDG_RUNTIME_DIR が無く、/run は read-only なので mkdir が失敗する。
   // 状態ディレクトリ（DB と同じ場所、0o700）に置く。古いソケットファイルが
   // 再起動をまたいで残るが、assertSocketNotLive が扱う。
-  if (env.os === "darwin") return join(env.stateRoot, "dctld.sock");
+  if (env.os === "darwin") return join(env.stateRoot(), "dctld.sock");
   return join(`/run/user/${env.uid}`, "doctrine", "dctld.sock");
 }
 
@@ -38,7 +41,7 @@ export function socketPath(): string {
   return resolveSocketPath({
     doctrineSocket: Deno.env.get("DOCTRINE_SOCKET"),
     xdgRuntimeDir: Deno.env.get("XDG_RUNTIME_DIR"),
-    stateRoot: stateRoot(),
+    stateRoot,
     uid: Deno.uid() ?? 1000,
     os: Deno.build.os === "darwin" ? "darwin" : "linux",
   });

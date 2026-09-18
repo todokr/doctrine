@@ -196,7 +196,7 @@ test("行の長さに上限がなく、巨大な1行でもフレーミングが�
 });
 
 const socketEnv = (o: Partial<import("../../src/daemon/server.ts").SocketEnv> = {}) => ({
-  stateRoot: "/home/u/.local/state/doctrine",
+  stateRoot: () => "/home/u/.local/state/doctrine",
   uid: 501,
   os: "linux" as const,
   ...o,
@@ -231,6 +231,16 @@ test("resolveSocketPath: macOS で XDG_RUNTIME_DIR が無ければ状態ディ�
 test("resolveSocketPath: 空文字の環境変数は未設定として扱う", () => {
   assert.equal(
     resolveSocketPath(socketEnv({ doctrineSocket: "", xdgRuntimeDir: "" })),
+    "/run/user/501/doctrine/dctld.sock",
+  );
+});
+
+test("resolveSocketPath: XDG_RUNTIME_DIR があれば stateRoot を解決しない", () => {
+  const boom = () => {
+    throw new Error("呼ばれてはいけません");
+  };
+  assert.equal(
+    resolveSocketPath({ xdgRuntimeDir: "/run/user/501", stateRoot: boom, uid: 501, os: "linux" }),
     "/run/user/501/doctrine/dctld.sock",
   );
 });
