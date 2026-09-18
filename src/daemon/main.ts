@@ -11,11 +11,9 @@ import { parseWorkflow } from "../workflow/schema.ts";
 import { withSetupStep } from "../workflow/project.ts";
 import { createServer, socketPath } from "./server.ts";
 import { createHandler, type DaemonContext, loadWorkflowFromDisk, tick } from "./handlers.ts";
-import { homeDir } from "../util/home.ts";
+import { stateRoot } from "../util/home.ts";
 
-export function stateRoot(): string {
-  return Deno.env.get("DOCTRINE_STATE_DIR") ?? join(homeDir(), ".local", "state", "doctrine");
-}
+export { stateRoot };
 
 /**
  * recoverOnStartup が要求するルックアップ。ワークフローYAMLが消えている・

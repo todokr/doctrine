@@ -1,3 +1,5 @@
+import { join } from "@std/path";
+
 /**
  * node:os の homedir() に相当する。HOME が無い環境で相対パスや `/` に黙って倒すと、
  * 状態ディレクトリ（DB・worktree・ログ）が予期しない場所に作られるので、例外にする。
@@ -10,4 +12,12 @@ export function homeDir(): string {
     );
   }
   return home;
+}
+
+/**
+ * DB・worktree・ログの置き場。macOS ではソケットもここに置く
+ * （XDG_RUNTIME_DIR が無く /run が read-only なため）。
+ */
+export function stateRoot(): string {
+  return Deno.env.get("DOCTRINE_STATE_DIR") ?? join(homeDir(), ".local", "state", "doctrine");
 }

@@ -1,5 +1,6 @@
 import { dirname, join } from "@std/path";
 import type { Request, Response, ServerEvent } from "./protocol.ts";
+import { stateRoot } from "../util/home.ts";
 
 export type Connection = {
   follow(taskId: string): void;
@@ -13,10 +14,34 @@ export type Handler = (
   conn: Connection,
 ) => Promise<unknown>;
 
+export type SocketEnv = {
+  doctrineSocket?: string;
+  xdgRuntimeDir?: string;
+  stateRoot: string;
+  uid: number;
+  os: "darwin" | "linux";
+};
+
+/** 環境を引数で受ける純関数。OS 分岐をテストから叩けるようにするため。 */
+export function resolveSocketPath(env: SocketEnv): string {
+  if (env.doctrineSocket) return env.doctrineSocket;
+  if (env.xdgRuntimeDir) return join(env.xdgRuntimeDir, "doctrine", "dctld.sock");
+  // macOS には XDG_RUNTIME_DIR が無く、/run は read-only なので mkdir が失敗する。
+  // 状態ディレクトリ（DB と同じ場所、0o700）に置く。古いソケットファイルが
+  // 再起動をまたいで残るが、assertSocketNotLive が扱う。
+  if (env.os === "darwin") return join(env.stateRoot, "dctld.sock");
+  return join(`/run/user/${env.uid}`, "doctrine", "dctld.sock");
+}
+
 /** TCPポートは開かない。ファイルパーミッションがそのまま認可になる。 */
 export function socketPath(): string {
-  const base = Deno.env.get("XDG_RUNTIME_DIR") ?? `/run/user/${Deno.uid() ?? 1000}`;
-  return join(base, "doctrine", "dctld.sock");
+  return resolveSocketPath({
+    doctrineSocket: Deno.env.get("DOCTRINE_SOCKET"),
+    xdgRuntimeDir: Deno.env.get("XDG_RUNTIME_DIR"),
+    stateRoot: stateRoot(),
+    uid: Deno.uid() ?? 1000,
+    os: Deno.build.os === "darwin" ? "darwin" : "linux",
+  });
 }
 
 type Client = {
