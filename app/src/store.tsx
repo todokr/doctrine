@@ -9,6 +9,7 @@ import {
 } from "react";
 import { connectionStatus, onConnection, onDaemonEvent, rpc } from "./daemon/client";
 import { reduce, toProject, toTask, type Action, type State } from "./model";
+import { createRefreshGate } from "./refreshGate";
 import type { Draft } from "./types";
 
 // 送信前の下書きは閉じても消さない。spec ではアプリのデータディレクトリに置くが、localStorage で代える
@@ -50,18 +51,23 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   // イベントのハンドラから最新の state を見るため（購読は1回しか張らない）
   const latest = useRef(s);
   latest.current = s;
+  // 取り直しは同時に何本も走る（イベント・15秒・再接続）。古い応答が
+  // 新しい応答の後に届くと、画面が一度古い状態に巻き戻る。
+  // 最後に始めた1本だけが反映してよい（ロジック自体は refreshGate.ts でテスト済み）
+  const refreshGate = useRef(createRefreshGate()).current;
 
   useEffect(() => {
     let alive = true;
     let unlisteners: (() => void)[] = [];
 
     async function refresh() {
+      const token = refreshGate.begin();
       try {
         const [projects, tasks] = await Promise.all([
           rpc("project.list", {}),
           rpc("task.list", {}),
         ]);
-        if (!alive) return;
+        if (!alive || !refreshGate.isLatest(token)) return;
         // previous を渡さないと、stepRun.finished で付いた degraded のステップ名が
         // 15 秒ごとの取り直しのたびに消える
         const known = latest.current.tasks;
