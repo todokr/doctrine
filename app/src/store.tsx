@@ -94,9 +94,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           if (conn.status === "connected") void refresh();
         }),
         onDaemonEvent((ev) => {
-          // task_id を持たない ServerEvent は今のところ無い（将来のための備え）。
-          // まだ持っていないタスクの task_id が来たら、reducer は純関数で
-          // そのタスクを持っていないので、ここで取り直す
+          // ratelimit.sample のように task_id を持たないイベントがあるので、
+          // この絞り込みが要る（型の絞り込みとしても load-bearing）。
+          // 知らない task_id のイベントは、まだ持っていないタスクが動いたということ。
+          // reducer は純関数で取得できないので、ここで取り直す。
           if ("task_id" in ev && !latest.current.tasks.some((t) => t.id === ev.task_id)) {
             void refresh();
             return;
