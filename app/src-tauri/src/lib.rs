@@ -3,7 +3,7 @@ pub mod relay;
 
 use std::sync::Arc;
 
-use serde_json::{json, Value};
+use serde_json::Value;
 use tauri::{Emitter, Manager, State};
 
 use relay::{Relay, RelayOptions};
@@ -15,12 +15,6 @@ use relay::{Relay, RelayOptions};
 enum RelayState {
     Ready(Arc<Relay>),
     Unavailable(String),
-}
-
-/// `Unavailable(reason)` を、relay.rs の `emit_status` が作るのと同じ形の
-/// 接続状態に変換する。二つの分岐でフロントエンドが同じ形を扱えるようにするため。
-fn unavailable_status(reason: &str) -> Value {
-    json!({ "status": "disconnected", "detail": reason })
 }
 
 /// デーモンへの中継。**method の種類はここでも見ない。**
@@ -44,7 +38,9 @@ async fn rpc(method: String, params: Value, state: State<'_, RelayState>) -> Res
 fn connection_status(state: State<'_, RelayState>) -> Value {
     match &*state {
         RelayState::Ready(relay) => relay.status(),
-        RelayState::Unavailable(reason) => unavailable_status(reason),
+        RelayState::Unavailable(reason) => {
+            relay::connection_payload("disconnected", Some(reason.clone()))
+        }
     }
 }
 
@@ -73,21 +69,4 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![rpc, connection_status])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn unavailable_status_matches_emit_status_shape() {
-        let value = unavailable_status("ソケットの置き場が決められません");
-        assert_eq!(
-            value,
-            json!({
-                "status": "disconnected",
-                "detail": "ソケットの置き場が決められません",
-            })
-        );
-    }
 }

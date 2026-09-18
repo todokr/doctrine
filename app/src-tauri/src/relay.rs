@@ -127,9 +127,17 @@ impl Relay {
     }
 }
 
+/// `daemon-connection` の payload。**形の定義はここだけ。**
+/// 流す側（emit_status）と、起動直後に問い合わせる側（lib.rs の
+/// connection_status）が別々に組み立てると、片方を直したときに
+/// もう片方が黙ってずれる。
+pub fn connection_payload(status: &str, detail: Option<String>) -> Value {
+    json!({ "status": status, "detail": detail })
+}
+
 /// 流すと同時に覚える。覚えないと、購読が間に合わなかった画面が永久に追いつけない。
 fn emit_status(relay: &Arc<Relay>, emit: &Emit, status: &str, detail: Option<String>) {
-    let payload = json!({ "status": status, "detail": detail });
+    let payload = connection_payload(status, detail);
     *relay.status.lock().unwrap() = payload.clone();
     emit("daemon-connection", payload);
 }
@@ -280,4 +288,24 @@ async fn pump(relay: &Arc<Relay>, stream: UnixStream, emit: &Emit) {
         fail_all(relay, "接続が切れました");
     }
     writer.abort();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `daemon-connection` の実際のワイヤ形。ここが唯一 literal を書いていい場所——
+    /// connection_payload の定義そのものを検証する。lib.rs 側はこの関数を
+    /// 呼ぶだけなので、二重の形が生まれず、これ以上のクロスチェックは不要。
+    #[test]
+    fn connection_payload_is_status_and_detail() {
+        assert_eq!(
+            connection_payload("connecting", None),
+            json!({ "status": "connecting", "detail": null })
+        );
+        assert_eq!(
+            connection_payload("disconnected", Some("理由".to_string())),
+            json!({ "status": "disconnected", "detail": "理由" })
+        );
+    }
 }
