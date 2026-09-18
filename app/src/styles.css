@@ -259,3 +259,14 @@ input[type=text],select.field{width:100%;border:1px solid var(--line);background
 
 .toast{position:fixed;left:50%;top:16px;transform:translateX(-50%);z-index:60;background:var(--ink);color:var(--surface);padding:7px 14px;border-radius:8px;font-size:12.5px;max-width:calc(100% - 24px);text-align:center}
 kbd{font-family:var(--mono);font-size:10.5px;border:1px solid var(--line);border-radius:4px;padding:0 4px}
+
+.conn-banner {
+  display: flex;
+  gap: 12px;
+  align-items: baseline;
+  padding: 6px 12px;
+  background: #5a3a12;
+  color: #f4e6d2;
+  font-size: 13px;
+}
+.conn-banner .hint { color: #d8c3a5; }

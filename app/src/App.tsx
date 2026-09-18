@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { ConnectionBanner } from "./components/ConnectionBanner";
 import { fileAnchor } from "./components/DiffFileBlock";
 import { ReviewView } from "./components/ReviewView";
 import { Rail, Sidebar } from "./components/Sidebar";
@@ -73,6 +74,7 @@ export default function App() {
 
   return (
     <>
+      <ConnectionBanner />
       <div className="app">
         <Rail />
         <Sidebar />
