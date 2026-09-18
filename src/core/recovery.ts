@@ -47,6 +47,8 @@ export function isSameChild(
  * ps 実行環境のロケール・タイムゾーンが記録時と食い違うと、パース結果がズレて
  * 誤ったマッチ／不一致を「静かに」生む（例外にならない）のが一番危険。
  * LC_ALL=C と TZ=UTC を強制し、書式とタイムゾーンを固定する。
+ * ここで固定できるのは ps の「出力側」だけで、出力にタイムゾーン表記は付かない。
+ * 「パース側」で UTC を明示するのは defaultProbe の責務。
  */
 export function psLstartCommand(
   pid: number,
@@ -66,7 +68,11 @@ export function defaultProbe(): ProcessProbe {
         const { stdout } = await runCommand(cmd, args, { env });
         const t = stdout.trim();
         if (!t) return null;
-        const parsed = new Date(t);
+        // ps は TZ=UTC で実行しているが、出力（例: "Fri Sep 18 11:58:53 2026"）には
+        // タイムゾーン表記が無い。そのまま new Date に渡すとデーモンのローカル
+        // タイムゾーンで解釈され、UTC 以外では時差ぶんずれて isSameChild が本物の子にも
+        // false を返す（＝ kill が届かない）。パース側でも UTC を明示する。
+        const parsed = new Date(`${t} UTC`);
         // パース結果が不正なら「同一ではない」側（gone）に倒れる。既存の安全側の挙動。
         return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
       } catch {
