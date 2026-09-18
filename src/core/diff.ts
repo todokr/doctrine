@@ -81,8 +81,9 @@ const LF = 0x0a;
  * 上限以内の最後の改行の直後で切る。行の途中で切ると unified diff のパーサが壊れ、
  * 画面が「壊れた diff」ではなく「間違った diff」を描きかねない。
  * 上限以内に改行が1つも無い（極端に長い1行）ときだけ、上限でそのまま切る。
+ * テスト用途で直接呼び出し可能。
  */
-function truncatePatch(
+export function truncatePatch(
   patch: string,
   limitBytes: number,
 ): { patch: string; truncated: boolean } {
@@ -90,24 +91,24 @@ function truncatePatch(
   if (bytes.length <= limitBytes) return { patch, truncated: false };
   const head = bytes.subarray(0, limitBytes);
   const lastLf = head.lastIndexOf(LF);
-  let cut = lastLf >= 0 ? head.subarray(0, lastLf + 1) : head;
 
-  // 改行がない場合、UTF-8 文字境界まで戻る。マルチバイト文字の途中で切ると、
-  // TextDecoder が U+FFFD に置き換えてしまい、再エンコード時に上限を超える。
-  // 戻り値を再エンコードしても上限を超えない、という保証を守る。
-  if (lastLf < 0) {
-    for (let i = 0; i < 3 && cut.length > 0; i++) {
-      const b = cut[cut.length - 1];
-      if ((b & 0xc0) === 0x80) {
-        // UTF-8 継続バイト — 1バイト削る
-        cut = cut.subarray(0, cut.length - 1);
-      } else {
-        break;
-      }
-    }
+  if (lastLf >= 0) {
+    return {
+      patch: new TextDecoder().decode(head.subarray(0, lastLf + 1)),
+      truncated: true,
+    };
   }
 
-  return { patch: new TextDecoder().decode(cut), truncated: true };
+  // 改行が無いときはバイト位置で切るしかないが、そのままだと UTF-8 の
+  // マルチバイト文字を分断し、TextDecoder が U+FFFD（3バイト）に置き換える。
+  // 置換後に再エンコードすると上限を超えうるので、文字の切れ目まで戻す。
+  //
+  // 切れ目かどうかは「切る位置のバイト」＝最初に捨てるバイトで判定する
+  // （最後に残すバイトではない）。継続バイト 10xxxxxx でなければ、そこから
+  // 次の文字が始まっているので既に切れ目にいる。
+  let cut = limitBytes;
+  while (cut > 0 && (bytes[cut] & 0xc0) === 0x80) cut -= 1;
+  return { patch: new TextDecoder().decode(bytes.subarray(0, cut)), truncated: true };
 }
 
 /**

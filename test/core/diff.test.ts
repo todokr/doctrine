@@ -6,7 +6,7 @@ import { promisify } from "node:util";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { computeDiff, mergeBase, writeWorktreeTree } from "../../src/core/diff.ts";
+import { computeDiff, mergeBase, truncatePatch, writeWorktreeTree } from "../../src/core/diff.ts";
 import { ensureDoctrineOutExcluded } from "../../src/core/worktree.ts";
 import { makeRepo } from "../helpers/repo.ts";
 
@@ -125,18 +125,18 @@ test("上限以内なら truncated は false のまま patch を全部返す", a
   assert.match(d.patch, /^\+d$/m);
 });
 
-test("改行がない長い1行は UTF-8 文字境界で切る", async () => {
-  // 日本語テキスト：各漢字は3バイト。
-  // この長い1行は改行を含まず、上限より長い。
-  const longLine = "日".repeat(150); // 150 * 3 = 450 バイト
-  await writeFile(join(repo, "long.txt"), longLine);
-  const limit = 200; // 450 バイト > 200 バイト → 打ち切られる
-  const d = await diffNow(limit);
-  assert.equal(d.truncated, true, "truncated を立てるべき");
-  const patchBytes = new TextEncoder().encode(d.patch);
-  assert.ok(
-    patchBytes.length <= limit,
-    `patch は ${limit} バイト以下のはず（${patchBytes.length}）`,
-  );
-  assert.ok(!d.patch.endsWith("�"), "U+FFFD で終わってはいけない");
+test("改行が無い長い1行は UTF-8 の文字境界まで戻して切る", () => {
+  const text = "日".repeat(100); // 1文字3バイト、改行なし
+  // 99 は文字の切れ目ちょうど、100・101 は文字の途中
+  for (const limit of [99, 100, 101]) {
+    const r = truncatePatch(text, limit);
+    assert.equal(r.truncated, true, `limit=${limit}`);
+    assert.ok(!r.patch.includes("�"), `limit=${limit}: 置換文字が混ざっている`);
+    assert.ok(
+      new TextEncoder().encode(r.patch).length <= limit,
+      `limit=${limit}: 再エンコードすると上限を超える`,
+    );
+  }
+  // 切れ目ちょうどの 99 は1文字も余分に捨てない
+  assert.equal(truncatePatch(text, 99).patch, "日".repeat(33));
 });
