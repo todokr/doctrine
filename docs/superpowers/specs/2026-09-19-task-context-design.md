@@ -33,7 +33,8 @@ overview 1章の「止まった作業は、指示・差し戻し・テスト結�
 | パスの検証（静的） | worktree からの相対パスのみ。絶対パスと `..` はスキーマ検証で落とす | 4 |
 | パスの検証（実行時） | **realpath が worktree 配下かを確認**する。worktree 内のシンボリックリンク経由で外を読ませない | 5 |
 | 1ファイルの上限 | **64KB**。超過は中身を返さず `too_large` | 5 |
-| ファイル1件の返し方 | `{ path, status, content?, size? }`。status は `ok` / `missing` / `too_large` / `outside_worktree` / `binary` | 5 |
+| ファイル1件の返し方 | status で判別するユニオン。`ok` / `missing` / `too_large` / `outside_worktree` / `binary` | 5 |
+| 「無いもの」の表し方 | `ReviewEntry` も `ReviewFile` も**判別ユニオン**にし、状態ごとに持つものだけを持たせる（null や空文字で埋めない） | 3, 5 |
 | 「エージェントの最後の発言」 | 直近の `agent` ステップの `step_outputs.last_stdout` | 6 |
 | `step_outputs` の列名 | `stdout` → **`last_stdout`**、`stderr` → **`last_stderr`**（テンプレート変数も改名） | 7 |
 
@@ -55,31 +56,65 @@ type TaskContext = {
   reviewFiles: ReviewFile[];
 };
 
-type ReviewEntry = {
+type ReviewBase = {
   stepRunId: number;
   stepId: string;
   /** 何回目のレビューか。 */
   attempt: number;
-  /** awaiting（まだ見ていない）/ success（承認）/ failed（却下）/ interrupted（中止・再開） */
-  status: StepRunStatus;
-  /** 差し戻しコメント。承認と待機中は空文字。 */
-  comment: string;
   /** 待ち始めた時刻。 */
   startedAt: string;
-  /** 決定した時刻。待機中は null。待ち時間は endedAt - startedAt。 */
-  endedAt: string | null;
-  /** その時点のツリー。記録できなかった回は null。 */
+  /** その時点のツリー。記録できなかった回は null（#43 spec 5.3）。 */
   reviewTree: string | null;
 };
 
+/**
+ * レビュー1回。**状態ごとに持つものが違う**ので判別ユニオンにする。
+ *
+ * 1つの形にまとめると「待機中の endedAt は null」「承認の comment は空文字」という
+ * 取り決めを型の外に置くことになり、読む側はそれを覚えて守らなければならなくなる。
+ * 待機中の回に決定時刻は存在せず、承認にコメントは存在しない — 無いものを
+ * null や空文字で埋めるのではなく、フィールドごと持たせない。
+ */
+type ReviewEntry =
+  /** まだ人が見ていない。決定時刻もコメントも無い。 */
+  | (ReviewBase & { status: "awaiting" })
+  /** 承認された。却下と違いコメントは取らない（task.approve は comment を受けない）。 */
+  | (ReviewBase & { status: "approved"; endedAt: string })
+  /** 却下された。コメントは必ずある（task.reject はコメント必須）。 */
+  | (ReviewBase & { status: "rejected"; endedAt: string; comment: string })
+  /** 人の決定を待たずに外から閉じられた（cancel / resume）。コメントは無い。 */
+  | (ReviewBase & { status: "interrupted"; endedAt: string });
+
 type CommandResult = {
   stepId: string;
+  /** シグナルで殺された実行は null（`exitCodeOf` の約束）。 */
   exitCode: number | null;
   /** DB が持つのは末尾 8KB（OUTPUT_TAIL_BYTES）まで。全文はログファイルにある。 */
   stdout: string;
   stderr: string;
 };
 ```
+
+### `step_runs.status` からの対応
+
+DB の `status` はステップ実行の語彙（`success` / `failed`）で、レビューの語彙
+（承認 / 却下）ではない。境界で言い換える。
+
+| `step_runs.status` | `ReviewEntry["status"]` |
+| --- | --- |
+| `awaiting` | `awaiting` |
+| `success` | `approved` |
+| `failed` | `rejected` |
+| `interrupted` | `interrupted` |
+
+approval の行にこの4つ以外は現れない（`engine.ts` と `handlers.ts` がこの4つしか
+書かない）。他の値が来たらそれは doctrine のバグであり、ユニオンのどの枝にも
+当てはまらない。**黙ってどれかに倒さず例外にする** — 形の違うレビューを返すより、
+バグとして気づける方がよい。
+
+なお `comment` は `step_outputs.last_stdout` から取る。`rejected` の行には必ず
+行があり（`applyApproval` が却下コメントを同じトランザクションで書く）、
+それが無ければやはり不変条件の破れなので例外にする。
 
 ### 呼べる状態
 
@@ -162,15 +197,22 @@ worktree からの相対パスに限る。次をスキーマ検証で落とす�
 export const MAX_REVIEW_FILE_BYTES = 64 * 1024;
 
 export type ReviewFileStatus = "ok" | "missing" | "too_large" | "outside_worktree" | "binary";
-export type ReviewFile = {
-  /** 宣言されたとおりのパス（worktree 相対）。 */
-  path: string;
-  status: ReviewFileStatus;
-  /** status が "ok" のときだけ入る。 */
-  content?: string;
-  /** ファイルが実在したときのバイト数。 */
-  size?: number;
-};
+
+/**
+ * 宣言されたファイル1件の読み出し結果。`ReviewEntry` と同じ理由で判別ユニオンにする
+ * （`content` は ok のときだけ、`size` は実在したときだけ、という取り決めを
+ * 型の外に置かない）。`path` は常に宣言されたとおりの worktree 相対パス。
+ */
+export type ReviewFile =
+  | { path: string; status: "ok"; content: string; size: number }
+  /** そこに無い。読もうとして予期しない I/O エラーになった場合もここに倒す。 */
+  | { path: string; status: "missing" }
+  /** 実在するが 64KB を超えた。中身は返さないが、大きさは判断材料になるので返す。 */
+  | { path: string; status: "too_large"; size: number }
+  /** realpath が worktree の外を指した。中身も大きさも読まない。 */
+  | { path: string; status: "outside_worktree" }
+  /** 実在するが UTF-8 として読めない。 */
+  | { path: string; status: "binary"; size: number };
 
 export function readReviewFiles(worktreePath: string, paths: string[]): Promise<ReviewFile[]>;
 ```
@@ -279,8 +321,14 @@ export type StepDef = {
   review?: { files: string[] };   // 既にある
 };
 
+// デーモン側（src/core/reviewFiles.ts）と同じ判別ユニオンを置く。
 export type ReviewFileStatus = "ok" | "missing" | "too_large" | "outside_worktree" | "binary";
-export type ReviewFile = { path: string; status: ReviewFileStatus; content?: string; size?: number };
+export type ReviewFile =
+  | { path: string; status: "ok"; content: string; size: number }
+  | { path: string; status: "missing" }
+  | { path: string; status: "too_large"; size: number }
+  | { path: string; status: "outside_worktree" }
+  | { path: string; status: "binary"; size: number };
 
 export type Task = {
   // ...
@@ -302,20 +350,28 @@ export type Task = {
 status ごとの文言を出し分ける。
 
 ```tsx
-const file = t.reviewFiles?.find((f) => f.path === path);
-// status ごとの文言。doctrine はファイルの中身を理解しないが、
-// 「なぜ出せないか」は知っており、それは人に伝える価値がある。
-const NOTE: Record<ReviewFileStatus, string> = {
-  ok: "",
-  missing: "(ファイルがありません)",
-  too_large: "(大きすぎるため表示していません)",
-  outside_worktree: "(worktree の外を指しているため読みませんでした)",
-  binary: "(テキストとして読めないため表示していません)",
-};
+// doctrine はファイルの中身を理解しないが、「なぜ出せないか」は知っている。
+// それは人に伝える価値がある。ユニオンを switch で網羅するので、status を
+// 足したときに書き忘れると型検査が落ちる。
+function FileBody({ file }: { file: ReviewFile | undefined }) {
+  if (!file) return <p className="hint">(このステップは宣言していますが、まだ読めていません)</p>;
+  switch (file.status) {
+    case "ok":
+      return <div className="md"><Markdown src={file.content} /></div>;
+    case "missing":
+      return <p className="hint">(ファイルがありません)</p>;
+    case "too_large":
+      return <p className="hint">(大きすぎるため表示していません · {file.size} バイト)</p>;
+    case "outside_worktree":
+      return <p className="hint">(worktree の外を指しているため読みませんでした)</p>;
+    case "binary":
+      return <p className="hint">(テキストとして読めないため表示していません · {file.size} バイト)</p>;
+  }
+}
 ```
 
-`ok` なら `content` を Markdown で描き、それ以外は文言を出す。`size` があれば
-併記する（大きすぎる場合に人が判断できる材料になる）。
+`size` を持つ枝でだけ大きさを併記できるのがユニオンにした効き目である
+（`missing` に「0 バイト」と書いてしまう余地が無い）。
 
 ## 9. テスト
 
@@ -323,7 +379,7 @@ const NOTE: Record<ReviewFileStatus, string> = {
 | --- | --- |
 | `test/workflow/schema.test.ts` | `review.files` が読める / 絶対パス・`..`・空文字・`~` が日本語のメッセージで落ちる / `files: []` が落ちる |
 | `test/core/reviewFiles.test.ts`（新規） | 本文が返る / 無いファイルが `missing` / 64KB 超が `too_large` で中身を返さない / **worktree 外を指すシンボリックリンクが `outside_worktree`** / 非 UTF-8 が `binary` / `/w/task-evil` が `/w/task` の配下と誤判定されない / 1件の失敗が他を巻き込まない |
-| `test/daemon/handlers.test.ts` | `task.context` が5つとも返す / 承認待ちでないタスクでも呼べて `reviewFiles` が空 / 定義から消えたステップがあっても失敗しない |
+| `test/daemon/handlers.test.ts` | `task.context` が5つとも返す / 承認待ちでないタスクでも呼べて `reviewFiles` が空 / 定義から消えたステップがあっても失敗しない / 待機中の回に `endedAt` の**キーが存在しない**（null が入っているのではない） / 却下の回に `comment` がある / 想定外の `step_runs.status` が来たら例外になる |
 | `test/db/migrate.test.ts` | `0004` で列が改名され、既存の値が残る |
 | `test/workflow/template.test.ts` | 新しい名前が展開される / 旧名が名指しのエラーで落ちる |
 | `test/integration/` | 計画を `.doctrine-out/plan.md` に書かせるワークフローで、approval の時点で `task.context` から計画の本文が取れる（**完了条件1**） / 2回差し戻したタスクで両方のレビューが返る（**完了条件2**） |
