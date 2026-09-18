@@ -594,3 +594,34 @@ test("移行時点で suspended のタスクには awaiting 行が立ち、attem
   const t = (await getTask(d, "t1"))!;
   assert.equal(t.attempt_counts, JSON.stringify({ implement: 1, review: 1 }));
 });
+
+test("移行前に一度差し戻されている suspended タスクの awaiting 行は attempt 2 になる", async () => {
+  const sqlite = new DatabaseSync(":memory:");
+  sqlite.exec(LEGACY_DDL);
+  // 1回目のレビューで差し戻され、implement をやり直して再び review で待っている DB。
+  // 旧コードは決定時にしか attempt を進めないので、既存の step_run は1件だけある。
+  sqlite.exec(`
+    INSERT INTO projects (path, default_workflow) VALUES ('/repo', 'f');
+    INSERT INTO tasks (id, project_id, title, prompt, workflow_name, state, current_step_id,
+                       attempt_counts, branch, created_at, updated_at)
+      VALUES ('t1', 1, 'T', 'P', 'f', 'suspended', 'review', '{"implement":2,"review":1}', 'b',
+              '2026-09-18T00:00:00.000Z', '2026-09-18T09:00:00.000Z');
+    INSERT INTO step_runs (id, task_id, step_id, attempt, status, started_at, ended_at, log_path)
+      VALUES (1, 't1', 'review', 1, 'failed', '2026-09-18T01:00:00.000Z',
+              '2026-09-18T02:00:00.000Z', '');
+  `);
+  const d = await openDbOn(sqlite);
+
+  const runs = await d.selectFrom("step_runs").selectAll().where("task_id", "=", "t1")
+    .orderBy("id").execute();
+  assert.equal(runs.length, 2, "既存の行は残り、今待っている回のぶんが1行足される");
+  assert.equal(runs[1].status, "awaiting");
+  assert.equal(runs[1].attempt, 2, "既存の step_run 数 + 1");
+  assert.equal(runs[1].started_at, "2026-09-18T09:00:00.000Z");
+  const t = (await getTask(d, "t1"))!;
+  assert.equal(
+    t.attempt_counts,
+    JSON.stringify({ implement: 2, review: 2 }),
+    "attempt_counts は step_runs.attempt とちょうど一致する",
+  );
+});

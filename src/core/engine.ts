@@ -177,6 +177,10 @@ export async function runTask(
             `レビュー時点のツリーを記録できませんでした: ${(e as Error).message}`,
           );
         }
+      } else {
+        // 「記録に失敗した」と「記録する対象がそもそも無かった」を区別できるようにする。
+        // どちらも review_tree は null になるので、黙ると後から見分けがつかない。
+        deps.onWarning?.(taskId, "worktree が無いためレビュー時点のツリーを記録できませんでした");
       }
 
       assertTransition(task.state, "suspended");
@@ -443,6 +447,13 @@ export async function applyApproval(
   const ctx = await contextFor(db, task);
   ctx.steps[stepId] = { stdout: verdict.comment, stderr: "", exitCode: "1" };
 
+  // 「却下をどう記録するか」は goto の枝でも fail の枝でも同じ1つの決定なので、
+  // 1箇所に置く（逐語で2つ書くと、将来変えたとき片方だけ直る）。
+  const rejected = {
+    stepRunUpdate: { id: awaiting.id, status: "failed" as const, exit_code: 1, ended_at: now },
+    outputs: { stdout: verdict.comment, stderr: "", exit_code: 1 },
+  };
+
   if (decision.kind === "goto") {
     const to: TaskState = "queued";
     assertTransition(task.state, to);
@@ -455,8 +466,7 @@ export async function applyApproval(
         resumed: 1,
         pending_feed: decision.feed ? expand(decision.feed, ctx) : null,
       },
-      stepRunUpdate: { id: awaiting.id, status: "failed", exit_code: 1, ended_at: now },
-      outputs: { stdout: verdict.comment, stderr: "", exit_code: 1 },
+      ...rejected,
     });
     return;
   }
@@ -468,7 +478,6 @@ export async function applyApproval(
     taskId,
     requireState: "suspended",
     taskPatch: { state: "failed" },
-    stepRunUpdate: { id: awaiting.id, status: "failed", exit_code: 1, ended_at: now },
-    outputs: { stdout: verdict.comment, stderr: "", exit_code: 1 },
+    ...rejected,
   });
 }

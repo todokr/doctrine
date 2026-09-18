@@ -330,11 +330,7 @@ export function createHandler(ctx: DaemonContext): Handler {
           worktreePath: task.worktree_path,
           force: params.force === true,
         });
-        // worktree が無くなればレビューの基準点を使う相手もいなくなる。
-        // 参照を残すと、指しているツリーが永久に gc されない。
-        await releaseTrees(project.path, taskId).catch((e: Error) => {
-          ctx.warnings.push(`タスク ${taskId}: レビュー参照を消せませんでした: ${e.message}`);
-        });
+        await releaseReviewRefs(ctx, project.path, taskId);
         await commitStepBoundary(ctx.db, { taskId, taskPatch: { worktree_path: null } });
         return { removed: task.worktree_path };
       }
@@ -351,6 +347,24 @@ export function createHandler(ctx: DaemonContext): Handler {
   };
 }
 
+/**
+ * worktree を消したタスクのレビュー参照を消す。worktree が無くなればレビューの
+ * 基準点を使う相手もいなくなり、参照を残すと指しているツリーが永久に gc されない。
+ *
+ * worktree の削除自体は既に成功しているので、参照を消せなくても要求は失敗させず
+ * 警告に倒す（spec 5.4）。worktree を消す2箇所（worktree.remove と
+ * cleanupAfterRun）が同じ扱いをするために、ここに1つだけ置く。
+ */
+async function releaseReviewRefs(
+  ctx: DaemonContext,
+  projectPath: string,
+  taskId: string,
+): Promise<void> {
+  await releaseTrees(projectPath, taskId).catch((e: Error) => {
+    ctx.warnings.push(`タスク ${taskId}: レビュー参照を消せませんでした: ${e.message}`);
+  });
+}
+
 /** completed のみ worktree を削除する。failed / canceled は証拠として残す。 */
 export async function cleanupAfterRun(ctx: DaemonContext, taskId: string): Promise<void> {
   const task = await getTask(ctx.db, taskId);
@@ -362,9 +376,7 @@ export async function cleanupAfterRun(ctx: DaemonContext, taskId: string): Promi
       worktreePath: task.worktree_path,
       force: false,
     });
-    await releaseTrees(project.path, taskId).catch((e: Error) => {
-      ctx.warnings.push(`タスク ${taskId}: レビュー参照を消せませんでした: ${e.message}`);
-    });
+    await releaseReviewRefs(ctx, project.path, taskId);
     await commitStepBoundary(ctx.db, { taskId, taskPatch: { worktree_path: null } });
   } catch (e) {
     if (e instanceof UncommittedChangesError) {

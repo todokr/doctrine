@@ -145,7 +145,10 @@ test("ステップ実行のidを返す（イベントが載せる id）", async 
   );
 });
 
-test("同じステップの2回目の出力は上書きされる", async () => {
+// step_outputs の主キーが step_run_id になったので、同じステップを2回実行しても
+// 出力は上書きされず2行残る。{{ steps.<id> }} が最新の実行を指すのは getStepOutputs
+// が step_id ごとに最大の step_run_id を選ぶからで、古い行を潰すからではない。
+test("{{ steps.<id> }} は最新の実行の出力を指し、過去の実行の出力も残る", async () => {
   const d = await fixture();
   const base = {
     step_id: "test",
@@ -170,6 +173,9 @@ test("同じステップの2回目の出力は上書きされる", async () => {
   });
   assert.equal((await getStepOutputs(d, "t1")).test.stdout, "2回目");
   assert.equal((await listStepRuns(d, "t1")).length, 2);
+  const outputs = await d.selectFrom("step_outputs").select("stdout").orderBy("step_run_id")
+    .execute();
+  assert.deepEqual(outputs.map((o) => o.stdout), ["1回目", "2回目"], "1回目の出力も残る");
 });
 
 test("巨大な出力は末尾だけ保存する", async () => {
