@@ -3,22 +3,22 @@ import { fileAnchor } from "./components/DiffFileBlock";
 import { ReviewView } from "./components/ReviewView";
 import { Rail, Sidebar } from "./components/Sidebar";
 import { TaskView } from "./components/TaskView";
-import { composeRejection, currentStep, draftOf, filesFor, selectedTask, stepDef } from "./model";
+import { composeRejection, currentStep, draftOf, filesFor, selectedTask } from "./model";
 import { useStore } from "./store";
 
 function RejectModal() {
   const { s, dispatch } = useStore();
   const t = selectedTask(s);
   if (s.modal !== "reject-preview" || !t) return null;
-  const def = stepDef(s, t);
   return (
     <>
       <div className="scrim" onClick={() => dispatch({ type: "modal.close" })} />
       <div className="modal" role="dialog" aria-modal="true">
         <h2>差し戻してエージェントに送る内容</h2>
         <p className="hint">
-          行コメントと全体へのコメントを1つの文字列にまとめて <span className="mono">task.reject(comment)</span> で送ります。
-          <span className="mono">{def?.onReject}</span> ステップに戻ります。
+          行コメントと全体へのコメントを1つの文字列にまとめて{" "}
+          <span className="mono">task.reject(comment)</span> で送ります。
+          戻り先のステップはワークフローの <span className="mono">onReject.goto</span> が決めます。
         </p>
         <pre className="block">{composeRejection(draftOf(s, t.id))}</pre>
         <div className="actions">

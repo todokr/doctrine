@@ -39,8 +39,6 @@ export function TaskView({ t }: { t: Task }) {
     if (t.state === "running" && logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
   }, [t.log, t.state]);
 
-  const steps = s.workflows[t.wf];
-  const idx = steps.findIndex((x) => x.id === t.step);
   const [stateName, stateCls] = STATE_PILL[t.state];
   const queuePos = s.tasks
     .filter((x) => x.state === "queued")
@@ -53,12 +51,7 @@ export function TaskView({ t }: { t: Task }) {
       <h1>{t.title}</h1>
       <div className="headrow">
         <span className={`pill ${stateCls}`}>{stateName}</span>
-        {t.step && (
-          <span>
-            ステップ <span className="mono">{t.step}</span>{" "}
-            <span className="hint">（{idx + 1} / {steps.length}{t.attempt > 1 ? ` · ${t.attempt}回目` : ""}）</span>
-          </span>
-        )}
+        {t.step && <span className="mono">{t.step}</span>}
         <span className="hint">{t.state === "running" ? `${elapsed(t.since, s.now)} 経過` : ago(t.since, s.now)}</span>
       </div>
 
@@ -113,30 +106,6 @@ export function TaskView({ t }: { t: Task }) {
           </div>
           <pre className="block" ref={logRef}>{t.log}</pre>
         </>
-      )}
-
-      {t.step && (
-        <details className="runs">
-          <summary>実行履歴</summary>
-          <div className="runtable">
-            <table>
-              <thead><tr><th>ステップ</th><th>種類</th><th>試行</th><th>状態</th></tr></thead>
-              <tbody>
-                {steps.slice(0, idx + 1).map((x, i) => (
-                  <tr key={x.id}>
-                    <td className="mono">{x.id}</td>
-                    <td className="hint">{x.type}</td>
-                    <td className="mono">#{i === idx ? t.attempt : 1}</td>
-                    <td>
-                      {i < idx ? <span className="pill p-ok">成功</span> : <span className={`pill ${stateCls}`}>{stateName}</span>}
-                      {t.degraded === x.id && <> <span className="pill p-deg">degraded</span></>}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </details>
       )}
     </div>
   );

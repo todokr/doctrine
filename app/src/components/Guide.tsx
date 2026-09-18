@@ -21,20 +21,10 @@ function UnguidedNote({ t }: { t: Task }) {
 
 /** レビュー画面の右に置く Review Guide */
 export function GuidePanel({ t, guide }: { t: Task; guide: Guide }) {
-  const { s, dispatch } = useStore();
-  const steps = s.workflows[t.wf];
-  const curIdx = steps.findIndex((x) => x.id === t.step);
+  const { dispatch } = useStore();
   return (
     <aside className="guide" aria-label="Review Guide">
       <div className="guide-head"><b>Review Guide</b></div>
-      <div className="g-timeline">
-        {steps.map((x, i) => (
-          <span key={x.id} style={{ display: "contents" }}>
-            {i > 0 && <span className="g-rule" />}
-            <span className={`g-step ${i < curIdx ? "done" : ""} ${i === curIdx ? "cur" : ""}`}><span className="g-dot" />{x.id}</span>
-          </span>
-        ))}
-      </div>
       <section className="g-sec" style={sec(0)}><h3>Why</h3><p>{guide.why}</p></section>
       <section className="g-sec" style={sec(1)}>
         <h3>What</h3>

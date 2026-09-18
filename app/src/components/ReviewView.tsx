@@ -1,9 +1,8 @@
-import { ago, canReject, clock, currentStep, diffStats, draftOf, filesFor, stepDef } from "../model";
+import { ago, canReject, clock, currentStep, diffStats, draftOf, filesFor } from "../model";
 import { useNotYet, useStore } from "../store";
 import type { Task } from "../types";
 import { DiffFileBlock, fileAnchor } from "./DiffFileBlock";
 import { GuidePanel, StepView } from "./Guide";
-import { Markdown } from "./text";
 
 export function Crumbs({ t }: { t: Task }) {
   const { s } = useStore();
@@ -97,11 +96,9 @@ function Diff({ t }: { t: Task }) {
 
 export function ReviewView({ t }: { t: Task }) {
   const { s, dispatch } = useStore();
-  const def = stepDef(s, t);
   const draft = draftOf(s, t.id);
   const scope = s.scope[t.id] ?? "all";
   const hasSince = t.reviews.length > 0 && t.diff.some((f) => f.since);
-  const declared = def?.review?.files ?? [];
 
   return (
     <>
@@ -109,7 +106,7 @@ export function ReviewView({ t }: { t: Task }) {
         <Crumbs t={t} />
         <h1>{t.title}</h1>
         <div className="headrow">
-          <span className="pill p-attn">◆ {def?.title}</span>
+          <span className="pill p-attn">◆ {t.step ?? "レビュー待ち"}</span>
           {t.reviews.length > 0 && <span className="pill p-muted">{t.reviews.length + 1}回目のレビュー</span>}
           <span className="hint">{ago(t.since, s.now)}から待っています</span>
           <span className="mono hint">{t.branch}</span>
@@ -118,13 +115,6 @@ export function ReviewView({ t }: { t: Task }) {
         </div>
 
         <Context t={t} />
-
-        {declared.map((path) => (
-          <section className="rv-files-md" key={path}>
-            <header><span className="mono">{path}</span><span className="hint">このステップが見せるファイル（review.files）</span></header>
-            <div className="md"><Markdown src={t.reviewFiles?.[path] ?? "(ファイルがありません)"} /></div>
-          </section>
-        ))}
 
         <div className="headrow">
           <b>変更</b>

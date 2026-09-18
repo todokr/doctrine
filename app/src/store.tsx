@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useReducer, type Dispatch, type ReactNode } from "react";
-import { NOW, PROJECTS, WORKFLOWS, seedTasks } from "./mock";
+import { NOW, PROJECTS, seedTasks } from "./mock";
 import { reduce, type Action, type State } from "./model";
 import type { Draft } from "./types";
 
@@ -18,7 +18,6 @@ function initialState(): State {
   return {
     tasks: seedTasks(),
     projects: PROJECTS,
-    workflows: WORKFLOWS,
     now: NOW,
     view: "tasks",
     project: "all",
@@ -29,6 +28,8 @@ function initialState(): State {
     editing: null,
     modal: null,
     toast: null,
+    // 実際の取得・購読の配線は Task 11 でここに入る
+    conn: { status: "connecting" },
   };
 }
 

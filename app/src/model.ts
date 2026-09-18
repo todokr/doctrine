@@ -1,5 +1,11 @@
 // 画面の状態と、そこから導く値。副作用を持たない（テストは model.test.ts）
-import type { DiffFile, Draft, LineComment, Project, StepDef, Task, TaskState } from "./types";
+import type { DiffFile, Draft, LineComment, Project, Task, TaskState } from "./types";
+import type {
+  ProjectSummary,
+  ServerEvent,
+  TaskListEntry,
+} from "../../src/daemon/protocol.ts";
+import type { ConnectionStatus } from "./daemon/client";
 
 export const MIN = 60000;
 
@@ -121,13 +127,73 @@ export function unguidedFiles(t: Task): DiffFile[] {
   return t.diff.filter((f) => !mentioned.has(f.path));
 }
 
+// ---------------------------------------------------------------- デーモンの形 → 画面の形
+
+/**
+ * task.list の has_degraded はどのステップかを教えてくれない。
+ * stepRun.finished を受け取れば具体的なステップ名に置き換わる。
+ */
+export const DEGRADED_UNKNOWN = "(ステップ不明)";
+
+/** プロジェクトの表示名。デーモンはパスしか持たないので末尾を使う */
+export function projectKey(path: string): string {
+  const parts = path.replace(/\/+$/, "").split("/");
+  return parts[parts.length - 1] || path;
+}
+
+/** 同じパスからは常に同じ色。色をデーモンに持たせる話は本specでは扱わない */
+export function toProject(p: ProjectSummary): Project {
+  let h = 0;
+  for (const ch of p.path) h = (h * 31 + ch.charCodeAt(0)) % 360;
+  return {
+    id: projectKey(p.path),
+    path: p.path,
+    def: p.default_workflow,
+    color: `hsl(${h} 45% 38%)`,
+  };
+}
+
+/**
+ * デーモンが持たない欄（diff / guide / reviews など）は空にする。埋めるのは #44〜#47。
+ * previous を渡すと、イベントで足した欄（degraded など）を引き継ぐ。
+ */
+export function toTask(
+  row: TaskListEntry,
+  projects: ProjectSummary[],
+  previous?: Task,
+): Task {
+  // デーモンは project_id しか返さない。表示名はパスの末尾から作る
+  const project = projects.find((p) => p.id === row.project_id);
+  return {
+    id: row.id,
+    wf: row.workflow_name,
+    project: project ? projectKey(project.path) : String(row.project_id),
+    title: row.title,
+    prompt: row.prompt,
+    branch: row.branch,
+    worktree: row.worktree_path,
+    state: row.state,
+    step: row.current_step_id,
+    attempt: 1,
+    prio: row.priority,
+    // 「待ち始めた時刻」の記録は #43。それまでは最後に動いた時刻で代える
+    since: Date.parse(row.updated_at),
+    diff: [],
+    reviews: [],
+    // 完了したのに worktree が残っているのは、後始末が削除を拒否したということ
+    refused: row.state === "completed" && row.worktree_path !== null,
+    // groupOf は `t.degraded &&` で見るので、空文字にすると要確認から落ちる。
+    // has_degraded だけではどのステップか分からないので、分からないと書く
+    degraded: row.has_degraded ? (previous?.degraded ?? DEGRADED_UNKNOWN) : undefined,
+  };
+}
+
 // ---------------------------------------------------------------- 状態
 export type Editing = LineComment & { task: string };
 
 export type State = {
   tasks: Task[];
   projects: Project[];
-  workflows: Record<string, StepDef[]>;
   now: number;
   view: View;
   project: string;
@@ -139,12 +205,12 @@ export type State = {
   editing: Editing | null;
   modal: "reject-preview" | null;
   toast: string | null;
+  conn: ConnectionStatus;
 };
 
 export const EMPTY_DRAFT: Draft = { comments: [], overall: "" };
 export const draftOf = (s: State, id: string): Draft => s.drafts[id] ?? EMPTY_DRAFT;
 export const selectedTask = (s: State) => s.tasks.find((t) => t.id === s.sel) ?? null;
-export const stepDef = (s: State, t: Task) => s.workflows[t.wf].find((x) => x.id === t.step);
 
 export function currentStep(s: State, t: Task): number | null {
   if (!t.guide) return null;
@@ -171,7 +237,10 @@ export type Action =
   | { type: "modal.close" }
   | { type: "cancel" }
   | { type: "log.append"; id: string; line: string }
-  | { type: "toast"; message: string | null };
+  | { type: "toast"; message: string | null }
+  | { type: "sync"; tasks: Task[]; projects: Project[]; now: number }
+  | { type: "daemon"; ev: ServerEvent; now: number }
+  | { type: "connection"; conn: ConnectionStatus };
 
 const updateTask = (s: State, id: string, patch: Partial<Task>): Task[] =>
   s.tasks.map((t) => (t.id === id ? { ...t, ...patch } : t));
@@ -239,13 +308,9 @@ export function reduce(s: State, a: Action): State {
     case "overall":
       return t ? { ...s, drafts: setDraft(s, t.id, { ...draftOf(s, t.id), overall: a.text }) } : s;
     case "approve": {
+      // 実際の遷移はデーモンが決め、task.stateChanged で返ってくる（Task 13 で rpc に繋ぐ）
       if (!t || t.state !== "suspended") return s;
-      const steps = s.workflows[t.wf];
-      const i = steps.findIndex((x) => x.id === t.step);
-      const patch: Partial<Task> = i === steps.length - 1
-        ? { state: "completed", worktree: null, since: s.now }
-        : { state: "running", step: steps[i + 1].id, attempt: 1, log: `$ ${steps[i + 1].id}\n…`, since: s.now };
-      const next = { ...s, tasks: updateTask(s, t.id, patch), drafts: withoutDraft(s, t.id), editing: null };
+      const next = { ...s, drafts: withoutDraft(s, t.id), editing: null };
       return { ...next, sel: selectNextReview(next, t.id), toast: `承認しました: ${t.title}` };
     }
     case "reject.preview":
@@ -254,17 +319,8 @@ export function reduce(s: State, a: Action): State {
       if (!t || t.state !== "suspended") return s;
       const d = draftOf(s, t.id);
       if (!canReject(d)) return s;
-      const def = stepDef(s, t);
       const next = {
         ...s,
-        tasks: updateTask(s, t.id, {
-          state: "running",
-          step: def?.onReject ?? t.step,
-          attempt: t.attempt + 1,
-          since: s.now,
-          reviews: [...t.reviews, { at: s.now, comment: composeRejection(d) }],
-          log: "assistant: レビューの指摘を読みます\n…",
-        }),
         drafts: withoutDraft(s, t.id),
         editing: null,
         modal: null,
@@ -275,7 +331,7 @@ export function reduce(s: State, a: Action): State {
       return { ...s, modal: null };
     case "cancel":
       if (!t || isTerminal(t.state)) return s;
-      return { ...s, tasks: updateTask(s, t.id, { state: "canceled", since: s.now, dirty: true }), toast: "中止しました。worktree は残します" };
+      return { ...s, toast: "中止しました。worktree は残します" };
     case "log.append": {
       const target = s.tasks.find((x) => x.id === a.id);
       if (!target || target.state !== "running") return s;
@@ -283,5 +339,42 @@ export function reduce(s: State, a: Action): State {
     }
     case "toast":
       return { ...s, toast: a.message };
+    case "sync": {
+      // 取り直しがイベントの取りこぼしを吸収する（レビューアプリ設計spec 4章）。
+      // 連番も再送も持たないので、ここが唯一の合わせ込みの場所である。
+      const ids = new Set(a.tasks.map((x) => x.id));
+      const drafts = Object.fromEntries(
+        Object.entries(s.drafts).filter(([id]) => ids.has(id)),
+      );
+      const next: State = { ...s, tasks: a.tasks, projects: a.projects, now: a.now, drafts };
+      if (s.sel !== null && ids.has(s.sel)) return next;
+      const first = sidebarOrder(a.tasks, s.view, s.project)[0];
+      return { ...next, sel: first ? first.id : null, editing: null };
+    }
+    case "daemon": {
+      const ev = a.ev;
+      // 知らない event は無視する。Rust は素通しするだけなので、
+      // デーモンが先に増えてもここで落ちない
+      if (ev.event === "task.stateChanged") {
+        if (!s.tasks.some((x) => x.id === ev.task_id)) return s;
+        return {
+          ...s,
+          now: a.now,
+          tasks: updateTask(s, ev.task_id, { state: ev.to as TaskState, since: a.now }),
+        };
+      }
+      if (ev.event === "stepRun.started") {
+        if (!s.tasks.some((x) => x.id === ev.task_id)) return s;
+        return { ...s, now: a.now, tasks: updateTask(s, ev.task_id, { step: ev.step_id }) };
+      }
+      if (ev.event === "stepRun.finished" && ev.status === "degraded") {
+        if (!s.tasks.some((x) => x.id === ev.task_id)) return s;
+        return { ...s, now: a.now, tasks: updateTask(s, ev.task_id, { degraded: ev.step_id }) };
+      }
+      // log.line は #47、ratelimit.sample は第2段階
+      return s;
+    }
+    case "connection":
+      return { ...s, conn: a.conn };
   }
 }
