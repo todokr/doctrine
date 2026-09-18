@@ -13,7 +13,12 @@ export function getStepRun(db: Db, id: number): Promise<StepRunRow | undefined> 
 
 /**
  * 承認待ちのステップ実行（approval が suspended に入った時点で立てた行）。
- * タスクが suspended なら、この行がちょうど1件ある。
+ * タスクが suspended なら、**開いている** awaiting 行がちょうど1件ある。
+ *
+ * 同じ (task_id, step_id) に閉じた行が何行あってもよい。task.resume は suspended の
+ * タスクを queued に戻すので、同じ approval ステップに入り直すと「interrupted で
+ * 閉じた行 + 新しい awaiting 行」になる（閉じるのは handlers.ts の
+ * closeAwaitingStepRun）。開いている行は常に最新なので id desc で取る。
  */
 export function getAwaitingStepRun(
   db: Db,

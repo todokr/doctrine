@@ -72,6 +72,16 @@ applyApproval（承認 / 却下）
 
 `log_path` が空文字なのは今の approval の行と同じ（人の判断にログファイルは無い）。
 
+**`awaiting` 行を閉じる経路は `applyApproval` だけではない。** 状態遷移表の
+`suspended` からの出口は `queued` / `canceled` / `failed` / `completed` の4つあり、
+`task.cancel` は `suspended` のタスクを `canceled` にでき、`task.resume` は
+`suspended` のタスクを `queued` に戻せる。どちらも人の決定を待たずに外から
+`suspended` を抜けるので、開いていた `awaiting` 行は `interrupted`
+（3.3 の「中断された実行」）で閉じる。閉じる書き込みは状態を書くのと同じ
+トランザクションに載せる（別トランザクションにすると、片方だけ書かれた記録が
+作れてしまう）。閉じるべき行が無ければ（`paused` からの resume、`queued` /
+`running` からの cancel）何もしない。
+
 ### 3.2 採らなかった案 — 復帰側で approval を除外する
 
 `status` は `running` のまま立てて、復帰処理（`recoverOnStartup`）が「タスクが
@@ -158,6 +168,15 @@ steps:
 入っても `step_runs.attempt` は `1` のまま記録される。何度目のレビューかという
 履歴そのものが嘘になっていた。新しい振る舞いは、そのステップに何度 `suspended`
 で立ち止まったか（承認・却下を問わず）を正直に数えるほうを選ぶ。
+
+**`task.resume` で approval に入り直すと、`attempt` はもう1つ進む。** `task.resume` は
+`paused` だけでなく `suspended` のタスクも受け付け、`queued` に戻す。開いていた
+`awaiting` 行は `interrupted` で閉じられ、スケジューラが拾い直して再び
+`suspended` に入ると、新しい `awaiting` 行が立って `attempt_counts` も1つ進む
+（`attempt_counts` を戻すことはしない）。**これを正とする理由は上と同じ** —
+そのステップに何度 `suspended` で立ち止まったかを正直に数える。結果として、
+`dctl resume` を叩くたびに、そのステップの `onReject.maxAttempts` の残り回数を
+1つ消費することになる。
 
 ### 3.5 `awaiting` 行が無いときは例外にする
 
