@@ -45,10 +45,22 @@ async function readOne(root: string, path: string): Promise<ReviewFile> {
   // /w/task-evil/x が配下として通る。
   if (!real.startsWith(root + SEPARATOR)) return { path, status: "outside_worktree" };
 
-  // realPath 解決から open までの間に real の指す先が差し替えられる窓は塞げないが、
+  // 通常ファイルかどうかを open 前に確かめる。名前付きパイプ（FIFO）は isFile が
+  // false になるので stat だけで弾ける ―― open してしまうと書き手のいない FIFO で
+  // Deno.open がブロックし続け、readReviewFiles 全体が固まる（Promise.all の一部として
+  // 待たれているため）。
+  let preStat: Deno.FileInfo;
+  try {
+    preStat = await Deno.stat(real);
+  } catch {
+    return { path, status: "missing" };
+  }
+  if (!preStat.isFile) return { path, status: "missing" };
+
+  // この stat から open までの間に real の指す先が差し替えられる窓は塞げないが、
   // 承認待ちに入った時点で書き手のステップは既に終了しているため、ここでレースする
   // 書き手は現在のアーキテクチャには存在しない。open 以降は同一ハンドルで
-  // stat と読み出しを行い、その窓だけは塞ぐ。
+  // サイズ確認と読み出しを行い、その窓だけは塞ぐ。
   let file: Deno.FsFile;
   try {
     file = await Deno.open(real, { read: true });

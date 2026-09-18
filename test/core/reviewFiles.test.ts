@@ -126,3 +126,24 @@ test("1件の失敗が他の件を巻き込まない", async () => {
     await Deno.chmod(join(wt, "locked"), 0o755);
   }
 });
+
+test("書き手のいない名前付きパイプを宣言しても readReviewFiles は固まらない", async () => {
+  const wt = await worktree({ "ok.md": "読める\n" });
+  const fifo = join(wt, "pipe");
+  const { code } = await new Deno.Command("mkfifo", { args: [fifo] }).output();
+  assert.equal(code, 0, "mkfifo コマンドに失敗した");
+
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<"timeout">((resolve) => {
+    timer = setTimeout(() => resolve("timeout"), 3000);
+  });
+  try {
+    const result = await Promise.race([readReviewFiles(wt, ["pipe", "ok.md"]), timeout]);
+    assert.notEqual(result, "timeout", "FIFO の open でブロックし、時間内に返らなかった");
+    const files = result as Awaited<ReturnType<typeof readReviewFiles>>;
+    assert.equal(files[0].status, "missing", "FIFO は open せず missing に倒す");
+    assert.equal(files[1].status, "ok", "FIFO の宣言が他の件を巻き込まない");
+  } finally {
+    clearTimeout(timer);
+  }
+});
