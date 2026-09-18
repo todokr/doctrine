@@ -78,10 +78,15 @@ export interface StepRunsTable {
   review_tree: string | null;
 }
 
+/**
+ * ステップ実行1回ぶんの出力。`last_` はこの行が最後という意味ではなく、
+ * テンプレート変数 `{{ steps.<id>.last_stdout }}` がステップの**最新の実行**の
+ * 行を引く、という読み出し側の規約を指す。
+ */
 export interface StepOutputsTable {
   step_run_id: number;
-  stdout: string;
-  stderr: string;
+  last_stdout: string;
+  last_stderr: string;
   exit_code: number | null;
 }
 

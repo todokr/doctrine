@@ -56,14 +56,14 @@ steps:
     onFailure:
       goto: implement
       maxAttempts: 3
-      feed: "marker.txt がない:\\n{{ steps.verify.stderr }}"
+      feed: "marker.txt がない:\\n{{ steps.verify.last_stderr }}"
   - id: review
     type: approval
     title: "差分を確認してください"
     onReject:
       goto: implement
       maxAttempts: 5
-      feed: "レビューで却下された:\\n{{ steps.review.stdout }}"
+      feed: "レビューで却下された:\\n{{ steps.review.last_stdout }}"
   - id: record
     type: command
     run: "echo done > result.txt"

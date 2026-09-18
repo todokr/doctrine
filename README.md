@@ -100,7 +100,7 @@ steps:
     onFailure:
       goto: implement
       maxAttempts: 3
-      feed: "テストが失敗した:\n{{ steps.verify.stderr }}"
+      feed: "テストが失敗した:\n{{ steps.verify.last_stderr }}"
 
   - id: review
     type: approval
@@ -108,7 +108,7 @@ steps:
     onReject:
       goto: implement
       maxAttempts: 5
-      feed: "レビューで却下された:\n{{ steps.review.stdout }}"
+      feed: "レビューで却下された:\n{{ steps.review.last_stdout }}"
 
   - id: record
     type: command
@@ -152,9 +152,9 @@ steps:
 - `{{ task.id }}` `{{ task.title }}` `{{ task.prompt }}` `{{ task.branch }}`
 - `{{ worktree.path }}`
 - `{{ project.path }}`
-- `{{ steps.<id>.stdout }}` `{{ steps.<id>.stderr }}` `{{ steps.<id>.exitCode }}`
-  — `agent` ステップの `stdout` は最終応答テキスト、`approval` ステップの
-  `stdout` は却下コメントそのもの。
+- `{{ steps.<id>.last_stdout }}` `{{ steps.<id>.last_stderr }}` `{{ steps.<id>.exitCode }}`
+  — `agent` ステップの `last_stdout` は最終応答テキスト、`approval` ステップの
+  `last_stdout` は却下コメントそのもの。
 
 ### `setup` は予約されたステップid
 

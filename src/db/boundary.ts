@@ -60,7 +60,7 @@ export type StepBoundary = {
    * ステップの出力。この境界で立てた（または閉じた）step_run に紐づく。
    * step_run も stepRunUpdate も無いのに outputs だけ渡すのは呼び出し側のバグ。
    */
-  outputs?: { stdout: string; stderr: string; exit_code: number | null };
+  outputs?: { last_stdout: string; last_stderr: string; exit_code: number | null };
 };
 
 /** requireState と実際の状態が食い違った。書き込みは一切起きていない。 */
@@ -170,14 +170,14 @@ export function commitStepBoundary(db: Db, b: StepBoundary): Promise<number | nu
       await trx.insertInto("step_outputs")
         .values({
           step_run_id: stepRunId,
-          stdout: tail(o.stdout),
-          stderr: tail(o.stderr),
+          last_stdout: tail(o.last_stdout),
+          last_stderr: tail(o.last_stderr),
           exit_code: o.exit_code,
         })
         .onConflict((oc) =>
           oc.column("step_run_id").doUpdateSet((eb) => ({
-            stdout: eb.ref("excluded.stdout"),
-            stderr: eb.ref("excluded.stderr"),
+            last_stdout: eb.ref("excluded.last_stdout"),
+            last_stderr: eb.ref("excluded.last_stderr"),
             exit_code: eb.ref("excluded.exit_code"),
           }))
         )

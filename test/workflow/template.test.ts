@@ -6,7 +6,7 @@ const ctx: TemplateContext = {
   task: { id: "t1", title: "ログイン修正", prompt: "直して", branch: "doctrine/t1-login" },
   worktree: { path: "/state/wt/t1" },
   project: { path: "/repo" },
-  steps: { test: { stdout: "ok", stderr: "3 failing", exitCode: "1" } },
+  steps: { test: { last_stdout: "ok", last_stderr: "3 failing", exitCode: "1" } },
 };
 
 test("4系統すべてを展開する", () => {
@@ -14,7 +14,7 @@ test("4系統すべてを展開する", () => {
   assert.equal(expand("{{ task.branch }}", ctx), "doctrine/t1-login");
   assert.equal(expand("{{ worktree.path }}", ctx), "/state/wt/t1");
   assert.equal(expand("{{ project.path }}", ctx), "/repo");
-  assert.equal(expand("{{ steps.test.stderr }}", ctx), "3 failing");
+  assert.equal(expand("{{ steps.test.last_stderr }}", ctx), "3 failing");
   assert.equal(expand("{{ steps.test.exitCode }}", ctx), "1");
 });
 
@@ -24,7 +24,7 @@ test("空白の有無を問わない", () => {
 
 test("1つの文字列に複数個埋められる", () => {
   assert.equal(
-    expand("テストが失敗した:\n{{ steps.test.stderr }}", ctx),
+    expand("テストが失敗した:\n{{ steps.test.last_stderr }}", ctx),
     "テストが失敗した:\n3 failing",
   );
 });
@@ -38,7 +38,7 @@ test("未知の系統は落とす", () => {
 });
 
 test("未実行のステップを参照したら落とす", () => {
-  assert.throws(() => expand("{{ steps.build.stdout }}", ctx), TemplateError);
+  assert.throws(() => expand("{{ steps.build.last_stdout }}", ctx), TemplateError);
 });
 
 test("ステップの未知のフィールドは落とす", () => {
@@ -86,14 +86,16 @@ test("代入された値に{{ }}を含むテンプレートは展開してもス
     task: ctx.task,
     worktree: ctx.worktree,
     project: ctx.project,
-    steps: { test: { stdout: "見つからない: {{ task.prompt }}", stderr: "error", exitCode: "1" } },
+    steps: {
+      test: { last_stdout: "見つからない: {{ task.prompt }}", last_stderr: "error", exitCode: "1" },
+    },
   };
-  const result = expand("失敗:\n{{ steps.test.stdout }}", ctxWithTemplate);
+  const result = expand("失敗:\n{{ steps.test.last_stdout }}", ctxWithTemplate);
   assert.equal(result, "失敗:\n見つからない: {{ task.prompt }}");
 });
 
 test("ステップidにドットを含めるとエラーメッセージで指摘する", () => {
-  assert.throws(() => expand("{{ steps.my.step.stdout }}", ctx), (e: unknown) => {
+  assert.throws(() => expand("{{ steps.my.step.last_stdout }}", ctx), (e: unknown) => {
     assert.ok(e instanceof TemplateError);
     assert.match((e as Error).message, /ステップidには . を含められません/);
     return true;
@@ -106,4 +108,16 @@ test("ステップにフィールドがないと落とす", () => {
     assert.match((e as Error).message, /ステップ出力を参照するにはフィールドが必要です/);
     return true;
   });
+});
+
+test("ステップ出力は最新の実行を指す名前で引く", () => {
+  const ctx: TemplateContext = {
+    task: { id: "t1", title: "T", prompt: "P", branch: "b" },
+    worktree: { path: "/w" },
+    project: { path: "/p" },
+    steps: { test: { last_stdout: "ok", last_stderr: "3 failing", exitCode: "1" } },
+  };
+  assert.equal(expand("{{ steps.test.last_stdout }}", ctx), "ok");
+  assert.equal(expand("{{ steps.test.last_stderr }}", ctx), "3 failing");
+  assert.equal(expand("{{ steps.test.exitCode }}", ctx), "1");
 });

@@ -69,7 +69,7 @@ steps:
     onFailure:
       goto: implement
       maxAttempts: 3
-      feed: "テストが失敗した:\n{{ steps.test.stderr }}"
+      feed: "テストが失敗した:\n{{ steps.test.last_stderr }}"
 
   - id: review
     type: approval
@@ -94,7 +94,7 @@ steps:
     onReject:
       goto: implement
       maxAttempts: 5
-      feed: "レビューで却下された:\n{{ steps.review.stdout }}"
+      feed: "レビューで却下された:\n{{ steps.review.last_stdout }}"
 ```
 
 `onReject` の形は `onFailure` と同一である（`goto` / `maxAttempts` / `feed`）。
@@ -112,16 +112,19 @@ steps:
 
 ### 変数
 
+> （#45 で `stdout` / `stderr` は `last_stdout` / `last_stderr` に改名した。本文の例は
+> 現行の名前に更新してある。）
+
 4系統のみ。
 
 - `{{ task.prompt }}` `{{ task.title }}` `{{ task.id }}` `{{ task.branch }}`
 - `{{ worktree.path }}`
 - `{{ project.path }}`
-- `{{ steps.<id>.stdout }}` `{{ steps.<id>.stderr }}` `{{ steps.<id>.exitCode }}`
-— `agent` ステップの場合、`stdout` は最終結果テキスト
-却下コメントに専用の変数は設けない。`**approval` ステップの `stdout` が
+- `{{ steps.<id>.last_stdout }}` `{{ steps.<id>.last_stderr }}` `{{ steps.<id>.exitCode }}`
+— `agent` ステップの場合、`last_stdout` は最終結果テキスト
+却下コメントに専用の変数は設けない。`**approval` ステップの `last_stdout` が
 却下コメントそのもの**として `step_outputs` に保存される。`agent` ステップの
-`stdout` を最終結果テキストとしたのと同じ扱いであり、変数の系統を増やさない。
+`last_stdout` を最終結果テキストとしたのと同じ扱いであり、変数の系統を増やさない。
 
 ### 形式は YAML（TSではない）
 
@@ -146,7 +149,7 @@ baseBranch: main
 対象プロジェクトが決めるもので、doctrine がパッケージマネージャを強制することはない。
 
 **ステップid `setup` は予約語**とする。自動挿入された結果として `step_runs` にも
-変数空間（`{{ steps.setup.stdout }}`）にも現れるため、ユーザー定義のワークフローが
+変数空間（`{{ steps.setup.last_stdout }}`）にも現れるため、ユーザー定義のワークフローが
 同じidを持つと静かに衝突する。検証時に**エラーとして弾く**。
 
 ## 4. 状態機械と永続化

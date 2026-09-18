@@ -434,12 +434,12 @@ test("runTask が例外を投げても daemon は落ちず、タスクは failed
   const ctx = await context();
   const h = createHandler(ctx);
   await h("project.add", { path: repo }, NOOP_CONN);
-  // {{ steps.nope.stdout }} は存在しないステップの出力を参照する。
+  // {{ steps.nope.last_stdout }} は存在しないステップの出力を参照する。
   // expand() はこれを意図的に例外として投げ、runTask はそれを握りつぶさず
   // 伝播させる（ワークフロー作者に見える形にするため）。
   await writeFile(
     join(repo, ".doctrine", "workflows", "brokenvar.yaml"),
-    'name: brokenvar\nsteps:\n  - id: a\n    type: command\n    run: "echo {{ steps.nope.stdout }}"\n',
+    'name: brokenvar\nsteps:\n  - id: a\n    type: command\n    run: "echo {{ steps.nope.last_stdout }}"\n',
   );
   const t = await h(
     "task.create",

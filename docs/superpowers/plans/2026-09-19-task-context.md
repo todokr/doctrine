@@ -1,5 +1,8 @@
 # task.context と review.files 実装計画
 
+> （#45 で `stdout` / `stderr` は `last_stdout` / `last_stderr` に改名した。本文の例は
+> 現行の名前に更新してある。）
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** レビュー画面が経緯（元の指示・レビュー履歴・直近のコマンド結果・エージェントの最後の発言）と、approval ステップが宣言したファイルの中身を、1回の `task.context(task_id)` で取れるようにする。
@@ -244,7 +247,7 @@ const STEP_FIELDS = ["last_stdout", "last_stderr", "exitCode"] as const;
       outputs: { last_stdout: verdict.comment, last_stderr: "", exit_code: 1 },
 ```
 
-`applyApproval` の doc コメント（`src/core/engine.ts:378-379` 付近）と、`{{ steps.review.stdout }}` に言及しているコメント（`:444` 付近）の変数名も直す。
+`applyApproval` の doc コメント（`src/core/engine.ts:378-379` 付近）と、`{{ steps.review.last_stdout }}` に言及しているコメント（`:444` 付近）の変数名も直す。
 
 > `outcome.stdout` / `outcome.stderr` は `StepOutcome`（`src/core/stepRunner.ts`）の
 > フィールドであり、**改名しない**。改名するのは DB の列とテンプレート変数だけ。

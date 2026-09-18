@@ -2,7 +2,7 @@ export type TemplateContext = {
   task: { id: string; title: string; prompt: string; branch: string };
   worktree: { path: string };
   project: { path: string };
-  steps: Record<string, { stdout: string; stderr: string; exitCode: string }>;
+  steps: Record<string, { last_stdout: string; last_stderr: string; exitCode: string }>;
 };
 
 export class TemplateError extends Error {
@@ -14,7 +14,7 @@ export class TemplateError extends Error {
 
 const PATTERN = /\{\{\s*([^}]+?)\s*\}\}/g;
 const TASK_FIELDS = ["id", "title", "prompt", "branch"] as const;
-const STEP_FIELDS = ["stdout", "stderr", "exitCode"] as const;
+const STEP_FIELDS = ["last_stdout", "last_stderr", "exitCode"] as const;
 
 export function expand(template: string, ctx: TemplateContext): string {
   validatePlaceholders(template);

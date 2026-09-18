@@ -338,8 +338,8 @@ export async function runTask(
         duration_ms: outcome.durationMs,
       },
       outputs: {
-        stdout: outcome.stdout,
-        stderr: outcome.stderr,
+        last_stdout: outcome.stdout,
+        last_stderr: outcome.stderr,
         exit_code: outcome.exitCode,
       },
     });
@@ -375,8 +375,8 @@ export async function runTask(
 }
 
 /**
- * approval の結果を適用する。却下コメントは approval ステップの stdout として保存する
- * （agent ステップの stdout を最終結果テキストとしたのと同じ扱い。変数の系統を増やさない）。
+ * approval の結果を適用する。却下コメントは approval ステップの last_stdout として保存する
+ * （agent ステップの last_stdout を最終結果テキストとしたのと同じ扱い。変数の系統を増やさない）。
  *
  * 書き込みはすべて requireState: "suspended" 付き。読んでから書くまでの間に
  * task.cancel などが届いていれば、StateConflictError で何も書かずに失敗する。
@@ -425,7 +425,7 @@ export async function applyApproval(
         ? { state: "queued", current_step_id: next.id, resumed: 1 }
         : { state: "completed" },
       stepRunUpdate: { id: awaiting.id, status: "success", exit_code: 0, ended_at: now },
-      outputs: { stdout: "", stderr: "", exit_code: 0 },
+      outputs: { last_stdout: "", last_stderr: "", exit_code: 0 },
     });
     return;
   }
@@ -441,17 +441,17 @@ export async function applyApproval(
     attempts: attemptCount(task, stepId),
   });
 
-  // {{ steps.review.stdout }} は却下コメントを指す。DBへ書く前に、これから書く値を
+  // {{ steps.review.last_stdout }} は却下コメントを指す。DBへ書く前に、これから書く値を
   // 直接コンテキストへ差し込んで展開する（コマンド実行パスが「出力を書いてから
   // 次のステップで参照する」のと同じ意味を、1トランザクション内で再現する）。
   const ctx = await contextFor(db, task);
-  ctx.steps[stepId] = { stdout: verdict.comment, stderr: "", exitCode: "1" };
+  ctx.steps[stepId] = { last_stdout: verdict.comment, last_stderr: "", exitCode: "1" };
 
   // 「却下をどう記録するか」は goto の枝でも fail の枝でも同じ1つの決定なので、
   // 1箇所に置く（逐語で2つ書くと、将来変えたとき片方だけ直る）。
   const rejected = {
     stepRunUpdate: { id: awaiting.id, status: "failed" as const, exit_code: 1, ended_at: now },
-    outputs: { stdout: verdict.comment, stderr: "", exit_code: 1 },
+    outputs: { last_stdout: verdict.comment, last_stderr: "", exit_code: 1 },
   };
 
   if (decision.kind === "goto") {

@@ -238,6 +238,19 @@ const migrations: Record<string, Migration> = {
       }
     },
   },
+  /**
+   * step_outputs の stdout / stderr を last_stdout / last_stderr に改名する。
+   * 制約に関わらない列なので、テーブル再構築は要らない。
+   */
+  "0004_step_outputs_last_names": {
+    // deno-lint-ignore no-explicit-any
+    async up(db: Kysely<any>) {
+      await db.schema.alterTable("step_outputs")
+        .renameColumn("stdout", "last_stdout").execute();
+      await db.schema.alterTable("step_outputs")
+        .renameColumn("stderr", "last_stderr").execute();
+    },
+  },
 };
 
 /** ファイルを動的 import しない（権限も要らず、deno check で型検査される）。 */
