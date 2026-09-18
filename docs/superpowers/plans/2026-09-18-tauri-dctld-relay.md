@@ -476,10 +476,11 @@ git commit -m "feat: protocol.ts にメソッドごとの params / result の型
   ```rust
   pub enum Os { Macos, Linux }
   pub struct PathEnv { pub doctrine_socket: Option<String>, pub xdg_runtime_dir: Option<String>,
-                       pub state_root: PathBuf, pub uid: u32, pub os: Os }
+                       pub state_dir: Option<String>, pub home: Option<String>,
+                       pub uid: u32, pub os: Os }
   pub fn resolve_state_root(state_dir: Option<String>, home: Option<String>) -> Result<PathBuf, String>
-  pub fn resolve_socket_path(env: &PathEnv) -> PathBuf
-  pub fn current_env() -> Result<PathEnv, String>
+  pub fn resolve_socket_path(env: &PathEnv) -> Result<PathBuf, String>
+  pub fn current_env() -> PathEnv
   pub fn socket_path() -> Result<PathBuf, String>
   ```
 
@@ -496,7 +497,8 @@ mod tests {
         PathEnv {
             doctrine_socket: None,
             xdg_runtime_dir: None,
-            state_root: PathBuf::from("/home/u/.local/state/doctrine"),
+            state_dir: None,
+            home: Some("/home/u".into()),
             uid: 501,
             os,
         }
@@ -507,20 +509,23 @@ mod tests {
         let mut e = env(Os::Linux);
         e.doctrine_socket = Some("/tmp/x.sock".into());
         e.xdg_runtime_dir = Some("/run/user/1".into());
-        assert_eq!(resolve_socket_path(&e), PathBuf::from("/tmp/x.sock"));
+        assert_eq!(resolve_socket_path(&e).unwrap(), PathBuf::from("/tmp/x.sock"));
     }
 
     #[test]
     fn xdg_runtime_dir_is_used_on_both_os() {
         let mut e = env(Os::Macos);
         e.xdg_runtime_dir = Some("/run/user/501".into());
-        assert_eq!(resolve_socket_path(&e), PathBuf::from("/run/user/501/doctrine/dctld.sock"));
+        assert_eq!(
+            resolve_socket_path(&e).unwrap(),
+            PathBuf::from("/run/user/501/doctrine/dctld.sock")
+        );
     }
 
     #[test]
     fn linux_falls_back_to_run_user() {
         assert_eq!(
-            resolve_socket_path(&env(Os::Linux)),
+            resolve_socket_path(&env(Os::Linux)).unwrap(),
             PathBuf::from("/run/user/501/doctrine/dctld.sock")
         );
     }
@@ -529,9 +534,23 @@ mod tests {
     fn macos_falls_back_to_state_root() {
         // macOS には XDG_RUNTIME_DIR が無く /run は read-only
         assert_eq!(
-            resolve_socket_path(&env(Os::Macos)),
+            resolve_socket_path(&env(Os::Macos)).unwrap(),
             PathBuf::from("/home/u/.local/state/doctrine/dctld.sock")
         );
+    }
+
+    #[test]
+    fn state_root_is_only_resolved_on_the_macos_branch() {
+        // 先に解決すると、XDG_RUNTIME_DIR はあるが HOME が無い環境で
+        // 繋がるはずの経路まで落ちる
+        let mut e = env(Os::Linux);
+        e.home = None;
+        e.xdg_runtime_dir = Some("/run/user/501".into());
+        assert!(resolve_socket_path(&e).is_ok());
+
+        let mut e = env(Os::Macos);
+        e.home = None;
+        assert!(resolve_socket_path(&e).is_err());
     }
 
     #[test]
@@ -571,10 +590,16 @@ pub enum Os {
     Linux,
 }
 
+/// 解決する前の生の環境。**状態ディレクトリをここで解決しない。**
+/// 解決は macOS の分岐でしか要らず、先に解決すると XDG_RUNTIME_DIR はあるが
+/// HOME が無い環境で、繋がるはずの経路まで落ちる。
 pub struct PathEnv {
     pub doctrine_socket: Option<String>,
     pub xdg_runtime_dir: Option<String>,
-    pub state_root: PathBuf,
+    /// DOCTRINE_STATE_DIR
+    pub state_dir: Option<String>,
+    /// HOME
+    pub home: Option<String>,
     pub uid: u32,
     pub os: Os,
 }
@@ -592,46 +617,47 @@ pub fn resolve_state_root(state_dir: Option<String>, home: Option<String>) -> Re
 
 /// `src/daemon/server.ts` の resolveSocketPath と同じ規則。**両方を直すこと。**
 /// 片方だけ直すと、症状は「繋がらない」としか出ない。
-pub fn resolve_socket_path(env: &PathEnv) -> PathBuf {
+pub fn resolve_socket_path(env: &PathEnv) -> Result<PathBuf, String> {
     if let Some(p) = env.doctrine_socket.as_deref().filter(|s| !s.is_empty()) {
-        return PathBuf::from(p);
+        return Ok(PathBuf::from(p));
     }
     if let Some(x) = env.xdg_runtime_dir.as_deref().filter(|s| !s.is_empty()) {
-        return Path::new(x).join("doctrine").join("dctld.sock");
+        return Ok(Path::new(x).join("doctrine").join("dctld.sock"));
     }
     match env.os {
-        // macOS には XDG_RUNTIME_DIR が無く /run は read-only
-        Os::Macos => env.state_root.join("dctld.sock"),
-        Os::Linux => Path::new(&format!("/run/user/{}", env.uid))
+        // macOS には XDG_RUNTIME_DIR が無く /run は read-only。
+        // 状態ディレクトリの解決（HOME を要る）はこの枝に入ってから
+        Os::Macos => {
+            Ok(resolve_state_root(env.state_dir.clone(), env.home.clone())?.join("dctld.sock"))
+        }
+        Os::Linux => Ok(Path::new(&format!("/run/user/{}", env.uid))
             .join("doctrine")
-            .join("dctld.sock"),
+            .join("dctld.sock")),
     }
 }
 
-pub fn current_env() -> Result<PathEnv, String> {
-    Ok(PathEnv {
+pub fn current_env() -> PathEnv {
+    PathEnv {
         doctrine_socket: env::var("DOCTRINE_SOCKET").ok(),
         xdg_runtime_dir: env::var("XDG_RUNTIME_DIR").ok(),
-        state_root: resolve_state_root(
-            env::var("DOCTRINE_STATE_DIR").ok(),
-            env::var("HOME").ok(),
-        )?,
+        state_dir: env::var("DOCTRINE_STATE_DIR").ok(),
+        home: env::var("HOME").ok(),
         // libc を足さずに実 uid を取る。macOS には /proc が無いが、
         // macOS の分岐は uid を見ないので既定値で構わない。
         uid: std::fs::metadata("/proc/self").map(|m| m.uid()).unwrap_or(1000),
         os: if cfg!(target_os = "macos") { Os::Macos } else { Os::Linux },
-    })
+    }
 }
 
 pub fn socket_path() -> Result<PathBuf, String> {
-    Ok(resolve_socket_path(&current_env()?))
+    resolve_socket_path(&current_env())
 }
 ```
 
 - [ ] **Step 4: テストが通ることを確かめる**
 
 Run: `cd app/src-tauri && cargo test --lib daemon`
-Expected: 5 tests PASS
+Expected: 6 tests PASS
 
 - [ ] **Step 5: commit**
 
@@ -747,7 +773,8 @@ pub fn find_dctld() -> Result<PathBuf, String> {
 /// ゾンビが残る。呼び出し側が Child を持ち、try_wait() で生死を見て両方を防ぐ。
 pub fn spawn_dctld() -> Result<Child, String> {
     let bin = find_dctld()?;
-    let root = current_env()?.state_root;
+    let e = current_env();
+    let root = resolve_state_root(e.state_dir, e.home)?;
     std::fs::create_dir_all(&root)
         .map_err(|e| format!("状態ディレクトリを作れません ({}): {e}", root.display()))?;
 
@@ -774,7 +801,7 @@ pub fn spawn_dctld() -> Result<Child, String> {
 - [ ] **Step 4: テストが通ることを確かめる**
 
 Run: `cd app/src-tauri && cargo test --lib daemon`
-Expected: 9 tests PASS
+Expected: 10 tests PASS
 
 - [ ] **Step 5: commit**
 
@@ -2934,7 +2961,8 @@ EOF
 
 **3. Type consistency**
 
-- `resolveSocketPath` / `resolve_socket_path`: TS と Rust で同じ規則。Task 1 と Task 4 で同じ 5 ケースをテストしている
+- `resolveSocketPath` / `resolve_socket_path`: TS と Rust で同じ規則。Task 1 と Task 4 で同じケースをテストしている
+- **状態ディレクトリは macOS の分岐に入ってから解決する。** 先に解決すると、`XDG_RUNTIME_DIR` はあるが `HOME` が無い環境（最小構成の CI やサービス）で、繋がるはずの経路まで落ちる。TS 側は `SocketEnv.stateRoot` を関数にし、Rust 側は `PathEnv` に生の `state_dir` / `home` を持たせて `resolve_socket_path` の中で解決する
 - `TaskListEntry` = `TaskSummary & { has_degraded }`: Task 3 で定義し、Task 10 の `toTask(row, projects, previous?)` が消費する
 - `toTask(row, projects, previous?)` の `projects` は `ProjectSummary[]`（rpc の生の応答）である。Task 11 の `store.tsx` は `project.list` の結果をそのまま渡し、Task 10 のテストは `PJ` を渡す
 - `Emit` は `Arc<dyn Fn(&str, Value) + Send + Sync>`。Task 6 の `collector()` と Task 8 の `AppHandle` 版が同じ型
