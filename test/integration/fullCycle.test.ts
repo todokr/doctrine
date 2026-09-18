@@ -16,7 +16,7 @@ import {
 } from "../../src/daemon/handlers.ts";
 import { createMockAdapter } from "../../src/adapter/mock.ts";
 import type { ServerEvent } from "../../src/daemon/protocol.ts";
-import { makeRepo, until } from "../helpers/repo.ts";
+import { makeRepo, tickWhenIdle, until } from "../helpers/repo.ts";
 
 const execFileAsync = promisify(execFile);
 const NOOP_CONN = { follow() {}, unfollow() {}, isFollowing: () => false };
@@ -130,12 +130,10 @@ test("setup → agent → command → approval → 承認 → 完了まで通る
 
   // review が suspended に入った1回目の runTask は、実際に git を叩いてツリーを
   // 記録してから ctx.running を解放する。その解放が終わる前にこの1回の tick が
-  // 素通りすることがあるので、tick を回しながら待つ。
+  // 素通りすることがあるので、tickWhenIdle で解放を待ってから1回だけ tick する。
+  await tickWhenIdle(ctx);
   await until(
-    async () => {
-      await tick(ctx);
-      return (await getTask(ctx.db, t.id))?.state === "completed";
-    },
+    async () => (await getTask(ctx.db, t.id))?.state === "completed",
     5000,
     "承認後の record 実行を経て completed に到達すること",
   );
@@ -190,12 +188,10 @@ test("却下すると実装ステップへ戻り、コメントがエージェ�
 
   // review は suspended に入るたびに実際の git でツリーを記録する（reviewTree.ts）ので、
   // 1回目の runTask が ctx.running を解放し終わる前にこの1回の tick が素通りすることが
-  // ある。tick を回しながら待つことで、解放され次第すぐに拾わせる。
+  // ある。tickWhenIdle で解放を待ってから1回だけ tick する。
+  await tickWhenIdle(ctx);
   await until(
-    async () => {
-      await tick(ctx);
-      return (await getTask(ctx.db, t.id))?.state === "suspended";
-    },
+    async () => (await getTask(ctx.db, t.id))?.state === "suspended",
     5000,
     "却下→再実装→再度の承認待ちに到達すること",
   );

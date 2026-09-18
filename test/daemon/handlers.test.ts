@@ -16,7 +16,7 @@ import { parseWorkflow } from "../../src/workflow/schema.ts";
 import type { ServerEvent } from "../../src/daemon/protocol.ts";
 import { branchNameFor } from "../../src/core/worktree.ts";
 import { randomUUID } from "node:crypto";
-import { makeRepo, until } from "../helpers/repo.ts";
+import { makeRepo, tickWhenIdle, until } from "../helpers/repo.ts";
 
 const run = promisify(execFile);
 let root: string;
@@ -185,11 +185,9 @@ test("却下ループを何度回しても task.approve/task.reject は警告を
     assert.equal((await getTask(ctx.db, t.id))?.state, "queued");
     // suspend するたびに review ステップがツリーを記録する（実際に git を叩く）ので、
     // 直前の runTask が ctx.running を解放し終わる前にこの1回の tick が素通りする
-    // ことがある。tick を回しながら待つことで、解放され次第すぐに拾わせる。
-    await until(async () => {
-      await tick(ctx);
-      return (await getTask(ctx.db, t.id))?.state === "suspended";
-    });
+    // ことがある。tickWhenIdle が解放を待ってから1回だけ tick する。
+    await tickWhenIdle(ctx);
+    await until(async () => (await getTask(ctx.db, t.id))?.state === "suspended");
   }
 
   assert.equal(

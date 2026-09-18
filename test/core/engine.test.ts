@@ -12,6 +12,7 @@ import { getTask, insertProject, insertTask } from "../../src/db/tasks.ts";
 import { getStepOutputs, getStepRun, listStepRuns } from "../../src/db/stepRuns.ts";
 import { createMockAdapter } from "../../src/adapter/mock.ts";
 import type { Db } from "../../src/db/schema.ts";
+import { makeRepo } from "../helpers/repo.ts";
 
 const roots: string[] = [];
 
@@ -803,6 +804,80 @@ steps:
   assert.equal(t.state, "canceled");
   assert.equal(t.current_step_id, null, "ステップ開始のコミットは丸ごと書かれない");
   assert.equal(t.attempt_counts, "{}");
+});
+
+/**
+ * approval 分岐は今回 step_runs を書くようになった上に、書く前に captureTree の
+ * 実I/O（git サブプロセス）が挟まるので、非 approval の分岐より「読んでから書くまで」
+ * の窓が広い。上の「状態を読んだ直後に cancel が届いても…」と同じやり方（sqlite の
+ * クエリに割り込む）は使えない — captureTree は DB へは触らず git を spawn するだけ
+ * なので、割り込む先が無い。代わりに Deno.Command を差し替えて、captureTree が
+ * 最初の git を spawn する瞬間に cancel を書き込む。
+ */
+test("captureTree が走っている間に cancel が届いても、awaiting の行を立てない", async () => {
+  const root = await mkdtemp(join(tmpdir(), "doctrine-engine-"));
+  roots.push(root);
+  const repo = await makeRepo(root, { "a.txt": "1\n" }); // captureTree が本物の git を叩けるようにする
+  const sqlite = new DatabaseSync(":memory:");
+  const db = await openDbOn(sqlite);
+  const pid = await insertProject(db, {
+    path: repo,
+    default_workflow: "f",
+    max_concurrent: 1,
+    base_branch: "main",
+    setup: null,
+  });
+  await insertTask(db, {
+    id: "t1",
+    project_id: pid,
+    title: "T",
+    prompt: "p",
+    workflow_name: "f",
+    branch: "b",
+    priority: 2,
+  });
+  await db.updateTable("tasks").set({ state: "running", worktree_path: repo }).where(
+    "id",
+    "=",
+    "t1",
+  ).execute();
+  const workflow = parseWorkflow(`
+name: f
+steps:
+  - id: review
+    type: approval
+    title: "見て"
+`).workflow;
+
+  const OriginalCommand = Deno.Command;
+  let injected = false;
+  // captureTree が最初に spawn する git（"add -A"）を捉えた瞬間、別の経路
+  // （task.cancel）が canceled を書いたことにする。生成した Command 自体は
+  // 本物に委ねる（git は実際に走らせ、captureTree の I/O をそのまま踏ませる）。
+  Deno.Command = function (
+    this: unknown,
+    cmd: string | URL,
+    options?: Deno.CommandOptions,
+  ) {
+    if (!injected && cmd === "git") {
+      injected = true;
+      sqlite.prepare("UPDATE tasks SET state = 'canceled' WHERE id = 't1'").run();
+    }
+    return new OriginalCommand(cmd, options);
+  } as unknown as typeof Deno.Command;
+
+  try {
+    const adapter = createMockAdapter({ result: {} });
+    await runTask(db, "t1", workflow, { db, adapter, logRoot: join(root, "logs"), globalLimit: 4 });
+  } finally {
+    Deno.Command = OriginalCommand;
+  }
+
+  assert.ok(injected, "窓に cancel を差し込めていない（テストの前提が崩れている）");
+  assert.deepEqual(await listStepRuns(db, "t1"), [], "cancel 後に awaiting の行を立ててはいけない");
+  const t = (await getTask(db, "t1"))!;
+  assert.equal(t.state, "canceled");
+  assert.equal(t.attempt_counts, "{}", "attempt を進めるコミットは丸ごと書かれない");
 });
 
 test("suspended に入った時点で awaiting の行が立ち、待ち始めた時刻が残る", async () => {
