@@ -265,7 +265,6 @@ export async function runTask(
         duration_ms: outcome.durationMs,
       },
       outputs: {
-        step_id: step.id,
         stdout: outcome.stdout,
         stderr: outcome.stderr,
         exit_code: outcome.exitCode,
@@ -353,7 +352,7 @@ export async function applyApproval(
         ended_at: now,
         log_path: "",
       },
-      outputs: { step_id: stepId, stdout: "", stderr: "", exit_code: 0 },
+      outputs: { stdout: "", stderr: "", exit_code: 0 },
     });
     return;
   }
@@ -400,7 +399,7 @@ export async function applyApproval(
         ended_at: now,
         log_path: "",
       },
-      outputs: { step_id: stepId, stdout: verdict.comment, stderr: "", exit_code: 1 },
+      outputs: { stdout: verdict.comment, stderr: "", exit_code: 1 },
     });
     return;
   }
@@ -421,6 +420,6 @@ export async function applyApproval(
       ended_at: now,
       log_path: "",
     },
-    outputs: { step_id: stepId, stdout: verdict.comment, stderr: "", exit_code: 1 },
+    outputs: { stdout: verdict.comment, stderr: "", exit_code: 1 },
   });
 }
