@@ -1,5 +1,5 @@
 import { join } from "@std/path";
-import { computeDiff, mergeBase, writeWorktreeTree } from "../core/diff.ts";
+import { computeDiff, mergeBase, type TaskDiff, writeWorktreeTree } from "../core/diff.ts";
 import { parseWorkflow, type Workflow } from "../workflow/schema.ts";
 import { parseProjectConfig, withSetupStep } from "../workflow/project.ts";
 import { ensureProjectScaffold } from "../workflow/scaffold.ts";
@@ -313,8 +313,14 @@ export function createHandler(ctx: DaemonContext): Handler {
         const taskId = req(params, "task_id");
         const task = await getTask(ctx.db, taskId);
         if (!task) throw new Error("タスクがありません");
-        // 範囲の取り違えは承認の取り違えになる。知らない値は黙って全体に倒さず落とす。
-        if (params.since !== undefined && params.since !== "last_review") {
+        // since に指定できる値は last_review だけだが、その基準点 (step_runs.review_tree)
+        // は #43 がまだ入れていない。受け付けて全体 diff を返すと、「前回レビュー以降」を
+        // 見ているつもりの人に範囲の広い diff を見せることになる — 範囲の取り違えは
+        // そのまま承認の取り違えになるので、実装が入るまでは明示的に断る。
+        if (params.since === "last_review") {
+          throw new Error("since: last_review はまだ実装されていません（#43 待ち）");
+        }
+        if (params.since !== undefined) {
           throw new Error(`since に指定できるのは last_review だけです: ${String(params.since)}`);
         }
         // 完了して削除済み、またはまだ実行枠が取れていない。空の diff を返すと
@@ -329,7 +335,7 @@ export function createHandler(ctx: DaemonContext): Handler {
           fromRef: merge_base,
           toRef,
         });
-        return {
+        const result: TaskDiff = {
           base: { branch: project.base_branch, merge_base },
           // 「前回レビュー以降」の基準点は #43 の review_tree に載る。
           since_step_run_id: null,
@@ -337,6 +343,7 @@ export function createHandler(ctx: DaemonContext): Handler {
           patch,
           truncated,
         };
+        return result;
       }
 
       case "worktree.list": {

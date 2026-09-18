@@ -47,7 +47,12 @@ dctl project-add --path /path/to/your/repo
 dctl add --project /path/to/your/repo --title "ログイン画面を実装" --prompt "..."
 dctl ls
 dctl get <task-id>
+dctl diff <task-id>                 # worktree の今の状態の diff（未コミット・未追跡を含む）
 ```
+
+`dctl diff` は JSON を返すので、patch をテキストとして読むには
+`dctl diff <task-id> | jq -r .patch` のように取り出す。レビュー画面（②）はまだ無いので、
+今のところこれが diff を実際に目で見る手段になる。
 
 `project-add` は最初に叩くコマンドで、`.doctrine/` が無ければ雛形を作る。
 
@@ -214,7 +219,6 @@ $ dctl add --project /path/to/repo --title "PRを作る" --prompt "..." --workfl
 ```bash
 dctl ls --state failed              # 失敗したタスクを探す
 dctl get <task-id>                  # worktree_path を確認する
-dctl diff <task-id>                 # worktree の今の状態の diff（未コミット・未追跡を含む）
 dctl gc <task-id>                   # そのタスクのworktreeを削除する
 dctl gc <task-id> --force           # 削除が拒否される場合（未コミットの変更がある）
 ```

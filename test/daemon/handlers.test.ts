@@ -1310,9 +1310,26 @@ test("since に未知の値を渡すと失敗する", async () => {
   const t = await h("task.create", { project: repo, title: "T", prompt: "直して" }, NOOP_CONN) as {
     id: string;
   };
+  // このタスクには worktree が無いのに「worktree がありません」ではなく since のエラーで
+  // 落ちる、というのが since のチェックが worktree_path のチェックより先に走っている証拠。
+  // チェックの順序が入れ替わると、このテストは意味の異なるエラーで失敗するようになる。
   await assert.rejects(
     () => h("task.diff", { task_id: t.id, since: "yesterday" }, NOOP_CONN),
     /since に指定できるのは/,
     "黙って全体に倒すと、画面が範囲を取り違えたまま承認に進む",
+  );
+});
+
+test("since: last_review はまだ実装されておらず失敗する", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  await h("project.add", { path: repo }, NOOP_CONN);
+  const t = await h("task.create", { project: repo, title: "T", prompt: "直して" }, NOOP_CONN) as {
+    id: string;
+  };
+  await assert.rejects(
+    () => h("task.diff", { task_id: t.id, since: "last_review" }, NOOP_CONN),
+    /まだ実装されていません/,
+    "基準点 (#43 の review_tree) が無いまま受け付けると、全体 diff と区別が付かない",
   );
 });

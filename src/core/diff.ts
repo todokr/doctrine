@@ -29,9 +29,13 @@ export async function writeWorktreeTree(worktreePath: string): Promise<string> {
     ]);
     const raw = stdout.trim();
     const realIndex = isAbsolute(raw) ? raw : join(worktreePath, raw);
-    // まだ一度も index が作られていないリポジトリもある。その場合は空から始める。
-    await Deno.copyFile(realIndex, tmpIndex).catch((e: unknown) => {
+    // まだ一度も index が作られていないリポジトリもある。
+    await Deno.copyFile(realIndex, tmpIndex).catch(async (e: unknown) => {
       if (!(e instanceof Deno.errors.NotFound)) throw e;
+      // 空ファイルを GIT_INDEX_FILE に渡すと git は
+      // "index file smaller than expected" で死ぬ。存在しないパスなら
+      // git が空の index として作ってくれるので、作られた一時ファイルを消す。
+      await Deno.remove(tmpIndex);
     });
 
     const env = { GIT_INDEX_FILE: tmpIndex };
@@ -58,6 +62,15 @@ export type DiffFile = {
 
 export type DiffResult = { files: DiffFile[]; patch: string; truncated: boolean };
 
+/** `task.diff` の応答の形。レビュー画面がこの型を読む（②spec 9章）。 */
+export type TaskDiff = {
+  base: { branch: string; merge_base: string };
+  since_step_run_id: number | null;
+  files: DiffFile[];
+  patch: string;
+  truncated: boolean;
+};
+
 /**
  * `.doctrine-out/` は info/exclude により未追跡としてツリーに入らないが、
  * 過去に誤ってコミットされたリポジトリでも diff に出さないよう pathspec でも外す。
@@ -78,10 +91,12 @@ export const PATCH_LIMIT_BYTES = 2 * 1024 * 1024;
 const LF = 0x0a;
 
 /**
+ * patch をバイト数の上限以内に切り詰める、汎用の純粋関数。
  * 上限以内の最後の改行の直後で切る。行の途中で切ると unified diff のパーサが壊れ、
  * 画面が「壊れた diff」ではなく「間違った diff」を描きかねない。
- * 上限以内に改行が1つも無い（極端に長い1行）ときだけ、上限でそのまま切る。
- * テスト用途で直接呼び出し可能。
+ * 上限以内に改行が1つも無い（極端に長い1行）ときだけ、上限でそのまま切る
+ * （`computeDiff` が渡す patch には git のヘッダによる改行が必ず早い位置にあるため
+ * この分岐には来ないが、関数自体の契約としては成り立つようにしておく）。
  */
 export function truncatePatch(
   patch: string,
@@ -173,7 +188,11 @@ function parseNumstat(
   const parts = splitZ(out);
   const result = new Map<string, { additions: number; deletions: number; binary: boolean }>();
   for (let i = 0; i < parts.length;) {
-    const [add, del, path] = parts[i].split("\t");
+    const fields = parts[i].split("\t");
+    const [add, del] = fields;
+    // パスにタブが入っていても壊れないよう、3つ目以降は繋ぎ直す
+    // （-z ではパスがクォートされず生で出るため）。
+    const path = fields.slice(2).join("\t");
     const binary = add === "-";
     const counts = {
       additions: binary ? 0 : Number(add),

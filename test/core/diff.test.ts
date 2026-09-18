@@ -32,6 +32,16 @@ test("write-tree は未コミットと未追跡を含めた今の状態を返す
   assert.equal(blob, "a\nb\nc\nd\n", "コミット済みの内容ではなく worktree の今の内容");
 });
 
+test("index が一度も作られていないリポジトリでも空のツリーとして扱う", async () => {
+  // makeRepo は最初のコミットまで済ませてしまい、その時点で index ができてしまう。
+  // 「index が存在しない」を再現するには、コミットを一度もしない裸のリポジトリが要る。
+  const bare = join(root, "no-index");
+  await mkdir(bare, { recursive: true });
+  await run("git", ["init", "-b", "main", bare]);
+  const tree = await writeWorktreeTree(bare);
+  assert.equal(tree, "4b825dc642cb6eb9a060e54bf8d69288fbee4904", "空のツリーの既知の SHA");
+});
+
 test("write-tree は本物の index を汚さない", async () => {
   await writeFile(join(repo, "new.txt"), "x\n");
   const before = (await run("git", ["-C", repo, "status", "--porcelain"])).stdout;
@@ -93,6 +103,20 @@ test(".doctrine-out/ は diff に出さない", async () => {
   await writeFile(join(repo, ".doctrine-out", "plan.md"), "計画\n");
   const d = await diffNow();
   assert.deepEqual(d.files, []);
+});
+
+test("誤ってコミットされた .doctrine-out/ も pathspec 側の除外で diff に出さない", async () => {
+  // ensureDoctrineOutExcluded を呼ばずに .doctrine-out/ を普通に commit する
+  // — exclude 設定が無い/漏れているリポジトリを再現する。exclude が効かない状況でも
+  // pathspec 側の除外だけで隠せることを確かめる（二重化の片方だけを検証する既存テストと対）。
+  await mkdir(join(repo, ".doctrine-out"), { recursive: true });
+  await writeFile(join(repo, ".doctrine-out", "x"), "1\n");
+  await run("git", ["-C", repo, "add", ".doctrine-out/x"]);
+  await run("git", ["-C", repo, "commit", "-m", "誤ってコミットされた .doctrine-out/x"]);
+
+  await writeFile(join(repo, ".doctrine-out", "x"), "2\n");
+  const d = await diffNow();
+  assert.deepEqual(d.files, [], "committed 済みでも pathspec の exclude が効く");
 });
 
 test("base ブランチが worktree の後に進んでも merge-base を基準にする", async () => {
