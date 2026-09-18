@@ -54,12 +54,12 @@
 | `app/src-tauri/Cargo.toml` | `tokio` / `tempfile` |
 | `app/tsconfig.json`・`app/vite.config.ts` | リポジトリルートの `src/daemon` を読めるようにする |
 | `app/src/types.ts` | `State` から `workflows` を落とし、`conn` を足す |
-| `app/src/model.ts` | `sync` / `daemon` / `connection` アクション、`toTask()` / `toProject()`。`stepDef()` を安全にする |
+| `app/src/model.ts` | `sync` / `daemon` / `connection` アクション、`toTask()` / `toProject()`。`stepDef()` を削除 |
 | `app/src/store.tsx` | mock を外し、取得・購読・取り直しを持つ |
 | `app/src/App.tsx` | 接続バナー、`RejectModal` の `onReject` 表示を外す |
 | `app/src/components/Sidebar.tsx` | プロジェクト未取得でも落ちないようにする |
-| `app/src/components/ReviewView.tsx` | `stepDef` の欠落に耐える |
-| `app/src/components/TaskView.tsx` | `workflows` 依存と偽のログ追従を外す |
+| `app/src/components/ReviewView.tsx` | `stepDef` と `review.files` の節を外し、`Crumbs` を欠落に耐えさせる |
+| `app/src/components/TaskView.tsx` | `workflows` 依存（Task 10）と偽のログ追従（Task 12）を外す |
 | `app/src/model.test.ts` | `mock` ではなく `fixtures` を使う |
 
 **削除**: `app/src/mock.ts`
@@ -2102,15 +2102,14 @@ export function toTask(
       return { ...s, conn: a.conn };
 ```
 
-`stepDef()` を安全にする。ワークフロー定義を持たなくなったので、常に `undefined` を返す形に縮める。呼び出し側（`ReviewView` / `App`）は `def?.` で受けているので落ちない。
+**`stepDef()` を削除する。** ワークフロー定義を返す口（`workflow.list`）は #58 なので、返せるものが何も無い。常に `undefined` を返す関数として残すと、引数を2つとも使わない空の関数が居座ることになる。呼び出し側は Task 11（`App.tsx`）と Task 12（`ReviewView.tsx`）で外す。
 
 ```ts
-/**
- * approval ステップの定義。ワークフロー定義を返す口（workflow.list）は #58 なので、
- * 今は何も持たない。呼び出し側は undefined を前提にすること。
- */
-export const stepDef = (_s: State, _t: Task): StepDef | undefined => undefined;
+// 削除する
+// export const stepDef = (s: State, t: Task) => s.workflows[t.wf].find((x) => x.id === t.step);
 ```
+
+`StepDef` の import が `model.ts` で未使用になったら外す。`types.ts` の `StepDef` 型そのものは残す（#58 で戻ってくる）。
 
 `approve` / `reject.confirm` / `cancel` の case は Task 13 で書き換えるので、この段では `s.workflows` を参照している `approve` だけ一旦落とす（型が通らないため）。`approve` の case を差し替える。
 
@@ -2150,20 +2149,48 @@ export const stepDef = (_s: State, _t: Task): StepDef | undefined => undefined;
 
 `TaskState` を `model.ts` に import する（`import type { …, TaskState } from "./types";` に足す）。
 
-- [ ] **Step 6: 既存テストのうち捏造に依存していたものを直す**
+- [ ] **Step 6: stepDef の呼び出し側を外す（型検査を緑に保つ）**
+
+`stepDef` を消したので、参照している 2 箇所を同じコミットで外す。残すとこのタスクの終わりで
+`pnpm build` が落ちたままになる。
+
+`app/src/App.tsx` の `RejectModal`: `const def = stepDef(s, t);` の行と、`{def?.onReject}` を
+含む `<p className="hint">` の一文を外す。`stepDef` の import も外す（`noUnusedLocals`）。
+
+```tsx
+        <p className="hint">
+          行コメントと全体へのコメントを1つの文字列にまとめて{" "}
+          <span className="mono">task.reject(comment)</span> で送ります。
+          戻り先のステップはワークフローの <span className="mono">onReject.goto</span> が決めます。
+        </p>
+```
+
+`app/src/components/ReviewView.tsx`:
+
+- `const def = stepDef(s, t);` と `const declared = def?.review?.files ?? [];` を消す
+- 見出しのピルを `<span className="pill p-attn">◆ {t.step ?? "レビュー待ち"}</span>` にする
+- `declared.map(...)` の節（`rv-files-md`）を丸ごと消す。宣言されたファイルをデーモンから
+  読むのは `task.context` の仕事で、#45 が入れる
+- `stepDef` と `Markdown` の import を外す
+
+- [ ] **Step 7: 既存テストのうち捏造に依存していたものを直す**
 
 Run: `cd app && pnpm test`
 Expected: `approve` / `reject.confirm` / `cancel` が状態を変えることを期待していたテストが落ちる。**それらは「UI がデーモンの決定を先取りして捏造する」ことを縛っていたテストなので、期待を書き換える。** 落ちたテストの `expect` を、下書きが消えること・次のレビュー待ちが選ばれること・toast が出ることだけに絞る
 
-- [ ] **Step 7: テストが通ることを確かめる**
+- [ ] **Step 8: テストと型検査が通ることを確かめる**
 
 Run: `cd app && pnpm test && pnpm build`
-Expected: PASS
+Expected: PASS。`TaskView.tsx` が `s.workflows` を参照しているので `pnpm build` はここで落ちる。
+**その分だけは Task 12 に回さず、このタスクで直す**（`steps` / `idx` / 実行履歴の `<details>` を
+消し、ステップ表示を `<span className="mono">{t.step}</span>` だけにする）。詳しい形は Task 12 の
+Step 1 にある
 
-- [ ] **Step 8: commit**
+- [ ] **Step 9: commit**
 
 ```bash
-git add app/src/fixtures.ts app/src/model.ts app/src/model.test.ts
+git add app/src/fixtures.ts app/src/model.ts app/src/model.test.ts \
+  app/src/App.tsx app/src/components/ReviewView.tsx app/src/components/TaskView.tsx
 git commit -m "feat(app): reducer をデーモンの形で動かす
 
 sync / daemon / connection のアクションを足し、承認・差し戻し・中止が
@@ -2394,7 +2421,7 @@ export function ConnectionBanner() {
       <div className="app">
 ```
 
-あわせて `RejectModal` の `stepDef` 依存を外す。ワークフロー定義を持たないので、戻り先のステップ名は出せない。
+あわせて `RejectModal` を差し戻し文言を変数に持つ形にする（Task 13 で `rpc` に渡す）。`stepDef` は Task 10 で外してある。
 
 ```tsx
 function RejectModal() {
@@ -2424,7 +2451,7 @@ function RejectModal() {
 }
 ```
 
-`stepDef` の import を `App.tsx` から外す（`noUnusedLocals` が落とす）。
+（`stepDef` の import は Task 10 で外してある。）
 
 - [ ] **Step 4: ビルドが通ることを確かめる**
 
@@ -2451,7 +2478,7 @@ git commit -m "feat(app): デーモンから取得し、イベントと取り直
 - Delete: `app/src/mock.ts`
 
 **Interfaces:**
-- Consumes: Task 10 の `stepDef`（常に `undefined`）
+- Consumes: Task 10 で `stepDef` が消えていること
 - Produces: なし
 
 - [ ] **Step 1: TaskView から workflows と偽のログ追従を外す**
@@ -2521,11 +2548,7 @@ export function Crumbs({ t }: { t: Task }) {
 }
 ```
 
-`ReviewView` の見出しのピルは、approval ステップの `title` が取れないので今のステップ id に落とす。
-
-```tsx
-          <span className="pill p-attn">◆ {def?.title ?? t.step ?? "レビュー待ち"}</span>
-```
+`stepDef` と `review.files` の節は Task 10 で外してある。ここで直すのは `Crumbs` と diff の説明だけ。
 
 「変更」の見出しの説明を、まだ取れないことを言う形に変える。
 
@@ -2919,4 +2942,4 @@ EOF
 - `Relay::status()` / `connection_status` / `connectionStatus()` は Task 6・8・9 で同じ 1 本の経路。Task 11 の `store.tsx` が購読の後に 1 度だけ読む
 - `spawn_dctld` は `Result<Child, String>` を返し、`supervise` の `still_starting()` が持つ（Task 5 で定義、Task 6 で消費）
 - `DEGRADED_UNKNOWN` は空文字にしない。`groupOf` が `t.degraded &&` で見るため（Task 10 のテストが縛る）
-- `stepDef(s, t)` は Task 10 以降つねに `undefined`。呼び出し側は `def?.` で受けている（`App.tsx` は Task 11 で参照ごと外す、`ReviewView.tsx` は Task 12 で既定値を入れる）
+- `stepDef` は Task 10 で削除し、**呼び出し側（`App.tsx` / `ReviewView.tsx` / `TaskView.tsx`）も同じタスクで外す**。各タスクの終わりで `pnpm build` が緑であることを保つため
