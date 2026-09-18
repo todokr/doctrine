@@ -1,5 +1,6 @@
 [tools]
 deno = "2.9.4"
+pnpm = "latest"
 rust = "stable"
 
 # worktree 初期化で使う。`mise run setup` を worktree 内で実行する。
