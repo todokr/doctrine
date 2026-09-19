@@ -1,5 +1,5 @@
 // テスト用の標本。画面はこれを使わない（画面のデータはデーモンから来る）
-import type { DiffFile, Guide, Project, StepDef, Task } from "./types";
+import type { Guide, Project, StepDef, Task, TaskDiff } from "./types";
 
 export const NOW = Date.parse("2026-09-15T15:00:00+09:00");
 export const MIN = 60000;
@@ -16,253 +16,6 @@ export const WORKFLOWS: Record<string, StepDef[]> = {
   "shop-api/hotfix": [st("setup","command"), st("fix","agent"), st("test","command"), st("confirm","approval",{ title: "本番反映前に確認してください", onReject: "fix" })],
   "blog/feature": [st("setup","command"), st("implement","agent"), st("build","command"), st("review","approval",{ title: "差分を確認してください", onReject: "implement" }), st("deploy-preview","command")],
 };
-
-const DIFF_2B91: DiffFile[] = [
-  { path: "src/daemon/handlers.ts", hunks: [
-    { old: 219, new: 219, body:
-`       case "worktree.list": {
--        const out: { project: string; orphans: string[] }[] = [];
-+        const out: WorktreeEntry[] = [];
-         for (const project of await listProjects(ctx.db)) {
--          const known = (await listTasks(ctx.db, { projectId: project.id }))
--            .map((t) => t.worktree_path).filter((p): p is string => p !== null);
--          out.push({ project: project.path, orphans: await findOrphans(project.path, known) });
-+          const tasks = await listTasks(ctx.db, { projectId: project.id });
-+          for (const wt of await listDoctrineWorktrees(project.path)) {
-+            const task = tasks.find((t) => t.worktree_path === wt.path) ?? null;
-+            out.push({
-+              project: project.path, path: wt.path, branch: wt.branch,
-+              task_id: task?.id ?? null, task_state: task?.state ?? null,
-+              dirty: await isDirty(wt.path),
-+              age_basis: task ? task.updated_at : wt.mtime,
-+            });
-+          }
-         }
-         return out;
-       }` },
-    { old: 228, new: 236, body:
-`       case "worktree.remove": {
--        const taskId = req(params, "task_id");
--        const task = await getTask(ctx.db, taskId);
--        if (!task?.worktree_path) throw new Error("worktree がありません");
-+        const target = await resolveRemoveTarget(ctx, params);
-+        if (target.task && !isTerminal(target.task.state)) {
-+          throw new Error("実行中のタスクの worktree は削除できません");
-+        }` },
-  ] },
-  { path: "src/core/worktree.ts", hunks: [
-    { old: 88, new: 88, body:
-` export async function findOrphans(repoPath: string, known: string[]) {
-   const all = await listDoctrineWorktrees(repoPath);
-   return all.filter((w) => !known.includes(w.path)).map((w) => w.path);
- }
-+
-+export function isUnderStateDir(path: string, stateDir: string): boolean {
-+  const rel = relative(join(stateDir, "worktrees"), resolve(path));
-+  return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
-+}` },
-  ] },
-  { path: "test/daemon/handlers.test.ts", hunks: [
-    { old: 402, new: 402, body:
-`+test("worktree.remove は state 配下にないパスを拒否する", async () => {
-+  const { handle } = await setup();
-+  await assert.rejects(
-+    handle("worktree.remove", { path: "/tmp/elsewhere" }),
-+    /state ディレクトリ配下ではありません/,
-+  );
-+});
-+
-+test("worktree.remove は実行中のタスクの worktree を force でも拒否する", async () => {
-+  const { handle, running } = await setupRunningTask();
-+  await assert.rejects(handle("worktree.remove", { task_id: running.id, force: true }));
-+});` },
-  ] },
-];
-
-const DIFF_1103: DiffFile[] = [
-  { path: "src/stock/reserve.ts", hunks: [
-    { old: 30, new: 30, body:
-` export async function reserve(db: Db, orderId: string, items: Item[]) {
--  for (const item of items) {
--    await db.insert("reservations", { orderId, sku: item.sku, qty: item.qty });
--  }
-+  const key = idempotencyKey(orderId, items);
-+  return await withRetry(async () => {
-+    return await db.transaction(async (tx) => {
-+      const existing = await tx.find("reservations", { key });
-+      if (existing) return existing;
-+      try {
-+        return await tx.insert("reservations", { key, orderId, items });
-+      } catch (e) {
-+        if (isUniqueViolation(e)) return await tx.find("reservations", { key });
-+        throw e;
-+      }
-+    });
-+  }, { attempts: 3, backoffMs: 200, jitter: true });
- }` },
-  ], since: [
-    { old: 35, new: 35, body:
-`       if (existing) return existing;
--      return await tx.insert("reservations", { key, orderId, items });
-+      try {
-+        return await tx.insert("reservations", { key, orderId, items });
-+      } catch (e) {
-+        if (isUniqueViolation(e)) return await tx.find("reservations", { key });
-+        throw e;
-+      }
-     });
--  }, { attempts: 3, backoffMs: 200 });
-+  }, { attempts: 3, backoffMs: 200, jitter: true });` },
-  ] },
-  { path: "test/stock/reserve.test.ts", hunks: [
-    { old: 0, new: 1, body:
-`+import { assert } from "../helpers.ts";
-+
-+test("同じ注文の再試行は引当を二重に作らない", async () => {
-+  const db = await freshDb();
-+  await reserve(db, "o-1", [{ sku: "A", qty: 1 }]);
-+  await reserve(db, "o-1", [{ sku: "A", qty: 1 }]);
-+  assert.equal(await db.count("reservations"), 1);
-+});
-+
-+test("同時に走った引当は一意制約違反を既存の行として扱う", async () => {
-+  const db = await freshDb();
-+  await Promise.all([reserve(db, "o-2", items), reserve(db, "o-2", items)]);
-+  assert.equal(await db.count("reservations"), 1);
-+});` },
-  ], since: [
-    { old: 7, new: 7, body:
-` });
-+
-+test("同時に走った引当は一意制約違反を既存の行として扱う", async () => {
-+  const db = await freshDb();
-+  await Promise.all([reserve(db, "o-2", items), reserve(db, "o-2", items)]);
-+  assert.equal(await db.count("reservations"), 1);
-+});` },
-  ] },
-  { path: "src/stock/idempotency.ts", hunks: [
-    { old: 0, new: 1, body:
-`+import { createHash } from "node:crypto";
-+
-+export function idempotencyKey(orderId: string, items: Item[]): string {
-+  const canonical = items.map((i) => i.sku + ":" + i.qty).sort().join(",");
-+  return createHash("sha256").update(orderId + "|" + canonical).digest("hex");
-+}` },
-  ] },
-];
-
-const DIFF_B204: DiffFile[] = [
-  { path: "src/pages/index.astro", hunks: [
-    { old: 12, new: 12, body:
-` const posts = (await getCollection("blog")).sort(byDate);
-+const PAGE_SIZE = 10;
-+const page = Number(Astro.url.searchParams.get("page") ?? "1");
-+const shown = posts.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
- ---
--{posts.map((p) => <PostCard post={p} />)}
-+{shown.map((p) => <PostCard post={p} />)}
-+<Pager page={page} total={Math.ceil(posts.length / PAGE_SIZE)} />` },
-  ] },
-  { path: "src/components/Pager.astro", hunks: [
-    { old: 0, new: 1, body:
-`+---
-+const { page, total } = Astro.props;
-+---
-+<nav class="pager">
-+  {page > 1 && <a href={"?page=" + (page - 1)}>前へ</a>}
-+  <span>{page} / {total}</span>
-+  {page < total && <a href={"?page=" + (page + 1)}>次へ</a>}
-+</nav>` },
-  ] },
-];
-
-const DIFF_9F21: DiffFile[] = [
-  { path: "src/workflow/schema.ts", hunks: [
-    { old: 41, new: 41, body:
-` const agentStep = baseStep.extend({
-   type: z.literal("agent"),
-   prompt: z.string(),
-+  // 同じ role を持つ agent ステップ同士が1本の会話を共有する。省略時は暗黙の既定ロール
-+  session: z.string().optional(),
-   permissionMode: z.enum(["default", "acceptEdits", "bypassPermissions"]).optional(),
- });` },
-  ] },
-  { path: "src/db/migrations.ts", hunks: [
-    { old: 0, new: 1, body:
-`+export const m011_task_sessions: Migration = {
-+  id: "011_task_sessions",
-+  up: async (db) => {
-+    await db.schema.createTable("task_sessions")
-+      .addColumn("task_id", "text", (c) => c.notNull())
-+      .addColumn("role", "text", (c) => c.notNull())
-+      .addColumn("claude_session_id", "text", (c) => c.notNull())
-+      .addPrimaryKeyConstraint("pk_task_sessions", ["task_id", "role"])
-+      .execute();
-+    // 既存の claude_session_id は役割「default」の行へ複写する（過去タスクの会話を失わないため）
-+    await copyLegacySessions(db);
-+  },
-+};` },
-  ] },
-  { path: "src/db/queries.ts", hunks: [
-    { old: 0, new: 1, body:
-`+export async function getSessionId(db: Db, taskId: string, role: string): Promise<string | null> {
-+  const row = await db.selectFrom("task_sessions")
-+    .select("claude_session_id")
-+    .where("task_id", "=", taskId).where("role", "=", role)
-+    .executeTakeFirst();
-+  return row?.claude_session_id ?? null;
-+}
-+
-+export async function sessionUpsert(db: Db, taskId: string, role: string, sessionId: string) {
-+  await db.insertInto("task_sessions")
-+    .values({ task_id: taskId, role, claude_session_id: sessionId })
-+    .onConflict((oc) => oc.columns(["task_id", "role"]).doUpdateSet({ claude_session_id: sessionId }))
-+    .execute();
-+}` },
-  ] },
-  { path: "src/core/engine.ts", hunks: [
-    { old: 118, new: 121, body:
-` async function runAgentStep(ctx: Ctx, task: Task, step: AgentStep) {
--  const sessionId = task.claude_session_id ?? null;
-+  const role = step.session ?? "default";
-+  const sessionId = await getSessionId(ctx.db, task.id, role);
-   const result = await runClaude(step.prompt, {
-     resume: sessionId,
-     permissionMode: step.permissionMode ?? "default",
-   });
--  await updateTask(ctx.db, task.id, { claude_session_id: result.session_id });
-+  await sessionUpsert(ctx.db, task.id, role, result.session_id);
-   return result;
- }` },
-  ] },
-  { path: "test/core/engine.test.ts", hunks: [
-    { old: 60, new: 60, body:
-`+test("agent ステップは role 単位でセッションを共有する", async () => {
-+  const { ctx, task } = await setupGuidedTask();
-+  await runAgentStep(ctx, task, { ...planStep, session: "planner" });
-+  await runAgentStep(ctx, task, { ...implementStep, session: "implementer" });
-+  const resumed = await runAgentStep(ctx, task, { ...planStep, session: "planner" });
-+  assert.equal(resumed.resumedSessionId, await getSessionId(ctx.db, task.id, "planner"));
-+});
-+
-+test("session 省略時は暗黙の既定ロールを使う", async () => {
-+  const { ctx, task } = await setupGuidedTask();
-+  await runAgentStep(ctx, task, implementStepNoSession);
-+  assert.ok(await getSessionId(ctx.db, task.id, "default"));
-+});` },
-  ] },
-  { path: "test/db/migrations.test.ts", hunks: [
-    { old: 40, new: 40, body:
-`+test("011_task_sessions は既存の claude_session_id を default ロールへ複写する", async () => {
-+  const db = await freshDbAtMigration(10);
-+  await db.updateTable("tasks").set({ claude_session_id: "sess-abc" }).where("id", "=", "t1").execute();
-+  await runMigration(db, m011_task_sessions);
-+  const row = await db.selectFrom("task_sessions").selectAll()
-+    .where("task_id", "=", "t1").where("role", "=", "default").executeTakeFirst();
-+  assert.equal(row?.claude_session_id, "sess-abc");
-+});` },
-  ] },
-];
 
 const GUIDE_9F21: Guide = {
   why: "差し戻しのたびに implement ステップの会話が単一の暗黙ロールに閉じていたため、plan ステップで積んだ文脈と implement ステップの文脈が同じ会話に混ざっていた。role ごとにセッションを分け、差し戻された agent ステップに戻ったとき、その役割の会話だけを --resume できるようにする。",
@@ -311,22 +64,6 @@ const GUIDE_9F21: Guide = {
   ],
 };
 
-const PLAN_MD = `# 計画: Review Guide の保存形式
-## 目的
-③ のレビュー画面が読む Review Guide を、エージェントが worktree に書き出す形式を決める。
-## 変更対象
-- \`.doctrine-out/guide.json\` を新設し、スキーマを zod で定義する
-- \`src/workflow/schema.ts\` は変えない（doctrine はガイドの中身を理解しない）
-## 方針
-1. Why / What / How / Reading Order / Key Decisions / Risks / Tests の7節を持つ JSON にする
-2. Reading Order の各項目に \`path\` と \`lines\` を持たせ、diff と機械的に照合できるようにする
-3. Markdown ではなく JSON にする。照合に構造が要るため
-## リスク
-- エージェントが JSON を壊すと表示できない。検証に失敗したら生の文字列をそのまま出す
-## テスト方針
-- 7節のどれかが欠けた JSON を検証が落とすこと
-- Reading Order に diff に無いパスが入っていたら警告になること`;
-
 const LOG_TEST_FAIL = `$ deno task test
 running 41 tests from ./test/daemon/handlers.test.ts
   daemon.warning は後始末の失敗を1回だけ送る ... FAILED (9ms)
@@ -361,31 +98,14 @@ export const FOLLOW_POOL = [
 
 // 状態は doctrine の7状態。degraded / refused はフラグ。
 // worktree は seedTasks が state から決めるので、dctl gc で消した後の姿は gced で指定する
-type Seed =
-  & Omit<Task, "project" | "prompt" | "branch" | "worktree" | "diff" | "reviews">
-  & Partial<Pick<Task, "diff" | "reviews">>
-  & { gced?: true };
+type Seed = Omit<Task, "project" | "prompt" | "branch" | "worktree"> & { gced?: true };
 
 const SEEDS: Seed[] = [
-  { id: "t-9f21", wf: "doctrine/guided", title: "ステップの再開をロール単位のセッションに切り替える", state: "suspended", step: "human-review", attempt: 1, prio: 1, since: NOW - 8 * MIN, diff: DIFF_9F21, guide: GUIDE_9F21, reviews: [],
-    lastCommand: null,
-    lastAgentMessage: "role ごとの task_sessions テーブルを追加し、agent ステップ実行の前後で getSessionId / sessionUpsert を呼ぶように変更しました。既存タスクの claude_session_id は default ロールへ複写するマイグレーションも足しています。テストは通っています。" },
-  { id: "t-2b91", wf: "doctrine/feature", title: "worktree.list をディスク上の全件にする", state: "suspended", step: "review", attempt: 1, prio: 2, since: NOW - 42 * MIN, diff: DIFF_2B91, reviews: [],
-    lastCommand: { stepId: "test", exitCode: 0, stdout: "running 41 tests from ./test/daemon/handlers.test.ts\nok | 41 passed | 0 failed (6s)", stderr: "" },
-    lastAgentMessage: "worktree.list を、孤児だけでなく管理下の全 worktree を返すように書き換えました。task_id / task_state を突き合わせ、age_basis はタスクがあれば終了時刻、孤児ならディレクトリの mtime を使うようにしています。テストは41件とも通っています。" },
-  { id: "s-1103", wf: "shop-api/feature", title: "在庫引当のリトライを冪等にする", state: "suspended", step: "review", attempt: 2, prio: 1, since: NOW - 15 * MIN, diff: DIFF_1103,
-    reviews: [{ at: NOW - 140 * MIN, comment: "src/stock/reserve.ts:36\n  > return await tx.insert(\"reservations\", { key, orderId, items });\n  同時に2つ走ると一意制約違反で落ちます。既存の行として扱ってください\n\n全体: 同時実行のテストも足してください" }],
-    lastCommand: { stepId: "test", exitCode: 0, stdout: "running 12 tests from ./test/stock/reserve.test.ts\nok | 12 passed | 0 failed (2s)", stderr: "" },
-    lastAgentMessage: "ご指摘の一意制約違反を、トランザクション内で find してから insert し、失敗時は find し直す形に直しました。同時実行のテストも2本追加しています。" },
-  { id: "t-a1b2", wf: "doctrine/guided", title: "Review Guide の保存形式を試す", state: "suspended", step: "plan-approval", attempt: 1, prio: 2, since: NOW - 130 * MIN, diff: [], reviewFiles: [
-      { path: ".doctrine-out/plan.md", status: "ok", content: PLAN_MD, size: PLAN_MD.length },
-    ], reviews: [],
-    lastCommand: null,
-    lastAgentMessage: "Review Guide の保存形式について JSON 案と Markdown 案を比較し、diff との機械照合のしやすさから JSON を選ぶ計画を .doctrine-out/plan.md に書きました。まだ実装はしていません。" },
-  { id: "b-204", wf: "blog/feature", title: "記事一覧にページネーションを付ける", state: "suspended", step: "review", attempt: 1, prio: 3, since: NOW - 60 * 26 * MIN, diff: DIFF_B204, reviews: [],
-    lastCommand: { stepId: "build", exitCode: 0, stdout: "$ astro build\n12 page(s) built in 1.8s", stderr: "" },
-    lastAgentMessage: "index.astro にページングを追加し、Pager コンポーネントを新設しました。1ページ10件です。" },
-
+  { id: "t-9f21", wf: "doctrine/guided", title: "ステップの再開をロール単位のセッションに切り替える", state: "suspended", step: "human-review", attempt: 1, prio: 1, since: NOW - 8 * MIN, guide: GUIDE_9F21 },
+  { id: "t-2b91", wf: "doctrine/feature", title: "worktree.list をディスク上の全件にする", state: "suspended", step: "review", attempt: 1, prio: 2, since: NOW - 42 * MIN },
+  { id: "s-1103", wf: "shop-api/feature", title: "在庫引当のリトライを冪等にする", state: "suspended", step: "review", attempt: 2, prio: 1, since: NOW - 15 * MIN },
+  { id: "t-a1b2", wf: "doctrine/guided", title: "Review Guide の保存形式を試す", state: "suspended", step: "plan-approval", attempt: 1, prio: 2, since: NOW - 130 * MIN },
+  { id: "b-204", wf: "blog/feature", title: "記事一覧にページネーションを付ける", state: "suspended", step: "review", attempt: 1, prio: 3, since: NOW - 60 * 26 * MIN },
   { id: "t-e812", wf: "doctrine/feature", title: "daemon.warning イベントを追加する", state: "failed", step: "test", attempt: 3, prio: 2, since: NOW - 60 * 26 * MIN, log: LOG_TEST_FAIL, dirty: true },
   { id: "t-6ba3", wf: "doctrine/feature", title: "ratelimit のサンプルを日次で丸める", state: "failed", step: "test", attempt: 1, prio: 2, since: NOW - 60 * 24 * 12 * MIN, gced: true, log: LOG_TEST_FAIL },
   { id: "t-3cd2", wf: "doctrine/feature", title: "gc の確認文言を直す", state: "completed", step: "open-pr", attempt: 1, prio: 2, since: NOW - 95 * MIN, refused: true, dirty: true, log: "$ gh pr create --fill\nhttps://github.com/todokr/doctrine/pull/31\nexit 0" },
@@ -414,11 +134,60 @@ export function seedTasks(): Task[] {
     return {
       ...t,
       project,
-      diff: t.diff ?? [],
-      reviews: t.reviews ?? [],
       prompt: `${t.title}。詳細は issue を参照してください。`,
       branch: `doctrine/${t.id}-${t.title.length}`,
       worktree: keepWorktree ? `~/.local/state/doctrine/worktrees/${project}/${t.id}` : null,
     };
   });
 }
+
+/**
+ * 本物の `git diff` から起こした task.diff の応答。
+ * 変更・追加・削除・リネーム・バイナリが1件ずつ入っていて、
+ * リネームは中身が変わっていないので patch に hunk を持たない。
+ */
+export const SAMPLE_DIFF: TaskDiff = {
+  base: { branch: "develop", merge_base: "3efbc75f70aeae7989a3dc4db95bdfc52b6c504a" },
+  since_step_run_id: null,
+  files: [
+    { path: "logo.png", status: "M", binary: true },
+    { path: "src/added.ts", status: "A", binary: false, additions: 1, deletions: 0 },
+    { path: "src/gone.ts", status: "D", binary: false, additions: 0, deletions: 1 },
+    { path: "src/keep.ts", status: "M", binary: false, additions: 2, deletions: 2 },
+    { path: "src/renamed.ts", status: "R", old_path: "src/moved.ts", binary: false, additions: 0, deletions: 0 },
+  ],
+  patch: `diff --git a/logo.png b/logo.png
+index 742c16a..674f206 100644
+Binary files a/logo.png and b/logo.png differ
+diff --git a/src/added.ts b/src/added.ts
+new file mode 100644
+index 0000000..fa49b07
+--- /dev/null
++++ b/src/added.ts
+@@ -0,0 +1 @@
++new file
+diff --git a/src/gone.ts b/src/gone.ts
+deleted file mode 100644
+index 3367afd..0000000
+--- a/src/gone.ts
++++ /dev/null
+@@ -1 +0,0 @@
+-old
+diff --git a/src/keep.ts b/src/keep.ts
+index 104f954..967f419 100644
+--- a/src/keep.ts
++++ b/src/keep.ts
+@@ -1,4 +1,4 @@
+ /* 先頭の
+    ブロックコメント */
+-export const greet = (name: string) => \`hello \${name}\`;
+-const n = 1;
++export const greet = (name: string) => \`hi \${name}!\`;
++const n = 2;
+diff --git a/src/moved.ts b/src/renamed.ts
+similarity index 100%
+rename from src/moved.ts
+rename to src/renamed.ts
+`,
+  truncated: false,
+};

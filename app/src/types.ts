@@ -1,4 +1,14 @@
 // 画面が扱う形。デーモンにつなぐときに shared/protocol.ts の型へ寄せる
+import type {
+  CommandResult,
+  DiffFileMeta,
+  ReviewEntry,
+  ReviewFile,
+  TaskContext,
+  TaskDiff,
+} from "../../shared/protocol.ts";
+
+export type { CommandResult, ReviewEntry, ReviewFile, TaskContext, TaskDiff };
 
 /**
  * デーモンが知らない状態を返したとき用。版のずれ（新しい dctld ＋ 古い画面）で起こりうる。
@@ -17,22 +27,18 @@ export type StepDef = {
   review?: { files: string[] };
 };
 
-export type Hunk = { old: number; new: number; body: string };
-export type DiffFile = { path: string; hunks: Hunk[]; since?: Hunk[] };
+export type DiffHunk = { old: number; new: number; body: string };
 
-// デーモン側（core/src/domain/reviewFiles.ts）と同じ判別ユニオン。
-export type ReviewFileStatus = "ok" | "missing" | "too_large" | "outside_worktree" | "binary";
-export type ReviewFile =
-  | { path: string; status: "ok"; content: string; size: number }
-  | { path: string; status: "missing" }
-  | { path: string; status: "too_large"; size: number }
-  | { path: string; status: "outside_worktree" }
-  | { path: string; status: "binary"; size: number };
-
-// デーモンの ReviewEntry（4系統の判別ユニオン、core/src/domain/taskContext.ts）とはまだ揃えていない。
-// この Review はモックの単純な形のままで、揃えるのはデーモンと UI を繋ぐ変更（別対応）で行う。
-export type Review = { at: number; comment: string };
-export type CommandResult = { stepId: string; exitCode: number | null; stdout: string; stderr: string };
+/**
+ * 画面が描く1ファイル。task.diff の files[] の1件（DiffFileMeta）に、
+ * patch から取り出した hunk を足したもの。リネーム・バイナリの持ち方は
+ * デーモンのまま引き継ぐので、「バイナリなのに行数」は型が作れない。
+ */
+export type DiffFile = DiffFileMeta & {
+  hunks: DiffHunk[];
+  /** patch が打ち切られて、このファイルの中身までは届かなかった */
+  cutOff: boolean;
+};
 
 export type SequenceDiagram = { actors: string[]; messages: { from: string; to: string; label: string }[] };
 export type ReadingStep = { title: string; paths: string[]; diagram: "sequence" | "relation" | null; explain: string };
@@ -61,12 +67,7 @@ export type Task = {
   since: number;
   /** 上限待ちのタスクが再開してよい時刻。task.stateChanged では埋まらないので null になりうる */
   resumeAt?: number | null;
-  diff: DiffFile[];
-  reviews: Review[];
   guide?: Guide;
-  reviewFiles?: ReviewFile[];
-  lastCommand?: CommandResult | null;
-  lastAgentMessage?: string | null;
   // どの画面も今は読まない。task.logs の follow（#47）で本物のログに置き換わるまでの残骸
   log?: string;
   dirty?: boolean;

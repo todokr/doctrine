@@ -1,10 +1,20 @@
-import { Fragment } from "react";
-import { diffLines, diffStats, draftOf } from "../model";
+import { Fragment, useMemo, type ReactNode } from "react";
+import { highlightHunk, languageOf } from "../highlight";
+import { diffLines, draftOf } from "../model";
 import { useStore } from "../store";
-import type { DiffFile, Task } from "../types";
-import { Highlight } from "./text";
+import type { DiffFile, DiffHunk, Task } from "../types";
 
 export const fileAnchor = (path: string) => `file-${path}`;
+
+/** ファイル一覧に出す増減。バイナリは行数を持たない（数えられない）ので、そう書く */
+export function fileStat(f: DiffFile): ReactNode {
+  if (f.binary) return <span className="hint">バイナリ</span>;
+  return <><span className="add">+{f.additions}</span><span className="del">−{f.deletions}</span></>;
+}
+
+const STATUS_LABEL: Record<DiffFile["status"], string> = {
+  A: "追加", M: "変更", D: "削除", R: "移動",
+};
 
 function LineComments({ t, path, line }: { t: Task; path: string; line: number }) {
   const { s, dispatch } = useStore();
@@ -35,33 +45,51 @@ function LineComments({ t, path, line }: { t: Task; path: string; line: number }
   );
 }
 
-export function DiffFileBlock({ t, file }: { t: Task; file: DiffFile }) {
+function Hunk({ t, path, hunk, language }: { t: Task; path: string; hunk: DiffHunk; language: string | null }) {
   const { dispatch } = useStore();
-  const { add, del } = diffStats(file);
+  // hunk 1つをまとめて解析する。行ごとに呼ぶと、行をまたぐトークンが解けない
+  const lines = useMemo(() => diffLines(hunk), [hunk]);
+  const tokens = useMemo(() => highlightHunk(lines, language), [lines, language]);
+  return (
+    <>
+      <div className="hunk">@@ -{hunk.old} +{hunk.new} @@</div>
+      {lines.map((l, li) => (
+        <Fragment key={li}>
+          <div className={`ln ${l.kind}`}>
+            <span className="o">{l.old ?? ""}</span>
+            <span className="n">{l.new ?? ""}</span>
+            <button className="cm" aria-label={`${l.line}行目にコメント`} onClick={() => dispatch({ type: "comment.new", path, line: l.line, quote: l.text.trim() })}>+</button>
+            <span className="c">
+              {tokens[li].map((p, pi) => (
+                p.cls ? <span key={pi} className={`tk-${p.cls}`}>{p.text}</span> : <Fragment key={pi}>{p.text}</Fragment>
+              ))}
+            </span>
+          </div>
+          <LineComments t={t} path={path} line={l.line} />
+        </Fragment>
+      ))}
+    </>
+  );
+}
+
+export function DiffFileBlock({ t, file }: { t: Task; file: DiffFile }) {
+  const language = useMemo(() => languageOf(file.path), [file.path]);
   return (
     <section className="file" id={fileAnchor(file.path)}>
       <header>
         <span className="nm">{file.path}</span>
-        <span className="add mono">+{add}</span>
-        <span className="del mono">−{del}</span>
+        {file.status === "R" && <span className="hint mono">← {file.old_path}</span>}
+        <span className="hint">{STATUS_LABEL[file.status]}</span>
+        {fileStat(file)}
       </header>
       <div className="code">
-        {file.hunks.map((h, hi) => (
-          <Fragment key={hi}>
-            <div className="hunk">@@ -{h.old} +{h.new} @@</div>
-            {diffLines(h).map((l, li) => (
-              <Fragment key={li}>
-                <div className={`ln ${l.kind}`}>
-                  <span className="o">{l.old ?? ""}</span>
-                  <span className="n">{l.new ?? ""}</span>
-                  <button className="cm" aria-label={`${l.line}行目にコメント`} onClick={() => dispatch({ type: "comment.new", path: file.path, line: l.line, quote: l.text.trim() })}>+</button>
-                  <span className="c"><Highlight code={l.text} /></span>
-                </div>
-                <LineComments t={t} path={file.path} line={l.line} />
-              </Fragment>
-            ))}
-          </Fragment>
-        ))}
+        {file.binary
+          ? <p className="hint" style={{ padding: "8px 12px" }}>バイナリファイルのため中身は表示しません</p>
+          : file.cutOff
+            ? <p className="hint" style={{ padding: "8px 12px" }}>diff が打ち切られたため、このファイルの中身は届いていません</p>
+            : file.hunks.length === 0
+              ? <p className="hint" style={{ padding: "8px 12px" }}>中身の変更はありません（モードや名前だけの変更）</p>
+              : file.hunks.map((h, hi) => <Hunk key={hi} t={t} path={file.path} hunk={h} language={language} />)}
       </div>
     </section>
   );
