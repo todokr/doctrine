@@ -72,12 +72,18 @@ export type EngineDeps = RunnerDeps & {
   globalLimit: number;
   onStateChanged?(taskId: string, from: TaskState, to: TaskState): void;
   onStepRunStarted?(taskId: string, stepRunId: number, stepId: string, attempt: number): void;
-  /** stepRunId は commitStepBoundary が返した step_runs.id。イベントがこれを載せる。 */
+  /**
+   * stepRunId は commitStepBoundary が返した step_runs.id。イベントがこれを載せる。
+   * status は step_runs に**記録した**値（差し戻しなら bounced）。gotoStepId は
+   * その差し戻し先で、差し戻しでなければ null。
+   */
   onStepRunFinished?(
     taskId: string,
     stepRunId: number,
     stepId: string,
     status: StepRunStatus,
+    gotoStepId: string | null,
+    attempt: number,
   ): void;
   /**
    * ワークフローは止めないが人に見せるべきこと（レビュー時点のツリーを記録できな
@@ -325,17 +331,32 @@ export async function runTask(
       );
     pendingFeed = null;
 
+    // 決定を終了のコミットより前に出す。差し戻し（goto が発火した実行）と本当の
+    // 失敗（分岐先が無い・maxAttempts を使い切った）は、決定を知らないと書き分け
+    // られない。渡す attempts はステップ開始コミットで進めた後の数でなければ
+    // ならず、それは開始時に算出済みの attempt がそのまま持っている
+    // （タスクの読み直しは要らない）。判断規則そのものは decide のまま変えない。
+    const decision = decide({
+      workflow,
+      currentStepId: step.id,
+      outcome: outcome.status,
+      attempts: attempt,
+    });
+    const bounced = decision.kind === "goto";
+    const recordedStatus: StepRunStatus = bounced ? "bounced" : outcome.status as StepRunStatus;
+
     await commitStepBoundary(db, {
       taskId,
       taskPatch: { child_pid: null, child_started_at: null },
       stepRunUpdate: {
         id: stepRunId,
-        status: outcome.status as StepRunStatus,
+        status: recordedStatus,
         exit_code: outcome.exitCode,
         ended_at: outcome.endedAt,
         cost_usd: outcome.costUsd,
         num_turns: outcome.numTurns,
         duration_ms: outcome.durationMs,
+        goto_step_id: bounced ? decision.stepId : null,
       },
       outputs: {
         last_stdout: outcome.stdout,
@@ -343,15 +364,17 @@ export async function runTask(
         exit_code: outcome.exitCode,
       },
     });
-    deps.onStepRunFinished?.(taskId, stepRunId, step.id, outcome.status as StepRunStatus);
+    // イベントとDBが食い違わないよう、渡すのは記録した status。
+    deps.onStepRunFinished?.(
+      taskId,
+      stepRunId,
+      step.id,
+      recordedStatus,
+      bounced ? decision.stepId : null,
+      attempt,
+    );
 
     task = (await getTask(db, taskId))!;
-    const decision = decide({
-      workflow,
-      currentStepId: step.id,
-      outcome: outcome.status,
-      attempts: attemptCount(task, step.id),
-    });
 
     switch (decision.kind) {
       case "next":
@@ -447,10 +470,9 @@ export async function applyApproval(
   const ctx = await contextFor(db, task);
   ctx.steps[stepId] = { last_stdout: verdict.comment, last_stderr: "", exitCode: "1" };
 
-  // 「却下をどう記録するか」は goto の枝でも fail の枝でも同じ1つの決定なので、
-  // 1箇所に置く（逐語で2つ書くと、将来変えたとき片方だけ直る）。
-  const rejected = {
-    stepRunUpdate: { id: awaiting.id, status: "failed" as const, exit_code: 1, ended_at: now },
+  // 却下コメントの書き方はどちらの枝でも同じ。status だけは枝で分かれる
+  // （前のステップへ戻る却下は差し戻しであってタスクの失敗ではない）。
+  const comment = {
     outputs: { last_stdout: verdict.comment, last_stderr: "", exit_code: 1 },
   };
 
@@ -466,7 +488,14 @@ export async function applyApproval(
         resumed: 1,
         pending_feed: decision.feed ? expand(decision.feed, ctx) : null,
       },
-      ...rejected,
+      stepRunUpdate: {
+        id: awaiting.id,
+        status: "bounced",
+        exit_code: 1,
+        ended_at: now,
+        goto_step_id: decision.stepId,
+      },
+      ...comment,
     });
     return;
   }
@@ -478,6 +507,7 @@ export async function applyApproval(
     taskId,
     requireState: "suspended",
     taskPatch: { state: "failed" },
-    ...rejected,
+    stepRunUpdate: { id: awaiting.id, status: "failed", exit_code: 1, ended_at: now },
+    ...comment,
   });
 }

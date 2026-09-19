@@ -392,7 +392,8 @@ const SEEDS: Seed[] = [
   { id: "s-1202", wf: "shop-api/hotfix", title: "注文日時のタイムゾーンずれ", state: "running", step: "test", attempt: 1, prio: 0, since: NOW - 23 * MIN, degraded: "fix", log: LOG_DEGRADED },
 
   { id: "t-7f3a", wf: "doctrine/feature", title: "task.cleanedUp イベントを追加する", state: "running", step: "implement", attempt: 1, prio: 1, since: NOW - 11 * MIN, log: LOG_RUNNING },
-  { id: "t-c04d", wf: "doctrine/feature", title: "workflow.list にステップを載せる", state: "running", step: "implement", attempt: 2, prio: 2, since: NOW - 134 * MIN, log: "[test #1] FAILED | 1 failed\nassistant: テストの失敗を受けて setupStep の挿入位置を直します\ntool_use Edit src/workflow/project.ts (+5 −2)" },
+  // test が1回差し戻した結果、implement が2周目に入っている
+  { id: "t-c04d", wf: "doctrine/feature", title: "workflow.list にステップを載せる", state: "running", step: "implement", attempt: 2, prio: 2, since: NOW - 134 * MIN, bounce: { step: "test", goto: "implement", attempt: 1 }, log: "[test #1] FAILED | 1 failed\nassistant: テストの失敗を受けて setupStep の挿入位置を直します\ntool_use Edit src/workflow/project.ts (+5 −2)" },
   { id: "s-1102", wf: "shop-api/feature", title: "注文 API にカーソルページングを入れる", state: "running", step: "lint", attempt: 1, prio: 2, since: NOW - 48 * MIN, log: "$ deno lint\nChecked 214 files" },
 
   { id: "s-1104", wf: "shop-api/feature", title: "価格改定バッチの分割実行", state: "queued", step: null, attempt: 0, prio: 0, since: NOW - 4 * MIN },

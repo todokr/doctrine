@@ -615,13 +615,15 @@ async function tickOnce(ctx: DaemonContext): Promise<void> {
             step_id: stepId,
           });
         },
-        onStepRunFinished: (id, stepRunId, stepId, status) =>
+        onStepRunFinished: (id, stepRunId, stepId, status, gotoStepId, attempt) =>
           ctx.broadcast({
             event: "stepRun.finished",
             task_id: id,
             step_run_id: stepRunId,
             step_id: stepId,
             status,
+            goto_step_id: gotoStepId,
+            attempt,
           }),
         onRateLimit: (s) =>
           ctx.broadcast({

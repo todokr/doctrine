@@ -251,6 +251,90 @@ const migrations: Record<string, Migration> = {
         .renameColumn("stderr", "last_stderr").execute();
     },
   },
+  /**
+   * 差し戻し（onFailure / onReject の goto が発火した実行）を、分岐先の無い
+   * 本当の失敗と区別できるようにする。status に 'bounced' を足し、戻り先を
+   * goto_step_id が持つ。
+   *
+   * 0003 と違い、ここでの step_outputs.step_run_id は step_runs.id を参照して
+   * いる。foreign_keys = ON（migrate.ts）のまま step_runs を DROP すると、
+   * 参照している step_outputs の行に暗黙の DELETE が走って出力が消える。
+   * defer_foreign_keys は違反の検査を COMMIT まで遅らせるだけで、この DELETE
+   * 自体は止められない。そこで step_outputs を外部キーの無い一時テーブルへ
+   * 退避してから step_runs を作り直し、後で戻す。
+   *
+   * 既存の failed 行は遡って直さない。その行が差し戻しだったかは当時の
+   * ワークフロー定義が無いと決まらないので、goto_step_id は NULL のままにする。
+   */
+  "0005_step_run_bounced": {
+    // deno-lint-ignore no-explicit-any
+    async up(db: Kysely<any>) {
+      // --- 1. step_outputs を外部キーの無い一時テーブルへ退避する ---
+      // CREATE TABLE ... AS SELECT は制約を引き継がないので、step_runs を
+      // drop しても連鎖 DELETE が走らない。
+      await sql`CREATE TABLE step_outputs_backup AS SELECT * FROM step_outputs`.execute(db);
+      await db.schema.dropTable("step_outputs").execute();
+
+      // --- 2. step_runs の再構築（bounced と goto_step_id） ---
+      await db.schema.createTable("step_runs_new")
+        .addColumn("id", "integer", (c) => c.primaryKey().autoIncrement())
+        .addColumn("task_id", "text", (c) => c.notNull().references("tasks.id"))
+        .addColumn("step_id", "text", (c) => c.notNull())
+        .addColumn("attempt", "integer", (c) => c.notNull())
+        .addColumn("status", "text", (c) =>
+          c.notNull().check(
+            sql`status IN ('running','awaiting','success','failed','degraded','interrupted','bounced')`,
+          ))
+        .addColumn("exit_code", "integer")
+        .addColumn("started_at", "text", (c) => c.notNull())
+        .addColumn("ended_at", "text")
+        .addColumn("log_path", "text", (c) => c.notNull())
+        .addColumn("cost_usd", "real")
+        .addColumn("num_turns", "integer")
+        .addColumn("duration_ms", "integer")
+        .addColumn("review_tree", "text")
+        .addColumn("goto_step_id", "text")
+        // 「分岐先のある失敗」「分岐先の無い差し戻し」という読めない行を入れない。
+        .addCheckConstraint(
+          "step_runs_goto_step_id_bounced",
+          sql`(status = 'bounced') = (goto_step_id IS NOT NULL)`,
+        )
+        .execute();
+      // id を含めてコピーする。step_outputs の参照がこの id を使う。
+      await sql`
+        INSERT INTO step_runs_new
+          (id, task_id, step_id, attempt, status, exit_code, started_at, ended_at,
+           log_path, cost_usd, num_turns, duration_ms, review_tree, goto_step_id)
+        SELECT id, task_id, step_id, attempt, status, exit_code, started_at, ended_at,
+               log_path, cost_usd, num_turns, duration_ms, review_tree, NULL
+        FROM step_runs
+      `.execute(db);
+      await db.schema.dropTable("step_runs").execute();
+      await db.schema.alterTable("step_runs_new").renameTo("step_runs").execute();
+      await db.schema.createIndex("idx_step_runs_task")
+        .on("step_runs").columns(["task_id", "id"]).execute();
+
+      // --- 3. step_outputs を作り直して退避した行を戻す ---
+      await db.schema.createTable("step_outputs")
+        .addColumn("step_run_id", "integer", (c) => c.primaryKey().references("step_runs.id"))
+        .addColumn("last_stdout", "text", (c) => c.notNull())
+        .addColumn("last_stderr", "text", (c) => c.notNull())
+        .addColumn("exit_code", "integer")
+        .execute();
+      await sql`
+        INSERT INTO step_outputs (step_run_id, last_stdout, last_stderr, exit_code)
+        SELECT step_run_id, last_stdout, last_stderr, exit_code FROM step_outputs_backup
+      `.execute(db);
+      await db.schema.dropTable("step_outputs_backup").execute();
+
+      const violations = await sql<{ table: string }>`PRAGMA foreign_key_check`.execute(db);
+      if (violations.rows.length > 0) {
+        throw new Error(
+          `外部キーが壊れています: ${violations.rows.map((r) => r.table).join(", ")}`,
+        );
+      }
+    },
+  },
 };
 
 /** ファイルを動的 import しない（権限も要らず、deno check で型検査される）。 */

@@ -63,6 +63,7 @@ async function run(
     startedAt?: string;
     endedAt?: string | null;
     reviewTree?: string | null;
+    gotoStepId?: string | null;
     outputs?: { last_stdout: string; last_stderr: string; exit_code: number | null };
   },
 ): Promise<number> {
@@ -78,6 +79,7 @@ async function run(
       ended_at: o.endedAt ?? "2026-09-19T00:01:00.000Z",
       log_path: o.stepId === "review" ? "" : "/logs/x.log",
       review_tree: o.reviewTree ?? null,
+      goto_step_id: o.gotoStepId ?? null,
     },
     outputs: o.outputs,
   });
@@ -169,6 +171,34 @@ test("レビューは古い順に、状態ごとに違う形で返る", async ()
   assert.equal(reviews[1].status, "awaiting");
   assert.equal("endedAt" in reviews[1], false, "待機中の回に決定時刻のキーは無い");
   assert.equal("comment" in reviews[1], false, "待機中の回にコメントのキーは無い");
+});
+
+test("前のステップへ戻した却下（bounced）も rejected として読める", async () => {
+  const db = await fixture();
+  await run(db, {
+    stepId: "review",
+    status: "bounced",
+    attempt: 1,
+    gotoStepId: "implement",
+    startedAt: "2026-09-19T01:00:00.000Z",
+    endedAt: "2026-09-19T02:00:00.000Z",
+    reviewTree: "c".repeat(40),
+    outputs: { last_stdout: "直してください", last_stderr: "", exit_code: 1 },
+  });
+
+  const { reviews } = await buildTaskContext(db, (await getTask(db, "t1"))!, WORKFLOW);
+  assert.equal(reviews.length, 1);
+  // レビュー画面にとって却下は1種類。戻り先の有無で見え方は変わらない。
+  assert.deepEqual(reviews[0], {
+    stepRunId: reviews[0].stepRunId,
+    stepId: "review",
+    attempt: 1,
+    status: "rejected",
+    startedAt: "2026-09-19T01:00:00.000Z",
+    endedAt: "2026-09-19T02:00:00.000Z",
+    reviewTree: "c".repeat(40),
+    comment: "直してください",
+  });
 });
 
 test("承認された回は approved で、コメントのキーを持たない", async () => {

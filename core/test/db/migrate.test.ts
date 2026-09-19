@@ -220,6 +220,7 @@ const COLUMNS = {
     num_turns: true,
     duration_ms: true,
     review_tree: true,
+    goto_step_id: true,
   },
   step_outputs: { step_run_id: true, last_stdout: true, last_stderr: true, exit_code: true },
   task_sessions: { task_id: true, role: true, session_id: true },
@@ -391,6 +392,7 @@ test("開き直してもマイグレーションは二度流れず、データ�
     "0002_task_sessions",
     "0003_review_records",
     "0004_step_outputs_last_names",
+    "0005_step_run_bounced",
   ]);
   await first.destroy();
 
@@ -401,6 +403,7 @@ test("開き直してもマイグレーションは二度流れず、データ�
       "0002_task_sessions",
       "0003_review_records",
       "0004_step_outputs_last_names",
+      "0005_step_run_bounced",
     ]);
     assert.equal((await second.selectFrom("projects").selectAll().execute()).length, 1);
   } finally {
@@ -431,6 +434,7 @@ test("pending_feed を足す前に作られたDBファイルは、行を保っ�
       "0002_task_sessions",
       "0003_review_records",
       "0004_step_outputs_last_names",
+      "0005_step_run_bounced",
     ]);
     const old = await getTask(d, "old");
     assert.equal(old?.state, "suspended", "既存の行は残る");
@@ -513,6 +517,7 @@ test("step_runs は awaiting と interrupted を受け付ける", async () => {
       ended_at: null,
       log_path: "",
       review_tree: null,
+      goto_step_id: null,
     }).execute();
   }
   const rows = await d.selectFrom("step_runs").select("status").where("task_id", "=", "t1")
@@ -544,8 +549,97 @@ test("未知の status は CHECK 制約で落ちる", async () => {
       ended_at: null,
       log_path: "",
       review_tree: null,
+      goto_step_id: null,
     }).execute()
   );
+});
+
+test("step_runs は bounced を受け付け、差し戻し先を goto_step_id に持つ", async () => {
+  const d = await db();
+  const pid = await seed(d);
+  await insertTask(d, {
+    id: "t1",
+    project_id: pid,
+    title: "T",
+    prompt: "P",
+    workflow_name: "feature",
+    branch: "b",
+    priority: 2,
+  });
+  await d.insertInto("step_runs").values({
+    task_id: "t1",
+    step_id: "plan-gate",
+    attempt: 1,
+    status: "bounced",
+    exit_code: 1,
+    started_at: "2026-09-19T00:00:00.000Z",
+    ended_at: "2026-09-19T00:01:00.000Z",
+    log_path: "",
+    review_tree: null,
+    goto_step_id: "plan",
+  }).execute();
+  const rows = await d.selectFrom("step_runs").selectAll().where("task_id", "=", "t1").execute();
+  assert.equal(rows[0].status, "bounced");
+  assert.equal(rows[0].goto_step_id, "plan");
+});
+
+test("bounced と goto_step_id の対応は CHECK 制約で固定されている", async () => {
+  const d = await db();
+  const pid = await seed(d);
+  await insertTask(d, {
+    id: "t1",
+    project_id: pid,
+    title: "T",
+    prompt: "P",
+    workflow_name: "feature",
+    branch: "b",
+    priority: 2,
+  });
+  const row = {
+    task_id: "t1",
+    step_id: "plan-gate",
+    attempt: 1,
+    exit_code: 1,
+    started_at: "2026-09-19T00:00:00.000Z",
+    ended_at: "2026-09-19T00:01:00.000Z",
+    log_path: "",
+    review_tree: null,
+  };
+  // 分岐先の無い差し戻し
+  await assert.rejects(
+    () => d.insertInto("step_runs").values({ ...row, status: "bounced", goto_step_id: null })
+      .execute(),
+    /CHECK/,
+  );
+  // 分岐先のある失敗
+  await assert.rejects(
+    () => d.insertInto("step_runs").values({ ...row, status: "failed", goto_step_id: "plan" })
+      .execute(),
+    /CHECK/,
+  );
+});
+
+test("0005: step_outputs の行は step_runs の再構築を越えて残る", async () => {
+  const sqlite = new DatabaseSync(":memory:");
+  sqlite.exec(LEGACY_DDL);
+  sqlite.exec(`
+    INSERT INTO projects (path, default_workflow) VALUES ('/repo', 'f');
+    INSERT INTO tasks (id, project_id, title, prompt, workflow_name, state, branch,
+                       created_at, updated_at)
+      VALUES ('t1', 1, 'T', 'P', 'f', 'running', 'b', '2026-09-19', '2026-09-19');
+    INSERT INTO step_runs (id, task_id, step_id, attempt, status, started_at, log_path)
+      VALUES (1, 't1', 'plan', 1, 'success', '2026-09-19', '');
+    INSERT INTO step_outputs (task_id, step_id, stdout, stderr, exit_code)
+      VALUES ('t1', 'plan', '計画', '', 0);
+  `);
+  const d = await openDbOn(sqlite);
+
+  const rows = await d.selectFrom("step_outputs").selectAll().execute();
+  assert.deepEqual(rows.map((r) => ({ ...r })), [
+    { step_run_id: 1, last_stdout: "計画", last_stderr: "", exit_code: 0 },
+  ]);
+  const { rows: violations } = await sql<{ table: string }>`PRAGMA foreign_key_check`.execute(d);
+  assert.deepEqual(violations, []);
 });
 
 test("既存の step_outputs は同じステップの最新の実行に割り当てられる", async () => {

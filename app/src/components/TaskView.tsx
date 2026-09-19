@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { sendDecision } from "../decision";
-import { ago, elapsed, isTerminal } from "../model";
+import { ago, bounceNotice, elapsed, isTerminal } from "../model";
 import { useDecide, useNotYet, useStore } from "../store";
 import type { Task, TaskState } from "../types";
 import { Crumbs, OpenInEditor } from "./ReviewView";
@@ -72,6 +72,13 @@ export function TaskView({ t }: { t: Task }) {
         <section className="box deg">
           <h2><span className="mono">{t.degraded}</span> が、権限で拒否された操作を含んだまま成功扱いで終わりました</h2>
           <p>後続のステップは進んでいますが、エージェントが意図した操作はされていません。</p>
+        </section>
+      )}
+      {t.bounce && (
+        // 差し戻しは失敗ではない（ワークフローは続いている）ので、赤い見た目は使わない
+        <section className="box quiet">
+          <h2>{bounceNotice(t.bounce)}</h2>
+          <p>ワークフローは続いています。<span className="mono">{t.bounce.goto}</span> からやり直しています。</p>
         </section>
       )}
       {t.state === "queued" && (

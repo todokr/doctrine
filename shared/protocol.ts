@@ -12,7 +12,12 @@ export type ServerEvent =
     task_id: string;
     step_run_id: number;
     step_id: string;
+    /** step_runs.status に記録した値。差し戻しは "bounced"（"failed" ではない）。 */
     status: string;
+    /** status が "bounced" のときの差し戻し先。それ以外は null。 */
+    goto_step_id: string | null;
+    /** このステップの何回目の実行か。差し戻しなら「差し戻しが何回目か」でもある。 */
+    attempt: number;
   }
   | { event: "log.line"; task_id: string; step_run_id: number; line: string }
   | { event: "ratelimit.sample"; window: string; utilization: number; resets_at: string | null };

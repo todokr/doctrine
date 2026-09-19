@@ -1,6 +1,7 @@
 import { describe, expect, test, vi } from "vitest";
 import { NOW, PROJECTS, seedTasks } from "./fixtures";
 import {
+  bounceNotice,
   canReject,
   composeRejection,
   countReview,
@@ -341,6 +342,19 @@ describe("toProject / toTask", () => {
     expect(toTask(row({ has_degraded: true }), PJ, before).degraded).toBe("implement");
   });
 
+  test("差し戻しの通知は 15 秒ごとの取り直しで消えない", () => {
+    const bounce = { step: "test", goto: "implement", attempt: 1 };
+    const before = { ...t1({ state: "running" }), bounce };
+    expect(toTask(row({ state: "running" }), PJ, before).bounce).toEqual(bounce);
+  });
+
+  test("終わったタスクには差し戻しの通知を引き継がない", () => {
+    // イベントを取りこぼして取り直しだけで終端状態になることがある。引き継ぐと
+    // 完了・失敗したタスクに差し戻し中の通知が残る
+    const before = { ...t1({ state: "running" }), bounce: { step: "test", goto: "implement", attempt: 1 } };
+    expect(toTask(row({ state: "completed" }), PJ, before).bounce).toBeUndefined();
+  });
+
   test("知らない state 文字列はタスクを消さず unknown にする（版のずれ対策）", () => {
     // TaskListEntry#state は protocol.ts 上は TaskState だが、それはコンパイル時の
     // 注釈にすぎない。JSON で来る実行時の値は保証されないので、あえて型をはみ出させる
@@ -445,12 +459,76 @@ describe("daemon イベント", () => {
       type: "daemon",
       ev: {
         event: "stepRun.finished", task_id: "a", step_run_id: 1,
-        step_id: "implement", status: "degraded",
+        step_id: "implement", status: "degraded", goto_step_id: null, attempt: 1,
       },
       now: 999,
     });
     expect(after.tasks[0].degraded).toBe("implement");
     expect(groupOf(after.tasks[0])).toBe("check");
+  });
+
+  const bounceEvent = (o: Partial<{ step_id: string; status: string; goto_step_id: string | null; attempt: number }> = {}) => ({
+    event: "stepRun.finished" as const, task_id: "a", step_run_id: 1,
+    step_id: "test", status: "bounced", goto_step_id: "implement", attempt: 1,
+    ...o,
+  });
+
+  test("stepRun.finished の bounced は差し戻しとして持ち、失敗扱いにしない", () => {
+    const after = reduce(withTask(), { type: "daemon", ev: bounceEvent(), now: 999 });
+    expect(after.tasks[0].bounce).toEqual({ step: "test", goto: "implement", attempt: 1 });
+    // 差し戻しは「要確認」でも「終了」でもない。ワークフローは続いている
+    expect(groupOf(after.tasks[0])).toBe("running");
+  });
+
+  test("差し戻してもサイドバーの並びは変わらない", () => {
+    const a = t1({ id: "a", state: "running", current_step_id: "test" });
+    const b = t1({ id: "b", state: "running", current_step_id: "x" });
+    const s = base({ tasks: [a, b], projects: [], sel: "a" });
+    const before = sidebarOrder(s.tasks, "tasks", "all").map((t) => t.id);
+    const after = reduce(s, { type: "daemon", ev: bounceEvent(), now: 999 });
+    expect(sidebarOrder(after.tasks, "tasks", "all").map((t) => t.id)).toEqual(before);
+  });
+
+  test("同じステップが今度は通ったら差し戻しの通知は消える", () => {
+    const bounced = reduce(withTask(), { type: "daemon", ev: bounceEvent(), now: 999 });
+    const after = reduce(bounced, {
+      type: "daemon",
+      ev: bounceEvent({ status: "success", goto_step_id: null, attempt: 2 }),
+      now: 1000,
+    });
+    expect(after.tasks[0].bounce).toBeUndefined();
+  });
+
+  test("別のステップが終わっても差し戻しの通知は残る", () => {
+    const bounced = reduce(withTask(), { type: "daemon", ev: bounceEvent(), now: 999 });
+    const after = reduce(bounced, {
+      type: "daemon",
+      ev: bounceEvent({ step_id: "implement", status: "success", goto_step_id: null, attempt: 2 }),
+      now: 1000,
+    });
+    expect(after.tasks[0].bounce).toEqual({ step: "test", goto: "implement", attempt: 1 });
+  });
+
+  test("差し戻しの後に degraded が来ても、両方が立つ", () => {
+    // onFailure 付きの agent ステップが一度差し戻され、やり直しで degraded で終わる筋書き。
+    const bounced = reduce(withTask(), { type: "daemon", ev: bounceEvent(), now: 999 });
+    const after = reduce(bounced, {
+      type: "daemon",
+      ev: bounceEvent({ step_id: "implement", status: "degraded", goto_step_id: null }),
+      now: 1000,
+    });
+    expect(after.tasks[0].degraded).toBe("implement");
+    expect(after.tasks[0].bounce).toEqual({ step: "test", goto: "implement", attempt: 1 });
+  });
+
+  test("タスクが終わったら差し戻しの通知は消える", () => {
+    const bounced = reduce(withTask(), { type: "daemon", ev: bounceEvent(), now: 999 });
+    const after = reduce(bounced, {
+      type: "daemon",
+      ev: { event: "task.stateChanged", task_id: "a", from: "running", to: "completed" },
+      now: 1000,
+    });
+    expect(after.tasks[0].bounce).toBeUndefined();
   });
 
   test("知らないタスクのイベントは何も壊さない", () => {
@@ -481,6 +559,19 @@ describe("daemon イベント", () => {
       now: 999,
     });
     expect(after).toEqual(s);
+  });
+});
+
+describe("bounceNotice", () => {
+  test("どこが通らず・どこへ戻り・差し戻しが何回目かを書く", () => {
+    const text = bounceNotice({ step: "plan-gate", goto: "plan", attempt: 1 });
+    expect(text).toContain("plan-gate");
+    expect(text).toContain("plan に差し戻し");
+    expect(text).toContain("1 回目");
+  });
+
+  test("回数は差し戻した回数（戻り先が何周目かではない）", () => {
+    expect(bounceNotice({ step: "plan-gate", goto: "plan", attempt: 2 })).toContain("2 回目");
   });
 });
 

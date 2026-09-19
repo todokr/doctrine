@@ -230,6 +230,130 @@ steps:
   assert.equal((await getTask(db, "t1"))?.state, "failed");
 });
 
+// 既定ワークフローの plan-gate（grep で verdict を見るゲート）が reject で非0終了し
+// plan に戻る筋書き。ワークフローとしては失敗ではなく差し戻しなので、記録もそう読める
+// 必要がある（status は failed ではなく bounced）。
+test("onFailure の goto が発火した実行は bounced として閉じ、タスクは失敗しない", async () => {
+  const { db, root, workflow } = await taskFixture(`
+name: f
+steps:
+  - id: plan
+    type: agent
+    prompt: "{{ task.prompt }}"
+  - id: plan-gate
+    type: command
+    run: "test -f {{ worktree.path }}/approved"
+    onFailure:
+      goto: plan
+      maxAttempts: 3
+      feed: "指摘があります"
+`);
+  const adapter = createMockAdapter({ result: { ok: true, text: "計画" } });
+  // 差し戻し後の2周目で通るようにする（同期で書く理由は上のテストと同じ）。
+  const origResume = adapter.resume;
+  adapter.resume = (sessionId, prompt, opts) => {
+    writeFileSync(join(root, "approved"), "");
+    return origResume(sessionId, prompt, opts);
+  };
+
+  await runTask(db, "t1", workflow, { db, adapter, logRoot: join(root, "logs"), globalLimit: 4 });
+
+  const gates = (await listStepRuns(db, "t1")).filter((r) => r.step_id === "plan-gate");
+  assert.equal(gates.length, 2);
+  assert.equal(gates[0].status, "bounced");
+  assert.equal(gates[0].goto_step_id, "plan");
+  assert.ok(gates[0].exit_code !== 0, `差し戻しでも終了コードは非0: ${gates[0].exit_code}`);
+  assert.equal(gates[1].status, "success", "2周目は通る");
+  assert.equal(gates[1].goto_step_id, null);
+  assert.equal((await getTask(db, "t1"))?.state, "completed", "差し戻しはタスクの失敗ではない");
+});
+
+test("差し戻すたびに bounced 行の attempt が増え、使い切った最後だけ failed になる", async () => {
+  const { db, root, workflow } = await taskFixture(`
+name: f
+steps:
+  - id: implement
+    type: agent
+    prompt: "p"
+  - id: test
+    type: command
+    run: "false"
+    onFailure:
+      goto: implement
+      maxAttempts: 3
+      feed: "だめ"
+`);
+  await runTask(db, "t1", workflow, {
+    db,
+    adapter: createMockAdapter({ result: { ok: true, text: "やった" } }),
+    logRoot: join(root, "logs"),
+    globalLimit: 4,
+  });
+
+  const tests = (await listStepRuns(db, "t1")).filter((r) => r.step_id === "test");
+  assert.deepEqual(tests.map((r) => [r.attempt, r.status, r.goto_step_id]), [
+    [1, "bounced", "implement"],
+    [2, "bounced", "implement"],
+    // 3回目は分岐先が無い（maxAttempts を使い切った）ので本当の失敗。
+    [3, "failed", null],
+  ]);
+  assert.equal((await getTask(db, "t1"))?.state, "failed");
+});
+
+test("onFailure の無いステップの失敗は今までどおり failed（分岐先を持たない）", async () => {
+  const { db, root, workflow } = await taskFixture(`
+name: f
+steps:
+  - id: build
+    type: command
+    run: "false"
+`);
+  await runTask(db, "t1", workflow, {
+    db,
+    adapter: createMockAdapter({ result: {} }),
+    logRoot: join(root, "logs"),
+    globalLimit: 4,
+  });
+  const runs = await listStepRuns(db, "t1");
+  assert.deepEqual(runs.map((r) => [r.status, r.goto_step_id]), [["failed", null]]);
+  assert.equal((await getTask(db, "t1"))?.state, "failed");
+});
+
+test("却下で goto した approval 行は bounced、使い切った却下は failed", async () => {
+  const { db, root, workflow } = await taskFixture(`
+name: f
+steps:
+  - id: implement
+    type: command
+    run: "true"
+  - id: review
+    type: approval
+    title: "見て"
+    onReject:
+      goto: implement
+      maxAttempts: 2
+`);
+  const deps = {
+    db,
+    adapter: createMockAdapter({ result: {} }),
+    logRoot: join(root, "logs"),
+    globalLimit: 4,
+  };
+
+  await runTask(db, "t1", workflow, deps);
+  await applyApproval(db, "t1", { approved: false, comment: "1回目" }, workflow);
+  await toRunning(db, "t1");
+  await runTask(db, "t1", workflow, deps);
+  await applyApproval(db, "t1", { approved: false, comment: "2回目" }, workflow);
+
+  const reviews = (await listStepRuns(db, "t1")).filter((r) => r.step_id === "review");
+  assert.deepEqual(reviews.map((r) => [r.status, r.goto_step_id]), [
+    ["bounced", "implement"],
+    ["failed", null],
+  ]);
+  assert.equal((await getTask(db, "t1"))?.state, "failed");
+});
+
 test("差し戻しでは resume が使われる（会話が継続する）", async () => {
   const { db, root, workflow } = await taskFixture(`
 name: f
@@ -698,6 +822,37 @@ steps:
   assert.deepEqual(finished, [{ id: started[0].id, stepId: "a", status: "success" }]);
 });
 
+test("onStepRunFinished は記録した status と戻り先・試行回数を渡す", async () => {
+  const { db, root, workflow } = await taskFixture(`
+name: f
+steps:
+  - id: implement
+    type: agent
+    prompt: "p"
+  - id: test
+    type: command
+    run: "false"
+    onFailure:
+      goto: implement
+      maxAttempts: 2
+      feed: "だめ"
+`);
+  const finished: { stepId: string; status: string; goto: string | null; attempt: number }[] = [];
+  await runTask(db, "t1", workflow, {
+    db,
+    adapter: createMockAdapter({ result: { ok: true, text: "やった" } }),
+    logRoot: join(root, "logs"),
+    globalLimit: 4,
+    onStepRunFinished: (_taskId, _stepRunId, stepId, status, gotoStepId, attempt) => {
+      finished.push({ stepId, status, goto: gotoStepId, attempt });
+    },
+  });
+  assert.deepEqual(finished.filter((f) => f.stepId === "test"), [
+    { stepId: "test", status: "bounced", goto: "implement", attempt: 1 },
+    { stepId: "test", status: "failed", goto: null, attempt: 2 },
+  ]);
+});
+
 test("onReject が無い却下は failed", async () => {
   const { db, root, workflow } = await taskFixture(`
 name: f
@@ -966,7 +1121,9 @@ steps:
   const reviews = (await listStepRuns(db, "t1")).filter((r) => r.step_id === "review");
   assert.equal(reviews.length, 2);
   assert.deepEqual(reviews.map((r) => r.attempt), [1, 2]);
-  assert.deepEqual(reviews.map((r) => r.status), ["failed", "failed"]);
+  // どちらも差し戻し（maxAttempts 5 をまだ使い切っていない）。
+  assert.deepEqual(reviews.map((r) => r.status), ["bounced", "bounced"]);
+  assert.deepEqual(reviews.map((r) => r.goto_step_id), ["implement", "implement"]);
   // それぞれの待ち時間が引ける（started_at と ended_at が両方ある）。
   for (const r of reviews) {
     assert.ok(r.ended_at !== null);

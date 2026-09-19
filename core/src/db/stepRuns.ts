@@ -15,9 +15,11 @@ export function getStepRun(db: Db, id: number): Promise<StepRunRow | undefined> 
  * 承認待ちのステップ実行（approval が suspended に入った時点で立てた行）。
  * タスクが suspended なら、**開いている** awaiting 行がちょうど1件ある。
  *
- * 同じ (task_id, step_id) に閉じた行が何行あってもよい。task.resume は suspended の
- * タスクを queued に戻すので、同じ approval ステップに入り直すと「interrupted で
- * 閉じた行 + 新しい awaiting 行」になる（閉じるのは handlers.ts の
+ * 同じ (task_id, step_id) に閉じた行が何行あってもよい。閉じ方は承認なら success、
+ * 却下なら bounced（前のステップへ戻した）か failed（分岐先が無い・maxAttempts を
+ * 使い切った）、task.resume / task.cancel なら interrupted である。task.resume は
+ * suspended のタスクを queued に戻すので、同じ approval ステップに入り直すと
+ * 「interrupted で閉じた行 + 新しい awaiting 行」になる（閉じるのは handlers.ts の
  * closeAwaitingStepRun）。開いている行は常に最新なので id desc で取る。
  */
 export function getAwaitingStepRun(
@@ -37,11 +39,13 @@ export function getAwaitingStepRun(
  * 「前回レビュー以降」の基準点。直近の**差し戻された** approval の step_run と、
  * その時点の worktree のツリーを返す。
  *
- * 差し戻しは「review_tree を持つ行が failed で閉じられたもの」として引く。
- * status に rejected は無く、approval の却下は exit_code 1 の failed として
- * 閉じられる（engine.ts の applyApproval）。review_tree が入るのは approval の
- * awaiting 行だけなので、この2条件で差し戻しだけが取れる。復旧が付ける
- * interrupted は差し戻しではないので failed の条件で外れる。
+ * 却下は「review_tree を持つ行が bounced または failed で閉じられたもの」として引く。
+ * status に rejected は無く、approval の却下は exit_code 1 で閉じられる。前のステップへ
+ * 戻せた却下は bounced、戻り先が無い（onReject が無い・maxAttempts を使い切った）却下は
+ * failed である（engine.ts の applyApproval）。bounced だけに絞ると後者が落ち、
+ * `dctl diff --since last_review` の範囲が今より狭くなるので、両方を条件にする。
+ * review_tree が入るのは approval の awaiting 行だけなので、この2条件で却下だけが取れる。
+ * 復旧が付ける interrupted は却下ではないので status の条件で外れる。
  *
  * 承認された回（success）は基準にしない。承認済みを基準にすると、その後の
  * ステップの成果がレビュー対象から丸ごと消える。「前回レビュー以降」が意味を
@@ -54,7 +58,7 @@ export async function lastRejectedReview(
   const row = await db.selectFrom("step_runs")
     .select(["id", "review_tree"])
     .where("task_id", "=", taskId)
-    .where("status", "=", "failed")
+    .where("status", "in", ["bounced", "failed"])
     .where("review_tree", "is not", null)
     .orderBy("id", "desc")
     .executeTakeFirst();
