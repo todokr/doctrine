@@ -510,7 +510,18 @@ export function reduce(s: State, a: Action): State {
       // log.line は #47、ratelimit.sample は第2段階
       return s;
     }
-    case "connection":
-      return { ...s, conn: a.conn };
+    case "connection": {
+      if (a.conn.status !== "connected") return { ...s, conn: a.conn };
+      // 繋ぎ直せたので、前の接続で失敗した取得をやり直せるようにする。
+      // 失敗のまま置くと、needDiff が false のままで誰も取り直さない
+      const drop = <T,>(r: Record<string, T>, failed: (v: T) => boolean) =>
+        Object.fromEntries(Object.entries(r).filter(([, v]) => !failed(v)));
+      return {
+        ...s,
+        conn: a.conn,
+        diffs: drop(s.diffs, (byScope) => Object.values(byScope).every((v) => v?.kind === "error")),
+        contexts: drop(s.contexts, (v) => v.kind === "error"),
+      };
+    }
   }
 }

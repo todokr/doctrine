@@ -3,8 +3,8 @@
 import type { TaskDiff } from "../../shared/protocol.ts";
 import type { DiffFile, DiffHunk } from "./types";
 
-/** patch を `diff --git` ごとに切った1区画。パスは読まない（下の PatchSection の注を参照） */
-type PatchSection = { hunks: DiffHunk[] };
+/** patch を `diff --git` ごとに切った1区画。パスは読まない（parsePatch の注を参照） */
+type PatchSection = { header: string; hunks: DiffHunk[] };
 
 const FILE_HEAD = /^diff --git /;
 const HUNK_HEAD = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/;
@@ -32,7 +32,16 @@ export function parsePatch(patch: string): PatchSection[] {
   for (const line of patch.split("\n")) {
     if (FILE_HEAD.test(line)) {
       closeHunk();
-      section = { hunks: [] };
+      // 種別が変わったファイル（symlink ⇄ 通常ファイル）は、--name-status が
+      // 1件（T）で返すのに patch では「削除」と「作成」の2区画に分かれる。
+      // 同じヘッダ行が続いたら同じファイルの続きとして1区画にまとめないと、
+      // 区画の数が files[] を追い越して突き合わせが壊れる
+      const last = sections[sections.length - 1];
+      if (last && last.header === line) {
+        section = last;
+        continue;
+      }
+      section = { header: line, hunks: [] };
       sections.push(section);
       continue;
     }
@@ -41,7 +50,7 @@ export function parsePatch(patch: string): PatchSection[] {
       closeHunk();
       // `diff --git` の無い patch は task.diff が作らないが、来ても落とさない
       if (!section) {
-        section = { hunks: [] };
+        section = { header: "", hunks: [] };
         sections.push(section);
       }
       hunk = { old: Number(head[1]), new: Number(head[2]), body: "" };

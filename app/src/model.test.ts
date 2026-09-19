@@ -577,4 +577,23 @@ describe("connection", () => {
     const after = reduce(base(), { type: "connection", conn: { status: "disconnected" } });
     expect(after.conn.status).toBe("disconnected");
   });
+
+  test("繋ぎ直したら、失敗したままの取得を捨てて取り直せるようにする", () => {
+    // 失敗を残すと「取りに行くべきか」の判定が false のままで、
+    // dctld を再起動しても画面はエラーのまま固まる
+    const s = base({
+      diffs: { "t-2b91": { all: { kind: "error", message: "切断" } } },
+      contexts: { "t-2b91": { kind: "error", message: "切断" } },
+    });
+    const after = reduce(s, { type: "connection", conn: { status: "connected" } });
+    expect(after.diffs).toEqual({});
+    expect(after.contexts).toEqual({});
+  });
+
+  test("取れている diff は繋ぎ直しても捨てない", () => {
+    const value: DiffView = { meta: SAMPLE_DIFF, files: [] };
+    const s = base({ diffs: { "t-2b91": { all: { kind: "ok", value } } } });
+    const after = reduce(s, { type: "connection", conn: { status: "connected" } });
+    expect(diffOf(after, "t-2b91", "all")).toEqual({ kind: "ok", value });
+  });
 });

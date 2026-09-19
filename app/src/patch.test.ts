@@ -74,6 +74,30 @@ describe("parsePatch", () => {
     expect(parsePatch(patch)[0].hunks[0].body.split("\n")).toEqual([" keep", "-old", "+new"]);
   });
 
+  test("種別の変わったファイル（symlink → 通常ファイル）の2区画を1つにまとめる", () => {
+    // --name-status は T の1件で返すのに、patch は削除と作成の2区画に分かれる。
+    // 分かれたまま数えると files[] より区画が多くなり、突き合わせが落ちる
+    const patch = `diff --git a/link b/link
+deleted file mode 120000
+index 1de5659..0000000
+--- a/link
++++ /dev/null
+@@ -1 +0,0 @@
+-target
+\\ No newline at end of file
+diff --git a/link b/link
+new file mode 100644
+index 0000000..2a79fdf
+--- /dev/null
++++ b/link
+@@ -0,0 +1 @@
++now a real file
+`;
+    const sections = parsePatch(patch);
+    expect(sections).toHaveLength(1);
+    expect(sections[0].hunks.map((h) => h.body)).toEqual(["-target", "+now a real file"]);
+  });
+
   test("1ファイルに複数の hunk があれば、それぞれの開始行を持つ", () => {
     const patch = `diff --git a/a.ts b/a.ts
 --- a/a.ts
