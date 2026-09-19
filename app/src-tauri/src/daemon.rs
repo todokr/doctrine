@@ -25,7 +25,7 @@ pub struct PathEnv {
     pub os: Os,
 }
 
-/// DB・ログ・（macOS では）ソケットの置き場。`src/util/home.ts` の stateRoot と同じ規則。
+/// DB・ログ・（macOS では）ソケットの置き場。`core/src/util/home.ts` の stateRoot と同じ規則。
 pub fn resolve_state_root(
     state_dir: Option<String>,
     home: Option<String>,
@@ -42,7 +42,7 @@ pub fn resolve_state_root(
         .join("doctrine"))
 }
 
-/// `src/daemon/server.ts` の resolveSocketPath と同じ規則。**両方を直すこと。**
+/// `core/src/daemon/server.ts` の resolveSocketPath と同じ規則。**両方を直すこと。**
 /// 片方だけ直すと、症状は「繋がらない」としか出ない。
 pub fn resolve_socket_path(env: &PathEnv) -> Result<PathBuf, String> {
     if let Some(p) = env.doctrine_socket.as_deref().filter(|s| !s.is_empty()) {
@@ -117,7 +117,7 @@ pub fn find_dctld() -> Result<PathBuf, String> {
 /// ここが緩いと、後から dctld が mode: 0o700 で mkdir しても手遅れになる
 /// （既にあるディレクトリのパーミッションは mkdir では変わらない）。
 /// doctrine は TCP ポートを開かず、ファイルパーミッションがそのまま認可に
-/// なるので（src/daemon/server.ts）、DB・ログ・ソケットの置き場を
+/// なるので（core/src/daemon/server.ts）、DB・ログ・ソケットの置き場を
 /// 他人から読めるまま作ってはいけない。
 /// 既に存在するディレクトリのモードは（Deno 側と同様）変更しない。
 fn ensure_state_dir(root: &Path) -> Result<(), String> {

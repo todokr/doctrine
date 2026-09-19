@@ -1,4 +1,4 @@
-// 画面が扱う形。デーモンにつなぐときに src/daemon/protocol.ts の型へ寄せる
+// 画面が扱う形。デーモンにつなぐときに shared/protocol.ts の型へ寄せる
 
 /**
  * デーモンが知らない状態を返したとき用。版のずれ（新しい dctld ＋ 古い画面）で起こりうる。
@@ -20,7 +20,7 @@ export type StepDef = {
 export type Hunk = { old: number; new: number; body: string };
 export type DiffFile = { path: string; hunks: Hunk[]; since?: Hunk[] };
 
-// デーモン側（src/core/reviewFiles.ts）と同じ判別ユニオン。
+// デーモン側（core/src/domain/reviewFiles.ts）と同じ判別ユニオン。
 export type ReviewFileStatus = "ok" | "missing" | "too_large" | "outside_worktree" | "binary";
 export type ReviewFile =
   | { path: string; status: "ok"; content: string; size: number }
@@ -29,7 +29,7 @@ export type ReviewFile =
   | { path: string; status: "outside_worktree" }
   | { path: string; status: "binary"; size: number };
 
-// デーモンの ReviewEntry（4系統の判別ユニオン、src/core/taskContext.ts）とはまだ揃えていない。
+// デーモンの ReviewEntry（4系統の判別ユニオン、core/src/domain/taskContext.ts）とはまだ揃えていない。
 // この Review はモックの単純な形のままで、揃えるのはデーモンと UI を繋ぐ変更（別対応）で行う。
 export type Review = { at: number; comment: string };
 export type CommandResult = { stepId: string; exitCode: number | null; stdout: string; stderr: string };
