@@ -9,6 +9,22 @@ steps:
     type: agent
     prompt: "{{ task.prompt }}"
     permissionMode: acceptEdits
+    # acceptEdits では Bash がすべて拒否されるので、このリポジトリで要るものだけ許可する。
+    allowedTools:
+      - "Bash(mise run core:test:*)"
+      - "Bash(mise run core:check:*)"
+      - "Bash(mise run app:test:*)"
+      - "Bash(deno fmt:*)"
+      - "Bash(git status:*)"
+      - "Bash(git diff:*)"
+      - "Bash(git log:*)"
+      - "Bash(git add:*)"
+      - "Bash(git commit:*)"
+      - "Bash(grep:*)"
+      - "Bash(awk:*)"
+      - "Bash(sed -n:*)"
+      - "Bash(ls:*)"
+      - "Bash(cat:*)"
 
   - id: review
     type: approval
