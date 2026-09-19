@@ -20,19 +20,37 @@ import type { CommandResult, ReviewEntry } from "../../src/core/taskContext.ts";
 const NOOP_CONN = { follow() {}, unfollow() {}, isFollowing: () => false };
 let root: string;
 
+// approval が suspended に入るときの retainTree（reviewTree.ts）は commitStepBoundary の
+// あとに実際の git を叩くので、テスト本体が「状態が suspended になった」ところで終わっても
+// ctx.running はまだ握られたままのことがある。agent ステップを挟むとその窓が広がり、
+// afterEach の rm がまだ書き込み中の worktree にぶつかって ENOTEMPTY になることがあるので、
+// rm の前に必ず running が空になるのを待つ（fullCycle.test.ts と同じ対策）。
+const contexts: DaemonContext[] = [];
+
 beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), "doctrine-taskctx-e2e-"));
   process.env.DOCTRINE_STATE_DIR = join(root, "state");
 });
 afterEach(async () => {
+  await until(() => contexts.every((c) => c.running.size === 0));
+  contexts.length = 0;
   await rm(root, { recursive: true, force: true });
   delete process.env.DOCTRINE_STATE_DIR;
 });
 
-/** 計画を .doctrine-out/plan.md に書き、その計画を承認させるワークフロー。 */
+/**
+ * agent ステップ（draft）が下書きし、command ステップ（plan）がそれを
+ * .doctrine-out/plan.md に書き出して承認させるワークフロー。draft はモックの
+ * text をそのまま返すだけで plan.md には触れないので、plan の内容は plan
+ * ステップ自身が書く。lastCommand と lastAgentMessage が別々のステップ種別から
+ * 拾われることを、この2ステップの区別で確かめる。
+ */
 const GUIDED = `
 name: guided
 steps:
+  - id: draft
+    type: agent
+    prompt: "計画を書いて"
   - id: plan
     type: command
     run: "mkdir -p .doctrine-out && printf '# 計画\\n\\n1. 引当をトランザクションに入れる\\n' > .doctrine-out/plan.md"
@@ -60,6 +78,7 @@ async function context() {
     running: new Set(),
     warnings: [],
   };
+  contexts.push(ctx);
   return { ctx, handler: createHandler(ctx) };
 }
 
@@ -104,6 +123,22 @@ test("approval の時点で task.context から計画の本文が取れる（完
 
   assert.equal(got.lastCommand?.stepId, "plan", "直前に走った command の結果も返る");
   assert.equal(got.lastCommand?.exitCode, 0);
+
+  assert.equal(
+    got.lastAgentMessage,
+    "やりました",
+    "agent ステップ（draft）の最終メッセージが、モックの text のまま返る",
+  );
+  assert.doesNotMatch(
+    got.lastCommand?.stdout ?? "",
+    /やりました/,
+    "lastCommand が agent ステップの出力を拾っていない",
+  );
+  assert.notEqual(
+    got.lastAgentMessage,
+    got.lastCommand?.stdout,
+    "lastAgentMessage が command ステップの出力を拾っていない",
+  );
 });
 
 test("2回差し戻したタスクで、両方のレビューが返る（完了条件2）", async () => {
