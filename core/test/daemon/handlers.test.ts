@@ -1157,6 +1157,7 @@ const TASK_SUMMARY_SHAPE: Record<
   current_step_id: nullable(isString),
   branch: isString,
   worktree_path: nullable(isString),
+  rate_limited_until: nullable(isString),
   priority: isNumber,
   created_at: isString,
   updated_at: isString,
@@ -1674,4 +1675,84 @@ test("差し戻しの記録が無ければ since: last_review は全体に倒す
   };
   assert.equal(d.since_step_run_id, null, "承認済みの回は基準にしない");
   assert.deepEqual(d.files.map((f) => f.path), ["only.txt"]);
+});
+
+// --- 上限待ち（2026-09-19-rate-limit-wait-design.md） ------------------------
+
+/** 指定した期限で上限待ちに置いたタスクを1件作る。 */
+async function rateLimitedTask(ctx: DaemonContext, deadline: string): Promise<string> {
+  const h = createHandler(ctx);
+  await h("project.add", { path: repo }, NOOP_CONN);
+  const t = await h("task.create", { project: repo, title: "T", prompt: "直して" }, NOOP_CONN) as {
+    id: string;
+  };
+  await ctx.db.updateTable("tasks")
+    .set({ state: "rate_limited", rate_limited_until: deadline })
+    .where("id", "=", t.id).execute();
+  return t.id;
+}
+
+test("tick は期限の来た上限待ちを queued に戻し、状態変化を配る", async () => {
+  const events: ServerEvent[] = [];
+  const ctx = await context(events);
+  const id = await rateLimitedTask(ctx, new Date(Date.now() - 1000).toISOString());
+
+  await tick(ctx);
+
+  assert.notEqual((await getTask(ctx.db, id))?.state, "rate_limited");
+  assert.ok(
+    events.some((e) =>
+      e.event === "task.stateChanged" && e.task_id === id && e.from === "rate_limited" &&
+      e.to === "queued"
+    ),
+    "配らないと、アプリは次の取り直しまで上限待ちのまま見える",
+  );
+});
+
+test("tick は期限前の上限待ちをそのままにする", async () => {
+  const ctx = await context();
+  const id = await rateLimitedTask(ctx, new Date(Date.now() + 60 * 60_000).toISOString());
+  await tick(ctx);
+  assert.equal((await getTask(ctx.db, id))?.state, "rate_limited");
+});
+
+test("上限待ちがいる間は新しいタスクを始めない", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  // プロジェクト枠を2にする。1のままだと rate_limited が枠を握っているだけで
+  // admit されず、上限そのものによるゲートの有無をこのテストが見分けられない。
+  await writeFile(
+    join(repo, ".doctrine", "project.yaml"),
+    "defaultWorkflow: feature\nmaxConcurrent: 2\nbaseBranch: main\n",
+  );
+  const waiting = await rateLimitedTask(ctx, new Date(Date.now() + 60 * 60_000).toISOString());
+  const other = await h("task.create", { project: repo, title: "別", prompt: "p" }, NOOP_CONN) as {
+    id: string;
+  };
+
+  await tick(ctx);
+
+  assert.equal(
+    (await getTask(ctx.db, other.id))?.state,
+    "queued",
+    "上限はアカウント全体に掛かるので、admit しても同じように弾かれるだけ",
+  );
+
+  // 上限待ちが居なくなれば、空いている枠で普通に始まる。
+  await h("task.resume", { task_id: waiting }, NOOP_CONN);
+  await tick(ctx);
+  await until(async () => (await getTask(ctx.db, other.id))?.state !== "queued");
+});
+
+test("task.resume は上限待ちのタスクを待たずに queued へ戻す", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  const id = await rateLimitedTask(ctx, new Date(Date.now() + 60 * 60_000).toISOString());
+
+  const after = await h("task.resume", { task_id: id }, NOOP_CONN) as {
+    state: string;
+    rate_limited_until: string | null;
+  };
+  assert.equal(after.state, "queued");
+  assert.equal(after.rate_limited_until, null, "消さないと次の tick がもう一度解放しにくる");
 });

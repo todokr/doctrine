@@ -11,10 +11,12 @@ import {
   groupOf,
   hasSince,
   isTerminal,
+  MIN,
   reduce,
   rejections,
   reviewRound,
   sidebarOrder,
+  timeLabel,
   toProject,
   toTask,
   unguidedFiles,
@@ -69,6 +71,11 @@ describe("groupOf", () => {
   test("degraded でも終端状態になれば要確認から外れる", () => {
     expect(groupOf(t({ state: "canceled", degraded: "fix" }))).toBe("done");
   });
+  test("上限待ちは要確認ではなく専用の区分に入る", () => {
+    // 人が何かする必要は無い。degraded が付いていても要確認へは寄せない
+    expect(groupOf(t({ state: "rate_limited" }))).toBe("limited");
+    expect(groupOf(t({ state: "rate_limited", degraded: "implement" }))).toBe("limited");
+  });
   test("それ以外は状態のとおり", () => {
     expect(groupOf(t({ state: "running" }))).toBe("running");
     expect(groupOf(t({ state: "queued" }))).toBe("queued");
@@ -107,6 +114,48 @@ describe("sidebarOrder", () => {
     const gced = seedTasks().find((t) => t.state === "failed" && t.worktree === null)!;
     expect(sidebarOrder(seedTasks(), "tasks", "all").map((t) => t.id)).not.toContain(gced.id);
     expect(sidebarOrder(seedTasks(), "done", "all").map((t) => t.id)).toContain(gced.id);
+  });
+});
+
+describe("上限待ち", () => {
+  const t = (patch: Partial<Task>): Task => ({ ...seedTasks()[0], state: "rate_limited", ...patch });
+
+  test("サイドバーでは実行中と待ちの間に、再開の早い順で並ぶ", () => {
+    const tasks = [
+      t({ id: "late", resumeAt: 2000 }),
+      { ...seedTasks()[0], id: "run", state: "running" as const },
+      { ...seedTasks()[0], id: "q", state: "queued" as const },
+      t({ id: "early", resumeAt: 1000 }),
+    ];
+    expect(sidebarOrder(tasks, "tasks", "all").map((x) => x.id)).toEqual(["run", "early", "late", "q"]);
+  });
+
+  test("timeLabel は再開予定時刻を出す", () => {
+    const at = new Date(2026, 8, 19, 12, 20).getTime();
+    expect(timeLabel(t({ resumeAt: at }), at - MIN)).toBe("12:20 再開");
+  });
+
+  test("再開予定時刻が無くても Invalid Date にならない", () => {
+    // task.stateChanged は期限を運ばない。取り直しが来るまでは分からない
+    expect(timeLabel(t({ resumeAt: null }), 0)).toBe("再開時刻は取得中");
+  });
+
+  test("toTask は rate_limited_until を resumeAt に写し、読めない値は落とす", () => {
+    expect(t1({ rate_limited_until: "2026-09-19T03:20:00.000Z" }).resumeAt)
+      .toBe(Date.parse("2026-09-19T03:20:00.000Z"));
+    expect(t1({ rate_limited_until: null }).resumeAt).toBeNull();
+    expect(t1({ rate_limited_until: "いつか" }).resumeAt).toBeNull();
+  });
+
+  test("task.stateChanged で rate_limited を受け取っても unknown に落ちない", () => {
+    const s = base({ sel: null });
+    const id = s.tasks[0].id;
+    const next = reduce(s, {
+      type: "daemon",
+      ev: { event: "task.stateChanged", task_id: id, from: "running", to: "rate_limited" },
+      now: 1,
+    });
+    expect(task(next, id).state).toBe("rate_limited");
   });
 });
 
@@ -308,6 +357,7 @@ const row = (o: Partial<TaskListEntry> = {}): TaskListEntry => ({
   current_step_id: null,
   branch: "doctrine/t-1",
   worktree_path: null,
+  rate_limited_until: null,
   priority: 2,
   created_at: "2026-09-18T00:00:00.000Z",
   updated_at: "2026-09-18T00:10:00.000Z",
@@ -383,7 +433,7 @@ describe("toProject / toTask", () => {
 
   test("知っている状態はそのまま通す", () => {
     // 「全部 unknown にする」という壊し方を、既存のテストは捕まえられない
-    for (const state of ["queued", "running", "suspended", "paused", "completed", "failed", "canceled"] as const) {
+    for (const state of ["queued", "running", "suspended", "paused", "rate_limited", "completed", "failed", "canceled"] as const) {
       expect(t1({ state }).state).toBe(state);
     }
   });

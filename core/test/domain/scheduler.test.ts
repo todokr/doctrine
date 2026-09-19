@@ -1,8 +1,13 @@
 import { test } from "@std/testing/bdd";
 import assert from "node:assert/strict";
 import { openDb } from "../../src/db/migrate.ts";
-import { insertProject, insertTask, type TaskState } from "../../src/db/tasks.ts";
-import { currentUsage, selectAdmissible } from "../../src/domain/scheduler.ts";
+import { getTask, insertProject, insertTask, type TaskState } from "../../src/db/tasks.ts";
+import {
+  currentUsage,
+  hasActiveRateLimit,
+  releaseDueRateLimited,
+  selectAdmissible,
+} from "../../src/domain/scheduler.ts";
 import type { Db } from "../../src/db/schema.ts";
 
 async function fixture(maxConcurrent = 1) {
@@ -151,6 +156,56 @@ test("優先度 → 作成時刻のFIFO", async () => {
   await add(d, ps[1], "p0-new", { priority: 0, createdAt: "2026-09-01T00:00:00Z" });
   await add(d, ps[2], "p2-new", { priority: 2, createdAt: "2026-09-02T00:00:00Z" });
   assert.deepEqual((await selectAdmissible(d, 3)).map((t) => t.id), ["p0-new", "p2-old", "p2-new"]);
+});
+
+// --- 上限待ち（2026-09-19-rate-limit-wait-design.md） ------------------------
+
+const UNTIL = "2026-09-19T03:20:00.000Z";
+
+async function addRateLimited(d: Db, p: number, id: string, until = UNTIL) {
+  await add(d, p, id);
+  await d.updateTable("tasks").set({ state: "rate_limited", rate_limited_until: until })
+    .where("id", "=", id).execute();
+}
+
+test("rate_limited は全体枠を数えず、プロジェクト枠は数える", async () => {
+  const { d, p } = await fixture(2);
+  await addRateLimited(d, p, "waiting");
+  const usage = await currentUsage(d);
+  assert.equal(usage.global, 0, "待っている間はマシンもAPIも使っていない");
+  assert.equal(usage.byProject.get(p), 1, "worktree とブランチは握ったまま");
+});
+
+test("期限が来ていなければ解放しない", async () => {
+  const { d, p } = await fixture();
+  await addRateLimited(d, p, "waiting");
+  assert.deepEqual(await releaseDueRateLimited(d, new Date("2026-09-19T03:19:59.000Z")), []);
+  assert.equal((await getTask(d, "waiting"))?.state, "rate_limited");
+});
+
+test("期限が来たら queued に戻し、戻したidを返す", async () => {
+  const { d, p } = await fixture(3);
+  await addRateLimited(d, p, "late", "2026-09-19T05:00:00.000Z");
+  await addRateLimited(d, p, "early", "2026-09-19T03:20:00.000Z");
+  assert.deepEqual(
+    await releaseDueRateLimited(d, new Date("2026-09-19T04:00:00.000Z")),
+    ["early"],
+    "期限の来たものだけ",
+  );
+  const t = (await getTask(d, "early"))!;
+  assert.equal(t.state, "queued");
+  assert.equal(t.rate_limited_until, null);
+  assert.equal(t.resumed, 1);
+  assert.equal((await getTask(d, "late"))?.state, "rate_limited");
+});
+
+test("上限待ちがいるかどうかを状態から数える", async () => {
+  const { d, p } = await fixture();
+  assert.equal(await hasActiveRateLimit(d), false);
+  await addRateLimited(d, p, "waiting");
+  assert.equal(await hasActiveRateLimit(d), true);
+  await releaseDueRateLimited(d, new Date("2026-09-19T04:00:00.000Z"));
+  assert.equal(await hasActiveRateLimit(d), false);
 });
 
 test("占有数はカウンタではなく running から導出する", async () => {

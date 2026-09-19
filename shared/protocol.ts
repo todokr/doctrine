@@ -22,6 +22,7 @@ export type TaskState =
   | "running"
   | "suspended"
   | "paused"
+  | "rate_limited"
   | "completed"
   | "failed"
   | "canceled";
@@ -40,6 +41,8 @@ export type TaskSummary = {
   current_step_id: string | null;
   branch: string;
   worktree_path: string | null;
+  /** state が rate_limited の間だけ入る、再開してよい時刻（ISO 8601）。 */
+  rate_limited_until: string | null;
   priority: number;
   created_at: string;
   updated_at: string;

@@ -34,6 +34,38 @@ test("result は DEFAULT にスクリプトの部分指定をマージしたも�
   assert.equal(r.costUsd, 0); // DEFAULT 由来
 });
 
+test("eventsSequence は呼び出しごとに違うイベントを流す", async () => {
+  const adapter = createMockAdapter({
+    events: [{ kind: "result" }],
+    result: {},
+    eventsSequence: [
+      [{
+        kind: "rateLimit",
+        window: "five_hour",
+        utilization: 1,
+        resetsAt: "2026-09-19T03:20:00Z",
+      }],
+      [{ kind: "assistant", text: "2回目" }],
+    ],
+  });
+  const collect = async (run: { events: AsyncIterable<unknown> }) => {
+    const out = [];
+    for await (const ev of run.events) out.push(ev);
+    return out;
+  };
+  assert.deepEqual(await collect(adapter.start("a", { cwd: "/wt", sessionId: "s1" })), [
+    { kind: "rateLimit", window: "five_hour", utilization: 1, resetsAt: "2026-09-19T03:20:00Z" },
+  ]);
+  assert.deepEqual(await collect(adapter.resume("s1", "b", { cwd: "/wt", sessionId: "s1" })), [
+    { kind: "assistant", text: "2回目" },
+  ]);
+  assert.deepEqual(
+    await collect(adapter.resume("s1", "c", { cwd: "/wt", sessionId: "s1" })),
+    [{ kind: "result" }],
+    "範囲を越えたら events に戻る",
+  );
+});
+
 test("events はスクリプトどおりに流れる", async () => {
   const adapter = createMockAdapter({
     events: [{ kind: "assistant", text: "こんにちは" }],

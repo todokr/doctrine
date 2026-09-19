@@ -26,6 +26,11 @@ export function clock(ms: number): string {
   const d = new Date(ms);
   return `${pad2(d.getMonth() + 1)}/${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
 }
+/** 再開予定時刻。今日か明日かまでは出さない（数時間先までしか待たない） */
+export function hm(ms: number): string {
+  const d = new Date(ms);
+  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
 export function elapsed(ms: number, now: number): string {
   const m = Math.round((now - ms) / MIN);
   return m < 60 ? `${m}分` : `${Math.floor(m / 60)}時間${pad2(m % 60)}分`;
@@ -41,10 +46,12 @@ export function ago(ms: number, now: number): string {
 // ---------------------------------------------------------------- サイドバーの区分
 export const isTerminal = (s: TaskState) => s === "completed" || s === "failed" || s === "canceled";
 
-export type Group = "review" | "check" | "running" | "queued" | "paused" | "done";
+export type Group = "review" | "check" | "running" | "limited" | "queued" | "paused" | "done";
 
 export function groupOf(t: Task): Group {
   if (t.state === "suspended") return "review";
+  // 要確認には入れない。人が何かする必要は無く、枠が明ければ自分で再開する
+  if (t.state === "rate_limited") return "limited";
   // failed を要確認に置くのは worktree が残っている間だけ（レビューアプリ設計spec 5章）。
   // 削除拒否の completed は refused の定義そのものが同じ規則になっている
   const failedWithEvidence = t.state === "failed" && t.worktree !== null;
@@ -59,6 +66,7 @@ export const GROUPS: { key: Exclude<Group, "done">; name: string; sort: (a: Task
   { key: "review", name: "レビュー待ち", sort: (a, b) => a.since - b.since },
   { key: "check", name: "要確認", sort: (a, b) => b.since - a.since },
   { key: "running", name: "実行中", sort: (a, b) => a.since - b.since },
+  { key: "limited", name: "上限待ち", sort: (a, b) => (a.resumeAt ?? Infinity) - (b.resumeAt ?? Infinity) },
   { key: "queued", name: "待ち", sort: (a, b) => a.prio - b.prio || a.since - b.since },
   { key: "paused", name: "一時停止", sort: (a, b) => b.since - a.since },
 ];
@@ -82,6 +90,8 @@ export function timeLabel(t: Task, now: number): string {
   const g = groupOf(t);
   if (g === "review") return clock(t.since);
   if (g === "running") return elapsed(t.since, now);
+  // task.stateChanged は期限を運ばないので、取り直しが来るまでは分からない
+  if (g === "limited") return t.resumeAt ? `${hm(t.resumeAt)} 再開` : "再開時刻は取得中";
   if (g === "queued") return `P${t.prio} · ${ago(t.since, now)}`;
   return ago(t.since, now);
 }
@@ -158,7 +168,7 @@ export const hasSince = (c: TaskContext) =>
 
 // ---------------------------------------------------------------- デーモンの state 文字列の検証
 const TASK_STATES: ReadonlySet<Exclude<TaskState, "unknown">> = new Set([
-  "queued", "running", "suspended", "paused", "completed", "failed", "canceled",
+  "queued", "running", "suspended", "paused", "rate_limited", "completed", "failed", "canceled",
 ]);
 /**
  * protocol.ts の TaskState / ServerEvent#to は、デーモンから来る JSON に対する
@@ -195,6 +205,13 @@ function toKnownState(x: string, where: string): TaskState {
  * stepRun.finished を受け取れば具体的なステップ名に置き換わる。
  */
 export const DEGRADED_UNKNOWN = "(ステップ不明)";
+
+/** 読めない時刻は捨てる。NaN を持ち回ると「Invalid Date」が画面に出る */
+function parseTime(iso: string | null): number | null {
+  if (!iso) return null;
+  const t = Date.parse(iso);
+  return Number.isNaN(t) ? null : t;
+}
 
 /** プロジェクトの表示名。デーモンはパスしか持たないので末尾を使う */
 export function projectKey(path: string): string {
@@ -242,6 +259,7 @@ export function toTask(
     prio: row.priority,
     // 「待ち始めた時刻」の記録は #43。それまでは最後に動いた時刻で代える
     since: Date.parse(row.updated_at),
+    resumeAt: parseTime(row.rate_limited_until),
     // 完了したのに worktree が残っているのは、後始末が削除を拒否したということ
     refused: row.state === "completed" && row.worktree_path !== null,
     // groupOf は `t.degraded &&` で見るので、空文字にすると要確認から落ちる。

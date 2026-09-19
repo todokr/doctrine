@@ -3,7 +3,17 @@ import type { TaskState } from "../db/tasks.ts";
 const TRANSITIONS: Record<TaskState, readonly TaskState[]> = {
   /** ワークフローが読めなければ、ステップを1つも実行せずに failed になれる。running を経由すると、ステップ実行を記録することになり嘘になる。 */
   queued: ["running", "paused", "canceled", "failed"],
-  running: ["suspended", "paused", "completed", "failed", "canceled", "queued"],
+  running: [
+    "suspended",
+    "paused",
+    "completed",
+    "failed",
+    "canceled",
+    "queued",
+    "rate_limited",
+  ],
+  /** 解放（tick）と task.resume が queued へ戻す。paused / canceled は人の操作、failed は tick の例外経路。 */
+  rate_limited: ["queued", "paused", "canceled", "failed"],
   /** 最後のステップが approval で、承認されて次のステップが無いとき completed になる。
       queued を経由させて次に何も無いことをスケジューラに発見させるのは、
       待つ理由が無いのに一瞬枠を再取得させ、実態のない queued を記録することになる。 */
@@ -36,10 +46,10 @@ export function holdsGlobalSlot(s: TaskState): boolean {
 
 /**
  * プロジェクト枠の理由は同一リポジトリでのマージ困難。
- * suspended / paused のタスクは worktree とブランチを生かしたままなので、理由が消えていない。
+ * suspended / paused / rate_limited のタスクは worktree とブランチを生かしたままなので、理由が消えていない。
  */
 export function holdsProjectSlot(s: TaskState): boolean {
-  return s === "running" || s === "suspended" || s === "paused";
+  return s === "running" || s === "suspended" || s === "paused" || s === "rate_limited";
 }
 
 export function isTerminal(s: TaskState): boolean {
