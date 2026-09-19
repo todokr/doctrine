@@ -5,3 +5,6 @@
 defaultWorkflow: default
 maxConcurrent: 1
 baseBranch: develop
+
+# worktree ごとに mise.toml を trust しないと mise run が動かない
+setup: mise trust && mise run setup
