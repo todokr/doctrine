@@ -68,7 +68,9 @@ export async function buildTaskContext(
   // toReview の想定外 status 例外（本来は approval 行が壊れているときだけに使う）を
   // 正常系で踏んでしまう。status を awaiting/success/failed/interrupted の4つに絞れば
   // running と degraded は除外できる。success/failed は command の正常終了/異常終了とも
-  // 一致するため、定義が無い以上そこまでの紛れは残るが、経緯を返せなくするよりはよい。
+  // 一致し、interrupted は recovery.ts の closeDanglingStepRun がクラッシュした
+  // command/agent 行にも書き込むため、定義が無い以上そこまでの紛れは残るが、
+  // 経緯を返せなくするよりはよい。
   const isReview = (r: StepRunRow) =>
     workflow
       ? types.get(r.step_id) === "approval"

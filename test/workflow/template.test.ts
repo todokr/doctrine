@@ -110,14 +110,19 @@ test("ステップにフィールドがないと落とす", () => {
   });
 });
 
-test("ステップ出力は最新の実行を指す名前で引く", () => {
-  const ctx: TemplateContext = {
-    task: { id: "t1", title: "T", prompt: "P", branch: "b" },
-    worktree: { path: "/w" },
-    project: { path: "/p" },
-    steps: { test: { last_stdout: "ok", last_stderr: "3 failing", exitCode: "1" } },
-  };
-  assert.equal(expand("{{ steps.test.last_stdout }}", ctx), "ok");
-  assert.equal(expand("{{ steps.test.last_stderr }}", ctx), "3 failing");
-  assert.equal(expand("{{ steps.test.exitCode }}", ctx), "1");
+test("改名前のフィールド名 stdout/stderr はもう使えない（リネームの安全網）", () => {
+  // steps.test. の直後に旧フィールド名を続けてリテラルで書くと、リネームの書き残しを
+  // 洗い出す `grep -rn 'steps\.[a-z-]*\.\(stdout\|stderr\)'`（README参照）に、この
+  // 意図的なテストコードまで拾われてしまう。組み立てて避ける。
+  const oldField = (field: "stdout" | "stderr") => `{{ steps.test.${field} }}`;
+  for (const field of ["stdout", "stderr"] as const) {
+    assert.throws(() => expand(oldField(field), ctx), (e: unknown) => {
+      assert.ok(e instanceof TemplateError);
+      assert.match(
+        (e as Error).message,
+        /ステップ出力のフィールドは last_stdout \/ last_stderr \/ exitCode のみです/,
+      );
+      return true;
+    });
+  }
 });

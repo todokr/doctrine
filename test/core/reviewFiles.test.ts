@@ -127,6 +127,18 @@ test("1件の失敗が他の件を巻き込まない", async () => {
   }
 });
 
+test("スキーマ検証をすり抜ける空白付き・区切り以外の .. パスも ok を返さない（realpath 側の安全網）", async () => {
+  // src/workflow/schema.ts の静的検証は先頭・末尾の空白を trim しない（" /etc/passwd" は
+  // startsWith("/") にならず通る）し、".." チェックは "/" split の要素一致でしか見ない
+  // （".. " は ".." と一致しないので通る）。どちらも readReviewFiles の realpath 解決で
+  // worktree の外に落ちることを確かめる。
+  const wt = await worktree({ "ok.md": "読める\n" });
+  const files = await readReviewFiles(wt, [" /etc/passwd", ".. "]);
+  for (const file of files) {
+    assert.notEqual(file.status, "ok", `${file.path} が ok を返した`);
+  }
+});
+
 test("書き手のいない名前付きパイプを宣言しても readReviewFiles は固まらない", async () => {
   const wt = await worktree({ "ok.md": "読める\n" });
   const fifo = join(wt, "pipe");

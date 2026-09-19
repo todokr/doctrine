@@ -24,8 +24,10 @@ export type ReviewFile =
   | { path: string; status: "outside_worktree" }
   | { path: string; status: "binary"; size: number };
 
+// デーモンの ReviewEntry（4系統の判別ユニオン、src/core/taskContext.ts）とはまだ揃えていない。
+// この Review はモックの単純な形のままで、揃えるのはデーモンと UI を繋ぐ変更（別対応）で行う。
 export type Review = { at: number; comment: string };
-export type CommandResult = { step: string; exitCode: number; stdout: string; stderr: string };
+export type CommandResult = { stepId: string; exitCode: number | null; stdout: string; stderr: string };
 
 export type SequenceDiagram = { actors: string[]; messages: { from: string; to: string; label: string }[] };
 export type ReadingStep = { title: string; paths: string[]; diagram: "sequence" | "relation" | null; explain: string };
@@ -57,7 +59,7 @@ export type Task = {
   guide?: Guide;
   reviewFiles?: ReviewFile[];
   lastCommand?: CommandResult | null;
-  lastAgentMessage?: string;
+  lastAgentMessage?: string | null;
   log?: string;
   dirty?: boolean;
   refused?: boolean;

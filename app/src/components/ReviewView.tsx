@@ -48,7 +48,10 @@ function Context({ t }: { t: Task }) {
       )}
       {c && (
         <details className="ctx">
-          <summary>直近の command ステップの結果（<span className="mono">{c.step}</span> · exit {c.exitCode}）</summary>
+          <summary>
+            直近の command ステップの結果（<span className="mono">{c.stepId}</span> · exit{" "}
+            {c.exitCode === null ? "シグナルで停止（終了コードなし）" : c.exitCode}）
+          </summary>
           <pre className="block">{c.stdout}{c.stderr ? "\n" + c.stderr : ""}</pre>
         </details>
       )}
