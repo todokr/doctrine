@@ -10,6 +10,7 @@ export type AgentStep = {
   session?: string;
   permissionMode?: string;
   model?: string;
+  allowedTools?: string[];
   onFailure?: Branch;
 };
 /** approval ステップが「これを見て判断してください」と宣言するもの。 */
@@ -95,6 +96,7 @@ const stepSchema = z.discriminatedUnion("type", [
     ).optional(),
     permissionMode: z.string().optional(),
     model: z.string().optional(),
+    allowedTools: z.array(z.string().min(1)).optional(),
     onFailure: branch.optional(),
   }).strict(),
   z.object({

@@ -131,6 +131,10 @@ steps:
     type: agent
     prompt: "{{ task.prompt }}"
     permissionMode: acceptEdits
+    # acceptEdits では Bash はすべて拒否される。使わせたいコマンドがあれば個別に許可する。
+    # allowedTools:
+    #   - "Bash(git diff:*)"
+    #   - "Bash(grep:*)"
 
   - id: review
     type: approval

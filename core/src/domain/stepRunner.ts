@@ -200,6 +200,7 @@ export async function runAgentStep(
     sessionId: o.sessionId,
     permissionMode: step.permissionMode,
     model: step.model,
+    allowedTools: step.allowedTools,
   };
 
   try {
