@@ -80,8 +80,14 @@ test("priority は数値になる", () => {
   assert.equal(params.priority, 0);
 });
 
-test("未知のサブコマンドは落ちる", () => {
-  assert.throws(() => parseArgv(["frobnicate"]), /未知のコマンド/);
+test("未知のサブコマンドは使い方を添えて落ちる", () => {
+  assert.throws(() => parseArgv(["frobnicate"]), /未知のコマンドです: frobnicate[\s\S]*使い方/);
+});
+
+test("引数なし・help・--help は使い方を出す", () => {
+  for (const argv of [[], ["help"], ["--help"], ["-h"]]) {
+    assert.throws(() => parseArgv(argv), /^Error: 使い方: dctl/);
+  }
 });
 
 test("値が繰り返されても positional を誤判定しない（indexOf バグの再発防止）", () => {

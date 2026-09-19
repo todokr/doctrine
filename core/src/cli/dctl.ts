@@ -50,6 +50,32 @@ function splitArgs(argv: string[]): { flags: Record<string, unknown>; positional
   return { flags, positional };
 }
 
+export const USAGE = `使い方: dctl <コマンド> [引数]
+
+タスク
+  add --project <path> --title <t> --prompt <p> [--workflow <name>] [--priority <n>]
+  ls [--project <path>] [--state <state>]
+  get <task-id>
+  approve <task-id>
+  reject <task-id> --comment <text>
+  pause | resume | cancel <task-id>
+  logs <task-id> [--tail <n>] [--step_run_id <n>]
+  diff <task-id> [--since last_review]
+
+プロジェクト
+  projects
+  project-add --path <path>       .doctrine/ の雛形を作って登録する
+  project-update --path <path>    .doctrine/project.yaml の変更を取り込む
+
+worktree
+  worktrees
+  gc <task-id> [--force]
+
+その他
+  ratelimit [--limit <n>]
+
+環境変数 DOCTRINE_SOCKET でデーモンのソケットの場所を上書きできる。`;
+
 export function parseArgv(argv: string[]): { method: string; params: Record<string, unknown> } {
   const [cmd, ...rest] = argv;
   const { flags, positional } = splitArgs(rest);
@@ -86,8 +112,13 @@ export function parseArgv(argv: string[]): { method: string; params: Record<stri
       return { method: "worktree.remove", params: { task_id: positional[0], ...flags } };
     case "ratelimit":
       return { method: "ratelimit.recent", params: flags };
+    case undefined:
+    case "help":
+    case "--help":
+    case "-h":
+      throw new Error(USAGE);
     default:
-      throw new Error(`未知のコマンドです: ${cmd}`);
+      throw new Error(`未知のコマンドです: ${cmd}\n\n${USAGE}`);
   }
 }
 
