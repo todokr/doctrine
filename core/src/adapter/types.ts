@@ -1,7 +1,14 @@
+/** rate_limit_event が伝える、ある枠（window）の消費率と明ける時刻。 */
+export type RateLimitObservation = {
+  window: string;
+  utilization: number;
+  resetsAt: string | null;
+};
+
 export type AgentEvent =
   | { kind: "system"; subtype: string }
   | { kind: "assistant"; text: string }
-  | { kind: "rateLimit"; window: string; utilization: number; resetsAt: string | null }
+  | ({ kind: "rateLimit" } & RateLimitObservation)
   | { kind: "result" };
 
 export type AgentResult = {

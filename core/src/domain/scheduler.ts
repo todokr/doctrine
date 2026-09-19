@@ -1,5 +1,6 @@
 import { getProject, type TaskRow } from "../db/tasks.ts";
 import type { Db } from "../db/schema.ts";
+import { commitStepBoundary, StateConflictError } from "../db/boundary.ts";
 import { holdsGlobalSlot, holdsProjectSlot } from "./states.ts";
 
 export const DEFAULT_GLOBAL_LIMIT = 4;
@@ -9,7 +10,7 @@ export type SlotUsage = { global: number; byProject: Map<number, number> };
 /** カウンタは持たない。状態から数える。持てば必ず状態とズレる。 */
 export async function currentUsage(db: Db): Promise<SlotUsage> {
   const rows = await db.selectFrom("tasks").select(["project_id", "state"])
-    .where("state", "in", ["running", "suspended", "paused"])
+    .where("state", "in", ["running", "suspended", "paused", "rate_limited"])
     .execute();
 
   const usage: SlotUsage = { global: 0, byProject: new Map() };
@@ -20,6 +21,49 @@ export async function currentUsage(db: Db): Promise<SlotUsage> {
     }
   }
   return usage;
+}
+
+/**
+ * 期限の来た上限待ちを queued に戻す。戻したタスクのidを返す（呼び出し側が
+ * task.stateChanged を配る。配らないとアプリは次の取り直しまで上限待ちのまま見える）。
+ *
+ * 待ちは runTask の中で sleep せず、タスク行の rate_limited_until と tick で表す。
+ * sleep にすると、デーモンを再起動した瞬間に待ちが消えてタスクが永久に止まる。
+ */
+export async function releaseDueRateLimited(
+  db: Db,
+  now: Date = new Date(),
+): Promise<string[]> {
+  const due = await db.selectFrom("tasks").select("id")
+    .where("state", "=", "rate_limited")
+    .where("rate_limited_until", "<=", now.toISOString())
+    .orderBy("rate_limited_until", "asc")
+    .execute();
+
+  const released: string[] = [];
+  for (const { id } of due) {
+    try {
+      await commitStepBoundary(db, {
+        taskId: id,
+        requireState: "rate_limited",
+        // 進行中の仕事なので行列の先頭に入る（承認からの再開と同じ扱い）。
+        taskPatch: { state: "queued", resumed: 1, rate_limited_until: null },
+      });
+      released.push(id);
+    } catch (e) {
+      // 読んでから書くまでに人が pause / cancel した。新しい状態を所有しているのは
+      // 先に書いた側なので、上書きせずに見送る。
+      if (!(e instanceof StateConflictError)) throw e;
+    }
+  }
+  return released;
+}
+
+/** 上限待ちのタスクが1件でもいるか。上限はアカウント全体に掛かる。 */
+export async function hasActiveRateLimit(db: Db): Promise<boolean> {
+  const row = await db.selectFrom("tasks").select("id")
+    .where("state", "=", "rate_limited").executeTakeFirst();
+  return row !== undefined;
 }
 
 /**

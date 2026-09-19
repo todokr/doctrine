@@ -251,6 +251,111 @@ const migrations: Record<string, Migration> = {
         .renameColumn("stderr", "last_stderr").execute();
     },
   },
+  /**
+   * 利用上限に当たった実行を待って再開する（spec 2026-09-19-rate-limit-wait-design.md）。
+   *
+   * tasks.state と step_runs.status はどちらも CHECK 制約なので、値を足すには
+   * テーブル再構築が要る。tasks は step_runs / step_outputs / task_sessions から
+   * 参照される行を持ち得るうえ、openDbOn は PRAGMA foreign_keys = ON で開いている。
+   * `DROP TABLE tasks` は暗黙の DELETE を伴うので、そのままでは子テーブルの行が
+   * 参照を失って即座に弾かれる。外部キーの検査を止めてから作り直し、
+   * PRAGMA foreign_key_check で整合を確かめてから戻す。
+   *
+   * 検査を止める手は2つ並べてある。Kysely の Migrator は SqliteAdapter が
+   * supportsTransactionalDdl: false を返すためマイグレーションをトランザクションに
+   * 入れない（`db.connection()` で流す）ので、ここでは PRAGMA foreign_keys が効く。
+   * 将来トランザクションの中で流れるようになったら foreign_keys は無視されるが、
+   * そのときは defer_foreign_keys の方が効く。
+   */
+  "0005_rate_limited": {
+    // deno-lint-ignore no-explicit-any
+    async up(db: Kysely<any>) {
+      await sql`PRAGMA foreign_keys = OFF`.execute(db);
+      await sql`PRAGMA defer_foreign_keys = ON`.execute(db);
+
+      // --- 1. tasks の再構築（state に rate_limited、rate_limited_until 列） ---
+      await db.schema.createTable("tasks_new")
+        .addColumn("id", "text", (c) => c.primaryKey())
+        .addColumn("project_id", "integer", (c) => c.notNull().references("projects.id"))
+        .addColumn("title", "text", (c) => c.notNull())
+        .addColumn("prompt", "text", (c) => c.notNull())
+        .addColumn("workflow_name", "text", (c) => c.notNull())
+        .addColumn("state", "text", (c) =>
+          c.notNull().check(
+            sql`state IN ('queued','running','suspended','paused','rate_limited','completed','failed','canceled')`,
+          ))
+        .addColumn("current_step_id", "text")
+        .addColumn("attempt_counts", "text", (c) => c.notNull().defaultTo("{}"))
+        .addColumn("branch", "text", (c) => c.notNull())
+        .addColumn("worktree_path", "text")
+        .addColumn("claude_session_id", "text")
+        .addColumn("child_pid", "integer")
+        .addColumn("child_started_at", "text")
+        .addColumn("pending_feed", "text")
+        .addColumn("rate_limited_until", "text")
+        .addColumn("priority", "integer", (c) => c.notNull().defaultTo(2))
+        .addColumn("resumed", "integer", (c) => c.notNull().defaultTo(0))
+        .addColumn("created_at", "text", (c) => c.notNull())
+        .addColumn("updated_at", "text", (c) => c.notNull())
+        .execute();
+      await sql`
+        INSERT INTO tasks_new
+          (id, project_id, title, prompt, workflow_name, state, current_step_id, attempt_counts,
+           branch, worktree_path, claude_session_id, child_pid, child_started_at, pending_feed,
+           rate_limited_until, priority, resumed, created_at, updated_at)
+        SELECT id, project_id, title, prompt, workflow_name, state, current_step_id, attempt_counts,
+               branch, worktree_path, claude_session_id, child_pid, child_started_at, pending_feed,
+               NULL, priority, resumed, created_at, updated_at
+        FROM tasks
+      `.execute(db);
+      await db.schema.dropTable("tasks").execute();
+      await db.schema.alterTable("tasks_new").renameTo("tasks").execute();
+      await db.schema.createIndex("idx_tasks_state").on("tasks").column("state").execute();
+      await db.schema.createIndex("idx_tasks_project")
+        .on("tasks").columns(["project_id", "state"]).execute();
+
+      // --- 2. step_runs の再構築（status に rate_limited） ---
+      await db.schema.createTable("step_runs_new")
+        .addColumn("id", "integer", (c) => c.primaryKey().autoIncrement())
+        .addColumn("task_id", "text", (c) => c.notNull().references("tasks.id"))
+        .addColumn("step_id", "text", (c) => c.notNull())
+        .addColumn("attempt", "integer", (c) => c.notNull())
+        .addColumn("status", "text", (c) =>
+          c.notNull().check(
+            sql`status IN ('running','awaiting','success','failed','degraded','interrupted','rate_limited')`,
+          ))
+        .addColumn("exit_code", "integer")
+        .addColumn("started_at", "text", (c) => c.notNull())
+        .addColumn("ended_at", "text")
+        .addColumn("log_path", "text", (c) => c.notNull())
+        .addColumn("cost_usd", "real")
+        .addColumn("num_turns", "integer")
+        .addColumn("duration_ms", "integer")
+        .addColumn("review_tree", "text")
+        .execute();
+      // id を含めてコピーする。step_outputs.step_run_id がこの id を指している。
+      await sql`
+        INSERT INTO step_runs_new
+          (id, task_id, step_id, attempt, status, exit_code, started_at, ended_at,
+           log_path, cost_usd, num_turns, duration_ms, review_tree)
+        SELECT id, task_id, step_id, attempt, status, exit_code, started_at, ended_at,
+               log_path, cost_usd, num_turns, duration_ms, review_tree
+        FROM step_runs
+      `.execute(db);
+      await db.schema.dropTable("step_runs").execute();
+      await db.schema.alterTable("step_runs_new").renameTo("step_runs").execute();
+      await db.schema.createIndex("idx_step_runs_task")
+        .on("step_runs").columns(["task_id", "id"]).execute();
+
+      const violations = await sql<{ table: string }>`PRAGMA foreign_key_check`.execute(db);
+      await sql`PRAGMA foreign_keys = ON`.execute(db);
+      if (violations.rows.length > 0) {
+        throw new Error(
+          `外部キーが壊れています: ${violations.rows.map((r) => r.table).join(", ")}`,
+        );
+      }
+    },
+  },
 };
 
 /** ファイルを動的 import しない（権限も要らず、deno check で型検査される）。 */

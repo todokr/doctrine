@@ -2,7 +2,13 @@ import type { Branch, Workflow } from "../workflow/schema.ts";
 import { branchOf } from "../workflow/schema.ts";
 import { expand, type TemplateContext } from "../workflow/template.ts";
 import { commitStepBoundary, StateConflictError, type StepBoundary } from "../db/boundary.ts";
-import { getAwaitingStepRun, getStepOutputs, type StepRunStatus } from "../db/stepRuns.ts";
+import {
+  getAwaitingStepRun,
+  getStepOutputs,
+  lastStepRunFor,
+  listStepRuns,
+  type StepRunStatus,
+} from "../db/stepRuns.ts";
 import { captureTree, retainTree } from "./reviewTree.ts";
 import {
   attemptCount,
@@ -12,7 +18,13 @@ import {
   type TaskState,
   withAttempt,
 } from "../db/tasks.ts";
-import { insertRateLimitSample } from "../db/rateLimits.ts";
+import { insertRateLimitSample, rateLimitsObservedSince } from "../db/rateLimits.ts";
+import {
+  classifyRateLimit,
+  consecutiveRateLimited,
+  MAX_CONSECUTIVE_RATE_LIMITS,
+  type RateLimitVerdict,
+} from "./rateLimit.ts";
 import { getSessionId } from "../db/sessions.ts";
 import type { Db } from "../db/schema.ts";
 import { assertTransition } from "./states.ts";
@@ -120,6 +132,56 @@ async function setState(
     throw e;
   }
   deps.onStateChanged?.(task.id, task.state, to);
+}
+
+/**
+ * 上限に当たった実行をどう扱うか。give-up は「上限ではあるが待たない」で、
+ * step_run は failed として閉じたうえで、タスクをそのまま failed にする
+ * （onFailure には渡さない。理由は runTask の give-up の分岐にある）。
+ */
+type RateLimitDecision =
+  | { kind: "none" }
+  | { kind: "wait"; until: string; resetsAt: string }
+  | { kind: "give-up"; note: string };
+
+function withNote(stderr: string, note: string): string {
+  return stderr ? `${stderr}\n${note}` : note;
+}
+
+async function decideRateLimit(
+  db: Db,
+  outcome: StepOutcome,
+  taskId: string,
+  stepId: string,
+): Promise<RateLimitDecision> {
+  const verdict: RateLimitVerdict = classifyRateLimit({
+    status: outcome.status,
+    observed: outcome.rateLimits,
+    // イベントを1件も受け取れなかったときだけ、その実行の開始以降に観測された
+    // 記録を代替の根拠にする。
+    samples: outcome.rateLimits.length > 0
+      ? []
+      : await rateLimitsObservedSince(db, outcome.startedAt),
+    now: new Date(),
+  });
+  if (verdict.kind === "none") return verdict;
+  if (verdict.kind === "too-long") {
+    return {
+      kind: "give-up",
+      note: `利用上限に達しましたが、枠が明けるのが ${verdict.resetsAt} と遠いので待ちません`,
+    };
+  }
+
+  // 開いている今回の行（status は running）は数に入れない。
+  const closed = (await listStepRuns(db, taskId)).filter((r) => r.status !== "running");
+  if (consecutiveRateLimited(closed, stepId) >= MAX_CONSECUTIVE_RATE_LIMITS) {
+    return {
+      kind: "give-up",
+      note:
+        `利用上限に連続して ${MAX_CONSECUTIVE_RATE_LIMITS} 回当たりました（次に明けるのは ${verdict.resetsAt}）`,
+    };
+  }
+  return verdict;
 }
 
 /**
@@ -237,7 +299,12 @@ export async function runTask(
       return;
     }
 
-    const attempt = attemptCount(task, step.id) + 1;
+    // 上限待ちから戻ってきた実行は、ワークフロー上の新しい試行ではない。カウンタは
+    // 持たず、直前の step_run の status から導く（デーモンの再起動をまたいでも同じ）。
+    // 進めてしまうと onFailure / onReject の maxAttempts を上限が食い潰す。
+    const resumingAfterRateLimit =
+      (await lastStepRunFor(db, taskId, step.id))?.status === "rate_limited";
+    const attempt = attemptCount(task, step.id) + (resumingAfterRateLimit ? 0 : 1);
     const ctx = await contextFor(db, task);
     // セッションはロール単位（agent ステップの session、省略時は既定ロール）。
     // 「このロールで会話が既にあったか」だけが resume すべきかを決める
@@ -260,7 +327,7 @@ export async function runTask(
         requireState: "running",
         taskPatch: {
           current_step_id: step.id,
-          attempt_counts: withAttempt(task, step.id),
+          attempt_counts: resumingAfterRateLimit ? task.attempt_counts : withAttempt(task, step.id),
           pending_feed: null,
         },
         // 会話を始めるのは agent ステップだけ。command ステップでは書かない —
@@ -304,6 +371,9 @@ export async function runTask(
     };
 
     const isResume = hadSession;
+    // 上限で待ちに入るときに pending_feed へ書き戻す値。stepRunner が展開した
+    // プロンプト文字列ではなく、goto の時点で expand 済みのこのローカル変数が正。
+    const feedForThisStep = pendingFeed;
     const outcome: StepOutcome = step.type === "command"
       ? await runCommandStep(step, ctx, {
         cwd: task.worktree_path!,
@@ -325,6 +395,60 @@ export async function runTask(
       );
     pendingFeed = null;
 
+    // 上限に当たれるのはアダプタを通る agent ステップだけ。command ステップは
+    // この分岐に入る余地がない。
+    const verdict: RateLimitDecision = step.type === "agent"
+      ? await decideRateLimit(db, outcome, taskId, step.id)
+      : { kind: "none" };
+
+    if (verdict.kind === "wait") {
+      assertTransition(task.state, "rate_limited");
+      try {
+        await commitStepBoundary(db, {
+          taskId,
+          requireState: "running",
+          taskPatch: {
+            state: "rate_limited",
+            rate_limited_until: verdict.until,
+            child_pid: null,
+            child_started_at: null,
+            // feed 無しのステップでは書き戻さない。展開済みの step.prompt を入れると、
+            // 再開時の入力がワークフロー定義由来から DB 由来に変わり、待っている間に
+            // worktree やステップ出力が変わっても古い文面が固定される。
+            ...(feedForThisStep !== null ? { pending_feed: feedForThisStep } : {}),
+          },
+          stepRunUpdate: {
+            id: stepRunId,
+            status: "rate_limited",
+            exit_code: outcome.exitCode,
+            ended_at: outcome.endedAt,
+            cost_usd: outcome.costUsd,
+            num_turns: outcome.numTurns,
+            duration_ms: outcome.durationMs,
+          },
+          outputs: {
+            last_stdout: outcome.stdout,
+            last_stderr: withNote(
+              outcome.stderr,
+              `利用上限に達しました（枠が明けるのは ${verdict.resetsAt}、${verdict.until} に再開します）`,
+            ),
+            exit_code: outcome.exitCode,
+          },
+          // その role の最初の呼び出しで弾かれたなら、会話が作られたかは分からない。
+          // 記録を取り消し、再開時は新しい session id で start し直す。
+          sessionDelete: !isResume && role ? { role } : undefined,
+        });
+      } catch (e) {
+        if (e instanceof StateConflictError) return;
+        throw e;
+      }
+      // この経路は setState を通らないので、通知は自分で呼ぶ（呼ばないとアプリは
+      // 次の取り直しまで「実行中」のまま見え続ける）。
+      deps.onStateChanged?.(taskId, "running", "rate_limited");
+      deps.onStepRunFinished?.(taskId, stepRunId, step.id, "rate_limited");
+      return;
+    }
+
     await commitStepBoundary(db, {
       taskId,
       taskPatch: { child_pid: null, child_started_at: null },
@@ -339,11 +463,24 @@ export async function runTask(
       },
       outputs: {
         last_stdout: outcome.stdout,
-        last_stderr: outcome.stderr,
+        // 待たずに失敗させた上限は、board 上で普通の失敗と区別が付くようにする。
+        last_stderr: verdict.kind === "give-up"
+          ? withNote(outcome.stderr, verdict.note)
+          : outcome.stderr,
         exit_code: outcome.exitCode,
       },
     });
     deps.onStepRunFinished?.(taskId, stepRunId, step.id, outcome.status as StepRunStatus);
+
+    if (verdict.kind === "give-up") {
+      // 上限で待たないと決めた実行は decide に渡さない。渡すと onFailure が
+      // 同じステップをやり直し、閉じていると分かっている枠に対して maxAttempts の
+      // 回ぶん claude を起動し直したうえ、上限がワークフロー本来の試行回数を食う
+      // （待ちの連続数も failed の行で切れるので、待ちは 5 回では止まらなくなる）。
+      // ここで止めるのが「人が作り直すか上限を上げるかを決める機会」（spec 6章）。
+      await setState(db, task, "failed", deps);
+      return;
+    }
 
     task = (await getTask(db, taskId))!;
     const decision = decide({
