@@ -3,7 +3,7 @@
 # setup: 新しい worktree で最初に走らせるコマンド。例: pnpm install --frozen-lockfile
 #   doctrine はパッケージマネージャを決めないので、必要なら自分で書く。
 defaultWorkflow: default
-maxConcurrent: 1
+maxConcurrent: 10
 baseBranch: develop
 
 # worktree ごとに mise.toml を trust しないと mise run が動かない
