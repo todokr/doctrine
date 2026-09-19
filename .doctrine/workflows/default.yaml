@@ -15,6 +15,7 @@ steps:
       - "Bash(mise run core:check:*)"
       - "Bash(mise run app:test:*)"
       - "Bash(deno fmt:*)"
+      - "Bash(deno eval:*)"
       - "Bash(git status:*)"
       - "Bash(git diff:*)"
       - "Bash(git log:*)"
