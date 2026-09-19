@@ -70,7 +70,16 @@ export type StepRun = {
   id: number;
   step_id: string;
   attempt: number;
-  status: "running" | "awaiting" | "success" | "failed" | "degraded" | "interrupted";
+  /** step_runs.status。bounced は差し戻し、rate_limited は利用上限で打ち切られ再開待ち。 */
+  status:
+    | "running"
+    | "awaiting"
+    | "success"
+    | "failed"
+    | "degraded"
+    | "interrupted"
+    | "bounced"
+    | "rate_limited";
   exit_code: number | null;
   started_at: string;
   ended_at: string | null;

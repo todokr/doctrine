@@ -26,6 +26,8 @@ const RUN_PILL: Record<StepRun["status"], [string, string]> = {
   failed: ["失敗", "p-danger"],
   degraded: ["degraded", "p-deg"],
   interrupted: ["中断", "p-muted"],
+  bounced: ["差し戻し", "p-muted"],
+  rate_limited: ["上限待ち", "p-muted"],
 };
 
 /** 末尾を一度に何行もらうか。task.logs の既定と揃える */
