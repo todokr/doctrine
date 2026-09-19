@@ -11,6 +11,7 @@ import { parseWorkflow } from "../workflow/schema.ts";
 import { withSetupStep } from "../workflow/project.ts";
 import { createServer, socketPath } from "./server.ts";
 import { createHandler, type DaemonContext, loadWorkflowFromDisk, tick } from "./handlers.ts";
+import { createWarningLog } from "./warnings.ts";
 import { stateRoot } from "../util/home.ts";
 
 export { stateRoot };
@@ -102,11 +103,6 @@ export async function tickCycle(ctx: DaemonContext): Promise<void> {
       }`,
     );
   }
-  // 警告は溜めっぱなしにしない。見えていれば直せる。失敗した周でも吐く
-  // （tick は途中まで進んで警告を積んでから落ちることがある）。
-  try {
-    for (const w of ctx.warnings.splice(0)) console.error(`[warn] ${w}`);
-  } catch { /* ここで落ちて周期を止める価値のあるものは何もない */ }
 }
 
 export async function startDaemon(o: {
@@ -133,7 +129,8 @@ export async function startDaemon(o: {
     broadcast: () => {},
     loadWorkflow: loadWorkflowFromDisk,
     running: new Set(),
-    warnings: [],
+    // broadcast は server を作った後に差し替わる。警告は間接に呼ぶ。
+    warnings: createWarningLog({ broadcast: (ev) => ctx.broadcast(ev) }),
   };
 
   const server = createServer(createHandler(ctx));
@@ -149,7 +146,7 @@ export async function startDaemon(o: {
     if (r.outcome === "recovered") {
       console.error(`[recovery] ${r.taskId}: ${r.action}`);
     } else {
-      console.error(`[recovery] ${r.taskId}: 復帰に失敗し failed にしました: ${r.error}`);
+      ctx.warnings.push(`起動時の復帰に失敗し failed にしました: ${r.error}`, r.taskId);
     }
   }
 
@@ -158,7 +155,7 @@ export async function startDaemon(o: {
     const known = (await listTasks(db, { projectId: project.id }))
       .map((t) => t.worktree_path).filter((p): p is string => p !== null);
     for (const orphan of await findOrphans(project.path, known)) {
-      console.error(`[orphan] 対応するタスクのない worktree: ${orphan}`);
+      ctx.warnings.push(`対応するタスクのない worktree: ${orphan}`);
     }
   }
 

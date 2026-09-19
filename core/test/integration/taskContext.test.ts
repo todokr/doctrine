@@ -11,6 +11,7 @@ import {
   loadWorkflowFromDisk,
   tick,
 } from "../../src/daemon/handlers.ts";
+import { createWarningLog } from "../../src/daemon/warnings.ts";
 import { createMockAdapter } from "../../src/adapter/mock.ts";
 import type { ServerEvent } from "../../../shared/protocol.ts";
 import { makeRepo, tickWhenIdle, until } from "../helpers/repo.ts";
@@ -76,7 +77,7 @@ async function context() {
     broadcast: (ev) => events.push(ev),
     loadWorkflow: loadWorkflowFromDisk,
     running: new Set(),
-    warnings: [],
+    warnings: createWarningLog({ broadcast: () => {}, write: () => {} }),
   };
   contexts.push(ctx);
   return { ctx, handler: createHandler(ctx) };

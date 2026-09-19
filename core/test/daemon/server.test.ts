@@ -119,6 +119,36 @@ test("log.line は follow 中のクライアントにだけ流れる", async () 
   idle.socket.end();
 });
 
+test("follow は1接続につき1タスク。次を追い始めた時点で前のタスクは流れなくなる", async () => {
+  const s = createServer(async (method, params, conn) => {
+    if (method === "task.logs" && params.follow) conn.follow(String(params.task_id));
+    return "ok";
+  });
+  servers.push(s);
+  await s.listen(sock);
+  const c = client(sock);
+  c.send({ id: 1, method: "task.logs", params: { task_id: "t1", follow: true } });
+  await c.next((o) => o.id === 1);
+  c.send({ id: 2, method: "task.logs", params: { task_id: "t2", follow: true } });
+  await c.next((o) => o.id === 2);
+
+  s.broadcast(
+    { event: "log.line", task_id: "t2", step_run_id: 2, line: "新しい方" },
+    { followersOnly: true },
+  );
+  await c.next((o) => o.event === "log.line");
+  s.broadcast(
+    { event: "log.line", task_id: "t1", step_run_id: 1, line: "前の方" },
+    { followersOnly: true },
+  );
+  await assert.rejects(
+    () => c.next((o) => o.event === "log.line" && o.line === "前の方", 200),
+    /タイムアウト/,
+    "画面を切り替えた後も前のタスクのログが流れ続ける",
+  );
+  c.socket.end();
+});
+
 test("listen: パスに古いファイルが残っていても bind できる（事前unlinkの許容性）", async () => {
   // 生きたソケットではなく、ただのファイルを置く。close()を経由しない。
   await writeFile(sock, "stale");

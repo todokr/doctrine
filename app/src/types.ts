@@ -68,8 +68,6 @@ export type Task = {
   /** 上限待ちのタスクが再開してよい時刻。task.stateChanged では埋まらないので null になりうる */
   resumeAt?: number | null;
   guide?: Guide;
-  // どの画面も今は読まない。task.logs の follow（#47）で本物のログに置き換わるまでの残骸
-  log?: string;
   dirty?: boolean;
   refused?: boolean;
   degraded?: string;

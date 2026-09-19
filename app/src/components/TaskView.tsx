@@ -1,8 +1,10 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { rpc } from "../daemon/client";
 import { sendDecision } from "../decision";
-import { ago, elapsed, hm, isTerminal } from "../model";
+import { ago, clock, elapsed, hm, isTerminal, stepRunHistory, stopReasons } from "../model";
 import { useDecide, useNotYet, useStore } from "../store";
 import type { Task, TaskState } from "../types";
+import type { StepRun } from "../../../shared/protocol.ts";
 import { Crumbs, OpenInEditor } from "./ReviewView";
 
 const STATE_PILL: Record<TaskState, [string, string]> = {
@@ -17,18 +19,95 @@ const STATE_PILL: Record<TaskState, [string, string]> = {
   unknown: ["不明な状態", "p-danger"],
 };
 
+const RUN_PILL: Record<StepRun["status"], [string, string]> = {
+  running: ["実行中", "p-run"],
+  awaiting: ["レビュー待ち", "p-attn"],
+  success: ["成功", "p-ok"],
+  failed: ["失敗", "p-danger"],
+  degraded: ["degraded", "p-deg"],
+  interrupted: ["中断", "p-muted"],
+};
+
+/** 末尾を一度に何行もらうか。task.logs の既定と揃える */
+const TAIL = 200;
+
+/**
+ * 状態・ステップ・履歴の出どころ。task.list は今のステップしか持たないので、
+ * 止まった理由と実行履歴はこちらから出す。
+ *
+ * タスクの状態やステップが動いたら取り直す。log.line のような流れ続ける
+ * イベントでは取り直さない（毎行 task.get を投げることになる）。
+ */
+function useTaskDetail(t: Task) {
+  const { dispatch } = useStore();
+  useEffect(() => {
+    let alive = true;
+    void rpc("task.get", { task_id: t.id })
+      .then((detail) => {
+        if (alive) dispatch({ type: "detail", id: t.id, detail });
+      })
+      // 取れなくても、task.list 由来の状態だけで画面は成り立つ
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [t.id, t.state, t.step, t.degraded, dispatch]);
+}
+
+/**
+ * ログの末尾と追従。追従は1接続につき1タスクなので、実行中のタスクを離れる
+ * ときは必ずやめる。やめないと、見ていないタスクのログが流れ続ける。
+ */
+function useTaskLogs(t: Task) {
+  const { dispatch } = useStore();
+  const follow = t.state === "running";
+  useEffect(() => {
+    let alive = true;
+    void rpc("task.logs", { task_id: t.id, tail: TAIL, follow })
+      .then((logs) => {
+        if (alive) {
+          dispatch({
+            type: "logs",
+            id: t.id,
+            logs: { stepRunId: logs.step_run_id, lines: logs.lines },
+          });
+        }
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+      if (follow) void rpc("task.logs", { task_id: t.id, follow: false }).catch(() => {});
+    };
+  }, [t.id, follow, dispatch]);
+}
+
 export function TaskView({ t }: { t: Task }) {
   const { s, dispatch } = useStore();
   const decide = useDecide();
   const notYet = useNotYet();
   // 送信中だけ止める。失敗したら「中止しました」は出さず、もう一度押せる
   const [canceling, setCanceling] = useState(false);
+  const logRef = useRef<HTMLPreElement>(null);
+
+  useTaskDetail(t);
+  useTaskLogs(t);
+
+  const detail = s.detail[t.id];
+  const history = stepRunHistory(detail);
+  const log = s.logs[t.id];
+  const following = t.state === "running";
+
+  // 追従中は新しい行が見えている必要がある。手で遡っている最中は邪魔をしない
+  useEffect(() => {
+    const el = logRef.current;
+    if (!following || !el) return;
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+    if (atBottom) el.scrollTop = el.scrollHeight;
+  }, [log, following]);
 
   const [stateName, stateCls] = STATE_PILL[t.state];
-  const queuePos = s.tasks
-    .filter((x) => x.state === "queued")
-    .sort((a, b) => a.prio - b.prio || a.since - b.since)
-    .findIndex((x) => x.id === t.id) + 1;
+  // 今のステップが何回目か。履歴の先頭が今の（または最後の）実行にあたる
+  const attempt = history[0]?.attempt ?? 1;
 
   return (
     <div className="pad">
@@ -39,45 +118,69 @@ export function TaskView({ t }: { t: Task }) {
         {t.step && (
           <span>
             ステップ <span className="mono">{t.step}</span>
+            {attempt > 1 && <span className="hint">（{attempt}回目）</span>}
           </span>
         )}
-        <span className="hint">{t.state === "running" ? `${elapsed(t.since, s.now)} 経過` : ago(t.since, s.now)}</span>
+        <span className="hint">
+          {t.state === "running" ? `${elapsed(t.since, s.now)} 経過` : ago(t.since, s.now)}
+        </span>
       </div>
 
-      {t.state === "failed" && (
-        <section className="box danger">
-          {/* worktree を作る前に落ちたタスクは step が null で、「 で失敗しました」になってしまう */}
-          <h2>{t.step ? <><span className="mono">{t.step}</span> で失敗しました</> : "実行を開始できませんでした"}</h2>
-          {t.worktree
-            ? (
-              <p>
-                worktree は証拠として残しています。中を確認してから、<span className="mono">dctl add</span> で同じ内容を投入し直すか、
-                <span className="mono">dctl gc {t.id}</span> で片付けてください（UIでの「同じ内容で投入し直す」は第2段階です）。
-              </p>
-            )
-            : (
-              <p>
-                worktree は残っていないので、中を見ることはできません。記録だけが残っています。
-                やり直すなら <span className="mono">dctl add</span> で同じ内容を投入し直してください（UIでの「同じ内容で投入し直す」は第2段階です）。
-              </p>
-            )}
-        </section>
-      )}
-      {t.refused && (
-        <section className="box danger">
-          <h2>worktree の削除を拒否しました</h2>
-          <p>完了時に未コミットの変更が残っていました。ワークフローの最終ステップがコミットしていない可能性があります。中を確認してから <span className="mono">dctl gc {t.id}</span> で削除してください。</p>
-        </section>
-      )}
-      {t.degraded && (
-        <section className="box deg">
-          <h2><span className="mono">{t.degraded}</span> が、権限で拒否された操作を含んだまま成功扱いで終わりました</h2>
-          <p>後続のステップは進んでいますが、エージェントが意図した操作はされていません。</p>
-        </section>
-      )}
-      {t.state === "queued" && (
-        <section className="box quiet"><p>実行枠が空くのを待っています（行列の {queuePos} 番目）。枠が取れた時点で worktree が作られます。</p></section>
-      )}
+      {stopReasons(s.tasks, t, detail).map((r) => {
+        if (r.kind === "failed") {
+          return (
+            <section className="box danger" key="failed">
+              {/* worktree を作る前に落ちたタスクはステップが無く、「 で失敗しました」になってしまう */}
+              <h2>
+                {r.step
+                  ? <><span className="mono">{r.step}</span> で失敗しました</>
+                  : "実行を開始できませんでした"}
+              </h2>
+              {t.worktree
+                ? (
+                  <p>
+                    worktree は証拠として残しています。中を確認してから、<span className="mono">dctl add</span> で同じ内容を投入し直すか、
+                    <span className="mono">dctl gc {t.id}</span> で片付けてください（UIでの「同じ内容で投入し直す」は第2段階です）。
+                  </p>
+                )
+                : (
+                  <p>
+                    worktree は残っていないので、中を見ることはできません。記録だけが残っています。
+                    やり直すなら <span className="mono">dctl add</span> で同じ内容を投入し直してください（UIでの「同じ内容で投入し直す」は第2段階です）。
+                  </p>
+                )}
+            </section>
+          );
+        }
+        if (r.kind === "refused") {
+          return (
+            <section className="box danger" key="refused">
+              <h2>worktree の削除を拒否しました</h2>
+              <p>完了時に未コミットの変更が残っていました。ワークフローの最終ステップがコミットしていない可能性があります。中を確認してから <span className="mono">dctl gc {t.id}</span> で削除してください。</p>
+            </section>
+          );
+        }
+        if (r.kind === "degraded") {
+          return (
+            <section className="box deg" key="degraded">
+              <h2>
+                {r.steps.map((x, i) => (
+                  <span key={x}>
+                    {i > 0 && "、"}
+                    <span className="mono">{x}</span>
+                  </span>
+                ))} が、権限で拒否された操作を含んだまま成功扱いで終わりました
+              </h2>
+              <p>後続のステップは進んでいますが、エージェントが意図した操作はされていません。</p>
+            </section>
+          );
+        }
+        return (
+          <section className="box quiet" key="queued">
+            <p>実行枠が空くのを待っています（行列の {r.position} 番目）。枠が取れた時点で worktree が作られます。</p>
+          </section>
+        );
+      })}
       {t.state === "rate_limited" && (
         <section className="box quiet">
           <p>
@@ -122,11 +225,54 @@ export function TaskView({ t }: { t: Task }) {
 
       <div className="headrow">
         <b>ログ</b>
+        <span className="mono hint">
+          {history.find((r) => r.id === log?.stepRunId)?.step_id ?? ""}
+        </span>
         <span className="spacer" />
+        <span className="hint">
+          {following
+            ? <><span className="spin" style={{ display: "inline-block", verticalAlign: -2 }} /> 追従中</>
+            : `末尾 ${TAIL} 行`}
+        </span>
       </div>
-      <div className="box quiet">
-        <p>ログの取得と追従はまだありません（<span className="mono">task.logs</span> の follow は #47）。</p>
-      </div>
+      {log && log.lines.some((l) => l !== "")
+        ? <pre className="block" ref={logRef}>{log.lines.join("\n")}</pre>
+        : (
+          <div className="box quiet">
+            <p>
+              {t.state === "queued"
+                ? "まだ1つもステップが走っていません。"
+                : "このステップ実行のログは残っていません。"}
+            </p>
+          </div>
+        )}
+
+      {history.length > 0 && (
+        <details className="runs">
+          <summary>実行履歴</summary>
+          <div className="runtable">
+            <table>
+              <thead>
+                <tr><th>ステップ</th><th>試行</th><th>状態</th><th>開始</th><th>終了</th></tr>
+              </thead>
+              <tbody>
+                {history.map((r) => {
+                  const [name, cls] = RUN_PILL[r.status];
+                  return (
+                    <tr key={r.id}>
+                      <td className="mono">{r.step_id}</td>
+                      <td className="mono">#{r.attempt}</td>
+                      <td><span className={`pill ${cls}`}>{name}</span></td>
+                      <td className="hint">{clock(Date.parse(r.started_at))}</td>
+                      <td className="hint">{r.ended_at ? clock(Date.parse(r.ended_at)) : "—"}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </details>
+      )}
     </div>
   );
 }
