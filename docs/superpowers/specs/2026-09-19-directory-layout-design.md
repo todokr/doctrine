@@ -1,7 +1,7 @@
 # ディレクトリ構成の見直し — core / shared / app
 
 - 日付: 2026-09-19
-- 状態: 設計のみ（未実装）
+- 状態: 実装済み
 - 前提: [overview](../../overview.md)、[Tauri アプリを dctld につなぐ中継](2026-09-18-tauri-dctld-relay-design.md) 6 章（型の共有）
 
 ## 1. 位置づけ
