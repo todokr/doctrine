@@ -32,7 +32,7 @@ steps:
     onFailure:
       goto: implement
       maxAttempts: 3
-      feed: "テストが失敗した:\\n{{ steps.test.stderr }}"
+      feed: "テストが失敗した:\\n{{ steps.test.last_stderr }}"
   - id: review
     type: approval
     title: "確認してください"
@@ -176,7 +176,7 @@ steps:
     onFailure:
       goto: implement
       maxAttempts: 3
-      feed: "テストが失敗した:\\n{{ steps.test.stderr }}"
+      feed: "テストが失敗した:\\n{{ steps.test.last_stderr }}"
 `);
   const adapter = createMockAdapter({ result: { ok: true, text: "やった" } });
   // 2回目の resume（差し戻し後の実装）で実際に done ファイルを作る。
@@ -490,7 +490,7 @@ steps:
     onReject:
       goto: implement
       maxAttempts: 3
-      feed: "レビューで却下された:\\n{{ steps.review.stdout }}"
+      feed: "レビューで却下された:\\n{{ steps.review.last_stdout }}"
 `);
   await runTask(db, "t1", workflow, {
     db,
@@ -502,7 +502,7 @@ steps:
   const t = (await getTask(db, "t1"))!;
   assert.equal(t.state, "queued");
   assert.equal(t.current_step_id, "implement");
-  assert.equal((await getStepOutputs(db, "t1")).review.stdout, "命名が変です");
+  assert.equal((await getStepOutputs(db, "t1")).review.last_stdout, "命名が変です");
 });
 
 test("却下の feed が resume するエージェントに実際に渡る（保存されているだけでは足りない）", async () => {
@@ -518,7 +518,7 @@ steps:
     onReject:
       goto: implement
       maxAttempts: 3
-      feed: "レビューで却下された:\\n{{ steps.review.stdout }}"
+      feed: "レビューで却下された:\\n{{ steps.review.last_stdout }}"
 `);
   const adapter = createMockAdapter({ result: {} });
   await runTask(db, "t1", workflow, { db, adapter, logRoot: join(root, "logs"), globalLimit: 4 });
@@ -548,7 +548,7 @@ steps:
     onReject:
       goto: implement
       maxAttempts: 3
-      feed: "だめ:\\n{{ steps.review.stdout }}"
+      feed: "だめ:\\n{{ steps.review.last_stdout }}"
 `);
   const adapter = createMockAdapter({ result: {} });
 
@@ -978,11 +978,11 @@ steps:
   const outputs = await db.selectFrom("step_outputs").selectAll()
     .orderBy("step_run_id").execute();
   assert.deepEqual(
-    outputs.filter((o) => reviews.some((r) => r.id === o.step_run_id)).map((o) => o.stdout),
+    outputs.filter((o) => reviews.some((r) => r.id === o.step_run_id)).map((o) => o.last_stdout),
     ["1回目の指摘", "2回目の指摘"],
   );
   // テンプレート変数は今までどおり最新の実行を指す。
-  assert.equal((await getStepOutputs(db, "t1")).review.stdout, "2回目の指摘");
+  assert.equal((await getStepOutputs(db, "t1")).review.last_stdout, "2回目の指摘");
 });
 
 test("ツリーを記録できなくても suspended に入り、警告が出る", async () => {

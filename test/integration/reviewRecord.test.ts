@@ -90,7 +90,7 @@ test("2回差し戻した後、両方のコメントと時刻とそれぞれの�
       "step_runs.attempt",
       "step_runs.started_at",
       "step_runs.ended_at",
-      "step_outputs.stdout",
+      "step_outputs.last_stdout",
     ])
     .where("step_runs.task_id", "=", "t1")
     .where("step_runs.step_id", "=", "review")
@@ -98,7 +98,7 @@ test("2回差し戻した後、両方のコメントと時刻とそれぞれの�
     .execute();
 
   assert.equal(rows.length, 2);
-  assert.deepEqual(rows.map((r) => r.stdout), ["1回目: 命名が雑", "2回目: テストが無い"]);
+  assert.deepEqual(rows.map((r) => r.last_stdout), ["1回目: 命名が雑", "2回目: テストが無い"]);
   assert.deepEqual(rows.map((r) => r.attempt), [1, 2]);
   for (const r of rows) {
     assert.ok(r.ended_at !== null, "決まった時刻が残っていない");

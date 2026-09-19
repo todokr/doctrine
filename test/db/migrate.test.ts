@@ -221,7 +221,7 @@ const COLUMNS = {
     duration_ms: true,
     review_tree: true,
   },
-  step_outputs: { step_run_id: true, stdout: true, stderr: true, exit_code: true },
+  step_outputs: { step_run_id: true, last_stdout: true, last_stderr: true, exit_code: true },
   task_sessions: { task_id: true, role: true, session_id: true },
   rate_limit_samples: {
     id: true,
@@ -390,6 +390,7 @@ test("開き直してもマイグレーションは二度流れず、データ�
     "0001_baseline",
     "0002_task_sessions",
     "0003_review_records",
+    "0004_step_outputs_last_names",
   ]);
   await first.destroy();
 
@@ -399,6 +400,7 @@ test("開き直してもマイグレーションは二度流れず、データ�
       "0001_baseline",
       "0002_task_sessions",
       "0003_review_records",
+      "0004_step_outputs_last_names",
     ]);
     assert.equal((await second.selectFrom("projects").selectAll().execute()).length, 1);
   } finally {
@@ -428,6 +430,7 @@ test("pending_feed を足す前に作られたDBファイルは、行を保っ�
       "0001_baseline",
       "0002_task_sessions",
       "0003_review_records",
+      "0004_step_outputs_last_names",
     ]);
     const old = await getTask(d, "old");
     assert.equal(old?.state, "suspended", "既存の行は残る");
@@ -568,7 +571,7 @@ test("既存の step_outputs は同じステップの最新の実行に割り当
   // node:sqlite が返す行は prototype なしのオブジェクトなので、deepEqual の前に
   // 素のオブジェクトへ写す（他のテストの selectAll 結果比較と同じ理由）。
   assert.deepEqual(rows.map((r) => ({ ...r })), [
-    { step_run_id: 2, stdout: "2回目のコメント", stderr: "", exit_code: 1 },
+    { step_run_id: 2, last_stdout: "2回目のコメント", last_stderr: "", exit_code: 1 },
   ]);
 });
 
@@ -624,4 +627,26 @@ test("移行前に一度差し戻されている suspended タスクの awaiting
     JSON.stringify({ implement: 2, review: 2 }),
     "attempt_counts は step_runs.attempt とちょうど一致する",
   );
+});
+
+test("0004: step_outputs の列が last_stdout / last_stderr に改名され、値は残る", async () => {
+  const sqlite = new DatabaseSync(":memory:");
+  sqlite.exec(LEGACY_DDL);
+  sqlite.exec(`
+    INSERT INTO projects (path, default_workflow) VALUES ('/repo', 'f');
+    INSERT INTO tasks (id, project_id, title, prompt, workflow_name, state, branch,
+                       created_at, updated_at)
+      VALUES ('t1', 1, 'T', 'P', 'f', 'suspended', 'b', '2026-09-19', '2026-09-19');
+    INSERT INTO step_runs (id, task_id, step_id, attempt, status, started_at, log_path)
+      VALUES (1, 't1', 'review', 1, 'failed', '2026-09-19', '');
+    INSERT INTO step_outputs (task_id, step_id, stdout, stderr, exit_code)
+      VALUES ('t1', 'review', '直して', 'warn', 1);
+  `);
+  const d = await openDbOn(sqlite);
+
+  const rows = await d.selectFrom("step_outputs").selectAll().execute();
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].last_stdout, "直して");
+  assert.equal(rows[0].last_stderr, "warn");
+  assert.equal(rows[0].exit_code, 1);
 });

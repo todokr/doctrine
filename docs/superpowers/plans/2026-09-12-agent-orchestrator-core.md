@@ -1,5 +1,8 @@
 # doctrine コア（サブプロジェクト①）実装計画
 
+> （#45 で `stdout` / `stderr` は `last_stdout` / `last_stderr` に改名した。本文の例は
+> 現行の名前に更新してある。）
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** ローカルの `dctld` デーモンが、YAMLで宣言されたワークフローに沿って Claude Code を spawn し、実行枠・worktree・承認待ちを管理しながらタスクを進行させる。UIなしで完結し、`dctl` CLI とテストから全機能を検証できる状態にする。
@@ -613,7 +616,7 @@ test("4系統すべてを展開する", () => {
   assert.equal(expand("{{ task.branch }}", ctx), "doctrine/t1-login");
   assert.equal(expand("{{ worktree.path }}", ctx), "/state/wt/t1");
   assert.equal(expand("{{ project.path }}", ctx), "/repo");
-  assert.equal(expand("{{ steps.test.stderr }}", ctx), "3 failing");
+  assert.equal(expand("{{ steps.test.last_stderr }}", ctx), "3 failing");
   assert.equal(expand("{{ steps.test.exitCode }}", ctx), "1");
 });
 
@@ -622,7 +625,7 @@ test("空白の有無を問わない", () => {
 });
 
 test("1つの文字列に複数個埋められる", () => {
-  assert.equal(expand("テストが失敗した:\n{{ steps.test.stderr }}", ctx), "テストが失敗した:\n3 failing");
+  assert.equal(expand("テストが失敗した:\n{{ steps.test.last_stderr }}", ctx), "テストが失敗した:\n3 failing");
 });
 
 test("未知の系統は落とす", () => {
@@ -634,7 +637,7 @@ test("未知の系統は落とす", () => {
 });
 
 test("未実行のステップを参照したら落とす", () => {
-  assert.throws(() => expand("{{ steps.build.stdout }}", ctx), TemplateError);
+  assert.throws(() => expand("{{ steps.build.last_stdout }}", ctx), TemplateError);
 });
 
 test("ステップの未知のフィールドは落とす", () => {
@@ -2713,7 +2716,7 @@ steps:
     onFailure:
       goto: implement
       maxAttempts: 3
-      feed: "テストが失敗した:\\n{{ steps.test.stderr }}"
+      feed: "テストが失敗した:\\n{{ steps.test.last_stderr }}"
   - id: review
     type: approval
     title: "確認してください"
@@ -2889,7 +2892,7 @@ steps:
     onFailure:
       goto: implement
       maxAttempts: 3
-      feed: "テストが失敗した:\\n{{ steps.test.stderr }}"
+      feed: "テストが失敗した:\\n{{ steps.test.last_stderr }}"
 `);
   // 1回目の agent は何もせず、2回目で done を作る
   let call = 0;
@@ -2978,7 +2981,7 @@ steps:
     onReject:
       goto: implement
       maxAttempts: 3
-      feed: "レビューで却下された:\\n{{ steps.review.stdout }}"
+      feed: "レビューで却下された:\\n{{ steps.review.last_stdout }}"
 `);
   await runTask(db, "t1", workflow, { db, adapter: createMockAdapter({ result: {} }), logRoot: join(root, "logs"), globalLimit: 4 });
   applyApproval(db, "t1", { approved: false, comment: "命名が変です" }, workflow);
@@ -4603,14 +4606,14 @@ steps:
     onFailure:
       goto: implement
       maxAttempts: 3
-      feed: "marker.txt がない:\\n{{ steps.verify.stderr }}"
+      feed: "marker.txt がない:\\n{{ steps.verify.last_stderr }}"
   - id: review
     type: approval
     title: "差分を確認してください"
     onReject:
       goto: implement
       maxAttempts: 5
-      feed: "レビューで却下された:\\n{{ steps.review.stdout }}"
+      feed: "レビューで却下された:\\n{{ steps.review.last_stdout }}"
   - id: record
     type: command
     run: "echo done > result.txt"

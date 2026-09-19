@@ -106,7 +106,7 @@ steps:
     onFailure:
       goto: implement
       maxAttempts: 3
-      feed: "テストが失敗した:\n{{ steps.verify.stderr }}"
+      feed: "テストが失敗した:\n{{ steps.verify.last_stderr }}"
 
   - id: review
     type: approval
@@ -114,7 +114,7 @@ steps:
     onReject:
       goto: implement
       maxAttempts: 5
-      feed: "レビューで却下された:\n{{ steps.review.stdout }}"
+      feed: "レビューで却下された:\n{{ steps.review.last_stdout }}"
 
   - id: record
     type: command
@@ -153,14 +153,47 @@ steps:
 （今までどおり「タスクに会話は1本」）。役割を分けたときの詳しい設計は
 [`docs/superpowers/specs/2026-09-13-step-artifacts-design.md`](docs/superpowers/specs/2026-09-13-step-artifacts-design.md) を参照。
 
+### `approval` ステップに読ませるファイル（`review.files`）
+
+`approval` ステップは差分（diff）を見て判断されるのが基本だが、計画の承認のように
+そもそも diff が無い（`.doctrine-out/plan.md` を読んで判断する）ステップもある。
+何を見ればよいかはワークフローの作者しか知らないので、`review.files` に列挙する。
+
+```yaml
+  - id: plan-approval
+    type: approval
+    title: "計画を確認してください"
+    onReject: { goto: plan, maxAttempts: 3 }
+    review:
+      files:
+        - .doctrine-out/plan.md
+```
+
+パスは worktree からの相対パスのみ。絶対パス（`/` 始まり）・`..` を含むパス・
+`~` 始まりのパス・空文字は、ワークフローの読み込み時（スキーマ検証）で日本語の
+エラーメッセージとともに落ちる。`review.files` を書くなら1件以上必要で、
+空配列（`review: { files: [] }`）は書けない。
+
+doctrine は宣言されたファイルの中身を理解しない。読んで、worktree の中にあることを
+確かめて、そのまま渡すだけである。実行時にも `realpath` で worktree 配下かを
+再確認しており（worktree 内のシンボリックリンクが外を指すケースに備えるため）、
+配下を指していなければ中身を読まずに `outside_worktree` として返す。ファイルごとに
+起こりうる結果は次のとおり:
+
+- 無ければ `missing`
+- 64KB（`MAX_REVIEW_FILE_BYTES`）を超えていれば `too_large`（中身は返さず大きさだけ返す）
+- worktree の外を指していれば `outside_worktree`
+- UTF-8 のテキストとして読めなければ `binary`
+- ここまでを通れば `ok`（中身と大きさを返す）
+
 ### 変数は4系統だけ
 
 - `{{ task.id }}` `{{ task.title }}` `{{ task.prompt }}` `{{ task.branch }}`
 - `{{ worktree.path }}`
 - `{{ project.path }}`
-- `{{ steps.<id>.stdout }}` `{{ steps.<id>.stderr }}` `{{ steps.<id>.exitCode }}`
-  — `agent` ステップの `stdout` は最終応答テキスト、`approval` ステップの
-  `stdout` は却下コメントそのもの。
+- `{{ steps.<id>.last_stdout }}` `{{ steps.<id>.last_stderr }}` `{{ steps.<id>.exitCode }}`
+  — `agent` ステップの `last_stdout` は最終応答テキスト、`approval` ステップの
+  `last_stdout` は却下コメントそのもの。
 
 ### `setup` は予約されたステップid
 

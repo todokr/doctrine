@@ -34,6 +34,7 @@ import {
   worktreePathFor,
 } from "../core/worktree.ts";
 import { defaultProbe, killStaleChild } from "../core/recovery.ts";
+import { buildTaskContext } from "../core/taskContext.ts";
 import { captureTree, releaseTrees } from "../core/reviewTree.ts";
 import { assertTransition, isTerminal } from "../core/states.ts";
 import type { AgentAdapter } from "../adapter/types.ts";
@@ -186,6 +187,18 @@ export function createHandler(ctx: DaemonContext): Handler {
         const task = await getTask(ctx.db, req(params, "task_id"));
         if (!task) throw new Error("タスクがありません");
         return { task, stepRuns: await listStepRuns(ctx.db, task.id) };
+      }
+
+      case "task.context": {
+        const task = await getTask(ctx.db, req(params, "task_id"));
+        if (!task) throw new Error("タスクがありません");
+        const project = (await getProject(ctx.db, task.project_id))!;
+        // 読み取り専用の経路なので、ワークフローが読めないことで失敗させない。
+        // 定義が引けないと分かるのは種別が要るものだけ（buildTaskContext が扱う）。
+        const workflow = await ctx.loadWorkflow(project.path, task.workflow_name)
+          .then(({ workflow }) => withSetupStep(workflow, project.setup ?? undefined))
+          .catch(() => null);
+        return await buildTaskContext(ctx.db, task, workflow);
       }
 
       case "task.approve":
