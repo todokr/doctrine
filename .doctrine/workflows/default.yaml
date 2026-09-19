@@ -1,13 +1,89 @@
-# doctrine の既定ワークフロー（dctl project-add が雛形として作成）
+# doctrine の既定ワークフロー（plan → plan-review → implement → agent-review → review）
 #
-# テストや lint などの command ステップは、プロジェクトに合わせて自分で足す。
+# エージェントを planner / reviewer / implementer の3つの役割に分け、
+# 役割の間は .doctrine-out/ のファイルで成果物を受け渡す。
+#
+# 2つのゲート（plan-gate / review-gate）は、reviewer が書いた成果物ファイルの
+# 1行目が `verdict: approve` かどうかを grep で見るだけの command ステップ。
+# reject なら onFailure で前の工程へ戻り、feed で reviewer の最終応答を渡す。
+#   plan-gate   が落ちたら plan へ（最大3回）
+#   review-gate が落ちたら implement へ（最大3回）
+#   review（人の承認）で却下されたら implement へ（最大5回）
+# maxAttempts を使い切ってもゲートが通らない場合、タスクは failed になる。
+# そのとき worktree は削除されずに残るので、中を見て手で直すか、タスクを作り直す。
+#
 # command ステップはクラッシュ復帰時に頭から再実行されるので、
-# 再実行しても安全なコマンドにすること（pnpm test は安全、gh pr create は危険）。
+# 再実行しても安全なコマンドにすること（grep は安全、gh pr create は危険）。
 name: default
 steps:
+  - id: plan
+    type: agent
+    session: planner
+    permissionMode: acceptEdits
+    allowedTools:
+      - "Bash(git status:*)"
+      - "Bash(git diff:*)"
+      - "Bash(git log:*)"
+      - "Bash(grep:*)"
+      - "Bash(cat:*)"
+      - "Bash(ls:*)"
+      - "Bash(sed -n:*)"
+    prompt: |
+      次のタスクの実装計画を立ててください。
+
+      ---
+      {{ task.prompt }}
+      ---
+
+      リポジトリを調べたうえで、計画を {{ worktree.path }}/.doctrine-out/plan.md に書いてください。
+      見出しは「変更するファイル」「変更内容」「テスト」「やらないこと」の4つにします。
+      計画を書くだけで、コードは書かないでください。
+
+      差し戻されて再度呼ばれた場合は、指摘を踏まえて plan.md を全文書き直してください。
+
+  - id: plan-review
+    type: agent
+    session: reviewer
+    permissionMode: acceptEdits
+    allowedTools:
+      - "Bash(git status:*)"
+      - "Bash(git diff:*)"
+      - "Bash(git log:*)"
+      - "Bash(grep:*)"
+      - "Bash(cat:*)"
+      - "Bash(ls:*)"
+      - "Bash(sed -n:*)"
+      - "Bash(mise run core:test:*)"
+      - "Bash(mise run core:check:*)"
+    prompt: |
+      {{ worktree.path }}/.doctrine-out/plan.md を毎回読み直して審査し、結果を
+      {{ worktree.path }}/.doctrine-out/plan-review.md に上書きしてください。
+
+      元のタスクは次のとおりです。
+
+      ---
+      {{ task.prompt }}
+      ---
+
+      plan-review.md の1行目は必ず `verdict: approve` か `verdict: reject` のどちらかにします。
+      2行目以降に指摘を書いてください。修正が必要な具体的な指摘があるときだけ reject にします。
+
+      最終応答には plan-review.md の内容をそのまま書いてください
+      （後続のステップが参照できるのは最終応答だけです）。
+
+  - id: plan-gate
+    type: command
+    run: "grep -q '^verdict: approve' .doctrine-out/plan-review.md"
+    onFailure:
+      goto: plan
+      maxAttempts: 3
+      feed: |
+        計画がレビューで却下された:
+        {{ steps.plan-review.last_stdout }}
+
   - id: implement
     type: agent
-    prompt: "{{ task.prompt }}"
+    session: implementer
     permissionMode: acceptEdits
     # acceptEdits では Bash がすべて拒否されるので、このリポジトリで要るものだけ許可する。
     allowedTools:
@@ -26,7 +102,70 @@ steps:
       - "Bash(sed -n:*)"
       - "Bash(ls:*)"
       - "Bash(cat:*)"
+    prompt: |
+      {{ worktree.path }}/.doctrine-out/plan.md を読んでから実装してください。
+
+      元のタスクは次のとおりです。
+
+      ---
+      {{ task.prompt }}
+      ---
+
+      テストを先に書いてから実装します。`mise run core:test` と `mise run core:check` を
+      通してから git commit してください。
+      差し戻されて再度呼ばれた場合は、指摘を直して再度コミットしてください。
+
+  - id: agent-review
+    type: agent
+    session: reviewer
+    permissionMode: acceptEdits
+    allowedTools:
+      - "Bash(git status:*)"
+      - "Bash(git diff:*)"
+      - "Bash(git log:*)"
+      - "Bash(grep:*)"
+      - "Bash(cat:*)"
+      - "Bash(ls:*)"
+      - "Bash(sed -n:*)"
+      - "Bash(mise run core:test:*)"
+      - "Bash(mise run core:check:*)"
+    prompt: |
+      implement が積んだコミットを毎回読み直して審査し、結果を
+      {{ worktree.path }}/.doctrine-out/review.md に上書きしてください。
+
+      `git diff develop...HEAD` と `git log develop..HEAD` で実装の差分とコミットを読み、
+      {{ worktree.path }}/.doctrine-out/plan.md と突き合わせます。見るのは次の3点です。
+
+      - plan.md との乖離
+      - テスト不足
+      - CLAUDE.md の規約違反
+
+      review.md の1行目は必ず `verdict: approve` か `verdict: reject` のどちらかにします。
+      2行目以降に指摘を書いてください。修正が必要な具体的な指摘があるときだけ reject にします。
+
+      最終応答には review.md の内容をそのまま書いてください
+      （後続のステップが参照できるのは最終応答だけです）。
+
+  - id: review-gate
+    type: command
+    run: "grep -q '^verdict: approve' .doctrine-out/review.md"
+    onFailure:
+      goto: implement
+      maxAttempts: 3
+      feed: |
+        実装がレビューで却下された:
+        {{ steps.agent-review.last_stdout }}
 
   - id: review
     type: approval
     title: "変更を確認してください"
+    onReject:
+      goto: implement
+      maxAttempts: 5
+      feed: |
+        人のレビューで却下された:
+        {{ steps.review.last_stdout }}
+    review:
+      files:
+        - .doctrine-out/plan.md
+        - .doctrine-out/review.md
