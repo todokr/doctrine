@@ -45,11 +45,21 @@ export function TaskView({ t }: { t: Task }) {
 
       {t.state === "failed" && (
         <section className="box danger">
-          <h2><span className="mono">{t.step}</span> で失敗しました</h2>
-          <p>
-            worktree は証拠として残しています。中を確認してから、<span className="mono">dctl add</span> で同じ内容を投入し直すか、
-            <span className="mono">dctl gc {t.id}</span> で片付けてください（UIでの「同じ内容で投入し直す」は第2段階です）。
-          </p>
+          {/* worktree を作る前に落ちたタスクは step が null で、「 で失敗しました」になってしまう */}
+          <h2>{t.step ? <><span className="mono">{t.step}</span> で失敗しました</> : "実行を開始できませんでした"}</h2>
+          {t.worktree
+            ? (
+              <p>
+                worktree は証拠として残しています。中を確認してから、<span className="mono">dctl add</span> で同じ内容を投入し直すか、
+                <span className="mono">dctl gc {t.id}</span> で片付けてください（UIでの「同じ内容で投入し直す」は第2段階です）。
+              </p>
+            )
+            : (
+              <p>
+                worktree は残っていないので、中を見ることはできません。記録だけが残っています。
+                やり直すなら <span className="mono">dctl add</span> で同じ内容を投入し直してください（UIでの「同じ内容で投入し直す」は第2段階です）。
+              </p>
+            )}
         </section>
       )}
       {t.refused && (

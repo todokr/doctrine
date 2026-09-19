@@ -34,7 +34,10 @@ export type Group = "review" | "check" | "running" | "queued" | "paused" | "done
 
 export function groupOf(t: Task): Group {
   if (t.state === "suspended") return "review";
-  if (t.state === "failed" || t.state === "unknown" || t.refused || (t.degraded && !isTerminal(t.state))) return "check";
+  // failed を要確認に置くのは worktree が残っている間だけ（レビューアプリ設計spec 5章）。
+  // 削除拒否の completed は refused の定義そのものが同じ規則になっている
+  const failedWithEvidence = t.state === "failed" && t.worktree !== null;
+  if (failedWithEvidence || t.state === "unknown" || t.refused || (t.degraded && !isTerminal(t.state))) return "check";
   if (t.state === "running") return "running";
   if (t.state === "queued") return "queued";
   if (t.state === "paused") return "paused";
