@@ -1,4 +1,5 @@
 import { join } from "@std/path";
+import { computeDiff, mergeBase, type TaskDiff } from "../core/diff.ts";
 import { parseWorkflow, type Workflow } from "../workflow/schema.ts";
 import { parseProjectConfig, withSetupStep } from "../workflow/project.ts";
 import { ensureProjectScaffold } from "../workflow/scaffold.ts";
@@ -12,7 +13,12 @@ import {
   listTasks,
   type TaskState,
 } from "../db/tasks.ts";
-import { getAwaitingStepRun, getStepRun, listStepRuns } from "../db/stepRuns.ts";
+import {
+  getAwaitingStepRun,
+  getStepRun,
+  lastRejectedReview,
+  listStepRuns,
+} from "../db/stepRuns.ts";
 import { commitStepBoundary, StateConflictError, type StepBoundary } from "../db/boundary.ts";
 import type { TaskRow } from "../db/tasks.ts";
 import type { Db } from "../db/schema.ts";
@@ -29,7 +35,7 @@ import {
 } from "../core/worktree.ts";
 import { defaultProbe, killStaleChild } from "../core/recovery.ts";
 import { buildTaskContext } from "../core/taskContext.ts";
-import { releaseTrees } from "../core/reviewTree.ts";
+import { captureTree, releaseTrees } from "../core/reviewTree.ts";
 import { assertTransition, isTerminal } from "../core/states.ts";
 import type { AgentAdapter } from "../adapter/types.ts";
 import type { Handler } from "./server.ts";
@@ -320,6 +326,42 @@ export function createHandler(ctx: DaemonContext): Handler {
         const text = await Deno.readTextFile(run.log_path).catch(() => "");
         const tailLines = typeof params.tail === "number" ? params.tail : 200;
         return { log_path: run.log_path, lines: text.split("\n").slice(-tailLines) };
+      }
+      case "task.diff": {
+        const taskId = req(params, "task_id");
+        const task = await getTask(ctx.db, taskId);
+        if (!task) throw new Error("タスクがありません");
+        if (params.since !== undefined && params.since !== "last_review") {
+          throw new Error(`since に指定できるのは last_review だけです: ${String(params.since)}`);
+        }
+        // 完了して削除済み、またはまだ実行枠が取れていない。空の diff を返すと
+        // 「変更なし」と区別がつかないので、はっきり失敗させる。
+        if (!task.worktree_path) throw new Error("worktree がありません");
+        const project = (await getProject(ctx.db, task.project_id))!;
+
+        const merge_base = await mergeBase(task.worktree_path, project.base_branch);
+        const toRef = await captureTree(task.worktree_path);
+
+        // 記録が無ければ全体に倒す（初回のレビューには「前回」が無い）。
+        const last = params.since === "last_review"
+          ? await lastRejectedReview(ctx.db, taskId)
+          : undefined;
+
+        const { files, patch, truncated } = await computeDiff({
+          worktreePath: task.worktree_path,
+          fromRef: last?.review_tree ?? merge_base,
+          toRef,
+        });
+        const result: TaskDiff = {
+          // base は since の有無にかかわらず常に merge-base。画面が
+          // 「ブランチ全体のうちどの範囲を今見ているか」を示せるようにする。
+          base: { branch: project.base_branch, merge_base },
+          since_step_run_id: last?.step_run_id ?? null,
+          files,
+          patch,
+          truncated,
+        };
+        return result;
       }
 
       case "worktree.list": {

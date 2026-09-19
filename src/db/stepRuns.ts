@@ -34,6 +34,35 @@ export function getAwaitingStepRun(
 }
 
 /**
+ * 「前回レビュー以降」の基準点。直近の**差し戻された** approval の step_run と、
+ * その時点の worktree のツリーを返す。
+ *
+ * 差し戻しは「review_tree を持つ行が failed で閉じられたもの」として引く。
+ * status に rejected は無く、approval の却下は exit_code 1 の failed として
+ * 閉じられる（engine.ts の applyApproval）。review_tree が入るのは approval の
+ * awaiting 行だけなので、この2条件で差し戻しだけが取れる。復旧が付ける
+ * interrupted は差し戻しではないので failed の条件で外れる。
+ *
+ * 承認された回（success）は基準にしない。承認済みを基準にすると、その後の
+ * ステップの成果がレビュー対象から丸ごと消える。「前回レビュー以降」が意味を
+ * 持つのは、差し戻してやり直させたときだけである。
+ */
+export async function lastRejectedReview(
+  db: Db,
+  taskId: string,
+): Promise<{ step_run_id: number; review_tree: string } | undefined> {
+  const row = await db.selectFrom("step_runs")
+    .select(["id", "review_tree"])
+    .where("task_id", "=", taskId)
+    .where("status", "=", "failed")
+    .where("review_tree", "is not", null)
+    .orderBy("id", "desc")
+    .executeTakeFirst();
+  if (!row?.review_tree) return undefined;
+  return { step_run_id: row.id, review_tree: row.review_tree };
+}
+
+/**
  * 変数展開に渡す形（exitCode は文字列。テンプレートは文字列しか返さない）。
  *
  * step_outputs は実行1回ごとに1行あるので、ステップidごとに**最新の実行**
