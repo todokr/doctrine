@@ -29,7 +29,14 @@ export type ServerEvent =
     warning?: string;
   }
   | { event: "daemon.warning"; at: string; message: string; task_id?: string }
-  | { event: "ratelimit.sample"; window: string; utilization: number; resets_at: string | null };
+  | {
+    event: "ratelimit.sample";
+    /** five_hour / seven_day。claude が枠を増やせば未知の値も来る。 */
+    window: string;
+    utilization: number;
+    /** 枠が明ける時刻（ISO 8601）。デーモンが生値を正規化してあり、読めない生値は null。 */
+    resets_at: string | null;
+  };
 
 export type TaskState =
   | "queued"
@@ -91,6 +98,14 @@ export type TaskLogs = { step_run_id: number | null; log_path: string | null; li
 
 /** daemon.warnings が返す1件。イベントの daemon.warning と同じ形。 */
 export type Warning = { at: string; message: string; task_id?: string };
+
+/** ratelimit.recent が返す1件。resets_at は ISO 8601 か null（読めない生値は null）。 */
+export type RateLimitSample = {
+  observed_at: string;
+  window: string;
+  utilization: number;
+  resets_at: string | null;
+};
 
 export type ProjectSummary = {
   id: number;
@@ -188,6 +203,7 @@ export type Methods = {
     result: TaskLogs;
   };
   "daemon.warnings": { params: Record<string, never>; result: Warning[] };
+  "ratelimit.recent": { params: { limit?: number }; result: RateLimitSample[] };
 };
 
 export type Method = keyof Methods;

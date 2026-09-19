@@ -79,5 +79,15 @@ export type Task = {
   bounce?: { step: string; goto: string; attempt: number };
 };
 
+/** 枠1つぶんの最新の標本。window はデーモンの生のキー（five_hour / seven_day / 未知の値）。 */
+export type RateLimitWindow = {
+  window: string;
+  utilization: number;
+  /** 枠が明ける時刻。読めない生値はデーモンが null にしてある */
+  resetsAt: number | null;
+  /** その標本を観測した時刻。古い値を「いま」と読ませないために持つ */
+  observedAt: number;
+};
+
 export type LineComment = { path: string; line: number; quote: string; text: string };
 export type Draft = { comments: LineComment[]; overall: string };

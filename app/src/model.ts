@@ -5,6 +5,7 @@ import type {
   Guide,
   LineComment,
   Project,
+  RateLimitWindow,
   ReviewEntry,
   Task,
   TaskContext,
@@ -13,6 +14,7 @@ import type {
 } from "./types";
 import type {
   ProjectSummary,
+  RateLimitSample,
   ServerEvent,
   StepRun,
   TaskDetail,
@@ -332,6 +334,93 @@ export function toTask(
   };
 }
 
+/** ratelimit.recent の行を画面の形にする。observed_at が読めない行は null（捨てる）。 */
+export function toRateLimitWindow(row: RateLimitSample): RateLimitWindow | null {
+  const observedAt = parseTime(row.observed_at);
+  if (observedAt === null) return null;
+  return {
+    window: row.window,
+    utilization: row.utilization,
+    resetsAt: parseTime(row.resets_at),
+    observedAt,
+  };
+}
+
+// ---------------------------------------------------------------- 利用上限
+const WINDOW_ORDER = ["five_hour", "seven_day"];
+const WINDOW_LABEL: Record<string, string> = { five_hour: "5時間枠", seven_day: "7日枠" };
+
+/**
+ * 7日枠がこの利用率に達したら警告に入る。デーモンが反応する飽和（利用率 1）とは別の値
+ * （docs/superpowers/specs/2026-09-19-rate-limit-visibility-design.md）。
+ */
+export const WEEKLY_WARN_UTILIZATION = 0.8;
+
+export type RateLimitSeverity = "calm" | "warn" | "danger";
+
+export type RateLimitView = {
+  window: string;
+  label: string;
+  /** バーの長さ（0〜1） */
+  fill: number;
+  percent: string;
+  severity: RateLimitSeverity;
+  /** 「18:05 明け」「明けました」「明ける時刻は不明」 */
+  reset: string;
+  /** 枠はもう明けていて、利用率は明ける前の値である */
+  stale: boolean;
+  /** いつ観測した値か（「3分前」） */
+  observed: string;
+  note: string | null;
+};
+
+function rateLimitView(w: RateLimitWindow, now: number): RateLimitView {
+  const stale = w.resetsAt !== null && w.resetsAt <= now;
+  const weekly = w.window === "seven_day";
+  const saturated = w.utilization >= 1;
+  const severity: RateLimitSeverity = stale || !weekly
+    ? "calm"
+    : saturated
+    ? "danger"
+    : w.utilization >= WEEKLY_WARN_UTILIZATION
+    ? "warn"
+    : "calm";
+  const note = stale
+    ? null
+    : severity === "danger"
+    ? "7日枠が飽和しています。明けるのが6時間より先なら、タスクは待たずに失敗します"
+    : severity === "warn"
+    ? "7日枠が飽和すると、明けるのが6時間より先になるのでタスクは待たずに失敗します"
+    : w.window === "five_hour" && saturated
+    ? "新しいタスクは明けるまで始まりません"
+    : null;
+  // hm は数時間先までの時刻にしか使えない。5時間枠のほかは日付を添える
+  const at = (ms: number) => (w.window === "five_hour" ? hm(ms) : clock(ms));
+  return {
+    window: w.window,
+    label: WINDOW_LABEL[w.window] ?? w.window,
+    fill: Math.min(1, Math.max(0, w.utilization)),
+    // 切り捨てる。四捨五入すると飽和の手前（0.996）が 100% に見える
+    percent: `${Math.floor(Math.round(w.utilization * 1000) / 10)}%`,
+    severity,
+    reset: w.resetsAt === null ? "明ける時刻は不明" : stale ? "明けました" : `${at(w.resetsAt)} 明け`,
+    stale,
+    observed: ago(w.observedAt, now),
+    note,
+  };
+}
+
+/** サイドバーに出す行。既知の枠を決まった順に、未知の枠はその後ろに生のキーで。 */
+export function rateLimitViews(s: State): RateLimitView[] {
+  const rank = (w: string) => {
+    const i = WINDOW_ORDER.indexOf(w);
+    return i < 0 ? WINDOW_ORDER.length : i;
+  };
+  return Object.values(s.limits)
+    .sort((a, b) => rank(a.window) - rank(b.window) || a.window.localeCompare(b.window))
+    .map((w) => rateLimitView(w, s.now));
+}
+
 // ---------------------------------------------------------------- 状態
 export type Editing = LineComment & { task: string };
 
@@ -356,6 +445,8 @@ export type State = {
   /** task.get の結果。選んだタスクぶんだけ持つ */
   detail: Record<string, TaskDetail>;
   logs: Record<string, LogView>;
+  /** 利用上限の枠ごとの最新の標本。キーは window 名 */
+  limits: Record<string, RateLimitWindow>;
   now: number;
   view: View;
   project: string;
@@ -425,6 +516,7 @@ export type Action =
   | { type: "logs"; id: string; logs: LogView }
   | { type: "toast"; message: string | null }
   | { type: "sync"; tasks: Task[]; projects: Project[]; now: number }
+  | { type: "limits.recent"; samples: RateLimitWindow[] }
   | { type: "daemon"; ev: ServerEvent; now: number }
   | { type: "connection"; conn: ConnectionStatus };
 
@@ -589,6 +681,15 @@ export function reduce(s: State, a: Action): State {
       const first = sidebarOrder(a.tasks, s.view, s.project)[0];
       return { ...next, sel: first ? first.id : null, editing: null };
     }
+    case "limits.recent": {
+      // DB の行はイベントで届いた値より古いことがあるので、代入せず新しいほうを残す
+      const limits = { ...s.limits };
+      for (const w of a.samples) {
+        const have = limits[w.window];
+        if (!have || w.observedAt > have.observedAt) limits[w.window] = w;
+      }
+      return { ...s, limits };
+    }
     case "daemon": {
       const ev = a.ev;
       // 知らない event は無視する。Rust は素通しするだけなので、
@@ -654,7 +755,15 @@ export function reduce(s: State, a: Action): State {
       if (ev.event === "daemon.warning") {
         return { ...s, toast: ev.message };
       }
-      // ratelimit.sample は第2段階
+      if (ev.event === "ratelimit.sample") {
+        const w: RateLimitWindow = {
+          window: ev.window,
+          utilization: ev.utilization,
+          resetsAt: parseTime(ev.resets_at),
+          observedAt: a.now,
+        };
+        return { ...s, now: a.now, limits: { ...s.limits, [ev.window]: w } };
+      }
       return s;
     }
     case "connection": {

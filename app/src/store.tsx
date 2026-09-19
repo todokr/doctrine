@@ -25,6 +25,7 @@ import {
   scopeOf,
   selectedTask,
   toProject,
+  toRateLimitWindow,
   toTask,
   type Action,
   type State,
@@ -43,6 +44,7 @@ function initialState(): State {
     projects: [],
     detail: {},
     logs: {},
+    limits: {},
     now: Date.now(),
     view: "tasks",
     project: "all",
@@ -83,12 +85,19 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     async function refresh() {
       const token = refreshGate.begin();
       try {
-        const [projects, tasks] = await Promise.all([
+        const [projects, tasks, samples] = await Promise.all([
           rpc("project.list", {}),
           rpc("task.list", {}),
+          // ratelimit.sample は agent ステップが走っている間しか飛ばない。開いた直後に
+          // 空欄にしないために DB の直近の行で埋める。これが落ちても一覧は出す
+          rpc("ratelimit.recent", {}).catch(() => []),
         ]);
         if (!alive || !refreshGate.isLatest(token)) return;
         refreshFailing = false;
+        dispatch({
+          type: "limits.recent",
+          samples: samples.map(toRateLimitWindow).filter((w) => w !== null),
+        });
         // previous を渡さないと、stepRun.finished で付いた degraded のステップ名が
         // 15 秒ごとの取り直しのたびに消える
         const known = latest.current.tasks;

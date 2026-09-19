@@ -1,5 +1,6 @@
 // テスト用の標本。画面はこれを使わない（画面のデータはデーモンから来る）
 import type { Guide, Project, StepDef, Task, TaskDiff } from "./types";
+import type { ServerEvent } from "../../shared/protocol.ts";
 
 export const NOW = Date.parse("2026-09-15T15:00:00+09:00");
 export const MIN = 60000;
@@ -110,6 +111,26 @@ export function seedTasks(): Task[] {
     };
   });
 }
+
+const rateLimit = (window: string, utilization: number, resetsInMin: number): ServerEvent => ({
+  event: "ratelimit.sample",
+  window,
+  utilization,
+  // デーモンが正規化した後の形（ISO 8601）
+  resets_at: new Date(NOW + resetsInMin * MIN).toISOString(),
+});
+
+/** 通常の状態。7日枠は上がってきているが、まだ警告ではない。 */
+export const RATELIMIT_NORMAL: ServerEvent[] = [
+  rateLimit("five_hour", 0.22, 185),
+  rateLimit("seven_day", 0.66, 60 * 24 * 4 - 360),
+];
+
+/** 飽和が近い状態。7日枠だけが警告に入る（5時間枠は 0.80 でも待てば明ける）。 */
+export const RATELIMIT_NEAR_SATURATION: ServerEvent[] = [
+  rateLimit("five_hour", 0.8, 185),
+  rateLimit("seven_day", 0.86, 60 * 24 * 4 - 360),
+];
 
 /**
  * 本物の `git diff` から起こした task.diff の応答。

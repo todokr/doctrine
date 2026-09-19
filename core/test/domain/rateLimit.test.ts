@@ -6,6 +6,8 @@ import {
   MAX_CONSECUTIVE_RATE_LIMITS,
   MAX_WAIT_MS,
   MIN_WAIT_MS,
+  normalizeResetsAt,
+  parseResetsAt,
 } from "../../src/domain/rateLimit.ts";
 import type { RateLimitObservation } from "../../src/adapter/types.ts";
 
@@ -70,6 +72,35 @@ test("resetsAt が epoch の数値・数字だけの文字列でも読む", () =
       { kind: "wait", until: RESETS, resetsAt: RESETS },
       String(resetsAt),
     );
+  }
+});
+
+test("小数付きの epoch 秒の文字列（TEXT 列に数値を bind した形）を秒として読む", () => {
+  assert.equal(parseResetsAt("1789828800.0"), 1789828800000);
+  assert.equal(parseResetsAt("1789828800.5"), 1789828800500);
+  for (const v of ["1789828800.", ".5", "1.2.3", "-1789828800.0"]) {
+    assert.equal(parseResetsAt(v), null, v);
+  }
+});
+
+test("代替根拠の resetsAt が小数付きの epoch 秒の文字列でも、上限として待つ", () => {
+  const sec = Math.floor(Date.parse(RESETS) / 1000);
+  assert.deepEqual(classify({ samples: [saturated({ resetsAt: `${sec}.0` })] }), {
+    kind: "wait",
+    until: RESETS,
+    resetsAt: RESETS,
+  });
+  const far = Math.floor((NOW.getTime() + MAX_WAIT_MS + 60_000) / 1000);
+  assert.equal(classify({ samples: [saturated({ resetsAt: `${far}.0` })] }).kind, "too-long");
+});
+
+test("normalizeResetsAt はどの形の生値も ISO 8601 にし、読めない値は null にする", () => {
+  const sec = Math.floor(Date.parse(RESETS) / 1000);
+  for (const v of [sec, `${sec}.0`, String(sec), Date.parse(RESETS), RESETS]) {
+    assert.equal(normalizeResetsAt(v), RESETS, String(v));
+  }
+  for (const v of [null, undefined, "", "いつか", Number.NaN]) {
+    assert.equal(normalizeResetsAt(v), null, String(v));
   }
 });
 
