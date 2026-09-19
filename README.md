@@ -127,7 +127,9 @@ steps:
 
 - **`command`** — worktree内でシェルコマンドを実行する。非0終了でステップ失敗。
 - **`agent`** — Claude Code を headless 実行する。会話を role 単位（`session: <role>`）で
-  記録し再開可能。
+  記録し再開可能。`allowedTools:` に文字列のリストを書くと、そのツールを個別に許可できる
+  （`- "Bash(git diff:*)"` のように1要素1パターンで書く）。`permissionMode: acceptEdits`
+  のままでは Bash はすべて拒否されるので、使わせたいコマンドはここに書く。
 - **`approval`** — ワークフローを `suspended` にし、人の承認・却下・追加コメントを待つ。
 
 失敗時の分岐は `onFailure`（`command` / `agent`）と `onReject`（`approval`）のみで、

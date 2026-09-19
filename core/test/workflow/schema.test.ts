@@ -37,6 +37,55 @@ test("3つのステップ型をパースする", () => {
   assert.equal((workflow.steps[1] as CommandStep).onFailure?.goto, "implement");
 });
 
+test("agent の allowedTools を string[] として読む", () => {
+  const yaml = `
+name: allow
+steps:
+  - id: implement
+    type: agent
+    prompt: "やって"
+    allowedTools:
+      - "Bash(grep:*)"
+      - "Bash(git diff:*)"
+`;
+  const { workflow } = parseWorkflow(yaml);
+  assert.deepEqual((workflow.steps[0] as AgentStep).allowedTools, [
+    "Bash(grep:*)",
+    "Bash(git diff:*)",
+  ]);
+});
+
+test("allowedTools に文字列単体を書いたら落とす", () => {
+  const yaml = `
+name: allow
+steps:
+  - id: implement
+    type: agent
+    prompt: "やって"
+    allowedTools: "Bash(grep:*)"
+`;
+  assert.throws(() => parseWorkflow(yaml), (e: unknown) => {
+    assert.ok(e instanceof WorkflowValidationError);
+    return true;
+  });
+});
+
+test("allowedTools に空文字の要素があったら落とす", () => {
+  const yaml = `
+name: allow
+steps:
+  - id: implement
+    type: agent
+    prompt: "やって"
+    allowedTools:
+      - ""
+`;
+  assert.throws(() => parseWorkflow(yaml), (e: unknown) => {
+    assert.ok(e instanceof WorkflowValidationError);
+    return true;
+  });
+});
+
 test("ステップidが重複したら落とす", () => {
   const yaml = `
 name: dup

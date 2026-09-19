@@ -22,6 +22,7 @@ export type StartOptions = {
   sessionId: string;
   permissionMode?: string;
   model?: string;
+  allowedTools?: string[];
 };
 
 export type AgentRun = {

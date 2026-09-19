@@ -59,6 +59,29 @@ test("再開の引数順序は実測どおり: プロンプトは --resume <id> 
   ]);
 });
 
+test("allowedTools は末尾に1要素ずつ argv として並ぶ", () => {
+  const args = buildArgs("やって", {
+    cwd: "/wt",
+    sessionId: "s1",
+    allowedTools: ["Bash(grep:*)", "Bash(git diff:*)"],
+  });
+  assert.deepEqual(args.slice(-3), ["--allowedTools", "Bash(grep:*)", "Bash(git diff:*)"]);
+});
+
+test("再開時も allowedTools が末尾に付く", () => {
+  const args = buildArgs("追加で直して", {
+    cwd: "/wt",
+    sessionId: "s1",
+    allowedTools: ["Bash(grep:*)", "Bash(git diff:*)"],
+  }, "s1");
+  assert.deepEqual(args.slice(-3), ["--allowedTools", "Bash(grep:*)", "Bash(git diff:*)"]);
+});
+
+test("allowedTools が空配列なら --allowedTools を付けない", () => {
+  const args = buildArgs("やって", { cwd: "/wt", sessionId: "s1", allowedTools: [] });
+  assert.equal(args.includes("--allowedTools"), false);
+});
+
 test("rate_limit_event を正規化する", () => {
   const ev = normalize({
     type: "rate_limit_event",
