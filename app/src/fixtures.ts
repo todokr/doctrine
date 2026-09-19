@@ -1,4 +1,4 @@
-// プロトタイプ（prototype/review-app-mvp.html）のモックデータ。デーモンにつなぐまでの仮の中身
+// テスト用の標本。画面はこれを使わない（画面のデータはデーモンから来る）
 import type { DiffFile, Guide, Project, StepDef, Task } from "./types";
 
 export const NOW = Date.parse("2026-09-15T15:00:00+09:00");

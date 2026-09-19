@@ -181,7 +181,14 @@ export function createHandler(ctx: DaemonContext): Handler {
           filter.projectId = (await getProjectByPath(ctx.db, params.project))?.id;
         }
         if (typeof params.state === "string") filter.state = params.state as TaskState;
-        return await listTasks(ctx.db, filter);
+        const tasks = await listTasks(ctx.db, filter);
+        // サイドバーの「要確認」に degraded を含めるために要る（レビューアプリ設計spec 5章）。
+        // 1タスクずつ問い合わせると件数ぶん往復するので、一度に集めて突き合わせる。
+        const degraded = new Set(
+          (await ctx.db.selectFrom("step_runs").select("task_id").distinct()
+            .where("status", "=", "degraded").execute()).map((r) => r.task_id),
+        );
+        return tasks.map((t) => ({ ...t, has_degraded: degraded.has(t.id) }));
       }
       case "task.get": {
         const task = await getTask(ctx.db, req(params, "task_id"));

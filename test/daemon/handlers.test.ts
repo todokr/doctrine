@@ -14,7 +14,7 @@ import { reviewRefName } from "../../src/core/reviewTree.ts";
 import { createHandler, type DaemonContext, tick } from "../../src/daemon/handlers.ts";
 import { createMockAdapter } from "../../src/adapter/mock.ts";
 import { parseWorkflow } from "../../src/workflow/schema.ts";
-import type { ServerEvent } from "../../src/daemon/protocol.ts";
+import type { ProjectSummary, ServerEvent, TaskListEntry } from "../../src/daemon/protocol.ts";
 import { branchNameFor } from "../../src/core/worktree.ts";
 import { randomUUID } from "node:crypto";
 import { makeRepo, tickWhenIdle, until } from "../helpers/repo.ts";
@@ -1107,6 +1107,112 @@ test("project.add: project.yaml が無くても、既にあるワークフロー
     [join(r, ".doctrine", "project.yaml")],
     "作ったのは project.yaml だけ",
   );
+});
+
+test("task.list は degraded な step_run を持つタスクに has_degraded を立てる", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  await h("project.add", { path: repo }, NOOP_CONN);
+
+  const clean = await h("task.create", { project: repo, title: "き", prompt: "p" }, NOOP_CONN) as {
+    id: string;
+  };
+  const dirty = await h("task.create", { project: repo, title: "よ", prompt: "p" }, NOOP_CONN) as {
+    id: string;
+  };
+
+  await ctx.db.insertInto("step_runs").values({
+    task_id: dirty.id,
+    step_id: "review",
+    attempt: 1,
+    status: "degraded",
+    exit_code: 0,
+    started_at: new Date().toISOString(),
+    ended_at: new Date().toISOString(),
+    log_path: join(root, "logs", "x.log"),
+  }).execute();
+
+  const rows = await h("task.list", {}, NOOP_CONN) as { id: string; has_degraded: boolean }[];
+  assert.equal(rows.find((r) => r.id === dirty.id)?.has_degraded, true);
+  assert.equal(rows.find((r) => r.id === clean.id)?.has_degraded, false);
+});
+
+/** keyof を鍵にすることで、型に欄を足したらこの表も直さないと deno task check が落ちる。
+ *  述語で実行時の型まで見るので、欄の名前替えと型替えの両方を捕まえる。 */
+const isString = (v: unknown) => typeof v === "string";
+const isNumber = (v: unknown) => typeof v === "number";
+const isBoolean = (v: unknown) => typeof v === "boolean";
+const nullable = (f: (v: unknown) => boolean) => (v: unknown) => v === null || f(v);
+
+const TASK_SUMMARY_SHAPE: Record<
+  Exclude<keyof TaskListEntry, "has_degraded">,
+  (v: unknown) => boolean
+> = {
+  id: isString,
+  project_id: isNumber,
+  title: isString,
+  prompt: isString,
+  workflow_name: isString,
+  state: isString,
+  current_step_id: nullable(isString),
+  branch: isString,
+  worktree_path: nullable(isString),
+  priority: isNumber,
+  created_at: isString,
+  updated_at: isString,
+};
+
+const TASK_SHAPE: Record<keyof TaskListEntry, (v: unknown) => boolean> = {
+  ...TASK_SUMMARY_SHAPE,
+  has_degraded: isBoolean,
+};
+
+const PROJECT_SHAPE: Record<keyof ProjectSummary, (v: unknown) => boolean> = {
+  id: isNumber,
+  path: isString,
+  default_workflow: isString,
+  max_concurrent: isNumber,
+  base_branch: isString,
+  setup: nullable(isString),
+};
+
+function assertShape(
+  row: Record<string, unknown>,
+  shape: Record<string, (v: unknown) => boolean>,
+  what: string,
+) {
+  for (const [key, ok] of Object.entries(shape)) {
+    assert.ok(key in row, `${what} に ${key} がありません`);
+    assert.ok(ok(row[key]), `${what} の ${key} の型が違います: ${JSON.stringify(row[key])}`);
+  }
+}
+
+test("task.list / project.list / task.cancel の応答が protocol.ts の型を満たす", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  await h("project.add", { path: repo }, NOOP_CONN);
+  const t = await h("task.create", { project: repo, title: "た", prompt: "p" }, NOOP_CONN) as {
+    id: string;
+  };
+
+  // keyof を鍵にした述語表で検証（型に欄を足したら deno task check が落ちる）。
+  const tasks = await h("task.list", {}, NOOP_CONN) as unknown as Record<string, unknown>[];
+  const projects = await h("project.list", {}, NOOP_CONN) as unknown as Record<string, unknown>[];
+
+  // TaskListEntry の形を検証
+  assert.ok(tasks.length > 0, "タスクが存在するはず");
+  assertShape(tasks[0], TASK_SHAPE, "task.list の結果");
+
+  // ProjectSummary の形を検証
+  assert.ok(projects.length > 0, "プロジェクトが存在するはず");
+  assertShape(projects[0], PROJECT_SHAPE, "project.list の結果");
+
+  // task.cancel は TaskSummary を返す（has_degraded は無し）
+  const canceled = await h("task.cancel", { task_id: t.id }, NOOP_CONN) as unknown as Record<
+    string,
+    unknown
+  >;
+  assertShape(canceled, TASK_SUMMARY_SHAPE, "task.cancel の結果");
 });
 
 test("worktree を消すとそのタスクのレビュー参照も消える", async () => {

@@ -1,6 +1,11 @@
 // 画面が扱う形。デーモンにつなぐときに src/daemon/protocol.ts の型へ寄せる
 
-export type TaskState = "queued" | "running" | "suspended" | "paused" | "completed" | "failed" | "canceled";
+/**
+ * デーモンが知らない状態を返したとき用。版のずれ（新しい dctld ＋ 古い画面）で起こりうる。
+ * 捨てると画面から消えるか「終了」に紛れるので、見える状態として持つ。
+ */
+export type TaskState = "queued" | "running" | "suspended" | "paused"
+  | "completed" | "failed" | "canceled" | "unknown";
 
 export type Project = { id: string; color: string; path: string; def: string };
 
@@ -60,6 +65,7 @@ export type Task = {
   reviewFiles?: ReviewFile[];
   lastCommand?: CommandResult | null;
   lastAgentMessage?: string | null;
+  // どの画面も今は読まない。task.logs の follow（#47）で本物のログに置き換わるまでの残骸
   log?: string;
   dirty?: boolean;
   refused?: boolean;

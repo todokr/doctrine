@@ -1,5 +1,7 @@
-import { ago, canReject, clock, currentStep, diffStats, draftOf, filesFor, stepDef } from "../model";
-import { useNotYet, useStore } from "../store";
+import { useState } from "react";
+import { sendDecision } from "../decision";
+import { ago, canReject, clock, currentStep, diffStats, draftOf, filesFor } from "../model";
+import { useDecide, useNotYet, useStore } from "../store";
 import type { ReviewFile, Task } from "../types";
 import { DiffFileBlock, fileAnchor } from "./DiffFileBlock";
 import { GuidePanel, StepView } from "./Guide";
@@ -7,11 +9,11 @@ import { Markdown } from "./text";
 
 export function Crumbs({ t }: { t: Task }) {
   const { s } = useStore();
-  const p = s.projects.find((x) => x.id === t.project)!;
+  const p = s.projects.find((x) => x.id === t.project);
   return (
     <div className="crumbs">
-      <span className="pjdot" style={{ background: p.color }} />
-      <span>{p.id}</span>
+      {p && <span className="pjdot" style={{ background: p.color }} />}
+      <span>{p?.id ?? t.project}</span>
       <span className="mono">{t.wf}</span>
       <span className="mono">{t.id}</span>
       <span className="mono">P{t.prio}</span>
@@ -72,7 +74,9 @@ function Diff({ t }: { t: Task }) {
   const all = t.diff;
   const step = currentStep(s, t);
 
-  if (all.length === 0) return <div className="empty-diff">コードの変更はまだありません。上の計画を読んで判断してください。</div>;
+  // デーモンには task.diff があるが、画面はまだ呼んでいない（#46）。
+  // 見出し側で既に案内しているので、ここでは何も出さない
+  if (all.length === 0) return null;
   if (t.guide && step !== null) return <StepView t={t} guide={t.guide} idx={step} />;
 
   return (
@@ -122,11 +126,13 @@ function FileBody({ file }: { file: ReviewFile | undefined }) {
 
 export function ReviewView({ t }: { t: Task }) {
   const { s, dispatch } = useStore();
-  const def = stepDef(s, t);
+  const decide = useDecide();
   const draft = draftOf(s, t.id);
   const scope = s.scope[t.id] ?? "all";
+  // 送信中は連打で二重送信しないよう承認ボタンを止める。成功したときだけ
+  // 下書きを消す（approve の dispatch）ので、失敗時はここで再度押せる
+  const [approving, setApproving] = useState(false);
   const hasSince = t.reviews.length > 0 && t.diff.some((f) => f.since);
-  const declared = def?.review?.files ?? [];
 
   return (
     <>
@@ -134,7 +140,7 @@ export function ReviewView({ t }: { t: Task }) {
         <Crumbs t={t} />
         <h1>{t.title}</h1>
         <div className="headrow">
-          <span className="pill p-attn">◆ {def?.title}</span>
+          <span className="pill p-attn">◆ {t.step ?? "レビュー待ち"}</span>
           {t.reviews.length > 0 && <span className="pill p-muted">{t.reviews.length + 1}回目のレビュー</span>}
           <span className="hint">{ago(t.since, s.now)}から待っています</span>
           <span className="mono hint">{t.branch}</span>
@@ -144,16 +150,19 @@ export function ReviewView({ t }: { t: Task }) {
 
         <Context t={t} />
 
-        {declared.map((path) => (
-          <section className="rv-files-md" key={path}>
-            <header><span className="mono">{path}</span><span className="hint">このステップが見せるファイル（review.files）</span></header>
-            <FileBody file={t.reviewFiles?.find((f) => f.path === path)} />
+        {/* 宣言されたパスの出どころはワークフロー定義ではなく task.context の応答。
+            定義を引く口（workflow.list）は #58 で、それまではデーモンが解決した
+            この配列だけが根拠になる。未取得（#46）のうちは何も出ない */}
+        {(t.reviewFiles ?? []).map((file) => (
+          <section className="rv-files-md" key={file.path}>
+            <header><span className="mono">{file.path}</span><span className="hint">このステップが見せるファイル（review.files）</span></header>
+            <FileBody file={file} />
           </section>
         ))}
 
         <div className="headrow">
           <b>変更</b>
-          <span className="hint">{t.diff.length} ファイル · ベースブランチとの merge-base から worktree の現在まで（未コミットを含む）</span>
+          <span className="hint">diff はまだ取りに行っていません（<span className="mono">task.diff</span> の呼び出しは #46）</span>
           <span className="spacer" />
           {hasSince && (
             <span className="seg" role="group" aria-label="差分の範囲">
@@ -172,7 +181,24 @@ export function ReviewView({ t }: { t: Task }) {
         </div>
         <div className="actions">
           <button className="btn danger" disabled={!canReject(draft)} onClick={() => dispatch({ type: "reject.preview" })}>差し戻す…</button>
-          <button className="btn primary" onClick={() => dispatch({ type: "approve" })}>承認する</button>
+          <button
+            className="btn primary"
+            disabled={approving}
+            onClick={async () => {
+              setApproving(true);
+              try {
+                const r = await sendDecision(decide.approve(t.id), "承認を送れませんでした");
+                // approve はもう「送れたときの後片付け」。task.stateChanged がこの
+                // await より先に届いて t.state が変わっていても、後片付けは必ず走る
+                if (r.ok) dispatch({ type: "approve" });
+                else dispatch({ type: "toast", message: r.message });
+              } finally {
+                setApproving(false);
+              }
+            }}
+          >
+            承認する
+          </button>
         </div>
       </footer>
     </>

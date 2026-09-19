@@ -4,7 +4,7 @@ import { connect, type Socket } from "node:net";
 import { mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createServer } from "../../src/daemon/server.ts";
+import { createServer, resolveSocketPath } from "../../src/daemon/server.ts";
 
 let root: string;
 let sock: string;
@@ -193,4 +193,54 @@ test("行の長さに上限がなく、巨大な1行でもフレーミングが�
   assert.equal(res.ok, true);
   assert.equal((res.result as string).length, 1_000_000);
   c.socket.end();
+});
+
+const socketEnv = (o: Partial<import("../../src/daemon/server.ts").SocketEnv> = {}) => ({
+  stateRoot: () => "/home/u/.local/state/doctrine",
+  uid: 501,
+  os: "linux" as const,
+  ...o,
+});
+
+test("resolveSocketPath: DOCTRINE_SOCKET があればそれを使う", () => {
+  assert.equal(
+    resolveSocketPath(socketEnv({ doctrineSocket: "/tmp/x.sock", xdgRuntimeDir: "/run/user/1" })),
+    "/tmp/x.sock",
+  );
+});
+
+test("resolveSocketPath: XDG_RUNTIME_DIR があれば OS によらずその下", () => {
+  assert.equal(
+    resolveSocketPath(socketEnv({ xdgRuntimeDir: "/run/user/501", os: "darwin" })),
+    "/run/user/501/doctrine/dctld.sock",
+  );
+});
+
+test("resolveSocketPath: Linux で XDG_RUNTIME_DIR が無ければ /run/user/<uid>", () => {
+  assert.equal(resolveSocketPath(socketEnv()), "/run/user/501/doctrine/dctld.sock");
+});
+
+test("resolveSocketPath: macOS で XDG_RUNTIME_DIR が無ければ状態ディレクトリ", () => {
+  // macOS には XDG_RUNTIME_DIR が無く /run は read-only なので、/run/user には作れない
+  assert.equal(
+    resolveSocketPath(socketEnv({ os: "darwin" })),
+    "/home/u/.local/state/doctrine/dctld.sock",
+  );
+});
+
+test("resolveSocketPath: 空文字の環境変数は未設定として扱う", () => {
+  assert.equal(
+    resolveSocketPath(socketEnv({ doctrineSocket: "", xdgRuntimeDir: "" })),
+    "/run/user/501/doctrine/dctld.sock",
+  );
+});
+
+test("resolveSocketPath: XDG_RUNTIME_DIR があれば stateRoot を解決しない", () => {
+  const boom = () => {
+    throw new Error("呼ばれてはいけません");
+  };
+  assert.equal(
+    resolveSocketPath({ xdgRuntimeDir: "/run/user/501", stateRoot: boom, uid: 501, os: "linux" }),
+    "/run/user/501/doctrine/dctld.sock",
+  );
 });
