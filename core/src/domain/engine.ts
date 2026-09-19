@@ -136,7 +136,8 @@ async function setState(
 
 /**
  * 上限に当たった実行をどう扱うか。give-up は「上限ではあるが待たない」で、
- * 記録のうえでは今までどおりの失敗（decide に渡す）になる。
+ * step_run は failed として閉じたうえで、タスクをそのまま failed にする
+ * （onFailure には渡さない。理由は runTask の give-up の分岐にある）。
  */
 type RateLimitDecision =
   | { kind: "none" }
@@ -470,6 +471,16 @@ export async function runTask(
       },
     });
     deps.onStepRunFinished?.(taskId, stepRunId, step.id, outcome.status as StepRunStatus);
+
+    if (verdict.kind === "give-up") {
+      // 上限で待たないと決めた実行は decide に渡さない。渡すと onFailure が
+      // 同じステップをやり直し、閉じていると分かっている枠に対して maxAttempts の
+      // 回ぶん claude を起動し直したうえ、上限がワークフロー本来の試行回数を食う
+      // （待ちの連続数も failed の行で切れるので、待ちは 5 回では止まらなくなる）。
+      // ここで止めるのが「人が作り直すか上限を上げるかを決める機会」（spec 6章）。
+      await setState(db, task, "failed", deps);
+      return;
+    }
 
     task = (await getTask(db, taskId))!;
     const decision = decide({

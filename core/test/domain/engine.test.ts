@@ -430,6 +430,19 @@ steps:
     prompt: "{{ task.prompt }}"
 `;
 
+/** 上限を「待たない」と決めたとき、onFailure にやり直させないことを見るためのワークフロー。 */
+const AGENT_WITH_RETRY = `
+name: f
+steps:
+  - id: implement
+    type: agent
+    prompt: "{{ task.prompt }}"
+    onFailure:
+      goto: implement
+      maxAttempts: 3
+      feed: "もう一度"
+`;
+
 test("上限に当たった agent ステップは失敗ではなく rate_limited として待つ", async () => {
   const { db, root, workflow } = await taskFixture(AGENT_ONLY);
   const hit = saturated();
@@ -621,8 +634,8 @@ test("feed 無しのステップで上限に当たっても pending_feed は書�
   assert.equal(adapter.calls[1].prompt, "直して", "再開時に step.prompt がその時点で展開される");
 });
 
-test("resetsAt が6時間より先なら待たずに failed にし、resetsAt を残す", async () => {
-  const { db, root, workflow } = await taskFixture(AGENT_ONLY);
+test("resetsAt が6時間より先なら、onFailure があっても待たずに failed にする", async () => {
+  const { db, root, workflow } = await taskFixture(AGENT_WITH_RETRY);
   const far = saturated(7 * 60);
   const adapter = createMockAdapter({
     eventsSequence: [[far]],
@@ -631,17 +644,25 @@ test("resetsAt が6時間より先なら待たずに failed にし、resetsAt �
   });
   await runTask(db, "t1", workflow, { db, adapter, logRoot: join(root, "logs"), globalLimit: 4 });
 
-  assert.equal((await getTask(db, "t1"))?.state, "failed");
+  const task = (await getTask(db, "t1"))!;
+  assert.equal(task.state, "failed");
   const outputs = await getStepOutputs(db, "t1");
   assert.match(
     outputs.implement.last_stderr,
     new RegExp(far.kind === "rateLimit" ? far.resetsAt! : ""),
     "board 上で普通の失敗と区別が付くように resetsAt を残す",
   );
+  assert.equal(
+    adapter.calls.length,
+    1,
+    "閉じていると分かっている枠に対して、onFailure で何度も起動し直さない",
+  );
+  assert.equal(task.attempt_counts, JSON.stringify({ implement: 1 }));
+  assert.deepEqual((await listStepRuns(db, "t1")).map((r) => r.status), ["failed"]);
 });
 
 test("同じステップで連続して上限に当たり続けたら failed にする", async () => {
-  const { db, root, workflow } = await taskFixture(AGENT_ONLY);
+  const { db, root, workflow } = await taskFixture(AGENT_WITH_RETRY);
   // 既に5回連続で上限に当たっている記録を作る（1回ずつ回すと上限の意味が変わらない）。
   await db.updateTable("tasks").set({ attempt_counts: JSON.stringify({ implement: 1 }) })
     .where("id", "=", "t1").execute();
@@ -665,8 +686,15 @@ test("同じステップで連続して上限に当たり続けたら failed に
   });
   await runTask(db, "t1", workflow, { db, adapter, logRoot: join(root, "logs"), globalLimit: 4 });
 
-  assert.equal((await getTask(db, "t1"))?.state, "failed");
+  const task = (await getTask(db, "t1"))!;
+  assert.equal(task.state, "failed");
   assert.match((await getStepOutputs(db, "t1")).implement.last_stderr, /連続して 5 回/);
+  assert.equal(adapter.calls.length, 1, "onFailure でやり直さない");
+  assert.equal(
+    task.attempt_counts,
+    JSON.stringify({ implement: 1 }),
+    "上限はワークフロー本来の試行回数を食わない",
+  );
 });
 
 test("上限と無関係な失敗は今までどおり onFailure の分岐に進む", async () => {
@@ -706,25 +734,20 @@ test("上限のイベントが取れなくても、実行開始以降のサン�
   const resetsAt = new Date(Date.now() + 10 * 60_000).toISOString();
   const adapter = createMockAdapter({ result: {}, sequence: [HIT] });
   // 実行中に別経路（他タスクの実行）で観測された飽和。イベントは自分には来ていない。
+  // 観測時刻は実行開始時刻ちょうどにする（同じミリ秒に落ちても拾えること = 比較が >=）。
   const origStart = adapter.start;
   adapter.start = (prompt, opts) => {
+    const run = origStart(prompt, opts);
     db.insertInto("rate_limit_samples").values({
-      observed_at: new Date().toISOString(),
+      observed_at: run.startedAt,
       window: "five_hour",
       utilization: 1,
       resets_at: resetsAt,
     }).execute();
-    return origStart(prompt, opts);
+    return run;
   };
 
-  await runTask(db, "t1", workflow, {
-    db,
-    adapter,
-    logRoot: join(root, "logs"),
-    globalLimit: 4,
-    // 実行開始時刻と観測時刻が同じミリ秒に落ちても拾えること
-    onChildSpawned: () => {},
-  });
+  await runTask(db, "t1", workflow, { db, adapter, logRoot: join(root, "logs"), globalLimit: 4 });
 
   const task = (await getTask(db, "t1"))!;
   assert.equal(task.state, "rate_limited");

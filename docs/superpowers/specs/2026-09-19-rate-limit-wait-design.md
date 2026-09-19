@@ -27,7 +27,7 @@ doctrine から見ると、これは「ステップが失敗した」と見分�
 | 待ち方 | runTask の中で sleep せず、タスク行に期限を書いて tick が拾う（スケジューラ駆動） | 4 |
 | 判定の根拠 | 応答テキストの文字列一致はしない。`rate_limit_event` の `utilization` の飽和 + 実行の失敗 | 5 |
 | 代替根拠 | イベントが1件も来なければ `rate_limit_samples` を見る。ただし**その実行の開始時刻以降**に限る | 5 |
-| 待つ上限 | 6時間。超える `resetsAt` は待たずに `failed`（`last_stderr` に `resetsAt` を残す） | 6 |
+| 待つ上限 | 6時間。超える `resetsAt` は待たずに `failed`（`onFailure` には渡さない。`last_stderr` に `resetsAt` を残す） | 6 |
 | 待ちの下限 | 60秒 | 6 |
 | 連続回数 | 同一ステップで5回まで。数えるのは step_runs の末尾に並ぶ `rate_limited` の数 | 6 |
 | 待機中の他タスク | 始めない。既に `running` のものは止めない | 6 |
@@ -72,8 +72,10 @@ doctrine から見ると、これは「ステップが失敗した」と見分�
 あった。`adapter/claude.ts` の `normalize` は `unifiedWindows` の値を `Number()` と
 `??` で素通ししているだけなので、コードからは決まらない。
 
-**根拠にしたのは `core/test/adapter/claude.test.ts` の `rate_limit_event` のフィクスチャ**で、
-これは実バイナリの出力から起こされたものである。
+**根拠にしたのは `core/test/adapter/claude.test.ts` の `rate_limit_event` のフィクスチャ**である。
+これは `normalize` がそれに対して書かれた唯一の具体例であり、`status` / `rateLimitType` /
+`unifiedWindows` という欄の名前は doctrine 側で発明できるものではないので、実物の形を
+写したものとして扱う。ただし**この1件を観測し直したわけではない**（下記）。
 
 ```json
 { "type": "rate_limit_event",
@@ -90,7 +92,8 @@ doctrine から見ると、これは「ステップが失敗した」と見分�
 
 **確かめられなかったこと。** 事故当時のログ（`~/.local/state/doctrine/logs/23a3b9c6*/`）と
 `dctl ratelimit` の出力は、実装した worktree の外にあり読めなかった。よって
-**「上限に当たった瞬間の実物」は未確認**である。分かっていないのは次の2点:
+**「上限に当たった瞬間の実物」は未確認**であり、上のフィクスチャも飽和していない
+（`utilization` が 0.14 の）例である。分かっていないのは次の2点:
 
 1. 飽和した window の `utilization` がちょうど `1` になるのか、`1` を超えるのか
    （`>=` にしてあるのでどちらでも動く）
@@ -154,7 +157,15 @@ doctrine から見ると、これは「ステップが失敗した」と見分�
   即再実行してまた弾かれる回転を防ぐ
 - **連続して上限に当たれるのは同一ステップで5回まで**（`MAX_CONSECUTIVE_RATE_LIMITS`）。
   数えるのはカウンタではなく「そのステップの step_runs の末尾に並ぶ `rate_limited` の数」。
-  超えたら `failed`（理由を `last_stderr` に書く）
+  超えたら `failed`（`onFailure` には渡さない。理由を `last_stderr` に書く）
+**待たないと決めた上限は、`onFailure` に渡さずそのままタスクを `failed` にする。**
+step_run は `failed` として閉じ、理由を `last_stderr` に書いた上で、`decide` を通さない。
+渡すと `onFailure` が同じステップをやり直し、**閉じていると分かっている枠**に対して
+`maxAttempts` の回ぶん claude を起動し直す。しかも上限が原因の失敗がワークフロー本来の
+試行回数を1つ食い、待ちの連続数も `failed` の行で切れて数え直しになるので、待ちは5回では
+止まらなくなる（7章-3 が避けたかった事態そのものである）。ここで止めるのが、6時間を超える
+待ちを拒む理由——「人が作り直すか・上限を上げるかを決める機会」——の中身である。
+
 - **待っている間、新しいタスクは始めない。** 上限はアカウント全体に掛かるので、別タスクを
   admit しても同じように弾かれ、step_run と worktree だけが増える。`tickOnce` は
   `rate_limited` のタスクが1件でもいる間 `selectAdmissible` を呼ばない。

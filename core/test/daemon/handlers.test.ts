@@ -1719,7 +1719,13 @@ test("tick は期限前の上限待ちをそのままにする", async () => {
 test("上限待ちがいる間は新しいタスクを始めない", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
-  await rateLimitedTask(ctx, new Date(Date.now() + 60 * 60_000).toISOString());
+  // プロジェクト枠を2にする。1のままだと rate_limited が枠を握っているだけで
+  // admit されず、上限そのものによるゲートの有無をこのテストが見分けられない。
+  await writeFile(
+    join(repo, ".doctrine", "project.yaml"),
+    "defaultWorkflow: feature\nmaxConcurrent: 2\nbaseBranch: main\n",
+  );
+  const waiting = await rateLimitedTask(ctx, new Date(Date.now() + 60 * 60_000).toISOString());
   const other = await h("task.create", { project: repo, title: "別", prompt: "p" }, NOOP_CONN) as {
     id: string;
   };
@@ -1731,6 +1737,11 @@ test("上限待ちがいる間は新しいタスクを始めない", async () =>
     "queued",
     "上限はアカウント全体に掛かるので、admit しても同じように弾かれるだけ",
   );
+
+  // 上限待ちが居なくなれば、空いている枠で普通に始まる。
+  await h("task.resume", { task_id: waiting }, NOOP_CONN);
+  await tick(ctx);
+  await until(async () => (await getTask(ctx.db, other.id))?.state !== "queued");
 });
 
 test("task.resume は上限待ちのタスクを待たずに queued へ戻す", async () => {
