@@ -3,8 +3,13 @@ import assert from "node:assert/strict";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { captureTree, releaseTrees, retainTree, reviewRefName } from "../../src/core/reviewTree.ts";
-import { ensureDoctrineOutExcluded } from "../../src/core/worktree.ts";
+import {
+  captureTree,
+  releaseTrees,
+  retainTree,
+  reviewRefName,
+} from "../../src/domain/reviewTree.ts";
+import { ensureDoctrineOutExcluded } from "../../src/domain/worktree.ts";
 import { runCommand } from "../../src/util/exec.ts";
 import { makeRepo } from "../helpers/repo.ts";
 

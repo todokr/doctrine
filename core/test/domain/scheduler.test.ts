@@ -2,7 +2,7 @@ import { test } from "@std/testing/bdd";
 import assert from "node:assert/strict";
 import { openDb } from "../../src/db/migrate.ts";
 import { insertProject, insertTask, type TaskState } from "../../src/db/tasks.ts";
-import { currentUsage, selectAdmissible } from "../../src/core/scheduler.ts";
+import { currentUsage, selectAdmissible } from "../../src/domain/scheduler.ts";
 import type { Db } from "../../src/db/schema.ts";
 
 async function fixture(maxConcurrent = 1) {

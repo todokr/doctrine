@@ -2,11 +2,11 @@
 import { dirname, join } from "@std/path";
 import { openDb } from "../db/migrate.ts";
 import { createClaudeAdapter } from "../adapter/claude.ts";
-import { defaultProbe, recoverOnStartup, type WorkflowLookup } from "../core/recovery.ts";
-import { findOrphans } from "../core/worktree.ts";
+import { defaultProbe, recoverOnStartup, type WorkflowLookup } from "../domain/recovery.ts";
+import { findOrphans } from "../domain/worktree.ts";
 import { getProject, listProjects, listTasks, type TaskRow } from "../db/tasks.ts";
 import type { Db } from "../db/schema.ts";
-import { DEFAULT_GLOBAL_LIMIT } from "../core/scheduler.ts";
+import { DEFAULT_GLOBAL_LIMIT } from "../domain/scheduler.ts";
 import { parseWorkflow } from "../workflow/schema.ts";
 import { withSetupStep } from "../workflow/project.ts";
 import { createServer, socketPath } from "./server.ts";

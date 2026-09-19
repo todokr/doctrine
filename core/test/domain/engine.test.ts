@@ -4,7 +4,7 @@ import { writeFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { applyApproval, decide, runTask } from "../../src/core/engine.ts";
+import { applyApproval, decide, runTask } from "../../src/domain/engine.ts";
 import { parseWorkflow } from "../../src/workflow/schema.ts";
 import { DatabaseSync } from "node:sqlite";
 import { openDb, openDbOn } from "../../src/db/migrate.ts";
