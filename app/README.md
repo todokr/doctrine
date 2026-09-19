@@ -29,11 +29,20 @@ Linux では WebKitGTK 4.1 などが要る（[Tauri の前提](https://tauri.app
 ## 構成
 
 - `src/model.ts` — 画面の状態と reducer、サイドバーの区分・差し戻しコメントの組み立てなどの純関数
+- `src/patch.ts` — `task.diff` の応答（ファイルの一覧 + 1 本の patch）を、画面が描くファイル単位の形に組み立てる
+- `src/highlight.ts` — diff のシンタックスハイライト（Prism）。hunk 単位で解析するので、
+  ブロックコメントやテンプレートリテラルのように行をまたぐトークンも続きの行に色が付く。
+  削除行と追加行は別々の流れとして解析する（対になる変更で引用符が繋がらないようにするため）
 - `src/fixtures.ts` — `src/model.test.ts` 用のフィクスチャ。画面はここを import しない
 - `src/daemon/client.ts` — `invoke("rpc")` / `listen("daemon-event")` / `listen("daemon-connection")` を
   呼ぶ唯一の場所。`../../../shared/protocol.ts` の型をそのまま import する（正本は 1 つ）
 - `src/store.tsx` — reducer の置き場所、`task.list` / `project.list` の取得と 15 秒ごとの取り直し、
-  下書きの保存（当面 localStorage）
+  レビュー中のタスクの `task.diff` / `task.context` の取得、下書きの保存。
+  diff と経緯は 15 秒ごとの取り直しには乗せない（承認待ちの間 worktree は凍っているため）。
+  取り直すのは状態が動いたとき・承認や差し戻しを送ったときで、そのとき reducer が捨てる
+- 下書き（行コメントと全体コメント）はアプリのデータディレクトリの `drafts.json` に置く。
+  読み書きは Rust 側の `load_drafts` / `save_drafts`。アプリを閉じても消えず、
+  承認・差し戻しがデーモンに受理されたときにだけ捨てる
 - `src/components/` — 画面（`ConnectionBanner.tsx` が接続状態のバナー）
 - `src-tauri/src/relay.rs` — ソケット接続を 1 本保持し `rpc` を中継する。method の種類は見ない
 - `src-tauri/src/daemon.rs` — ソケットパスの解決、`dctld` の探索・切り離し起動・ログ

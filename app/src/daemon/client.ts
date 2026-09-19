@@ -7,6 +7,7 @@ import type {
   ResultOf,
   ServerEvent,
 } from "../../../shared/protocol.ts";
+import type { Draft } from "../types";
 
 export type ConnectionStatus = {
   status: "connecting" | "connected" | "disconnected";
@@ -37,4 +38,17 @@ export function onConnection(fn: (c: ConnectionStatus) => void): Promise<() => v
  */
 export function connectionStatus(): Promise<ConnectionStatus> {
   return invoke<ConnectionStatus>("connection_status");
+}
+
+/**
+ * 送信前の下書きの読み書き。デーモンではなく Rust 側のファイル操作へ行くが、
+ * invoke を1か所に閉じるという約束はこちらにも効くので、同じ場所に置く。
+ * 置き場（アプリのデータディレクトリ）は Rust が決める。
+ */
+export function loadDrafts(): Promise<Record<string, Draft>> {
+  return invoke<Record<string, Draft>>("load_drafts");
+}
+
+export function saveDrafts(drafts: Record<string, Draft>): Promise<void> {
+  return invoke("save_drafts", { drafts });
 }

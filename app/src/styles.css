@@ -8,7 +8,7 @@
   --degraded:#6C4A9C; --degraded-bg:#EAE2F5;
   --ok:#296B49; --ok-bg:#DEEFE4;
   --add-bg:#E1F0E5; --add-gutter:#C9E3D1; --del-bg:#F7E4E0; --del-gutter:#EFC9C2;
-  --kw:#7A4AA0; --str:#2B7A4B; --com:#8B93A0; --num:#A05A22;
+  --kw:#7A4AA0; --str:#2B7A4B; --com:#8B93A0; --num:#A05A22; --fn:#2A5DA8; --ty:#1F6F73;
   --shadow:0 12px 32px rgba(20,26,34,.18);
   --sans:"IBM Plex Sans JP","Hiragino Sans","Noto Sans JP",system-ui,sans-serif;
   --mono:"IBM Plex Mono",ui-monospace,"SFMono-Regular",Menlo,monospace;
@@ -23,7 +23,7 @@
     --degraded:#B79CE8; --degraded-bg:#2B2140;
     --ok:#7FCB9E; --ok-bg:#16301F;
     --add-bg:#173322; --add-gutter:#1F452E; --del-bg:#3A2019; --del-gutter:#4A2921;
-    --kw:#C79EE8; --str:#8FDBA9; --com:#707A85; --num:#E0A067;
+    --kw:#C79EE8; --str:#8FDBA9; --com:#707A85; --num:#E0A067; --fn:#8FBCE8; --ty:#79C9CE;
     --shadow:0 12px 32px rgba(0,0,0,.55);
   }
 }
@@ -36,7 +36,7 @@
   --degraded:#B79CE8; --degraded-bg:#2B2140;
   --ok:#7FCB9E; --ok-bg:#16301F;
   --add-bg:#173322; --add-gutter:#1F452E; --del-bg:#3A2019; --del-gutter:#4A2921;
-  --kw:#C79EE8; --str:#8FDBA9; --com:#707A85; --num:#E0A067;
+  --kw:#C79EE8; --str:#8FDBA9; --com:#707A85; --num:#E0A067; --fn:#8FBCE8; --ty:#79C9CE;
   --shadow:0 12px 32px rgba(0,0,0,.55);
 }
 *{box-sizing:border-box}
@@ -240,6 +240,7 @@ th{color:var(--ink-3);font-size:11px;font-weight:500;border-top:0;background:var
 .ln.a{background:var(--add-bg)} .ln.a .o,.ln.a .n{background:var(--add-gutter)}
 .ln.d{background:var(--del-bg)} .ln.d .o,.ln.d .n{background:var(--del-gutter)}
 .tk-kw{color:var(--kw)} .tk-str{color:var(--str)} .tk-com{color:var(--com);font-style:italic} .tk-num{color:var(--num)}
+.tk-fn{color:var(--fn)} .tk-ty{color:var(--ty)}
 .lc{margin:4px 10px 6px 104px;border:1px solid var(--line);border-radius:8px;background:var(--surface);padding:8px 10px;display:grid;gap:6px;font-family:var(--sans);font-size:12.5px;max-width:640px}
 .lc .who{font-size:11px;color:var(--ink-3)}textarea{width:100%;border:1px solid var(--line);background:var(--surface);border-radius:7px;padding:7px 9px;resize:vertical;min-height:54px}
 input[type=text],select.field{width:100%;border:1px solid var(--line);background:var(--surface);border-radius:7px;padding:7px 9px}

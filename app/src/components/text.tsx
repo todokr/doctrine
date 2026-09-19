@@ -1,21 +1,5 @@
 import type { ReactNode } from "react";
 
-const TOKEN = /(\/\/.*$)|("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')|\b(const|let|return|if|else|async|await|function|export|import|from|throw|new|for|of|try|catch|type)\b|\b(\d+)\b/g;
-
-/** diff 用の素朴なシンタックスハイライト */
-export function Highlight({ code }: { code: string }) {
-  const out: ReactNode[] = [];
-  let last = 0;
-  for (const m of code.matchAll(TOKEN)) {
-    out.push(code.slice(last, m.index));
-    const cls = m[1] ? "com" : m[2] ? "str" : m[3] ? "kw" : "num";
-    out.push(<span key={m.index} className={`tk-${cls}`}>{m[0]}</span>);
-    last = m.index + m[0].length;
-  }
-  out.push(code.slice(last));
-  return <>{out}</>;
-}
-
 function inline(s: string): ReactNode[] {
   return s.split(/`([^`]+)`/g).map((part, i) => (i % 2 ? <code key={i}>{part}</code> : part));
 }
