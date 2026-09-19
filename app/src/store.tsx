@@ -32,6 +32,8 @@ function initialState(): State {
   return {
     tasks: [],
     projects: [],
+    detail: {},
+    logs: {},
     now: Date.now(),
     view: "tasks",
     project: "all",

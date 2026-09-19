@@ -10,19 +10,25 @@ import {
   filesFor,
   groupOf,
   isTerminal,
+  LOG_LINES_KEPT,
+  queuePosition,
   reduce,
   sidebarOrder,
+  stepRunHistory,
+  stopReasons,
   toProject,
   toTask,
   unguidedFiles,
   type State,
 } from "./model";
 import type { Task } from "./types";
-import type { ProjectSummary, TaskListEntry } from "../../shared/protocol.ts";
+import type { ProjectSummary, StepRun, TaskDetail, TaskListEntry } from "../../shared/protocol.ts";
 
 const base = (overrides: Partial<State> = {}): State => ({
   tasks: seedTasks(),
   projects: PROJECTS,
+  detail: {},
+  logs: {},
   now: NOW,
   view: "tasks",
   project: "all",
@@ -260,10 +266,13 @@ describe("reduce", () => {
     expect(reduce(s, { type: "step", idx: null }).step["t-9f21"]).toBeNull();
   });
 
-  test("ログの追記は実行中のタスクにだけ効く", () => {
-    const s = reduce(base(), { type: "log.append", id: "t-7f3a", line: "next" });
-    expect(task(s, "t-7f3a").log?.endsWith("\nnext")).toBe(true);
-    expect(reduce(base(), { type: "log.append", id: "t-0a77", line: "next" }).tasks).toEqual(base().tasks);
+  test("ログの取得結果はタスクごとに持つ", () => {
+    const s = reduce(base(), {
+      type: "logs",
+      id: "t-7f3a",
+      logs: { stepRunId: 7, lines: ["a", "b"] },
+    });
+    expect(s.logs["t-7f3a"]).toEqual({ stepRunId: 7, lines: ["a", "b"] });
   });
 });
 
@@ -477,10 +486,79 @@ describe("daemon イベント", () => {
     const s = withTask();
     const after = reduce(s, {
       type: "daemon",
-      ev: { event: "log.line", task_id: "a", step_run_id: 1, line: "x" },
+      ev: {
+        event: "ratelimit.sample", window: "5h", utilization: 0.4, resets_at: null,
+      },
       now: 999,
     });
     expect(after).toEqual(s);
+  });
+
+  const line = (s: State, step_run_id: number, l: string): State =>
+    reduce(s, {
+      type: "daemon",
+      ev: { event: "log.line", task_id: "a", step_run_id, line: l },
+      now: 999,
+    });
+
+  test("log.line は同じステップ実行の間だけ積み上がる", () => {
+    const after = line(line(withTask(), 3, "一行目"), 3, "二行目");
+    expect(after.logs["a"]).toEqual({ stepRunId: 3, lines: ["一行目", "二行目"] });
+  });
+
+  test("log.line の step_run_id が変わったら入れ替える（前のステップのログを混ぜない）", () => {
+    const after = line(line(withTask(), 3, "前のステップ"), 4, "次のステップ");
+    expect(after.logs["a"]).toEqual({ stepRunId: 4, lines: ["次のステップ"] });
+  });
+
+  test("ログは上限を超えたら古い行から落とす", () => {
+    let s = withTask();
+    for (let i = 0; i < LOG_LINES_KEPT + 5; i++) s = line(s, 3, `l${i}`);
+    expect(s.logs["a"].lines.length).toBe(LOG_LINES_KEPT);
+    expect(s.logs["a"].lines[0]).toBe("l5");
+  });
+
+  test("task.cleanedUp の removed は worktree が消えたことを伝える", () => {
+    const s = base({
+      tasks: [{ ...t1({ id: "a", state: "completed" }), worktree: "/w", refused: true }],
+      sel: "a",
+    });
+    const after = reduce(s, {
+      type: "daemon",
+      ev: {
+        event: "task.cleanedUp", task_id: "a", outcome: "removed", worktree_path: null,
+      },
+      now: 999,
+    });
+    expect(after.tasks[0].worktree).toBeNull();
+    expect(after.tasks[0].refused).toBe(false);
+    expect(groupOf(after.tasks[0])).toBe("done");
+  });
+
+  test("task.cleanedUp の refused は要確認に入れる", () => {
+    const s = base({
+      tasks: [{ ...t1({ id: "a", state: "completed" }), worktree: "/w", refused: false }],
+      sel: "a",
+    });
+    const after = reduce(s, {
+      type: "daemon",
+      ev: {
+        event: "task.cleanedUp", task_id: "a", outcome: "refused",
+        worktree_path: "/w", warning: "未コミットの変更が残っています",
+      },
+      now: 999,
+    });
+    expect(after.tasks[0].refused).toBe(true);
+    expect(groupOf(after.tasks[0])).toBe("check");
+  });
+
+  test("daemon.warning はトーストで知らせる", () => {
+    const after = reduce(withTask(), {
+      type: "daemon",
+      ev: { event: "daemon.warning", at: "2026-09-19T00:00:00.000Z", message: "消せませんでした" },
+      now: 999,
+    });
+    expect(after.toast).toBe("消せませんでした");
   });
 });
 
@@ -488,5 +566,68 @@ describe("connection", () => {
   test("接続状態を持つ", () => {
     const after = reduce(base(), { type: "connection", conn: { status: "disconnected" } });
     expect(after.conn.status).toBe("disconnected");
+  });
+});
+
+describe("止まった理由と実行履歴", () => {
+  const stepRun = (o: Partial<StepRun> = {}): StepRun => ({
+    id: 1,
+    step_id: "implement",
+    attempt: 1,
+    status: "success",
+    exit_code: 0,
+    started_at: "2026-09-18T00:00:00.000Z",
+    ended_at: "2026-09-18T00:01:00.000Z",
+    ...o,
+  });
+  const detail = (stepRuns: StepRun[]): TaskDetail =>
+    ({ task: {} as TaskDetail["task"], stepRuns });
+  const t = (patch: Partial<Task>): Task => ({ ...seedTasks()[0], ...patch });
+
+  test("失敗したステップは task.get の stepRuns から取る", () => {
+    const task = t({ state: "failed", step: "open-pr", worktree: "/w" });
+    const d = detail([
+      stepRun({ id: 1, step_id: "implement" }),
+      stepRun({ id: 2, step_id: "test", status: "failed", exit_code: 1 }),
+    ]);
+    expect(stopReasons([task], task, d)).toEqual([{ kind: "failed", step: "test" }]);
+  });
+
+  test("履歴がまだ無いときは task.list の今のステップで代える", () => {
+    const task = t({ state: "failed", step: "test", worktree: "/w" });
+    expect(stopReasons([task], task)).toEqual([{ kind: "failed", step: "test" }]);
+  });
+
+  test("degraded は stepRuns から、どのステップかを重複なく出す", () => {
+    const task = t({ state: "running", degraded: DEGRADED_UNKNOWN });
+    const d = detail([
+      stepRun({ id: 1, step_id: "fix", status: "degraded" }),
+      stepRun({ id: 2, step_id: "fix", status: "degraded" }),
+      stepRun({ id: 3, step_id: "test" }),
+    ]);
+    expect(stopReasons([task], task, d)).toEqual([{ kind: "degraded", steps: ["fix"] }]);
+  });
+
+  test("止まった理由は failed → 削除拒否 → degraded → queued の順に並ぶ", () => {
+    const task = t({ state: "failed", worktree: "/w", refused: true, degraded: "fix" });
+    expect(stopReasons([task], task).map((r) => r.kind)).toEqual(["failed", "refused", "degraded"]);
+  });
+
+  test("queued は行列の何番目かを持つ", () => {
+    const first = t({ id: "a", state: "queued", prio: 1, since: 1 });
+    const second = t({ id: "b", state: "queued", prio: 2, since: 1 });
+    expect(stopReasons([first, second], second)).toEqual([{ kind: "queued", position: 2 }]);
+    expect(queuePosition([first, second], t({ id: "c", state: "running" }))).toBe(0);
+  });
+
+  test("動いているタスクには止まった理由が無い", () => {
+    const task = t({ state: "running", degraded: undefined, refused: false });
+    expect(stopReasons([task], task, detail([stepRun()]))).toEqual([]);
+  });
+
+  test("実行履歴は新しい順", () => {
+    const d = detail([stepRun({ id: 1 }), stepRun({ id: 2 })]);
+    expect(stepRunHistory(d).map((r) => r.id)).toEqual([2, 1]);
+    expect(stepRunHistory(undefined)).toEqual([]);
   });
 });

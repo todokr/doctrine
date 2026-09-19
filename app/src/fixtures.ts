@@ -327,37 +327,6 @@ const PLAN_MD = `# 計画: Review Guide の保存形式
 - 7節のどれかが欠けた JSON を検証が落とすこと
 - Reading Order に diff に無いパスが入っていたら警告になること`;
 
-const LOG_TEST_FAIL = `$ deno task test
-running 41 tests from ./test/daemon/handlers.test.ts
-  daemon.warning は後始末の失敗を1回だけ送る ... FAILED (9ms)
-
-error: AssertionError: Expected values to be strictly equal:
-  + actual - expected
-  + 2
-  - 1
-    at test/daemon/handlers.test.ts:512:12
-FAILED | 40 passed | 1 failed (7s)
-exit 1`;
-const LOG_DEGRADED = `tool_use Edit src/order/time.ts (+12 −4)
-tool_use Bash "git commit -m 'fix: 注文日時を UTC で保存する'"
-permission_denied: Bash(git commit) は permissionMode=acceptEdits で許可されていません
-assistant: コミットできなかったため、変更はワーキングツリーに残しています
-{"type":"result","subtype":"success","permission_denials":1}
-[test] $ deno task test
-[test] ok | 88 passed | 0 failed (5s)`;
-const LOG_RUNNING = `{"type":"system","subtype":"init","session_id":"4be1…"}
-assistant: src/daemon/protocol.ts の ServerEvent に task.cleanedUp を足します
-tool_use Read src/daemon/protocol.ts
-tool_use Edit src/daemon/protocol.ts (+2 −0)
-tool_use Read src/daemon/handlers.ts`;
-export const FOLLOW_POOL = [
-  "assistant: cleanupAfterRun の戻り値に outcome を持たせます",
-  "tool_use Edit src/core/engine.ts (+14 −3)",
-  "tool_use Bash \"deno test test/core/engine.test.ts\"",
-  "ok | 31 passed | 0 failed (3s)",
-  "assistant: 承認経路（task.approve）でも同じイベントを送ります",
-  "tool_use Edit src/daemon/handlers.ts (+6 −1)",
-];
 
 // 状態は doctrine の7状態。degraded / refused はフラグ。
 // worktree は seedTasks が state から決めるので、dctl gc で消した後の姿は gced で指定する
@@ -386,23 +355,23 @@ const SEEDS: Seed[] = [
     lastCommand: { stepId: "build", exitCode: 0, stdout: "$ astro build\n12 page(s) built in 1.8s", stderr: "" },
     lastAgentMessage: "index.astro にページングを追加し、Pager コンポーネントを新設しました。1ページ10件です。" },
 
-  { id: "t-e812", wf: "doctrine/feature", title: "daemon.warning イベントを追加する", state: "failed", step: "test", attempt: 3, prio: 2, since: NOW - 60 * 26 * MIN, log: LOG_TEST_FAIL, dirty: true },
-  { id: "t-6ba3", wf: "doctrine/feature", title: "ratelimit のサンプルを日次で丸める", state: "failed", step: "test", attempt: 1, prio: 2, since: NOW - 60 * 24 * 12 * MIN, gced: true, log: LOG_TEST_FAIL },
-  { id: "t-3cd2", wf: "doctrine/feature", title: "gc の確認文言を直す", state: "completed", step: "open-pr", attempt: 1, prio: 2, since: NOW - 95 * MIN, refused: true, dirty: true, log: "$ gh pr create --fill\nhttps://github.com/todokr/doctrine/pull/31\nexit 0" },
-  { id: "s-1202", wf: "shop-api/hotfix", title: "注文日時のタイムゾーンずれ", state: "running", step: "test", attempt: 1, prio: 0, since: NOW - 23 * MIN, degraded: "fix", log: LOG_DEGRADED },
+  { id: "t-e812", wf: "doctrine/feature", title: "daemon.warning イベントを追加する", state: "failed", step: "test", attempt: 3, prio: 2, since: NOW - 60 * 26 * MIN, dirty: true },
+  { id: "t-6ba3", wf: "doctrine/feature", title: "ratelimit のサンプルを日次で丸める", state: "failed", step: "test", attempt: 1, prio: 2, since: NOW - 60 * 24 * 12 * MIN, gced: true },
+  { id: "t-3cd2", wf: "doctrine/feature", title: "gc の確認文言を直す", state: "completed", step: "open-pr", attempt: 1, prio: 2, since: NOW - 95 * MIN, refused: true, dirty: true },
+  { id: "s-1202", wf: "shop-api/hotfix", title: "注文日時のタイムゾーンずれ", state: "running", step: "test", attempt: 1, prio: 0, since: NOW - 23 * MIN, degraded: "fix" },
 
-  { id: "t-7f3a", wf: "doctrine/feature", title: "task.cleanedUp イベントを追加する", state: "running", step: "implement", attempt: 1, prio: 1, since: NOW - 11 * MIN, log: LOG_RUNNING },
-  { id: "t-c04d", wf: "doctrine/feature", title: "workflow.list にステップを載せる", state: "running", step: "implement", attempt: 2, prio: 2, since: NOW - 134 * MIN, log: "[test #1] FAILED | 1 failed\nassistant: テストの失敗を受けて setupStep の挿入位置を直します\ntool_use Edit src/workflow/project.ts (+5 −2)" },
-  { id: "s-1102", wf: "shop-api/feature", title: "注文 API にカーソルページングを入れる", state: "running", step: "lint", attempt: 1, prio: 2, since: NOW - 48 * MIN, log: "$ deno lint\nChecked 214 files" },
+  { id: "t-7f3a", wf: "doctrine/feature", title: "task.cleanedUp イベントを追加する", state: "running", step: "implement", attempt: 1, prio: 1, since: NOW - 11 * MIN },
+  { id: "t-c04d", wf: "doctrine/feature", title: "workflow.list にステップを載せる", state: "running", step: "implement", attempt: 2, prio: 2, since: NOW - 134 * MIN },
+  { id: "s-1102", wf: "shop-api/feature", title: "注文 API にカーソルページングを入れる", state: "running", step: "lint", attempt: 1, prio: 2, since: NOW - 48 * MIN },
 
   { id: "s-1104", wf: "shop-api/feature", title: "価格改定バッチの分割実行", state: "queued", step: null, attempt: 0, prio: 0, since: NOW - 4 * MIN },
   { id: "t-91e0", wf: "doctrine/feature", title: "ログ追従を1接続1タスクに上書きする", state: "queued", step: null, attempt: 0, prio: 2, since: NOW - 25 * MIN },
 
-  { id: "t-d5e6", wf: "doctrine/guided", title: "step_outputs の全文保持を検討する", state: "paused", step: "plan", attempt: 1, prio: 2, since: NOW - 60 * 5 * MIN, log: "assistant: step_outputs の容量見積もりを出します\n(SIGTERM で一時停止)" },
+  { id: "t-d5e6", wf: "doctrine/guided", title: "step_outputs の全文保持を検討する", state: "paused", step: "plan", attempt: 1, prio: 2, since: NOW - 60 * 5 * MIN },
 
-  { id: "t-0a77", wf: "doctrine/feature", title: "README にデーモン起動手順を書く", state: "completed", step: "open-pr", attempt: 1, prio: 2, since: NOW - 60 * 3 * MIN, log: "exit 0" },
-  { id: "s-1105", wf: "shop-api/feature", title: "決済 Webhook の署名検証", state: "canceled", step: "implement", attempt: 1, prio: 2, since: NOW - 60 * 24 * 9 * MIN, dirty: true, log: "(SIGTERM で中止)" },
-  { id: "b-198", wf: "blog/feature", title: "OGP 画像を記事ごとに生成する", state: "completed", step: "deploy-preview", attempt: 1, prio: 2, since: NOW - 60 * 24 * 2 * MIN, log: "exit 0" },
+  { id: "t-0a77", wf: "doctrine/feature", title: "README にデーモン起動手順を書く", state: "completed", step: "open-pr", attempt: 1, prio: 2, since: NOW - 60 * 3 * MIN },
+  { id: "s-1105", wf: "shop-api/feature", title: "決済 Webhook の署名検証", state: "canceled", step: "implement", attempt: 1, prio: 2, since: NOW - 60 * 24 * 9 * MIN, dirty: true },
+  { id: "b-198", wf: "blog/feature", title: "OGP 画像を記事ごとに生成する", state: "completed", step: "deploy-preview", attempt: 1, prio: 2, since: NOW - 60 * 24 * 2 * MIN },
 ];
 
 export function seedTasks(): Task[] {

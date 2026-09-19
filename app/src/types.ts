@@ -65,8 +65,6 @@ export type Task = {
   reviewFiles?: ReviewFile[];
   lastCommand?: CommandResult | null;
   lastAgentMessage?: string | null;
-  // どの画面も今は読まない。task.logs の follow（#47）で本物のログに置き換わるまでの残骸
-  log?: string;
   dirty?: boolean;
   refused?: boolean;
   degraded?: string;

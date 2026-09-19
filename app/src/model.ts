@@ -3,6 +3,8 @@ import type { DiffFile, Draft, LineComment, Project, Task, TaskState } from "./t
 import type {
   ProjectSummary,
   ServerEvent,
+  StepRun,
+  TaskDetail,
   TaskListEntry,
 } from "../../shared/protocol.ts";
 import type { ConnectionStatus } from "./daemon/client";
@@ -130,6 +132,52 @@ export function unguidedFiles(t: Task): DiffFile[] {
   return t.diff.filter((f) => !mentioned.has(f.path));
 }
 
+// ---------------------------------------------------------------- タスク画面
+
+/** 行列の何番目か。1始まり。queued でないタスクは 0 */
+export function queuePosition(tasks: Task[], t: Task): number {
+  if (t.state !== "queued") return 0;
+  return tasks
+    .filter((x) => x.state === "queued")
+    .sort((a, b) => a.prio - b.prio || a.since - b.since)
+    .findIndex((x) => x.id === t.id) + 1;
+}
+
+/**
+ * 止まった理由（レビューアプリ設計spec 7章）。並び順がそのまま優先順位で、
+ * 当てはまるものを当てはまる順に返す。
+ */
+export type StopReason =
+  | { kind: "failed"; step: string | null }
+  | { kind: "refused" }
+  | { kind: "degraded"; steps: string[] }
+  | { kind: "queued"; position: number };
+
+/**
+ * ステップ名は task.get の stepRuns から取る。task.list の current_step_id は
+ * 失敗した後も動き得るし、has_degraded はどのステップかを教えてくれない。
+ */
+export function stopReasons(tasks: Task[], t: Task, detail?: TaskDetail): StopReason[] {
+  const runs = detail?.stepRuns ?? [];
+  const out: StopReason[] = [];
+  if (t.state === "failed") {
+    const failed = [...runs].reverse().find((r) => r.status === "failed");
+    out.push({ kind: "failed", step: failed?.step_id ?? t.step });
+  }
+  if (t.refused) out.push({ kind: "refused" });
+  const degraded = [...new Set(runs.filter((r) => r.status === "degraded").map((r) => r.step_id))];
+  // 履歴をまだ取れていないときは task.list の has_degraded 由来の名前で代える
+  if (degraded.length === 0 && t.degraded) degraded.push(t.degraded);
+  if (degraded.length > 0) out.push({ kind: "degraded", steps: degraded });
+  if (t.state === "queued") out.push({ kind: "queued", position: queuePosition(tasks, t) });
+  return out;
+}
+
+/** 実行履歴は新しい順に見る（spec 7章は畳んで置く） */
+export function stepRunHistory(detail?: TaskDetail): StepRun[] {
+  return detail ? [...detail.stepRuns].reverse() : [];
+}
+
 // ---------------------------------------------------------------- デーモンの state 文字列の検証
 const TASK_STATES: ReadonlySet<Exclude<TaskState, "unknown">> = new Set([
   "queued", "running", "suspended", "paused", "completed", "failed", "canceled",
@@ -189,7 +237,7 @@ export function toProject(p: ProjectSummary): Project {
 }
 
 /**
- * デーモンが持たない欄（diff / guide / reviews など）は空にする。埋めるのは #44〜#47。
+ * デーモンが持たない欄（diff / guide / reviews など）は空にする。埋めるのは #44〜#46。
  * previous を渡すと、イベントで足した欄（degraded など）を引き継ぐ。
  */
 export function toTask(
@@ -228,9 +276,18 @@ export function toTask(
 // ---------------------------------------------------------------- 状態
 export type Editing = LineComment & { task: string };
 
+/** 画面が持つログ。step_run_id が変われば別のステップの実行なので入れ替える */
+export type LogView = { stepRunId: number | null; lines: string[] };
+
+/** ログの保持行数。追従したまま放置しても増え続けないように上限を持つ */
+export const LOG_LINES_KEPT = 2000;
+
 export type State = {
   tasks: Task[];
   projects: Project[];
+  /** task.get の結果。選んだタスクぶんだけ持つ */
+  detail: Record<string, TaskDetail>;
+  logs: Record<string, LogView>;
   now: number;
   view: View;
   project: string;
@@ -277,11 +334,30 @@ export type Action =
   | { type: "reject.confirm" }
   | { type: "modal.close" }
   | { type: "cancel" }
-  | { type: "log.append"; id: string; line: string }
+  | { type: "detail"; id: string; detail: TaskDetail }
+  | { type: "logs"; id: string; logs: LogView }
   | { type: "toast"; message: string | null }
   | { type: "sync"; tasks: Task[]; projects: Project[]; now: number }
   | { type: "daemon"; ev: ServerEvent; now: number }
   | { type: "connection"; conn: ConnectionStatus };
+
+/** 生き残った id のぶんだけ残す */
+const pick = <T,>(m: Record<string, T>, ids: Set<string>): Record<string, T> =>
+  Object.fromEntries(Object.entries(m).filter(([id]) => ids.has(id)));
+
+/**
+ * 流れてきた1行を足す。step_run_id が持っているものと違えば、別のステップの
+ * 実行が始まったということなので入れ替える（stepRun.started を待たない）。
+ */
+function appendLog(
+  current: LogView | undefined,
+  ev: { step_run_id: number; line: string },
+): LogView {
+  const lines = current && current.stepRunId === ev.step_run_id ? [...current.lines, ev.line] : [
+    ev.line,
+  ];
+  return { stepRunId: ev.step_run_id, lines: lines.slice(-LOG_LINES_KEPT) };
+}
 
 const updateTask = (s: State, id: string, patch: Partial<Task>): Task[] =>
   s.tasks.map((t) => (t.id === id ? { ...t, ...patch } : t));
@@ -378,12 +454,10 @@ export function reduce(s: State, a: Action): State {
       // なっていても、送信自体は成功しているので「中止しました」は出す
       if (!t) return s;
       return { ...s, toast: "中止しました。worktree は残します" };
-    case "log.append": {
-      // どの画面も t.log をもう読まない。task.logs の follow（#47）までの残骸
-      const target = s.tasks.find((x) => x.id === a.id);
-      if (!target || target.state !== "running") return s;
-      return { ...s, tasks: updateTask(s, a.id, { log: (target.log ?? "") + "\n" + a.line }) };
-    }
+    case "detail":
+      return { ...s, detail: { ...s.detail, [a.id]: a.detail } };
+    case "logs":
+      return { ...s, logs: { ...s.logs, [a.id]: a.logs } };
     case "toast":
       return { ...s, toast: a.message };
     case "sync": {
@@ -393,7 +467,16 @@ export function reduce(s: State, a: Action): State {
       const drafts = Object.fromEntries(
         Object.entries(s.drafts).filter(([id]) => ids.has(id)),
       );
-      const next: State = { ...s, tasks: a.tasks, projects: a.projects, now: a.now, drafts };
+      // 消えたタスクの詳細とログは捨てる。持ち続けても見る画面が無い
+      const next: State = {
+        ...s,
+        tasks: a.tasks,
+        projects: a.projects,
+        now: a.now,
+        drafts,
+        detail: pick(s.detail, ids),
+        logs: pick(s.logs, ids),
+      };
       if (s.sel !== null && ids.has(s.sel)) return next;
       const first = sidebarOrder(a.tasks, s.view, s.project)[0];
       return { ...next, sel: first ? first.id : null, editing: null };
@@ -421,7 +504,27 @@ export function reduce(s: State, a: Action): State {
         if (!s.tasks.some((x) => x.id === ev.task_id)) return s;
         return { ...s, now: a.now, tasks: updateTask(s, ev.task_id, { degraded: ev.step_id }) };
       }
-      // log.line は #47、ratelimit.sample は第2段階
+      if (ev.event === "log.line") {
+        if (!s.tasks.some((x) => x.id === ev.task_id)) return s;
+        return { ...s, logs: { ...s.logs, [ev.task_id]: appendLog(s.logs[ev.task_id], ev) } };
+      }
+      if (ev.event === "task.cleanedUp") {
+        if (!s.tasks.some((x) => x.id === ev.task_id)) return s;
+        // 後始末が終わるまで worktree は残っている。消えた時点で要確認から外れ、
+        // 拒否されたなら「要確認」に入る（groupOf が refused を見る）
+        return {
+          ...s,
+          now: a.now,
+          tasks: updateTask(s, ev.task_id, {
+            worktree: ev.worktree_path,
+            refused: ev.outcome === "refused",
+          }),
+        };
+      }
+      if (ev.event === "daemon.warning") {
+        return { ...s, toast: ev.message };
+      }
+      // ratelimit.sample は第2段階
       return s;
     }
     case "connection":
