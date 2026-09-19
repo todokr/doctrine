@@ -23,8 +23,8 @@ CI（`.github/workflows/ci.yml`）はすでに「コア」と「アプリ」と�
 | レイアウト | コア側（`src` `test` `deno.json` `deno.lock`）を `core/` に寄せ、`app/` と対等な兄弟にする | 3 |
 | コア内部の名前 | `src/core` → `src/domain`（`core/src/core/` という重複を避ける）。`test/core` も同様 | 3 |
 | 共有物 | `daemon/protocol.ts` を `shared/protocol.ts` に切り出し、core と app が対称に依存する | 4 |
-| タスクの入口 | `mise.toml` に `core:*` の委譲タスクを置き、ルートから `mise run core:test` で回す | 5 |
-| タスクの正本 | `core/deno.json` のまま。mise 側は一行の委譲に留める | 5 |
+| タスクの入口 | `mise.toml` に `core:*` と `app:*` の委譲タスクを置き、ルートから `mise run core:test` のように回す | 5 |
+| タスクの正本 | `core/deno.json` と `app/package.json` のまま。mise 側は一行の委譲に留める | 5 |
 | CI | `mise run` には寄せない。`working-directory: core` ＋ `deno task` を続ける | 5・6 |
 | `.gitignore` | `app/.gitignore` を畳んでルート 1 本にする | 6 |
 | `prototype/` `docs/` | 触らない | 1 |
@@ -112,22 +112,51 @@ Vite 側に追加設定は要らない。`server.fs.allow` を絞っていない
 ## 5. タスクの入口
 
 `deno task` は今後 `core/` から叩くものになる。ルートから回せるように `mise.toml` に委譲タスクを置く。
+`app` 側の pnpm も元々 `cd app` を要求していたので、同じ形で揃える。ルートに立ったまま両方の
+パッケージを操作できる状態が、`core/` と `app/` が対等に並ぶ構成の見え方と一致する。
 
 ```toml
 [tasks."core:test"]
 dir = "core"
 run = "deno task test"
+
+[tasks."app:test"]
+dir = "app"
+run = "pnpm test"
 ```
 
-`core:check` / `core:install` / `core:build` も同じ形。タスクの正本は `core/deno.json` に残し、
-mise 側は一行の委譲に留める。委譲は委譲先とズレようがないので、入口が 2 つに増えても内容が食い違う
-ことはない。`dir` が mise.toml の位置からの相対で解決されること、`:` を含むタスク名が扱えることは
-実際に試して確認した。
+置くタスクは、コア側が `core:test` / `core:check` / `core:install` / `core:build`（`core/deno.json` の
+`tasks` と 1 対 1）、アプリ側が `app:dev` / `app:build` / `app:test` / `app:tauri`（`app/package.json` の
+`scripts` と 1 対 1）。タスクの正本はそれぞれ `core/deno.json` と `app/package.json` に残し、mise 側は
+一行の委譲に留める。委譲は委譲先とズレようがないので、入口が増えても内容が食い違うことはない。
+`dir` が mise.toml の位置からの相対で解決されること、`:` を含むタスク名が扱えることは実際に試して
+確認した。
 
-`app` 側の pnpm は元々 `cd app` を要求しており、今回の移動で何も変わらないので `app:*` は作らない。
-`core:` を付けておけば後から足せる。プレフィックスの無いタスクはルートの `setup` だけで、これは
-`dir = "core"` が付くだけで中身は変わらない（`deno install --frozen` は `deno.lock` の隣で走る
-必要がある）。
+依存の取得は `setup` が両方を呼ぶ形にする。`deno install --frozen` は `deno.lock` の隣、
+`pnpm install --frozen-lockfile` は `pnpm-lock.yaml` の隣で走る必要があり、1 つの `dir` では
+書けないため、実体を 2 つに割って `depends` で束ねる。
+
+```toml
+[tasks."core:deps"]
+dir = "core"
+run = "deno install --frozen"
+
+[tasks."app:deps"]
+dir = "app"
+run = "pnpm install --frozen-lockfile"
+
+[tasks.setup]
+description = "worktree を作業可能な状態にする（依存の取得）"
+depends = ["core:deps", "app:deps"]
+```
+
+これは `setup` の振る舞いの変更でもある。今の `setup` はコアの依存しか取らず、アプリを触るには
+別途 `cd app && pnpm install` が要る。`app:*` を置くなら `mise run app:test` が依存の入っていない
+worktree でいきなり落ちるのは筋が悪いので、`setup` の説明文（「依存の取得」）どおりに両方を揃える。
+`depends` は並列に走ることも確認した。
+
+`core:install` はバイナリの設置、`core:deps` / `app:deps` は依存の取得で、名前が紛らわしくなる。
+pnpm 側を `app:install` と呼ばず `app:deps` に揃えているのはそのためである。
 
 CI は `mise run` に寄せない。コア系のジョブは `install_args: deno` で deno だけを入れており、
 `mise run` に切り替えると `[tools]` 全体（rust を含む）の解決が絡む。ビルド時間に跳ねるリスクを
@@ -164,7 +193,8 @@ CI と手元でコマンド名が違う状態は残るが、これは今日す�
 
 **文書** — ルート `README.md` の `deno task install` / `build` / `test` / `check` を
 `mise run core:…` に、`deno run -A src/daemon/main.ts` を `core/src/daemon/main.ts` に書き換える。
-`app/README.md` の `../../../src/daemon/protocol.ts` を `../../../shared/protocol.ts` にする。
+`app/README.md` は `../../../src/daemon/protocol.ts` を `../../../shared/protocol.ts` にし、
+`pnpm` を直に叩いている箇所があれば `mise run app:…` に寄せる。
 `docs/overview.md` にパス参照は無い。`docs/superpowers/` 配下の過去の spec / plan は当時の記録なので
 触らない。
 
@@ -178,16 +208,12 @@ CI と手元でコマンド名が違う状態は残るが、これは今日す�
 | 1 | `mkdir core` → `git mv src test deno.json deno.lock core/` | `cd core && deno task check && deno task test` |
 | 2 | `mkdir shared` → protocol.ts の切り出し ＋ 参照 11 箇所（app の `tsconfig.json` を含む）＋ `deno.json` の include | 上に加えて `cd app && pnpm build && pnpm test` |
 | 3 | `src/core`→`src/domain`、`test/core`→`test/domain` ＋ 参照 33 箇所（16 ファイル） | `cd core && deno fmt --check && deno lint && deno task check && deno task test` |
-| 4 | `mise.toml` / `.gitignore` / `ci.yml` / README ×2 | `mise run core:test`、`git status` が空 |
+| 4 | `mise.toml` / `.gitignore` / `ci.yml` / README ×2 | `mise run setup`、`mise run core:test`、`mise run app:test`、`git status` が空 |
 
 CI が緑になるのは 4 の後である。1〜3 の時点ではパスフィルタが古いままでスキップ判定を誤るため、
 4 つを 1 本の PR にまとめて流す。
 
 ## 8. リスク
-
-**進行中のブランチとの衝突。** リポジトリ全体のファイルパスを動かすので、未マージのブランチはほぼ確実に
-コンフリクトする。しかも移動なので Git の自動解決はあまり効かない。着手前に生きている worktree /
-ブランチを確認し、あるならそれらを先に develop へ入れてからこの変更を流す。
 
 **`deno task install` 済みの環境。** `~/.deno/bin/dctl` はチェックアウト内の `src/cli/dctl.ts` を
 `deno run` するシェルスクリプトなので、移動した時点で壊れる。段階 1 の直後に `mise run core:install`
