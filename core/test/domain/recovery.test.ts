@@ -12,7 +12,7 @@ import {
   psLstartCommand,
   recoverOnStartup,
   type WorkflowLookup,
-} from "../../src/core/recovery.ts";
+} from "../../src/domain/recovery.ts";
 
 async function fixture(taskIds: string[] = ["t1"]) {
   const db = await openDb(":memory:");
@@ -351,7 +351,7 @@ type TzProbeResult = {
 };
 
 async function killOwnChildUnderTz(tz: string): Promise<TzProbeResult> {
-  const recoveryUrl = new URL("../../src/core/recovery.ts", import.meta.url).href;
+  const recoveryUrl = new URL("../../src/domain/recovery.ts", import.meta.url).href;
   // task.pause / task.cancel と同じ呼び方（killStaleChild + defaultProbe + SIGTERM）で、
   // シグナルが本当に子へ届いたかを子の終了シグナルで確かめる。
   const script = `

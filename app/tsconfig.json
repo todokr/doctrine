@@ -20,6 +20,6 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src", "../src/daemon/protocol.ts"],
+  "include": ["src", "../shared/protocol.ts"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

@@ -1,5 +1,5 @@
 import { dirname, join } from "@std/path";
-import type { Request, Response, ServerEvent } from "./protocol.ts";
+import type { Request, Response, ServerEvent } from "../../../shared/protocol.ts";
 import { stateRoot } from "../util/home.ts";
 
 export type Connection = {

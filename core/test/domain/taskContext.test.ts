@@ -5,7 +5,7 @@ import { openDb } from "../../src/db/migrate.ts";
 import { getTask, insertProject, insertTask } from "../../src/db/tasks.ts";
 import { commitStepBoundary } from "../../src/db/boundary.ts";
 import { parseWorkflow } from "../../src/workflow/schema.ts";
-import { buildTaskContext } from "../../src/core/taskContext.ts";
+import { buildTaskContext } from "../../src/domain/taskContext.ts";
 import type { Db } from "../../src/db/schema.ts";
 import type { StepRunStatus } from "../../src/db/stepRuns.ts";
 

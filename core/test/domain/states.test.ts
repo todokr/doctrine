@@ -7,7 +7,7 @@ import {
   holdsProjectSlot,
   InvalidTransitionError,
   isTerminal,
-} from "../../src/core/states.ts";
+} from "../../src/domain/states.ts";
 
 test("正常系の遷移を許す", () => {
   assert.ok(canTransition("queued", "running"));

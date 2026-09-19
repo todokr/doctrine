@@ -6,7 +6,7 @@ import type {
   ParamsOf,
   ResultOf,
   ServerEvent,
-} from "../../../src/daemon/protocol.ts";
+} from "../../../shared/protocol.ts";
 
 export type ConnectionStatus = {
   status: "connecting" | "connected" | "disconnected";

@@ -10,12 +10,12 @@ import { DatabaseSync } from "node:sqlite";
 import { openDb, openDbOn } from "../../src/db/migrate.ts";
 import { getTask, insertTask } from "../../src/db/tasks.ts";
 import { listStepRuns } from "../../src/db/stepRuns.ts";
-import { reviewRefName } from "../../src/core/reviewTree.ts";
+import { reviewRefName } from "../../src/domain/reviewTree.ts";
 import { createHandler, type DaemonContext, tick } from "../../src/daemon/handlers.ts";
 import { createMockAdapter } from "../../src/adapter/mock.ts";
 import { parseWorkflow } from "../../src/workflow/schema.ts";
-import type { ProjectSummary, ServerEvent, TaskListEntry } from "../../src/daemon/protocol.ts";
-import { branchNameFor } from "../../src/core/worktree.ts";
+import type { ProjectSummary, ServerEvent, TaskListEntry } from "../../../shared/protocol.ts";
+import { branchNameFor } from "../../src/domain/worktree.ts";
 import { randomUUID } from "node:crypto";
 import { makeRepo, tickWhenIdle, until } from "../helpers/repo.ts";
 

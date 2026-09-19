@@ -9,7 +9,7 @@ import {
   runAgentStep,
   runCommandStep,
   type RunnerDeps,
-} from "../../src/core/stepRunner.ts";
+} from "../../src/domain/stepRunner.ts";
 import { createMockAdapter } from "../../src/adapter/mock.ts";
 import type { TemplateContext } from "../../src/workflow/template.ts";
 

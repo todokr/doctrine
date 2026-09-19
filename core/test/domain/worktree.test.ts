@@ -16,7 +16,7 @@ import {
   stateDir,
   UncommittedChangesError,
   worktreePathFor,
-} from "../../src/core/worktree.ts";
+} from "../../src/domain/worktree.ts";
 
 const run = promisify(execFile);
 let repo: string;

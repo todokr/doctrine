@@ -1,5 +1,5 @@
 import { join } from "@std/path";
-import { computeDiff, mergeBase, type TaskDiff } from "../core/diff.ts";
+import { computeDiff, mergeBase, type TaskDiff } from "../domain/diff.ts";
 import { parseWorkflow, type Workflow } from "../workflow/schema.ts";
 import { parseProjectConfig, withSetupStep } from "../workflow/project.ts";
 import { ensureProjectScaffold } from "../workflow/scaffold.ts";
@@ -23,8 +23,8 @@ import { commitStepBoundary, StateConflictError, type StepBoundary } from "../db
 import type { TaskRow } from "../db/tasks.ts";
 import type { Db } from "../db/schema.ts";
 import { recentRateLimitSamples } from "../db/rateLimits.ts";
-import { selectAdmissible } from "../core/scheduler.ts";
-import { applyApproval, runTask } from "../core/engine.ts";
+import { selectAdmissible } from "../domain/scheduler.ts";
+import { applyApproval, runTask } from "../domain/engine.ts";
 import {
   branchNameFor,
   createWorktree,
@@ -32,14 +32,14 @@ import {
   removeWorktree,
   UncommittedChangesError,
   worktreePathFor,
-} from "../core/worktree.ts";
-import { defaultProbe, killStaleChild } from "../core/recovery.ts";
-import { buildTaskContext } from "../core/taskContext.ts";
-import { captureTree, releaseTrees } from "../core/reviewTree.ts";
-import { assertTransition, isTerminal } from "../core/states.ts";
+} from "../domain/worktree.ts";
+import { defaultProbe, killStaleChild } from "../domain/recovery.ts";
+import { buildTaskContext } from "../domain/taskContext.ts";
+import { captureTree, releaseTrees } from "../domain/reviewTree.ts";
+import { assertTransition, isTerminal } from "../domain/states.ts";
 import type { AgentAdapter } from "../adapter/types.ts";
 import type { Handler } from "./server.ts";
-import type { ServerEvent } from "./protocol.ts";
+import type { ServerEvent } from "../../../shared/protocol.ts";
 
 export type DaemonContext = {
   db: Db;

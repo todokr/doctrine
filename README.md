@@ -11,23 +11,24 @@
 ## 1. セットアップ
 
 ```bash
-mise install                        # Deno のバージョンをリポジトリに固定
-deno install --frozen               # 依存（deno.lock 固定）を取得
+mise install                        # Deno / Node / pnpm / Rust の版をリポジトリに固定
+mise trust                          # 新しい worktree では最初の 1 回だけ必要
+mise run setup                      # core と app の依存（lock 固定）を取得
 ```
 
 `dctl` / `dctld` をコマンドとして使うには、次のどちらかを行う。
 
 ```bash
-deno task install   # ~/.deno/bin に dctl / dctld を置く（要 PATH）
-deno task build     # dist/dctl / dist/dctld に単一バイナリを作る
+mise run core:install   # ~/.deno/bin に dctl / dctld を置く（要 PATH）
+mise run core:build     # core/dist/dctl / core/dist/dctld に単一バイナリを作る
 ```
 
-- **`deno task install`（普段使い）** — 置かれるのはこのチェックアウトのソースを
+- **`mise run core:install`（普段使い）** — 置かれるのはこのチェックアウトのソースを
   `deno run` する小さなシェルスクリプトなので、ソースを保存すれば再インストール
   なしで反映される。その代わりチェックアウトを移動・削除すると動かなくなる。
-  `deno.json` の `imports` はインストール時点のものが複製されるので、
-  依存を変えたら `deno task install` をやり直すこと。
-- **`deno task build`（配布用）** — Deno もチェックアウトも不要な単体の実行ファイル。
+  `core/deno.json` の `imports` はインストール時点のものが複製されるので、
+  依存を変えたら `mise run core:install` をやり直すこと。
+- **`mise run core:build`（配布用）** — Deno もチェックアウトも不要な単体の実行ファイル。
   1本あたり約100MBあり、ソースを変えるたびにビルドし直す必要がある。
 
 ```bash
@@ -35,10 +36,11 @@ dctld &     # デーモンを起動（フォアグラウンドで動く。&で�
 dctl ls     # CLIから接続
 ```
 
-インストールせずに `deno run -A src/daemon/main.ts` / `deno run -A src/cli/dctl.ts`
+インストールせずに `deno run -A core/src/daemon/main.ts` / `deno run -A core/src/cli/dctl.ts`
 として直接動かしてもよい。
 
-テストは `deno task test`、型チェックは `deno task check`。
+テストは `mise run core:test`、型チェックは `mise run core:check`。アプリ側は
+`mise run app:test` / `mise run app:tauri`。
 
 ### プロジェクトを登録し、タスクを作る
 

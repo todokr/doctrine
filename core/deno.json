@@ -1,10 +1,10 @@
 {
   "fmt": {
-    "include": ["src/", "test/"],
+    "include": ["src/", "test/", "../shared/"],
     "lineWidth": 100
   },
   "lint": {
-    "include": ["src/", "test/"],
+    "include": ["src/", "test/", "../shared/"],
     "rules": {
       // async のシグネチャがインターフェース側（kysely の Dialect / DatabaseConnection、
       // createServer のハンドラ）から要求される箇所が多く、await の有無で判断できない。
@@ -13,7 +13,7 @@
   },
   "tasks": {
     "test": "deno test --allow-all test/",
-    "check": "deno check src test",
+    "check": "deno check src test ../shared",
     "install": "deno install -g -A -f --config deno.json -n dctl src/cli/dctl.ts && deno install -g -A -f --config deno.json -n dctld src/daemon/main.ts",
     "build": "deno compile -A --output dist/dctl src/cli/dctl.ts && deno compile -A --output dist/dctld src/daemon/main.ts"
   },

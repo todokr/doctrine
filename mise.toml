@@ -11,10 +11,65 @@ node = "26.8.1"
 "npm:pnpm" = "11.15.1"
 rust = "1.98.1"
 
+# タスクはすべて core/deno.json と app/package.json への一行の委譲。実体をここに
+# 書き写さないのは、書き写した瞬間に二重管理になるため。
+[tasks."core:deps"]
+description = "コアの依存を取る"
+dir = "core"
+run = "deno install --frozen"
+
+[tasks."core:test"]
+description = "コアのテスト"
+dir = "core"
+run = "deno task test"
+
+[tasks."core:check"]
+description = "コアの型検査"
+dir = "core"
+run = "deno task check"
+
+[tasks."core:install"]
+description = "dctl / dctld を ~/.deno/bin に置く"
+dir = "core"
+run = "deno task install"
+
+[tasks."core:build"]
+description = "dctl / dctld の単一バイナリを作る"
+dir = "core"
+run = "deno task build"
+
+[tasks."app:deps"]
+description = "アプリの依存を取る"
+dir = "app"
+run = "pnpm install --frozen-lockfile"
+
+[tasks."app:dev"]
+description = "アプリをブラウザで開く"
+dir = "app"
+run = "pnpm dev"
+
+[tasks."app:build"]
+description = "アプリをビルドする"
+dir = "app"
+run = "pnpm build"
+
+[tasks."app:test"]
+description = "アプリのテスト"
+dir = "app"
+run = "pnpm test"
+
+[tasks."app:tauri"]
+description = "アプリをウィンドウで開く"
+dir = "app"
+run = "pnpm tauri dev"
+
 # worktree 初期化で使う。`mise run setup` を worktree 内で実行する。
 # 注意: 新しい worktree のパスは mise にとって未信頼なので、このタスクを呼ぶ前に
 # `mise trust`（または MISE_TRUSTED_CONFIG_PATHS）が必要。信頼判定は設定の
 # パース時点で走るため、タスク自身が自分の信頼をブートストラップすることはできない
+#
+# deno と pnpm はそれぞれの lock ファイルの隣で走る必要があり、1 つの dir では
+# 書けないので、実体を 2 つに割って depends で束ねている。
 [tasks.setup]
 description = "worktree を作業可能な状態にする（依存の取得）"
-run = "deno install --frozen"
+depends = ["core:deps", "app:deps"]

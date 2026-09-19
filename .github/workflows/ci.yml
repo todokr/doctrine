@@ -72,14 +72,13 @@ jobs:
           common='^(\.github/|mise\.toml$)'
 
           core=false
-          if matches "$common" || matches '^(src/|test/|deno\.json$|deno\.lock$)'; then
+          if matches "$common" || matches '^(core/|shared/)'; then
             core=true
           fi
 
           app=false
-          # src/daemon/protocol.ts は #42 でアプリと共有し始める。共有後は
-          # コア側の変更でアプリも壊れうるので、今のうちから対象に入れておく。
-          if matches "$common" || matches '^(app/|src/daemon/protocol\.ts$)'; then
+          # shared/ は app と core の双方が依存する wire 契約なので、両方の対象に入れる。
+          if matches "$common" || matches '^(app/|shared/)'; then
             app=true
           fi
 
@@ -93,6 +92,9 @@ jobs:
     needs: changes
     if: needs.changes.outputs.core == 'true'
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: core
     steps:
       - uses: actions/checkout@v7
 
@@ -105,7 +107,7 @@ jobs:
         uses: actions/cache@v6
         with:
           path: ~/.cache/deno
-          key: deno-${{ runner.os }}-${{ hashFiles('deno.lock') }}
+          key: deno-${{ runner.os }}-${{ hashFiles('core/deno.lock') }}
           restore-keys: deno-${{ runner.os }}-
 
       # --frozen は deno.lock と実際の依存の食い違いをここで落とす
@@ -126,6 +128,9 @@ jobs:
     needs: changes
     if: needs.changes.outputs.core == 'true'
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: core
     strategy:
       fail-fast: false
       matrix:
@@ -143,7 +148,7 @@ jobs:
         uses: actions/cache@v6
         with:
           path: ~/.cache/deno
-          key: deno-${{ runner.os }}-${{ hashFiles('deno.lock') }}
+          key: deno-${{ runner.os }}-${{ hashFiles('core/deno.lock') }}
           restore-keys: deno-${{ runner.os }}-
 
       - run: deno install --frozen

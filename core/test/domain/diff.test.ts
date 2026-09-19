@@ -6,9 +6,9 @@ import { promisify } from "node:util";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { computeDiff, mergeBase, truncatePatch } from "../../src/core/diff.ts";
-import { captureTree } from "../../src/core/reviewTree.ts";
-import { ensureDoctrineOutExcluded } from "../../src/core/worktree.ts";
+import { computeDiff, mergeBase, truncatePatch } from "../../src/domain/diff.ts";
+import { captureTree } from "../../src/domain/reviewTree.ts";
+import { ensureDoctrineOutExcluded } from "../../src/domain/worktree.ts";
 import { makeRepo } from "../helpers/repo.ts";
 
 const run = promisify(execFile);

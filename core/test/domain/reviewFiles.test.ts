@@ -1,7 +1,7 @@
 import { afterEach, test } from "@std/testing/bdd";
 import assert from "node:assert/strict";
 import { join } from "@std/path";
-import { MAX_REVIEW_FILE_BYTES, readReviewFiles } from "../../src/core/reviewFiles.ts";
+import { MAX_REVIEW_FILE_BYTES, readReviewFiles } from "../../src/domain/reviewFiles.ts";
 
 const dirs: string[] = [];
 afterEach(async () => {

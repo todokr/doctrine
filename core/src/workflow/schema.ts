@@ -57,7 +57,7 @@ const branch = z.object({
 /**
  * review.files のパス。worktree からの相対に限る。
  * 指す先が worktree の外に出ていないかは、読み出し時に realpath で確かめる
- * （src/core/reviewFiles.ts）。ここで見るのは書かれた文字列だけ。
+ * （src/domain/reviewFiles.ts）。ここで見るのは書かれた文字列だけ。
  */
 const reviewPath = z.string()
   .min(1, "ファイルのパスが空です")
