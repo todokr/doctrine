@@ -5,6 +5,11 @@ export type MockScript = {
   result: Partial<AgentResult>;
   /** 呼び出しごとに結果を変えたいとき。start/resume の通算回数で引く。 */
   sequence?: Partial<AgentResult>[];
+  /**
+   * 呼び出しごとにイベント列を変えたいとき（sequence と同じく通算回数で引く）。
+   * 1回目だけ上限のイベントを流す、といった実行が組める。範囲外の回は events に戻る。
+   */
+  eventsSequence?: AgentEvent[][];
   delayMs?: number;
 };
 
@@ -36,7 +41,7 @@ export function createMockAdapter(script: MockScript): MockAdapter {
     const n = calls.length;
     calls.push({ kind, prompt, sessionId, opts });
     const partial = script.sequence?.[n] ?? script.result;
-    const events = script.events ?? [];
+    const events = script.eventsSequence?.[n] ?? script.events ?? [];
     return {
       sessionId,
       pid: 424242,

@@ -2,7 +2,7 @@ import { dirname, join } from "@std/path";
 import type { Db } from "../db/schema.ts";
 import type { AgentStep, CommandStep } from "../workflow/schema.ts";
 import { expand, type TemplateContext } from "../workflow/template.ts";
-import type { AgentAdapter } from "../adapter/types.ts";
+import type { AgentAdapter, RateLimitObservation } from "../adapter/types.ts";
 import { exitCodeOf } from "../util/exec.ts";
 
 export type StepOutcome = {
@@ -16,6 +16,11 @@ export type StepOutcome = {
   startedAt: string;
   endedAt: string;
   logPath: string;
+  /**
+   * この実行中に受け取った rate_limit_event（window ごとの最新）。
+   * command ステップはアダプタを通らないので常に空。
+   */
+  rateLimits: RateLimitObservation[];
 };
 
 export type RunnerDeps = {
@@ -24,9 +29,7 @@ export type RunnerDeps = {
   logRoot: string;
   /** DBに書く呼び出し側がいるので待つ。待たないと書き込みの順序も失敗も宙に浮く。 */
   onChildSpawned?(pid: number, startedAt: string): void | Promise<void>;
-  onRateLimit?(
-    s: { window: string; utilization: number; resetsAt: string | null },
-  ): void | Promise<void>;
+  onRateLimit?(s: RateLimitObservation): void | Promise<void>;
   /** 出力のチャンクごとに同期で呼ぶ。ここでDBを触らないこと（待てない）。 */
   onLogLine?(line: string): void;
 };
@@ -172,6 +175,7 @@ export async function runCommandStep(
       startedAt,
       endedAt: new Date().toISOString(),
       logPath,
+      rateLimits: [],
     };
   } finally {
     await log.close();
@@ -209,14 +213,20 @@ export async function runAgentStep(
       : o.deps.adapter.start(prompt, opts);
     await o.deps.onChildSpawned?.(run.pid, run.startedAt);
 
+    // window ごとの最新だけを持つ。同じ枠の古い値を混ぜると、明けた後の
+    // 実行で飽和していた時点の値が判定に残る。
+    const rateLimits = new Map<string, RateLimitObservation>();
+
     for await (const ev of run.events) {
       log.write(JSON.stringify(ev) + "\n");
       if (ev.kind === "rateLimit") {
-        await o.deps.onRateLimit?.({
+        const observation = {
           window: ev.window,
           utilization: ev.utilization,
           resetsAt: ev.resetsAt,
-        });
+        };
+        rateLimits.set(ev.window, observation);
+        await o.deps.onRateLimit?.(observation);
       }
       if (ev.kind === "assistant" && ev.text) o.deps.onLogLine?.(ev.text);
     }
@@ -245,6 +255,7 @@ export async function runAgentStep(
       startedAt: run.startedAt,
       endedAt: new Date().toISOString(),
       logPath,
+      rateLimits: [...rateLimits.values()],
     };
   } finally {
     await log.close();

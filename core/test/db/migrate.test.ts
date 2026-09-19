@@ -201,6 +201,7 @@ const COLUMNS = {
     child_pid: true,
     child_started_at: true,
     pending_feed: true,
+    rate_limited_until: true,
     priority: true,
     resumed: true,
     created_at: true,
@@ -391,6 +392,7 @@ test("開き直してもマイグレーションは二度流れず、データ�
     "0002_task_sessions",
     "0003_review_records",
     "0004_step_outputs_last_names",
+    "0005_rate_limited",
   ]);
   await first.destroy();
 
@@ -401,6 +403,7 @@ test("開き直してもマイグレーションは二度流れず、データ�
       "0002_task_sessions",
       "0003_review_records",
       "0004_step_outputs_last_names",
+      "0005_rate_limited",
     ]);
     assert.equal((await second.selectFrom("projects").selectAll().execute()).length, 1);
   } finally {
@@ -431,6 +434,7 @@ test("pending_feed を足す前に作られたDBファイルは、行を保っ�
       "0002_task_sessions",
       "0003_review_records",
       "0004_step_outputs_last_names",
+      "0005_rate_limited",
     ]);
     const old = await getTask(d, "old");
     assert.equal(old?.state, "suspended", "既存の行は残る");
@@ -627,6 +631,139 @@ test("移行前に一度差し戻されている suspended タスクの awaiting
     JSON.stringify({ implement: 2, review: 2 }),
     "attempt_counts は step_runs.attempt とちょうど一致する",
   );
+});
+
+/**
+ * 0005 は tasks と step_runs を作り直す。tasks を DROP する時点で step_runs /
+ * step_outputs / task_sessions が tasks.id を参照する行を持っているのが本番の姿なので、
+ * フィクスチャには4テーブルすべてに行を入れる（行が無ければ defer_foreign_keys の
+ * 効果を検証したことにならない）。
+ */
+function legacyWithChildren(): DatabaseSync {
+  const sqlite = new DatabaseSync(":memory:");
+  sqlite.exec(LEGACY_DDL);
+  sqlite.exec(`
+    INSERT INTO projects (path, default_workflow) VALUES ('/repo', 'f');
+    INSERT INTO tasks (id, project_id, title, prompt, workflow_name, state, current_step_id,
+                       attempt_counts, branch, claude_session_id, pending_feed,
+                       created_at, updated_at)
+      VALUES ('t1', 1, 'T', 'P', 'f', 'running', 'implement', '{"implement":1}', 'b',
+              'sess-1', '直して', '2026-09-19T00:00:00.000Z', '2026-09-19T01:00:00.000Z');
+    INSERT INTO step_runs (id, task_id, step_id, attempt, status, exit_code, started_at,
+                           ended_at, log_path)
+      VALUES (1, 't1', 'implement', 1, 'failed', 1, '2026-09-19T00:00:00.000Z',
+              '2026-09-19T00:30:00.000Z', '/logs/implement.1.log');
+    INSERT INTO step_outputs (task_id, step_id, stdout, stderr, exit_code)
+      VALUES ('t1', 'implement', 'out', 'err', 1);
+    INSERT INTO rate_limit_samples (observed_at, window, utilization, resets_at)
+      VALUES ('2026-09-19T00:10:00.000Z', 'five_hour', 1, '2026-09-19T03:20:00.000Z');
+  `);
+  return sqlite;
+}
+
+test("0005: tasks と step_runs を作り直しても、全テーブルの行がそのまま残る", async () => {
+  const d = await openDbOn(legacyWithChildren());
+
+  const t = (await getTask(d, "t1"))!;
+  assert.equal(t.state, "running");
+  assert.equal(t.current_step_id, "implement");
+  assert.equal(t.attempt_counts, '{"implement":1}');
+  assert.equal(t.pending_feed, "直して");
+  assert.equal(t.claude_session_id, "sess-1");
+  assert.equal(t.rate_limited_until, null, "新しい列は NULL で足される");
+
+  const runs = await d.selectFrom("step_runs").selectAll().execute();
+  assert.deepEqual(runs.map((r) => [r.id, r.step_id, r.status, r.log_path]), [[
+    1,
+    "implement",
+    "failed",
+    "/logs/implement.1.log",
+  ]], "id を含めて残る（step_outputs の参照先）");
+
+  const outputs = await d.selectFrom("step_outputs").selectAll().execute();
+  assert.deepEqual(outputs.map((o) => [o.step_run_id, o.last_stdout]), [[1, "out"]]);
+
+  const sessions = await d.selectFrom("task_sessions").selectAll().execute();
+  assert.deepEqual(sessions.map((s) => [s.task_id, s.role, s.session_id]), [[
+    "t1",
+    "default",
+    "sess-1",
+  ]]);
+
+  const samples = await d.selectFrom("rate_limit_samples").selectAll().execute();
+  assert.deepEqual(samples.map((s) => [s.window, s.utilization, s.resets_at]), [[
+    "five_hour",
+    1,
+    "2026-09-19T03:20:00.000Z",
+  ]], "rate_limit_samples には触っていない");
+
+  const violations = await sql<{ table: string }>`PRAGMA foreign_key_check`.execute(d);
+  assert.deepEqual(violations.rows, [], "外部キーが壊れていない");
+});
+
+test("0005: 再構築した tasks / step_runs の索引が残っている", async () => {
+  const d = await openDbOn(legacyWithChildren());
+  const { rows } = await sql<{ name: string }>`
+    SELECT name FROM sqlite_master WHERE type='index' AND name LIKE 'idx_%' ORDER BY name
+  `.execute(d);
+  assert.deepEqual(rows.map((r) => r.name), [
+    "idx_step_runs_task",
+    "idx_tasks_project",
+    "idx_tasks_state",
+  ]);
+});
+
+test("0005: tasks.state は rate_limited を受け付け、未知の値は CHECK で落ちる", async () => {
+  const d = await db();
+  const pid = await seed(d);
+  await insertTask(d, {
+    id: "t1",
+    project_id: pid,
+    title: "T",
+    prompt: "P",
+    workflow_name: "feature",
+    branch: "b",
+    priority: 2,
+  });
+  await d.updateTable("tasks")
+    .set({ state: "rate_limited", rate_limited_until: "2026-09-19T03:20:00.000Z" })
+    .where("id", "=", "t1").execute();
+  const t = (await getTask(d, "t1"))!;
+  assert.equal(t.state, "rate_limited");
+  assert.equal(t.rate_limited_until, "2026-09-19T03:20:00.000Z");
+
+  await assert.rejects(() =>
+    d.updateTable("tasks")
+      // deno-lint-ignore no-explicit-any
+      .set({ state: "bogus" as any }).where("id", "=", "t1").execute()
+  );
+});
+
+test("0005: step_runs.status は rate_limited を受け付ける", async () => {
+  const d = await db();
+  const pid = await seed(d);
+  await insertTask(d, {
+    id: "t1",
+    project_id: pid,
+    title: "T",
+    prompt: "P",
+    workflow_name: "feature",
+    branch: "b",
+    priority: 2,
+  });
+  await d.insertInto("step_runs").values({
+    task_id: "t1",
+    step_id: "implement",
+    attempt: 1,
+    status: "rate_limited",
+    exit_code: 1,
+    started_at: "2026-09-19T00:00:00.000Z",
+    ended_at: "2026-09-19T00:00:10.000Z",
+    log_path: "",
+    review_tree: null,
+  }).execute();
+  const rows = await d.selectFrom("step_runs").select("status").execute();
+  assert.deepEqual(rows.map((r) => r.status), ["rate_limited"]);
 });
 
 test("0004: step_outputs の列が last_stdout / last_stderr に改名され、値は残る", async () => {

@@ -54,6 +54,30 @@ test("suspended から running / paused へは直接行けない", () => {
   assert.equal(canTransition("suspended", "paused"), false);
 });
 
+test("running から rate_limited へ入り、解放で queued に戻れる", () => {
+  assert.ok(canTransition("running", "rate_limited"));
+  assert.ok(canTransition("rate_limited", "queued"));
+  assert.doesNotThrow(() => assertTransition("running", "rate_limited"));
+});
+
+test("上限待ちのタスクも人の操作と tick の失敗経路で外へ出られる", () => {
+  for (const to of ["paused", "canceled", "failed"] as const) {
+    assert.ok(canTransition("rate_limited", to), `rate_limited -> ${to}`);
+  }
+});
+
+test("rate_limited から直接 running / suspended / completed へは行けない", () => {
+  for (const to of ["running", "suspended", "completed"] as const) {
+    assert.equal(canTransition("rate_limited", to), false, `rate_limited -> ${to}`);
+  }
+});
+
+test("終端状態から rate_limited へは戻れない", () => {
+  for (const from of ["completed", "failed", "canceled"] as const) {
+    assert.equal(canTransition(from, "rate_limited"), false, from);
+  }
+});
+
 test("不正な遷移は例外を投げる", () => {
   assert.throws(() => assertTransition("completed", "running"), InvalidTransitionError);
   assert.doesNotThrow(() => assertTransition("queued", "running"));
@@ -61,13 +85,23 @@ test("不正な遷移は例外を投げる", () => {
 
 test("全体枠を握るのは running だけ", () => {
   assert.ok(holdsGlobalSlot("running"));
-  for (const s of ["queued", "suspended", "paused", "completed", "failed", "canceled"] as const) {
+  for (
+    const s of [
+      "queued",
+      "suspended",
+      "paused",
+      "rate_limited",
+      "completed",
+      "failed",
+      "canceled",
+    ] as const
+  ) {
     assert.equal(holdsGlobalSlot(s), false, s);
   }
 });
 
-test("プロジェクト枠は suspended / paused でも保持される", () => {
-  for (const s of ["running", "suspended", "paused"] as const) {
+test("プロジェクト枠は suspended / paused / rate_limited でも保持される", () => {
+  for (const s of ["running", "suspended", "paused", "rate_limited"] as const) {
     assert.ok(holdsProjectSlot(s), s);
   }
   for (const s of ["queued", "completed", "failed", "canceled"] as const) {

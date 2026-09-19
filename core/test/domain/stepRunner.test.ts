@@ -184,6 +184,52 @@ test("rate_limit イベントが通知される", async () => {
   assert.deepEqual(samples, [{ window: "five_hour", utilization: 0.14, resetsAt: null }]);
 });
 
+test("実行中に観測した rate_limit は window ごとの最新が結果に載る", async () => {
+  const adapter = createMockAdapter({
+    events: [
+      {
+        kind: "rateLimit",
+        window: "five_hour",
+        utilization: 0.9,
+        resetsAt: "2026-09-19T03:20:00Z",
+      },
+      {
+        kind: "rateLimit",
+        window: "seven_day",
+        utilization: 0.1,
+        resetsAt: "2026-09-26T00:00:00Z",
+      },
+      { kind: "rateLimit", window: "five_hour", utilization: 1, resetsAt: "2026-09-19T03:20:00Z" },
+    ],
+    result: { ok: false, exitCode: 1 },
+  });
+  const out = await runAgentStep(
+    { id: "a", type: "agent", prompt: "p" },
+    ctx,
+    {
+      cwd: root,
+      taskId: "t1",
+      attempt: 1,
+      sessionId: "s1",
+      resume: false,
+      deps: await deps({ adapter }),
+    },
+  );
+  assert.deepEqual(out.rateLimits, [
+    { window: "five_hour", utilization: 1, resetsAt: "2026-09-19T03:20:00Z" },
+    { window: "seven_day", utilization: 0.1, resetsAt: "2026-09-26T00:00:00Z" },
+  ]);
+});
+
+test("command ステップは rate_limit を観測しない", async () => {
+  const out = await runCommandStep(
+    { id: "a", type: "command", run: "true" },
+    ctx,
+    { cwd: root, taskId: "t1", attempt: 1, deps: await deps() },
+  );
+  assert.deepEqual(out.rateLimits, []);
+});
+
 test("command ステップでも子プロセスのpidと開始時刻が通知される", async () => {
   const seen: { pid: number; startedAt: string }[] = [];
   const d = await deps({

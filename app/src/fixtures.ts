@@ -398,6 +398,8 @@ const SEEDS: Seed[] = [
   { id: "s-1104", wf: "shop-api/feature", title: "価格改定バッチの分割実行", state: "queued", step: null, attempt: 0, prio: 0, since: NOW - 4 * MIN },
   { id: "t-91e0", wf: "doctrine/feature", title: "ログ追従を1接続1タスクに上書きする", state: "queued", step: null, attempt: 0, prio: 2, since: NOW - 25 * MIN },
 
+  { id: "t-f22b", wf: "doctrine/feature", title: "ratelimit の待機と再開を入れる", state: "rate_limited", step: "agent-review", attempt: 1, prio: 2, since: NOW - 12 * MIN, resumeAt: NOW + 68 * MIN, log: "assistant: 変更点をレビューします\n(利用上限に達したため待機中)" },
+
   { id: "t-d5e6", wf: "doctrine/guided", title: "step_outputs の全文保持を検討する", state: "paused", step: "plan", attempt: 1, prio: 2, since: NOW - 60 * 5 * MIN, log: "assistant: step_outputs の容量見積もりを出します\n(SIGTERM で一時停止)" },
 
   { id: "t-0a77", wf: "doctrine/feature", title: "README にデーモン起動手順を書く", state: "completed", step: "open-pr", attempt: 1, prio: 2, since: NOW - 60 * 3 * MIN, log: "exit 0" },

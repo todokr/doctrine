@@ -27,6 +27,7 @@ export type StepBoundary = {
       | "child_started_at"
       | "resumed"
       | "pending_feed"
+      | "rate_limited_until"
     >
   >;
   /** ステップ開始時: status "running" / ended_at null で挿入し、返り値の id を持っておく。 */
@@ -56,6 +57,11 @@ export type StepBoundary = {
   };
   /** ステップ開始時（agent ステップのみ）: そのロールのセッションを記録する。 */
   sessionUpsert?: { role: string; session_id: string };
+  /**
+   * そのロールの会話の記録を取り消す。最初の呼び出しが上限で弾かれたときだけ使う
+   * （会話が作られたか分からないので、次は新しい session id で start し直す）。
+   */
+  sessionDelete?: { role: string };
   /**
    * ステップの出力。この境界で立てた（または閉じた）step_run に紐づく。
    * step_run も stepRunUpdate も無いのに outputs だけ渡すのは呼び出し側のバグ。
@@ -157,6 +163,13 @@ export function commitStepBoundary(db: Db, b: StepBoundary): Promise<number | nu
             session_id: eb.ref("excluded.session_id"),
           }))
         )
+        .execute();
+    }
+
+    if (b.sessionDelete) {
+      await trx.deleteFrom("task_sessions")
+        .where("task_id", "=", b.taskId)
+        .where("role", "=", b.sessionDelete.role)
         .execute();
     }
 

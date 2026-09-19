@@ -4,7 +4,9 @@ import { writeFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { applyApproval, decide, runTask } from "../../src/domain/engine.ts";
+import { applyApproval, decide, type EngineDeps, runTask } from "../../src/domain/engine.ts";
+import { releaseDueRateLimited } from "../../src/domain/scheduler.ts";
+import type { AgentEvent, AgentResult } from "../../src/adapter/types.ts";
 import { parseWorkflow } from "../../src/workflow/schema.ts";
 import { DatabaseSync } from "node:sqlite";
 import { openDb, openDbOn } from "../../src/db/migrate.ts";
@@ -388,6 +390,369 @@ steps:
   await runTask(db, "t1", workflow, { db, adapter, logRoot: join(root, "logs"), globalLimit: 4 });
 
   assert.equal(adapter.calls[0].kind, "start", "feed があることは会話が既にあることを意味しない");
+});
+
+// --- 利用上限（2026-09-19-rate-limit-wait-design.md） -----------------------
+
+/** 今から min 分後に明ける、飽和した5時間枠のイベント。 */
+function saturated(min = 5): AgentEvent {
+  return {
+    kind: "rateLimit",
+    window: "five_hour",
+    utilization: 1,
+    resetsAt: new Date(Date.now() + min * 60_000).toISOString(),
+  };
+}
+
+/** 上限で打ち切られた実行（イベントを流して exit 1 で終わる）。 */
+const HIT: Partial<AgentResult> = { ok: false, exitCode: 1, text: "", stderrTail: "" };
+const OK: Partial<AgentResult> = { ok: true, text: "やった" };
+
+type Events = { onStateChanged: string[]; onStepRunFinished: string[] };
+
+function recorder(): { events: Events; deps: Partial<EngineDeps> } {
+  const events: Events = { onStateChanged: [], onStepRunFinished: [] };
+  return {
+    events,
+    deps: {
+      onStateChanged: (_id, from, to) => events.onStateChanged.push(`${from} -> ${to}`),
+      onStepRunFinished: (_id, _runId, stepId, status) =>
+        events.onStepRunFinished.push(`${stepId}:${status}`),
+    },
+  };
+}
+
+const AGENT_ONLY = `
+name: f
+steps:
+  - id: implement
+    type: agent
+    prompt: "{{ task.prompt }}"
+`;
+
+test("上限に当たった agent ステップは失敗ではなく rate_limited として待つ", async () => {
+  const { db, root, workflow } = await taskFixture(AGENT_ONLY);
+  const hit = saturated();
+  const adapter = createMockAdapter({
+    eventsSequence: [[hit]],
+    result: {},
+    sequence: [HIT],
+  });
+  const { events, deps } = recorder();
+
+  await runTask(db, "t1", workflow, {
+    db,
+    adapter,
+    logRoot: join(root, "logs"),
+    globalLimit: 4,
+    ...deps,
+  });
+
+  const task = (await getTask(db, "t1"))!;
+  assert.equal(task.state, "rate_limited");
+  assert.equal(task.rate_limited_until, hit.kind === "rateLimit" ? hit.resetsAt : null);
+  assert.equal(task.child_pid, null);
+
+  const runs = await listStepRuns(db, "t1");
+  assert.deepEqual(runs.map((r) => [r.step_id, r.status, r.attempt]), [[
+    "implement",
+    "rate_limited",
+    1,
+  ]]);
+  assert.equal(task.attempt_counts, JSON.stringify({ implement: 1 }));
+  assert.deepEqual(events.onStateChanged, ["running -> rate_limited"]);
+  assert.deepEqual(events.onStepRunFinished, ["implement:rate_limited"]);
+
+  const outputs = await getStepOutputs(db, "t1");
+  assert.match(outputs.implement.last_stderr, /利用上限/);
+
+  const samples = await db.selectFrom("rate_limit_samples").selectAll().execute();
+  assert.deepEqual(
+    samples.map((s) => [s.window, s.utilization]),
+    [["five_hour", 1]],
+    "記録側は今までどおり（読み取りを足しただけ）",
+  );
+});
+
+test("期限が来たら queued に戻り、同じ会話を resume してワークフローが完走する", async () => {
+  const { db, root, workflow } = await taskFixture(`
+name: f
+steps:
+  - id: plan
+    type: agent
+    prompt: "計画して"
+  - id: implement
+    type: agent
+    prompt: "実装して"
+`);
+  // 1回目（plan）は成功、2回目（implement）で上限、3回目は成功。
+  const adapter = createMockAdapter({
+    eventsSequence: [[], [saturated()]],
+    result: {},
+    sequence: [OK, HIT, OK],
+  });
+  const deps = { db, adapter, logRoot: join(root, "logs"), globalLimit: 4 };
+
+  await runTask(db, "t1", workflow, deps);
+  const waiting = (await getTask(db, "t1"))!;
+  assert.equal(waiting.state, "rate_limited");
+
+  // 期限より前の tick では解放しない。
+  assert.deepEqual(
+    await releaseDueRateLimited(db, new Date(Date.parse(waiting.rate_limited_until!) - 1000)),
+    [],
+  );
+  assert.equal((await getTask(db, "t1"))?.state, "rate_limited");
+
+  assert.deepEqual(
+    await releaseDueRateLimited(db, new Date(Date.parse(waiting.rate_limited_until!) + 1000)),
+    ["t1"],
+  );
+  const released = (await getTask(db, "t1"))!;
+  assert.equal(released.state, "queued");
+  assert.equal(released.rate_limited_until, null);
+  assert.equal(released.resumed, 1, "進行中の仕事として行列の先頭に入る");
+
+  await toRunning(db, "t1");
+  await runTask(db, "t1", workflow, deps);
+
+  assert.equal((await getTask(db, "t1"))?.state, "completed");
+  assert.equal(adapter.calls[2].kind, "resume", "同じ会話の続き");
+  assert.equal(adapter.calls[2].sessionId, adapter.calls[1].sessionId);
+
+  const implement = (await listStepRuns(db, "t1")).filter((r) => r.step_id === "implement");
+  assert.deepEqual(implement.map((r) => [r.status, r.attempt]), [["rate_limited", 1], [
+    "success",
+    1,
+  ]], "上限はワークフロー上の試行ではないので attempt は進まない");
+  assert.equal(
+    implement[0].log_path,
+    implement[1].log_path,
+    "同じ会話の続きは同じログに追記される",
+  );
+  assert.equal(
+    (await getTask(db, "t1"))?.attempt_counts,
+    JSON.stringify({ plan: 1, implement: 1 }),
+  );
+});
+
+test("最初の呼び出しで上限に当たったら、会話を作り直して start からやり直す", async () => {
+  const { db, root, workflow } = await taskFixture(AGENT_ONLY);
+  const adapter = createMockAdapter({
+    eventsSequence: [[saturated()]],
+    result: {},
+    sequence: [HIT, OK],
+  });
+  const deps = { db, adapter, logRoot: join(root, "logs"), globalLimit: 4 };
+
+  await runTask(db, "t1", workflow, deps);
+  assert.deepEqual(
+    await db.selectFrom("task_sessions").selectAll().execute(),
+    [],
+    "会話が作られたかは分からないので、記録は取り消す",
+  );
+
+  const until = (await getTask(db, "t1"))!.rate_limited_until!;
+  await releaseDueRateLimited(db, new Date(Date.parse(until) + 1000));
+  await toRunning(db, "t1");
+  await runTask(db, "t1", workflow, deps);
+
+  assert.equal((await getTask(db, "t1"))?.state, "completed");
+  assert.equal(adapter.calls[1].kind, "start");
+  assert.notEqual(adapter.calls[1].sessionId, adapter.calls[0].sessionId, "新しい会話");
+});
+
+test("feed 付きで入ったステップで上限に当たっても feed を失わない", async () => {
+  const { db, root, workflow } = await taskFixture(`
+name: f
+steps:
+  - id: build
+    type: command
+    run: "false"
+    onFailure:
+      goto: repair
+      maxAttempts: 2
+      feed: "壊れた: {{ steps.build.exitCode }}"
+  - id: repair
+    type: agent
+    prompt: "直して"
+`);
+  const adapter = createMockAdapter({
+    eventsSequence: [[saturated()]],
+    result: {},
+    sequence: [HIT, OK],
+  });
+  const deps = { db, adapter, logRoot: join(root, "logs"), globalLimit: 4 };
+
+  await runTask(db, "t1", workflow, deps);
+  const waiting = (await getTask(db, "t1"))!;
+  assert.equal(waiting.state, "rate_limited");
+  assert.equal(waiting.pending_feed, "壊れた: 1");
+
+  await releaseDueRateLimited(db, new Date(Date.parse(waiting.rate_limited_until!) + 1000));
+  await toRunning(db, "t1");
+  await runTask(db, "t1", workflow, deps);
+
+  assert.equal(adapter.calls[1].prompt, adapter.calls[0].prompt);
+  assert.equal(adapter.calls[1].prompt, "壊れた: 1");
+  assert.equal((await getTask(db, "t1"))?.pending_feed, null, "消費は一度きり");
+});
+
+test("feed 無しのステップで上限に当たっても pending_feed は書かれない", async () => {
+  const { db, root, workflow } = await taskFixture(AGENT_ONLY);
+  const adapter = createMockAdapter({
+    eventsSequence: [[saturated()]],
+    result: {},
+    sequence: [HIT, OK],
+  });
+  const deps = { db, adapter, logRoot: join(root, "logs"), globalLimit: 4 };
+
+  await runTask(db, "t1", workflow, deps);
+  assert.equal(
+    (await getTask(db, "t1"))?.pending_feed,
+    null,
+    "展開済みの step.prompt を入れると、再開時の入力が DB 由来に変わってしまう",
+  );
+
+  const until = (await getTask(db, "t1"))!.rate_limited_until!;
+  await releaseDueRateLimited(db, new Date(Date.parse(until) + 1000));
+  await toRunning(db, "t1");
+  await runTask(db, "t1", workflow, deps);
+  assert.equal(adapter.calls[1].prompt, "直して", "再開時に step.prompt がその時点で展開される");
+});
+
+test("resetsAt が6時間より先なら待たずに failed にし、resetsAt を残す", async () => {
+  const { db, root, workflow } = await taskFixture(AGENT_ONLY);
+  const far = saturated(7 * 60);
+  const adapter = createMockAdapter({
+    eventsSequence: [[far]],
+    result: {},
+    sequence: [HIT],
+  });
+  await runTask(db, "t1", workflow, { db, adapter, logRoot: join(root, "logs"), globalLimit: 4 });
+
+  assert.equal((await getTask(db, "t1"))?.state, "failed");
+  const outputs = await getStepOutputs(db, "t1");
+  assert.match(
+    outputs.implement.last_stderr,
+    new RegExp(far.kind === "rateLimit" ? far.resetsAt! : ""),
+    "board 上で普通の失敗と区別が付くように resetsAt を残す",
+  );
+});
+
+test("同じステップで連続して上限に当たり続けたら failed にする", async () => {
+  const { db, root, workflow } = await taskFixture(AGENT_ONLY);
+  // 既に5回連続で上限に当たっている記録を作る（1回ずつ回すと上限の意味が変わらない）。
+  await db.updateTable("tasks").set({ attempt_counts: JSON.stringify({ implement: 1 }) })
+    .where("id", "=", "t1").execute();
+  for (let i = 0; i < 5; i++) {
+    await db.insertInto("step_runs").values({
+      task_id: "t1",
+      step_id: "implement",
+      attempt: 1,
+      status: "rate_limited",
+      exit_code: 1,
+      started_at: new Date().toISOString(),
+      ended_at: new Date().toISOString(),
+      log_path: "",
+      review_tree: null,
+    }).execute();
+  }
+  const adapter = createMockAdapter({
+    eventsSequence: [[saturated()]],
+    result: {},
+    sequence: [HIT],
+  });
+  await runTask(db, "t1", workflow, { db, adapter, logRoot: join(root, "logs"), globalLimit: 4 });
+
+  assert.equal((await getTask(db, "t1"))?.state, "failed");
+  assert.match((await getStepOutputs(db, "t1")).implement.last_stderr, /連続して 5 回/);
+});
+
+test("上限と無関係な失敗は今までどおり onFailure の分岐に進む", async () => {
+  const { db, root, workflow } = await taskFixture(`
+name: f
+steps:
+  - id: implement
+    type: agent
+    prompt: "直して"
+    onFailure:
+      goto: implement
+      maxAttempts: 2
+      feed: "もう一度"
+`);
+  // 飽和したサンプルはあるが、この実行が始まる前のもの（別タスクが残した行）。
+  await db.insertInto("rate_limit_samples").values({
+    observed_at: new Date(Date.now() - 60_000).toISOString(),
+    window: "five_hour",
+    utilization: 1,
+    resets_at: new Date(Date.now() + 60 * 60_000).toISOString(),
+  }).execute();
+  const adapter = createMockAdapter({ result: {}, sequence: [HIT, HIT] });
+
+  await runTask(db, "t1", workflow, { db, adapter, logRoot: join(root, "logs"), globalLimit: 4 });
+
+  assert.equal((await getTask(db, "t1"))?.state, "failed");
+  assert.deepEqual(
+    (await listStepRuns(db, "t1")).map((r) => r.status),
+    ["failed", "failed"],
+    "実行開始より前に観測された行は根拠にしない",
+  );
+  assert.equal(adapter.calls[1].prompt, "もう一度");
+});
+
+test("上限のイベントが取れなくても、実行開始以降のサンプルがあれば待つ", async () => {
+  const { db, root, workflow } = await taskFixture(AGENT_ONLY);
+  const resetsAt = new Date(Date.now() + 10 * 60_000).toISOString();
+  const adapter = createMockAdapter({ result: {}, sequence: [HIT] });
+  // 実行中に別経路（他タスクの実行）で観測された飽和。イベントは自分には来ていない。
+  const origStart = adapter.start;
+  adapter.start = (prompt, opts) => {
+    db.insertInto("rate_limit_samples").values({
+      observed_at: new Date().toISOString(),
+      window: "five_hour",
+      utilization: 1,
+      resets_at: resetsAt,
+    }).execute();
+    return origStart(prompt, opts);
+  };
+
+  await runTask(db, "t1", workflow, {
+    db,
+    adapter,
+    logRoot: join(root, "logs"),
+    globalLimit: 4,
+    // 実行開始時刻と観測時刻が同じミリ秒に落ちても拾えること
+    onChildSpawned: () => {},
+  });
+
+  const task = (await getTask(db, "t1"))!;
+  assert.equal(task.state, "rate_limited");
+  assert.equal(task.rate_limited_until, resetsAt);
+});
+
+test("command ステップの失敗は上限判定に掛からない", async () => {
+  const { db, root, workflow } = await taskFixture(`
+name: f
+steps:
+  - id: build
+    type: command
+    run: "false"
+`);
+  await db.insertInto("rate_limit_samples").values({
+    observed_at: new Date(Date.now() + 60_000).toISOString(),
+    window: "five_hour",
+    utilization: 1,
+    resets_at: new Date(Date.now() + 60 * 60_000).toISOString(),
+  }).execute();
+
+  await runTask(db, "t1", workflow, {
+    db,
+    adapter: createMockAdapter({ result: {} }),
+    logRoot: join(root, "logs"),
+    globalLimit: 4,
+  });
+  assert.equal((await getTask(db, "t1"))?.state, "failed");
 });
 
 test("承認待ちの間にワークフローが書き換わり、承認ステップが消えたらエラーになる", async () => {

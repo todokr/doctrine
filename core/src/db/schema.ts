@@ -13,6 +13,8 @@ export type TaskState =
   | "running"
   | "suspended"
   | "paused"
+  /** 利用上限に当たり、resetsAt まで待っている（2026-09-19-rate-limit-wait-design.md）。 */
+  | "rate_limited"
   | "completed"
   | "failed"
   | "canceled";
@@ -23,7 +25,9 @@ export type StepRunStatus =
   | "success"
   | "failed"
   | "degraded"
-  | "interrupted";
+  | "interrupted"
+  /** 利用上限で打ち切られた実行。同じ会話で再開されるので失敗ではない。 */
+  | "rate_limited";
 
 export interface ProjectsTable {
   id: Generated<number>;
@@ -49,6 +53,8 @@ export interface TasksTable {
   child_pid: number | null;
   child_started_at: string | null;
   pending_feed: string | null;
+  /** state が rate_limited の間だけ入る、再開してよい時刻（ISO 8601）。 */
+  rate_limited_until: string | null;
   priority: Generated<number>;
   resumed: Generated<number>;
   created_at: string;
