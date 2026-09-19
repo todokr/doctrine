@@ -20,8 +20,19 @@ export type StepDef = {
 export type Hunk = { old: number; new: number; body: string };
 export type DiffFile = { path: string; hunks: Hunk[]; since?: Hunk[] };
 
+// デーモン側（src/core/reviewFiles.ts）と同じ判別ユニオン。
+export type ReviewFileStatus = "ok" | "missing" | "too_large" | "outside_worktree" | "binary";
+export type ReviewFile =
+  | { path: string; status: "ok"; content: string; size: number }
+  | { path: string; status: "missing" }
+  | { path: string; status: "too_large"; size: number }
+  | { path: string; status: "outside_worktree" }
+  | { path: string; status: "binary"; size: number };
+
+// デーモンの ReviewEntry（4系統の判別ユニオン、src/core/taskContext.ts）とはまだ揃えていない。
+// この Review はモックの単純な形のままで、揃えるのはデーモンと UI を繋ぐ変更（別対応）で行う。
 export type Review = { at: number; comment: string };
-export type CommandResult = { step: string; exitCode: number; stdout: string; stderr: string };
+export type CommandResult = { stepId: string; exitCode: number | null; stdout: string; stderr: string };
 
 export type SequenceDiagram = { actors: string[]; messages: { from: string; to: string; label: string }[] };
 export type ReadingStep = { title: string; paths: string[]; diagram: "sequence" | "relation" | null; explain: string };
@@ -51,9 +62,9 @@ export type Task = {
   diff: DiffFile[];
   reviews: Review[];
   guide?: Guide;
-  reviewFiles?: Record<string, string>;
+  reviewFiles?: ReviewFile[];
   lastCommand?: CommandResult | null;
-  lastAgentMessage?: string;
+  lastAgentMessage?: string | null;
   // どの画面も今は読まない。task.logs の follow（#47）で本物のログに置き換わるまでの残骸
   log?: string;
   dirty?: boolean;

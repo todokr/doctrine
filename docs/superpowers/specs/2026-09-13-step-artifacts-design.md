@@ -5,6 +5,9 @@
 - issue: [#15](https://github.com/todokr/doctrine/issues/15)
 - 前提: [overview](../../overview.md)、[コア設計spec](2026-09-12-agent-orchestrator-core-design.md)
 
+> （#45 で `stdout` / `stderr` は `last_stdout` / `last_stderr` に改名した。本文の例は
+> 現行の名前に更新してある。）
+
 ## 1. 位置づけ
 
 overview 4章が目標とするワークフローは、**役割の違うエージェントが1つのタスクの中で
@@ -68,7 +71,7 @@ steps:
     onReject:
       goto: plan
       maxAttempts: 3
-      feed: "計画レビューで却下された:\n{{ steps.plan-review.stdout }}"
+      feed: "計画レビューで却下された:\n{{ steps.plan-review.last_stdout }}"
 
   - id: implement
     type: agent
@@ -83,7 +86,7 @@ steps:
     onFailure:
       goto: implement
       maxAttempts: 3
-      feed: "コードレビューで指摘された:\n{{ steps.code-review.stdout }}"
+      feed: "コードレビューで指摘された:\n{{ steps.code-review.last_stdout }}"
 ```
 
 `plan` に戻る差し戻しは `session: planner` の会話を再開し、`implement` に戻る差し戻しは

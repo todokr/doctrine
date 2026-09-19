@@ -12,7 +12,15 @@ export type AgentStep = {
   model?: string;
   onFailure?: Branch;
 };
-export type ApprovalStep = { id: string; type: "approval"; title: string; onReject?: Branch };
+/** approval ステップが「これを見て判断してください」と宣言するもの。 */
+export type ReviewDecl = { files: string[] };
+export type ApprovalStep = {
+  id: string;
+  type: "approval";
+  title: string;
+  onReject?: Branch;
+  review?: ReviewDecl;
+};
 export type Step = CommandStep | AgentStep | ApprovalStep;
 export type Workflow = { name: string; steps: Step[] };
 
@@ -46,6 +54,30 @@ const branch = z.object({
   feed: z.string().optional(),
 }).strict();
 
+/**
+ * review.files のパス。worktree からの相対に限る。
+ * 指す先が worktree の外に出ていないかは、読み出し時に realpath で確かめる
+ * （src/core/reviewFiles.ts）。ここで見るのは書かれた文字列だけ。
+ */
+const reviewPath = z.string()
+  .min(1, "ファイルのパスが空です")
+  .refine(
+    (p) => !p.startsWith("/"),
+    "絶対パスは書けません（worktree からの相対パスを書いてください）",
+  )
+  .refine(
+    (p) => !p.startsWith("~"),
+    "~ は展開されません（worktree からの相対パスを書いてください）",
+  )
+  .refine(
+    (p) => !p.split("/").includes(".."),
+    ".. は書けません（worktree の外のファイルは宣言できません）",
+  );
+
+const review = z.object({
+  files: z.array(reviewPath).min(1, "review.files は1つ以上必要です"),
+}).strict();
+
 const stepSchema = z.discriminatedUnion("type", [
   z.object({
     id: stepId,
@@ -70,6 +102,7 @@ const stepSchema = z.discriminatedUnion("type", [
     type: z.literal("approval"),
     title: z.string().min(1),
     onReject: branch.optional(),
+    review: review.optional(),
   }).strict(),
 ]);
 

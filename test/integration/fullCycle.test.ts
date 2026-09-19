@@ -16,17 +16,29 @@ import {
 } from "../../src/daemon/handlers.ts";
 import { createMockAdapter } from "../../src/adapter/mock.ts";
 import type { ServerEvent } from "../../src/daemon/protocol.ts";
-import { makeRepo, until } from "../helpers/repo.ts";
+import { makeRepo, tickWhenIdle, until } from "../helpers/repo.ts";
 
 const execFileAsync = promisify(execFile);
 const NOOP_CONN = { follow() {}, unfollow() {}, isFollowing: () => false };
 let root: string;
+
+// テストが context() で作った DaemonContext をすべて控えておく。approval が
+// suspended に入るときの retainTree（reviewTree.ts）は commitStepBoundary の
+// あとに実際の git を叩くので、DB の状態がもう "suspended" でも、その runTask
+// はまだ ctx.running を持ったまま git サブプロセスを走らせていることがある。
+// テスト本体は「状態が suspended になった」ところで終わってしまうので、
+// 個々のテストに drain を書かせるのではなく、afterEach が rm の前に必ず
+// ここへ控えた全 ctx の running が空になるのを待つ（書き込み中の worktree を
+// 消して ENOTEMPTY になるのを防ぐ）。
+const contexts: DaemonContext[] = [];
 
 beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), "doctrine-e2e-"));
   process.env.DOCTRINE_STATE_DIR = join(root, "state");
 });
 afterEach(async () => {
+  await until(() => contexts.every((c) => c.running.size === 0));
+  contexts.length = 0;
   await rm(root, { recursive: true, force: true });
   delete process.env.DOCTRINE_STATE_DIR;
 });
@@ -44,14 +56,14 @@ steps:
     onFailure:
       goto: implement
       maxAttempts: 3
-      feed: "marker.txt がない:\\n{{ steps.verify.stderr }}"
+      feed: "marker.txt がない:\\n{{ steps.verify.last_stderr }}"
   - id: review
     type: approval
     title: "差分を確認してください"
     onReject:
       goto: implement
       maxAttempts: 5
-      feed: "レビューで却下された:\\n{{ steps.review.stdout }}"
+      feed: "レビューで却下された:\\n{{ steps.review.last_stdout }}"
   - id: record
     type: command
     run: "echo done > result.txt"
@@ -70,6 +82,7 @@ async function context(adapter = createMockAdapter({ result: { ok: true, text: "
     running: new Set(),
     warnings: [],
   };
+  contexts.push(ctx);
   return { ctx, events, handler: createHandler(ctx) };
 }
 
@@ -95,7 +108,9 @@ test("setup → agent → command → approval → 承認 → 完了まで通る
   );
 
   const runs = (await listStepRuns(ctx.db, t.id)).map((r) => r.step_id);
-  assert.deepEqual(runs, ["setup", "implement", "verify"], "setup が先頭に自動挿入されている");
+  // review は suspended に入った時点で awaiting の行を立てるので、承認待ちの
+  // 時点で既に記録に現れる（setup が先頭に自動挿入されていることも合わせて確認）。
+  assert.deepEqual(runs, ["setup", "implement", "verify", "review"]);
 
   // ブリーフが求める「event が運ぶ id が実際に何かへ解決できる」ことの証明。
   // stepRun.started / stepRun.finished が載せる step_run_id を、broadcast された
@@ -126,7 +141,10 @@ test("setup → agent → command → approval → 承認 → 完了まで通る
   await handler("task.approve", { task_id: t.id }, NOOP_CONN);
   assert.equal((await getTask(ctx.db, t.id))?.state, "queued");
 
-  await tick(ctx);
+  // review が suspended に入った1回目の runTask は、実際に git を叩いてツリーを
+  // 記録してから ctx.running を解放する。その解放が終わる前にこの1回の tick が
+  // 素通りすることがあるので、tickWhenIdle で解放を待ってから1回だけ tick する。
+  await tickWhenIdle(ctx);
   await until(
     async () => (await getTask(ctx.db, t.id))?.state === "completed",
     5000,
@@ -181,7 +199,10 @@ test("却下すると実装ステップへ戻り、コメントがエージェ�
   await handler("task.reject", { task_id: t.id, comment: "命名が変です" }, NOOP_CONN);
   assert.equal((await getTask(ctx.db, t.id))?.current_step_id, "implement");
 
-  await tick(ctx);
+  // review は suspended に入るたびに実際の git でツリーを記録する（reviewTree.ts）ので、
+  // 1回目の runTask が ctx.running を解放し終わる前にこの1回の tick が素通りすることが
+  // ある。tickWhenIdle で解放を待ってから1回だけ tick する。
+  await tickWhenIdle(ctx);
   await until(
     async () => (await getTask(ctx.db, t.id))?.state === "suspended",
     5000,

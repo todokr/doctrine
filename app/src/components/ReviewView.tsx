@@ -2,9 +2,10 @@ import { useState } from "react";
 import { sendDecision } from "../decision";
 import { ago, canReject, clock, currentStep, diffStats, draftOf, filesFor } from "../model";
 import { useDecide, useNotYet, useStore } from "../store";
-import type { Task } from "../types";
+import type { ReviewFile, Task } from "../types";
 import { DiffFileBlock, fileAnchor } from "./DiffFileBlock";
 import { GuidePanel, StepView } from "./Guide";
+import { Markdown } from "./text";
 
 export function Crumbs({ t }: { t: Task }) {
   const { s } = useStore();
@@ -49,7 +50,10 @@ function Context({ t }: { t: Task }) {
       )}
       {c && (
         <details className="ctx">
-          <summary>直近の command ステップの結果（<span className="mono">{c.step}</span> · exit {c.exitCode}）</summary>
+          <summary>
+            直近の command ステップの結果（<span className="mono">{c.stepId}</span> · exit{" "}
+            {c.exitCode === null ? "シグナルで停止（終了コードなし）" : c.exitCode}）
+          </summary>
           <pre className="block">{c.stdout}{c.stderr ? "\n" + c.stderr : ""}</pre>
         </details>
       )}
@@ -70,7 +74,8 @@ function Diff({ t }: { t: Task }) {
   const all = t.diff;
   const step = currentStep(s, t);
 
-  // diff の取得はまだない（task.diff は #44）。見出し側で既に案内しているので、ここでは何も出さない
+  // デーモンには task.diff があるが、画面はまだ呼んでいない（#46）。
+  // 見出し側で既に案内しているので、ここでは何も出さない
   if (all.length === 0) return null;
   if (t.guide && step !== null) return <StepView t={t} guide={t.guide} idx={step} />;
 
@@ -95,6 +100,28 @@ function Diff({ t }: { t: Task }) {
       {t.guide && <GuidePanel t={t} guide={t.guide} />}
     </div>
   );
+}
+
+function FileBody({ file }: { file: ReviewFile | undefined }) {
+  if (!file) return <p className="hint">(このステップは宣言していますが、まだ読めていません)</p>;
+  switch (file.status) {
+    case "ok":
+      return <div className="md"><Markdown src={file.content} /></div>;
+    case "missing":
+      return <p className="hint">(ファイルがありません)</p>;
+    case "too_large":
+      return <p className="hint">(大きすぎるため表示していません · {file.size} バイト)</p>;
+    case "outside_worktree":
+      return <p className="hint">(worktree の外を指しているため読みませんでした)</p>;
+    case "binary":
+      return <p className="hint">(テキストとして読めないため表示していません · {file.size} バイト)</p>;
+    default: {
+      // ReviewFile に variant が増えたのにここが未対応だと、tsc がここで落ちる。
+      const _exhaustive: never = file;
+      void _exhaustive;
+      return null;
+    }
+  }
 }
 
 export function ReviewView({ t }: { t: Task }) {
@@ -123,9 +150,19 @@ export function ReviewView({ t }: { t: Task }) {
 
         <Context t={t} />
 
+        {/* 宣言されたパスの出どころはワークフロー定義ではなく task.context の応答。
+            定義を引く口（workflow.list）は #58 で、それまではデーモンが解決した
+            この配列だけが根拠になる。未取得（#46）のうちは何も出ない */}
+        {(t.reviewFiles ?? []).map((file) => (
+          <section className="rv-files-md" key={file.path}>
+            <header><span className="mono">{file.path}</span><span className="hint">このステップが見せるファイル（review.files）</span></header>
+            <FileBody file={file} />
+          </section>
+        ))}
+
         <div className="headrow">
           <b>変更</b>
-          <span className="hint">diff の取得はまだありません（<span className="mono">task.diff</span> は #44）</span>
+          <span className="hint">diff はまだ取りに行っていません（<span className="mono">task.diff</span> の呼び出しは #46）</span>
           <span className="spacer" />
           {hasSince && (
             <span className="seg" role="group" aria-label="差分の範囲">

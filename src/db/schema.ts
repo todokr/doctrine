@@ -17,7 +17,13 @@ export type TaskState =
   | "failed"
   | "canceled";
 
-export type StepRunStatus = "running" | "success" | "failed" | "degraded";
+export type StepRunStatus =
+  | "running"
+  | "awaiting"
+  | "success"
+  | "failed"
+  | "degraded"
+  | "interrupted";
 
 export interface ProjectsTable {
   id: Generated<number>;
@@ -68,13 +74,19 @@ export interface StepRunsTable {
   cost_usd: number | null;
   num_turns: number | null;
   duration_ms: number | null;
+  /** approval ステップで suspended に入った時点の worktree 全体のツリー（5章）。 */
+  review_tree: string | null;
 }
 
+/**
+ * ステップ実行1回ぶんの出力。`last_` はこの行が最後という意味ではなく、
+ * テンプレート変数 `{{ steps.<id>.last_stdout }}` がステップの**最新の実行**の
+ * 行を引く、という読み出し側の規約を指す。
+ */
 export interface StepOutputsTable {
-  task_id: string;
-  step_id: string;
-  stdout: string;
-  stderr: string;
+  step_run_id: number;
+  last_stdout: string;
+  last_stderr: string;
   exit_code: number | null;
 }
 

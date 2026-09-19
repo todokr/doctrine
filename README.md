@@ -47,7 +47,13 @@ dctl project-add --path /path/to/your/repo
 dctl add --project /path/to/your/repo --title "ログイン画面を実装" --prompt "..."
 dctl ls
 dctl get <task-id>
+dctl diff <task-id>                 # worktree の今の状態の diff（未コミット・未追跡を含む）
+dctl diff <task-id> --since last_review  # 直近の差し戻し以降だけの diff
 ```
+
+`dctl diff` は JSON を返すので、patch をテキストとして読むには
+`dctl diff <task-id> | jq -r .patch` のように取り出す。レビュー画面（②）はまだ無いので、
+今のところこれが diff を実際に目で見る手段になる。
 
 `project-add` は最初に叩くコマンドで、`.doctrine/` が無ければ雛形を作る。
 
@@ -100,7 +106,7 @@ steps:
     onFailure:
       goto: implement
       maxAttempts: 3
-      feed: "テストが失敗した:\n{{ steps.verify.stderr }}"
+      feed: "テストが失敗した:\n{{ steps.verify.last_stderr }}"
 
   - id: review
     type: approval
@@ -108,7 +114,7 @@ steps:
     onReject:
       goto: implement
       maxAttempts: 5
-      feed: "レビューで却下された:\n{{ steps.review.stdout }}"
+      feed: "レビューで却下された:\n{{ steps.review.last_stdout }}"
 
   - id: record
     type: command
@@ -147,14 +153,47 @@ steps:
 （今までどおり「タスクに会話は1本」）。役割を分けたときの詳しい設計は
 [`docs/superpowers/specs/2026-09-13-step-artifacts-design.md`](docs/superpowers/specs/2026-09-13-step-artifacts-design.md) を参照。
 
+### `approval` ステップに読ませるファイル（`review.files`）
+
+`approval` ステップは差分（diff）を見て判断されるのが基本だが、計画の承認のように
+そもそも diff が無い（`.doctrine-out/plan.md` を読んで判断する）ステップもある。
+何を見ればよいかはワークフローの作者しか知らないので、`review.files` に列挙する。
+
+```yaml
+  - id: plan-approval
+    type: approval
+    title: "計画を確認してください"
+    onReject: { goto: plan, maxAttempts: 3 }
+    review:
+      files:
+        - .doctrine-out/plan.md
+```
+
+パスは worktree からの相対パスのみ。絶対パス（`/` 始まり）・`..` を含むパス・
+`~` 始まりのパス・空文字は、ワークフローの読み込み時（スキーマ検証）で日本語の
+エラーメッセージとともに落ちる。`review.files` を書くなら1件以上必要で、
+空配列（`review: { files: [] }`）は書けない。
+
+doctrine は宣言されたファイルの中身を理解しない。読んで、worktree の中にあることを
+確かめて、そのまま渡すだけである。実行時にも `realpath` で worktree 配下かを
+再確認しており（worktree 内のシンボリックリンクが外を指すケースに備えるため）、
+配下を指していなければ中身を読まずに `outside_worktree` として返す。ファイルごとに
+起こりうる結果は次のとおり:
+
+- 無ければ `missing`
+- 64KB（`MAX_REVIEW_FILE_BYTES`）を超えていれば `too_large`（中身は返さず大きさだけ返す）
+- worktree の外を指していれば `outside_worktree`
+- UTF-8 のテキストとして読めなければ `binary`
+- ここまでを通れば `ok`（中身と大きさを返す）
+
 ### 変数は4系統だけ
 
 - `{{ task.id }}` `{{ task.title }}` `{{ task.prompt }}` `{{ task.branch }}`
 - `{{ worktree.path }}`
 - `{{ project.path }}`
-- `{{ steps.<id>.stdout }}` `{{ steps.<id>.stderr }}` `{{ steps.<id>.exitCode }}`
-  — `agent` ステップの `stdout` は最終応答テキスト、`approval` ステップの
-  `stdout` は却下コメントそのもの。
+- `{{ steps.<id>.last_stdout }}` `{{ steps.<id>.last_stderr }}` `{{ steps.<id>.exitCode }}`
+  — `agent` ステップの `last_stdout` は最終応答テキスト、`approval` ステップの
+  `last_stdout` は却下コメントそのもの。
 
 ### `setup` は予約されたステップid
 
@@ -220,6 +259,10 @@ dctl gc <task-id> --force           # 削除が拒否される場合（未コミ
 
 **`--force` を付けると、worktree内の未コミットの作業は失われる。** 確認してから使うこと。
 
+worktree を消すと、そのタスクのレビュー参照（`refs/doctrine/reviews/<task-id>/`）も
+一緒に消える。この参照は「レビュー時点の worktree の中身」を `git gc` から守るために
+doctrine が張っているもので、worktree が無くなれば使う相手もいない。
+
 なお `dctl worktrees` が一覧するのは「対応するタスクが見つからない孤立
 worktree」だけであり、`failed` タスクの（対応するタスクが存在する）worktreeは
 ここには出てこない。上記のとおり `dctl ls --state failed` → `dctl get` の経路で探す。
@@ -244,6 +287,16 @@ dctl get <task-id>
 
 `degraded` を見逃すと、「成功した」と思って進めたタスクが実質何も達成していない、
 という気づきにくい失敗を踏む。
+
+### ステップ実行の状態
+
+`dctl get <task-id>` の `.stepRuns[].status` が取る値。
+
+- `running` — 実行中
+- `awaiting` — `approval` ステップが人の承認・却下を待っている（1行＝レビュー1回）
+- `success` / `failed` — 終わった
+- `degraded` — 成功扱いだが権限拒否があった（5章）
+- `interrupted` — デーモンのクラッシュで中断され、復帰時に閉じられた
 
 ## 6. ステップ間で成果物を渡す
 
@@ -277,11 +330,6 @@ dctl get <task-id>
 
 実装の過程で判明した、まだ直していない・あえて直さないと決めた制約。
 
-- **中断されたステップ実行は `failed` として閉じられる。** デーモンのクラッシュで
-  `running` のまま残ったステップ実行は、復帰時に本来より正直でない `failed` になる
-  （本来欲しい値は `interrupted`）。マイグレーション機構（`src/db/migrations.ts`）は
-  入ったので値を足すことはできるが、SQLite で `step_runs.status` の `CHECK` 制約を
-  変えるにはテーブル再構築が要るため、別の変更として残している。
 - **完了イベントとworktree後始末の間に競合がある**（[#3](https://github.com/todokr/doctrine/issues/3)）。
   `task.stateChanged`（`completed`）を受け取った直後にクライアントがworktreeを
   見に行くと、まだ削除されずに存在していることがある。また、完了時の

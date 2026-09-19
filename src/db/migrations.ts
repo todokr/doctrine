@@ -130,6 +130,127 @@ const migrations: Record<string, Migration> = {
       `.execute(db);
     },
   },
+  /**
+   * レビュー1回を1件の記録にする（spec 2026-09-18-review-record-design.md）。
+   *
+   * SQLite は CHECK 制約を変えられないので step_runs を再構築する。step_outputs は
+   * その step_runs を参照するので、順序は「step_runs を作り直す → step_outputs を
+   * 作り直す」でなければならない。この順序なら PRAGMA foreign_keys を切る必要が
+   * ない（切ろうにもマイグレーションはトランザクションの中なので切れない）。
+   */
+  "0003_review_records": {
+    // deno-lint-ignore no-explicit-any
+    async up(db: Kysely<any>) {
+      // --- 1. step_runs の再構築（awaiting / interrupted と review_tree） ---
+      await db.schema.createTable("step_runs_new")
+        .addColumn("id", "integer", (c) => c.primaryKey().autoIncrement())
+        .addColumn("task_id", "text", (c) => c.notNull().references("tasks.id"))
+        .addColumn("step_id", "text", (c) => c.notNull())
+        .addColumn("attempt", "integer", (c) => c.notNull())
+        .addColumn("status", "text", (c) =>
+          c.notNull().check(
+            sql`status IN ('running','awaiting','success','failed','degraded','interrupted')`,
+          ))
+        .addColumn("exit_code", "integer")
+        .addColumn("started_at", "text", (c) => c.notNull())
+        .addColumn("ended_at", "text")
+        .addColumn("log_path", "text", (c) => c.notNull())
+        .addColumn("cost_usd", "real")
+        .addColumn("num_turns", "integer")
+        .addColumn("duration_ms", "integer")
+        .addColumn("review_tree", "text")
+        .execute();
+      // id を含めてコピーする。step_outputs の割り当てがこの id を使う。
+      await sql`
+        INSERT INTO step_runs_new
+          (id, task_id, step_id, attempt, status, exit_code, started_at, ended_at,
+           log_path, cost_usd, num_turns, duration_ms, review_tree)
+        SELECT id, task_id, step_id, attempt, status, exit_code, started_at, ended_at,
+               log_path, cost_usd, num_turns, duration_ms, NULL
+        FROM step_runs
+      `.execute(db);
+      await db.schema.dropTable("step_runs").execute();
+      await db.schema.alterTable("step_runs_new").renameTo("step_runs").execute();
+      await db.schema.createIndex("idx_step_runs_task")
+        .on("step_runs").columns(["task_id", "id"]).execute();
+
+      // --- 2. step_outputs の再構築（主キーを step_run_id に） ---
+      await db.schema.createTable("step_outputs_new")
+        .addColumn("step_run_id", "integer", (c) => c.primaryKey().references("step_runs.id"))
+        .addColumn("stdout", "text", (c) => c.notNull())
+        .addColumn("stderr", "text", (c) => c.notNull())
+        .addColumn("exit_code", "integer")
+        .execute();
+      // 既存の1行は、同じ (task_id, step_id) の最新の実行の出力だった。
+      // 対応する step_run が無い行は、どの実行の出力か決められないので捨てる。
+      await sql`
+        INSERT INTO step_outputs_new (step_run_id, stdout, stderr, exit_code)
+        SELECT (SELECT r.id FROM step_runs r
+                 WHERE r.task_id = o.task_id AND r.step_id = o.step_id
+                 ORDER BY r.id DESC LIMIT 1),
+               o.stdout, o.stderr, o.exit_code
+        FROM step_outputs o
+        WHERE EXISTS (SELECT 1 FROM step_runs r
+                       WHERE r.task_id = o.task_id AND r.step_id = o.step_id)
+      `.execute(db);
+      await db.schema.dropTable("step_outputs").execute();
+      await db.schema.alterTable("step_outputs_new").renameTo("step_outputs").execute();
+
+      // --- 3. 移行時点で suspended のタスクに awaiting 行を立てる ---
+      // suspended は approval でしか起こらないので、current_step_id がそのまま
+      // approval ステップの id である。待ち始めた時刻は updated_at（suspended へ
+      // 遷移した時刻そのもの）。ツリーは過去に遡れないので NULL。
+      const suspended = await sql<
+        { id: string; current_step_id: string; attempt_counts: string; updated_at: string }
+      >`
+        SELECT id, current_step_id, attempt_counts, updated_at FROM tasks
+         WHERE state = 'suspended' AND current_step_id IS NOT NULL
+      `.execute(db);
+      for (const t of suspended.rows) {
+        const prior = await sql<{ n: number }>`
+          SELECT COUNT(*) AS n FROM step_runs
+           WHERE task_id = ${t.id} AND step_id = ${t.current_step_id}
+        `.execute(db);
+        await sql`
+          INSERT INTO step_runs
+            (task_id, step_id, attempt, status, exit_code, started_at, ended_at,
+             log_path, cost_usd, num_turns, duration_ms, review_tree)
+          VALUES (${t.id}, ${t.current_step_id}, ${prior.rows[0].n + 1}, 'awaiting', NULL,
+                  ${t.updated_at}, NULL, '', NULL, NULL, NULL, NULL)
+        `.execute(db);
+        // attempt の確定を待ち始めた時点へ移したので（spec 3.4）、旧コードで
+        // 進めていないぶんをここで進める。進めないと移行後の applyApproval が
+        // 1つ小さい数を decide に渡し、差し戻しの上限が1回ぶん甘くなる。
+        // withAttempt は呼ばない（マイグレーションは最新の形に依存しない）。
+        const counts = JSON.parse(t.attempt_counts) as Record<string, number>;
+        counts[t.current_step_id] = (counts[t.current_step_id] ?? 0) + 1;
+        await sql`
+          UPDATE tasks SET attempt_counts = ${JSON.stringify(counts)} WHERE id = ${t.id}
+        `.execute(db);
+      }
+
+      // 再構築で外部キーが壊れていないことを確かめてから終える。
+      const violations = await sql<{ table: string }>`PRAGMA foreign_key_check`.execute(db);
+      if (violations.rows.length > 0) {
+        throw new Error(
+          `外部キーが壊れています: ${violations.rows.map((r) => r.table).join(", ")}`,
+        );
+      }
+    },
+  },
+  /**
+   * step_outputs の stdout / stderr を last_stdout / last_stderr に改名する。
+   * 制約に関わらない列なので、テーブル再構築は要らない。
+   */
+  "0004_step_outputs_last_names": {
+    // deno-lint-ignore no-explicit-any
+    async up(db: Kysely<any>) {
+      await db.schema.alterTable("step_outputs")
+        .renameColumn("stdout", "last_stdout").execute();
+      await db.schema.alterTable("step_outputs")
+        .renameColumn("stderr", "last_stderr").execute();
+    },
+  },
 };
 
 /** ファイルを動的 import しない（権限も要らず、deno check で型検査される）。 */
