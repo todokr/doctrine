@@ -1,7 +1,7 @@
 # Tauri アプリを dctld につなぐ中継
 
 - 日付: 2026-09-18
-- 状態: 承認済み、実装計画の作成待ち
+- 状態: 実装済み
 - issue: [#41](https://github.com/todokr/doctrine/issues/41)、[#42](https://github.com/todokr/doctrine/issues/42)
 - 前提: [レビューアプリ設計spec](2026-09-13-review-app-design.md) 4章・11章、[overview](../../overview.md)
 
