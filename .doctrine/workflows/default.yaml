@@ -1,0 +1,15 @@
+# doctrine の既定ワークフロー（dctl project-add が雛形として作成）
+#
+# テストや lint などの command ステップは、プロジェクトに合わせて自分で足す。
+# command ステップはクラッシュ復帰時に頭から再実行されるので、
+# 再実行しても安全なコマンドにすること（pnpm test は安全、gh pr create は危険）。
+name: default
+steps:
+  - id: implement
+    type: agent
+    prompt: "{{ task.prompt }}"
+    permissionMode: acceptEdits
+
+  - id: review
+    type: approval
+    title: "変更を確認してください"

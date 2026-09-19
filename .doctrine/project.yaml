@@ -1,0 +1,7 @@
+# doctrine のプロジェクト設定（dctl project-add が雛形として作成）
+#
+# setup: 新しい worktree で最初に走らせるコマンド。例: pnpm install --frozen-lockfile
+#   doctrine はパッケージマネージャを決めないので、必要なら自分で書く。
+defaultWorkflow: default
+maxConcurrent: 1
+baseBranch: develop
