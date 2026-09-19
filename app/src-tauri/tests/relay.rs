@@ -438,6 +438,15 @@ async fn 生きていないソケットファイルが在っても_spawn_が呼�
     assert!(path.exists(), "中継がソケットファイルを消してしまった");
 }
 
+// クラッシュループ（spawn は成功するがすぐ終了する dctld）の検証は、実物の子プロセスを
+// fork するため、このファイル内の他のテストが同時にソケットを bind/drop していると
+// fork の瞬間に fd テーブルが丸ごと複製され、他テストの「もう閉じたはずの listener」が
+// 一瞬だけ生き残って ECONNREFUSED を期待するテストがまれに connect 成功してしまう
+// （実測: 3回に1回程度で `生きていないソケットファイルが在っても…` が落ちた）。
+// このファイル内の他のテストは全部 Unix ソケットを bind するので、fork するテストを
+// ここに置くのをやめ、ソケット bind を一切しない doctrine_lib のユニットテスト側
+// （`src/relay.rs` の `#[cfg(test)] mod tests`）に移した。
+
 const _: fn() = || {
     fn assert_send_sync<T: Send + Sync>() {}
     assert_send_sync::<Relay>();

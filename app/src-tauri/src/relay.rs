@@ -186,14 +186,36 @@ async fn supervise(relay: Arc<Relay>, socket: PathBuf, emit: Emit) {
                     std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused
                 );
                 if let (true, Some(spawn)) = (nobody_listening, relay.options.spawn.as_ref()) {
-                    if !still_starting(&mut child) {
-                        match spawn() {
+                    match child_state(&mut child) {
+                        ChildState::Running => {
+                            // まだ起動中。何もせず下の「接続できません」＋backoff へ落ちる。
+                        }
+                        ChildState::Exited => {
+                            // 起こした dctld がソケットを listen する前に（あるいは listen した
+                            // 直後に）落ちた＝クラッシュループの疑いがある。ここで respawn を
+                            // 即座にやり直すと、backoff を挟まないまま dctld の起動コストだけで
+                            // 高速に回り続け、しかも理由がバナーに出ない（dctld.log にしか残らない）
+                            // まま静かに繰り返す。backoff を必ず挟み、次に回すのはそれから。
+                            emit_status(
+                                &relay,
+                                &emit,
+                                "disconnected",
+                                Some(
+                                    "dctld が起動直後に終了しました。状態ディレクトリの dctld.log を確認してください"
+                                        .to_string(),
+                                ),
+                            );
+                            tokio::time::sleep(backoff).await;
+                            backoff = (backoff * 2).min(relay.options.backoff_max);
+                            continue;
+                        }
+                        ChildState::Absent => match spawn() {
                             Ok(c) => {
                                 child = Some(c);
                                 wait_for_socket(&socket, relay.options.spawn_grace).await;
                                 // 起こした直後はソケットが現れたはずなので、backoff を
                                 // 挟まずにすぐ次の接続を試す（現れていなければ次の周で
-                                // still_starting が Ok を素通りさせず、無限に起こし続けない）。
+                                // child_state が Running か Exited を返し、無限に起こし続けない）。
                                 continue;
                             }
                             Err(detail) => {
@@ -204,7 +226,7 @@ async fn supervise(relay: Arc<Relay>, socket: PathBuf, emit: Emit) {
                                 backoff = (backoff * 2).min(relay.options.backoff_max);
                                 continue;
                             }
-                        }
+                        },
                     }
                 }
                 emit_status(
@@ -221,21 +243,33 @@ async fn supervise(relay: Arc<Relay>, socket: PathBuf, emit: Emit) {
     }
 }
 
-/// 前に起こした dctld がまだ動いているか。
+enum ChildState {
+    /// 起こしたことがまだ無い（か、前回起こしたものはもう刈り取った）
+    Absent,
+    /// 前に起こした dctld がまだ動いている
+    Running,
+    /// 前に起こした dctld はもう終了していた（クラッシュループの疑い）
+    Exited,
+}
+
+/// 前に起こした dctld の状態を見る。
 ///
-/// **これが無いと同じ DB に2つのデーモンが書く。** dctld が listen するまでに
-/// spawn_grace + backoff を超えると、次の周が「ソケットが無い」と見てもう1つ起こす。
+/// **`Running` を無視して起こすと同じ DB に2つのデーモンが書く。** dctld が listen するまでに
+/// spawn_grace + backoff を超えると、次の周が「ソケットが無い」と見てもう1つ起こしてしまう。
 /// どちらもまだ listen していないので assertSocketNotLive は両方を通してしまう。
-/// 終わっていたら try_wait が刈り取る（ゾンビも残らない）。
-fn still_starting(child: &mut Option<std::process::Child>) -> bool {
+///
+/// `Exited` を `Absent` と同じに扱って即座に respawn すると、backoff を挟まないまま
+/// dctld の起動コストだけで高速に回るクラッシュループになる。呼び出し側は `Exited` を
+/// 見たら必ず backoff を挟むこと。終わっていたら try_wait が刈り取る（ゾンビも残らない）。
+fn child_state(child: &mut Option<std::process::Child>) -> ChildState {
     let Some(c) = child.as_mut() else {
-        return false;
+        return ChildState::Absent;
     };
     match c.try_wait() {
-        Ok(None) => true, // まだ動いている
+        Ok(None) => ChildState::Running,
         _ => {
             *child = None;
-            false
+            ChildState::Exited
         }
     }
 }
@@ -329,5 +363,77 @@ mod tests {
             connection_payload("disconnected", Some("理由".to_string())),
             json!({ "status": "disconnected", "detail": "理由" })
         );
+    }
+
+    fn collector() -> (Emit, Arc<Mutex<Vec<(String, Value)>>>) {
+        let seen: Arc<Mutex<Vec<(String, Value)>>> = Arc::new(Mutex::new(Vec::new()));
+        let sink = seen.clone();
+        let emit: Emit = Arc::new(move |name: &str, payload: Value| {
+            sink.lock().unwrap().push((name.to_string(), payload));
+        });
+        (emit, seen)
+    }
+
+    async fn until<F: FnMut() -> bool>(mut f: F, what: &str) {
+        for _ in 0..200 {
+            if f() {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        panic!("待っても起きませんでした: {what}");
+    }
+
+    /// クラッシュループ（spawn は成功するがすぐ終了する dctld）の検証。実物の子プロセスを
+    /// fork するため、Unix ソケットを bind するテストと同じプロセスで並列に走らせると、
+    /// fork の瞬間に fd テーブルが複製され、他のテストの「もう閉じたはずの listener」が
+    /// 一瞬だけ生き残ってしまう（`app/src-tauri/tests/relay.rs` で実際に踏んだ）。
+    /// このユニットテストは別バイナリ（`cargo test` の unittests src/lib.rs）で走り、
+    /// ここには Unix ソケットを bind する他のテストが無いので、その心配が無い。
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn クラッシュループするdctldはbackoffを挟んで案内する() {
+        // 「起こすことには成功するが即座に終了する」を、実物の子プロセスで再現する。
+        // 実際の Child でないと child_state の try_wait 分岐が踏めない。
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("nope").join("dctld.sock"); // 親ディレクトリも無い＝ENOENT
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let calls2 = calls.clone();
+        let spawn: Spawner = Arc::new(move || {
+            calls2.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            std::process::Command::new("true")
+                .spawn()
+                .map_err(|e| e.to_string())
+        });
+        let (emit, seen) = collector();
+        let opts = RelayOptions {
+            request_timeout: Duration::from_millis(500),
+            backoff_initial: Duration::from_millis(20),
+            backoff_max: Duration::from_millis(80),
+            spawn: Some(spawn),
+            spawn_grace: Duration::from_millis(0),
+        };
+        let (_relay, driver) = Relay::new(path, emit, opts);
+        tokio::spawn(driver);
+
+        // dctld.log を見るよう案内が出ること
+        until(
+            || {
+                seen.lock().unwrap().iter().any(|(n, v)| {
+                    n == "daemon-connection"
+                        && v.get("detail")
+                            .and_then(Value::as_str)
+                            .is_some_and(|d| d.contains("dctld.log"))
+                })
+            },
+            "クラッシュループの案内（dctld.log）",
+        )
+        .await;
+
+        // backoff を挟んでいても、respawn 自体はちゃんと続く（=「二度と起こさない」ではない）
+        until(
+            || calls.load(std::sync::atomic::Ordering::SeqCst) >= 2,
+            "backoff の後も respawn される",
+        )
+        .await;
     }
 }
