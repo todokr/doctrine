@@ -359,8 +359,12 @@ export const FOLLOW_POOL = [
   "tool_use Edit src/daemon/handlers.ts (+6 −1)",
 ];
 
-// 状態は doctrine の7状態。degraded / refused はフラグ
-type Seed = Omit<Task, "project" | "prompt" | "branch" | "worktree" | "diff" | "reviews"> & Partial<Pick<Task, "diff" | "reviews">>;
+// 状態は doctrine の7状態。degraded / refused はフラグ。
+// worktree は seedTasks が state から決めるので、dctl gc で消した後の姿は gced で指定する
+type Seed =
+  & Omit<Task, "project" | "prompt" | "branch" | "worktree" | "diff" | "reviews">
+  & Partial<Pick<Task, "diff" | "reviews">>
+  & { gced?: true };
 
 const SEEDS: Seed[] = [
   { id: "t-9f21", wf: "doctrine/guided", title: "ステップの再開をロール単位のセッションに切り替える", state: "suspended", step: "human-review", attempt: 1, prio: 1, since: NOW - 8 * MIN, diff: DIFF_9F21, guide: GUIDE_9F21, reviews: [],
@@ -383,6 +387,7 @@ const SEEDS: Seed[] = [
     lastAgentMessage: "index.astro にページングを追加し、Pager コンポーネントを新設しました。1ページ10件です。" },
 
   { id: "t-e812", wf: "doctrine/feature", title: "daemon.warning イベントを追加する", state: "failed", step: "test", attempt: 3, prio: 2, since: NOW - 60 * 26 * MIN, log: LOG_TEST_FAIL, dirty: true },
+  { id: "t-6ba3", wf: "doctrine/feature", title: "ratelimit のサンプルを日次で丸める", state: "failed", step: "test", attempt: 1, prio: 2, since: NOW - 60 * 24 * 12 * MIN, gced: true, log: LOG_TEST_FAIL },
   { id: "t-3cd2", wf: "doctrine/feature", title: "gc の確認文言を直す", state: "completed", step: "open-pr", attempt: 1, prio: 2, since: NOW - 95 * MIN, refused: true, dirty: true, log: "$ gh pr create --fill\nhttps://github.com/todokr/doctrine/pull/31\nexit 0" },
   { id: "s-1202", wf: "shop-api/hotfix", title: "注文日時のタイムゾーンずれ", state: "running", step: "test", attempt: 1, prio: 0, since: NOW - 23 * MIN, degraded: "fix", log: LOG_DEGRADED },
 
@@ -401,9 +406,9 @@ const SEEDS: Seed[] = [
 ];
 
 export function seedTasks(): Task[] {
-  return SEEDS.map((t) => {
+  return SEEDS.map(({ gced, ...t }) => {
     const project = t.wf.split("/")[0];
-    const keepWorktree = t.state !== "queued" && (t.state !== "completed" || t.refused);
+    const keepWorktree = !gced && t.state !== "queued" && (t.state !== "completed" || t.refused);
     return {
       ...t,
       project,

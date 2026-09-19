@@ -45,10 +45,17 @@ describe("groupOf", () => {
   test("suspended はレビュー待ち", () => {
     expect(groupOf(t({ state: "suspended" }))).toBe("review");
   });
-  test("failed、削除拒否の completed、degraded な非終端タスクは要確認", () => {
-    expect(groupOf(t({ state: "failed" }))).toBe("check");
-    expect(groupOf(t({ state: "completed", refused: true }))).toBe("check");
+  test("worktree の残っている failed、削除拒否の completed、degraded な非終端タスクは要確認", () => {
+    expect(groupOf(t({ state: "failed", worktree: "/w" }))).toBe("check");
+    expect(groupOf(t({ state: "completed", refused: true, worktree: "/w" }))).toBe("check");
     expect(groupOf(t({ state: "running", degraded: "fix" }))).toBe("check");
+  });
+  test("gc 済み（worktree が無い）の failed は要確認から外れる", () => {
+    expect(groupOf(t({ state: "failed", worktree: null }))).toBe("done");
+  });
+  test("gc 済みの削除拒否だった completed も要確認から外れる", () => {
+    // failed と同じ規則で動いていることを固定する
+    expect(groupOf(t({ state: "completed", refused: false, worktree: null }))).toBe("done");
   });
   test("degraded でも終端状態になれば要確認から外れる", () => {
     expect(groupOf(t({ state: "canceled", degraded: "fix" }))).toBe("done");
@@ -86,6 +93,11 @@ describe("sidebarOrder", () => {
     const order = sidebarOrder(seedTasks(), "done", "all");
     expect(order.every((t) => groupOf(t) === "done")).toBe(true);
     expect(order.map((t) => t.since)).toEqual([...order.map((t) => t.since)].sort((a, b) => b - a));
+  });
+  test("gc 済みの failed はタスク一覧から消え、終了ビューに移る", () => {
+    const gced = seedTasks().find((t) => t.state === "failed" && t.worktree === null)!;
+    expect(sidebarOrder(seedTasks(), "tasks", "all").map((t) => t.id)).not.toContain(gced.id);
+    expect(sidebarOrder(seedTasks(), "done", "all").map((t) => t.id)).toContain(gced.id);
   });
 });
 
@@ -310,6 +322,11 @@ describe("toProject / toTask", () => {
     expect(t1({ state: "completed", worktree_path: "/w" }).refused).toBe(true);
     expect(t1({ state: "completed", worktree_path: null }).refused).toBe(false);
     expect(t1({ state: "failed", worktree_path: "/w" }).refused).toBe(false);
+  });
+
+  test("failed が要確認に入るかは worktree_path の有無で決まる", () => {
+    expect(groupOf(t1({ state: "failed", worktree_path: "/w" }))).toBe("check");
+    expect(groupOf(t1({ state: "failed", worktree_path: null }))).toBe("done");
   });
 
   test("has_degraded は degraded に写し、要確認に入る", () => {
