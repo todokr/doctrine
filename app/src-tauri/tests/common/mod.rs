@@ -67,6 +67,18 @@ impl Fake {
         }
     }
 
+    /// `sent` から1行受け取る。最大2秒待ち、それでも来なければ何を待っていたかを
+    /// 名指しして panic する（`until` と同じ「上限を決めて待つ→panic」の形）。
+    /// 素の `recv().await` だと、書き込み側が壊れているテストが CI をハングさせる
+    /// だけで赤くならない。
+    pub async fn recv_sent(&mut self, what: &str) -> String {
+        match tokio::time::timeout(std::time::Duration::from_secs(2), self.sent.recv()).await {
+            Ok(Some(line)) => line,
+            Ok(None) => panic!("待っていた行が来る前に送信元が閉じました: {what}"),
+            Err(_) => panic!("待っても行が来ませんでした: {what}"),
+        }
+    }
+
     /// 接続を切る。ディレクトリとパスは呼び出し側が持ち、立て直しに使う。
     pub fn stop(self) -> (tempfile::TempDir, PathBuf) {
         let Fake {
@@ -107,5 +119,19 @@ pub fn statuses(seen: &Emitted) -> Vec<String> {
         .iter()
         .filter(|(n, _)| n == "daemon-connection")
         .filter_map(|(_, v)| v.get("status").and_then(Value::as_str).map(str::to_string))
+        .collect()
+}
+
+/// `disconnected` で流れた detail を、流れた順のまま返す。detail が無い（null）ものは飛ばす。
+/// spawn 失敗の理由が接続失敗の文言で上書きされていないかを、順序込みで検証するために使う。
+pub fn statuses_with_detail(seen: &Emitted) -> Vec<String> {
+    seen.lock()
+        .unwrap()
+        .iter()
+        .filter(|(n, v)| {
+            n == "daemon-connection"
+                && v.get("status") == Some(&Value::String("disconnected".into()))
+        })
+        .filter_map(|(_, v)| v.get("detail").and_then(Value::as_str).map(str::to_string))
         .collect()
 }

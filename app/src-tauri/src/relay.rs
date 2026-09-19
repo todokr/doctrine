@@ -15,13 +15,16 @@ use crate::daemon;
 /// 中継がフロントエンドへ出す口。Tauri の AppHandle を relay.rs に持ち込まないための注入点。
 pub type Emit = Arc<dyn Fn(&str, Value) + Send + Sync>;
 
+/// dctld を起こす関数の型。テストは差し替えて、実際に起動せずに spawn 経路を検証する。
+pub type Spawner = Arc<dyn Fn() -> Result<std::process::Child, String> + Send + Sync>;
+
 #[derive(Clone)]
 pub struct RelayOptions {
     pub request_timeout: Duration,
     pub backoff_initial: Duration,
     pub backoff_max: Duration,
-    /// ソケットが無いときに dctld を起こすか。テストは false
-    pub spawn_daemon: bool,
+    /// dctld を起こす関数。None なら起こさない（テストは None）
+    pub spawn: Option<Spawner>,
     /// dctld を起こしてからソケットが現れるまで待つ上限
     pub spawn_grace: Duration,
 }
@@ -33,7 +36,7 @@ impl Default for RelayOptions {
             request_timeout: Duration::from_secs(30),
             backoff_initial: Duration::from_millis(500),
             backoff_max: Duration::from_secs(30),
-            spawn_daemon: true,
+            spawn: Some(Arc::new(|| daemon::spawn_dctld())),
             spawn_grace: Duration::from_secs(5),
         }
     }
@@ -161,18 +164,6 @@ async fn supervise(relay: Arc<Relay>, socket: PathBuf, emit: Emit) {
             announced_connecting = true;
         }
 
-        // ソケットファイルが在るのに繋がらないときは消さない。生きているデーモンを
-        // 気づかれずに切り離す危険がある（その判定は dctld の assertSocketNotLive の担当）。
-        if !socket.exists() && relay.options.spawn_daemon && !still_starting(&mut child) {
-            match daemon::spawn_dctld() {
-                Ok(c) => {
-                    child = Some(c);
-                    wait_for_socket(&socket, relay.options.spawn_grace).await;
-                }
-                Err(e) => emit_status(&relay, &emit, "disconnected", Some(e)),
-            }
-        }
-
         match UnixStream::connect(&socket).await {
             Ok(stream) => {
                 backoff = relay.options.backoff_initial;
@@ -185,6 +176,37 @@ async fn supervise(relay: Arc<Relay>, socket: PathBuf, emit: Emit) {
                 announced_connecting = false;
             }
             Err(e) => {
+                // ソケットファイルが在るのに繋がらないときも消さない。生きている
+                // デーモンを気づかれずに切り離す危険がある（その判定は dctld の
+                // assertSocketNotLive の担当）。ここでは「誰も listen していない」
+                // ことだけを見る。ファイルが無い（ENOENT）か、ファイルはあるが
+                // 中身が古い（ECONNREFUSED）かのどちらでも、起こしてよい合図は同じ。
+                let nobody_listening = matches!(
+                    e.kind(),
+                    std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused
+                );
+                if let (true, Some(spawn)) = (nobody_listening, relay.options.spawn.as_ref()) {
+                    if !still_starting(&mut child) {
+                        match spawn() {
+                            Ok(c) => {
+                                child = Some(c);
+                                wait_for_socket(&socket, relay.options.spawn_grace).await;
+                                // 起こした直後はソケットが現れたはずなので、backoff を
+                                // 挟まずにすぐ次の接続を試す（現れていなければ次の周で
+                                // still_starting が Ok を素通りさせず、無限に起こし続けない）。
+                                continue;
+                            }
+                            Err(detail) => {
+                                // ここで emit した detail は、後段の「接続できません」で
+                                // 上書きしてはいけない。continue して connect を試みない。
+                                emit_status(&relay, &emit, "disconnected", Some(detail));
+                                tokio::time::sleep(backoff).await;
+                                backoff = (backoff * 2).min(relay.options.backoff_max);
+                                continue;
+                            }
+                        }
+                    }
+                }
                 emit_status(
                     &relay,
                     &emit,

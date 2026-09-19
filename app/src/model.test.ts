@@ -208,6 +208,25 @@ describe("reduce", () => {
     expect(after.toast).toBe("差し戻しました: worktree.list をディスク上の全件にする");
   });
 
+  test("中止は状態を捏造せず toast を出す。下書きは消さない", () => {
+    // approve / reject.confirm と違い、中止は下書きの後片付けをしない
+    // （中止は下書きの送信ではないので、下書きは残っていてよい）
+    const s = base({ drafts: { "t-2b91": { comments: [], overall: "メモ" } } });
+    const after = reduce(s, { type: "cancel" });
+    expect(task(after, "t-2b91")).toMatchObject({ state: "suspended" });
+    expect(after.drafts["t-2b91"]).toEqual({ comments: [], overall: "メモ" });
+    expect(after.toast).toBe("中止しました。worktree は残します");
+  });
+
+  test("中止の後片付けは、イベントが先に届いて canceled になっていても走る", () => {
+    // 送信自体はもう成功しているので、ローカルの状態が先にイベントで
+    // canceled になっていても toast は出す（isTerminal も見ない）
+    const changed = seedTasks().map((x) => (x.id === "t-2b91" ? { ...x, state: "canceled" as const } : x));
+    const s = base({ tasks: changed });
+    const after = reduce(s, { type: "cancel" });
+    expect(after.toast).toBe("中止しました。worktree は残します");
+  });
+
   test("j / k の移動はサイドバーの端で止まる", () => {
     const order = sidebarOrder(seedTasks(), "tasks", "all");
     let s = base({ sel: order[0].id });

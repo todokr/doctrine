@@ -1,9 +1,11 @@
 mod common;
 
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
 use common::{collector, until, Fake};
-use doctrine_lib::relay::{Relay, RelayOptions};
+use doctrine_lib::relay::{Relay, RelayOptions, Spawner};
 use serde_json::{json, Value};
 
 fn options() -> RelayOptions {
@@ -11,7 +13,7 @@ fn options() -> RelayOptions {
         request_timeout: Duration::from_millis(500),
         backoff_initial: Duration::from_millis(20),
         backoff_max: Duration::from_millis(80),
-        spawn_daemon: false, // テストは実物の dctld を起こさない
+        spawn: None, // テストは実物の dctld を起こさない
         spawn_grace: Duration::from_millis(0),
     }
 }
@@ -40,7 +42,7 @@ async fn 応答が逆順で返ってきても取り違えない() {
     // 届いた2本の id を拾い、わざと逆順に返す
     let mut ids = Vec::new();
     for _ in 0..2 {
-        let line = fake.sent.recv().await.unwrap();
+        let line = fake.recv_sent("逆順に返す2本目の要求").await;
         let v: Value = serde_json::from_str(&line).unwrap();
         ids.push((
             v["id"].as_u64().unwrap(),
@@ -73,7 +75,7 @@ async fn イベントは素通しでemitされる() {
         let r = relay.clone();
         tokio::spawn(async move { r.call("task.list".into(), json!({})).await })
     };
-    let line = fake.sent.recv().await.unwrap();
+    let line = fake.recv_sent("relay からの要求").await;
     let id = serde_json::from_str::<Value>(&line).unwrap()["id"]
         .as_u64()
         .unwrap();
@@ -113,7 +115,7 @@ async fn エラー応答はerrになる() {
         let r = relay.clone();
         tokio::spawn(async move { r.call("task.get".into(), json!({})).await })
     };
-    let line = fake.sent.recv().await.unwrap();
+    let line = fake.recv_sent("relay からの要求").await;
     let id = serde_json::from_str::<Value>(&line).unwrap()["id"]
         .as_u64()
         .unwrap();
@@ -140,7 +142,7 @@ async fn 壊れた行を飛ばして次の行を処理する() {
         let r = relay.clone();
         tokio::spawn(async move { r.call("task.list".into(), json!({})).await })
     };
-    let line = fake.sent.recv().await.unwrap();
+    let line = fake.recv_sent("relay からの要求").await;
     let id = serde_json::from_str::<Value>(&line).unwrap()["id"]
         .as_u64()
         .unwrap();
@@ -316,7 +318,7 @@ async fn 切断で待ち中の要求が失敗し_立て直すと復帰する() {
         let r = relay.clone();
         tokio::spawn(async move { r.call("task.list".into(), json!({})).await })
     };
-    let line = fake.sent.recv().await.unwrap();
+    let line = fake.recv_sent("relay からの要求").await;
     let id = serde_json::from_str::<Value>(&line).unwrap()["id"]
         .as_u64()
         .unwrap();
@@ -354,7 +356,7 @@ async fn 最初からデーモンが居なくても_後から立てれば繋が�
         let r = relay.clone();
         tokio::spawn(async move { r.call("task.list".into(), json!({})).await })
     };
-    let line = fake.sent.recv().await.unwrap();
+    let line = fake.recv_sent("relay からの要求").await;
     let id = serde_json::from_str::<Value>(&line).unwrap()["id"]
         .as_u64()
         .unwrap();
@@ -364,6 +366,76 @@ async fn 最初からデーモンが居なくても_後から立てれば繋が�
     assert_eq!(call.await.unwrap().unwrap(), json!([]));
 
     driver.abort();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn spawn_失敗の理由は接続失敗の文言で上書きされない() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("nope").join("dctld.sock"); // 親ディレクトリも無い＝ENOENT
+    let (emit, seen) = collector();
+    let spawn: Spawner =
+        Arc::new(|| Err("dctld が見つかりません（deno task install で入ります）".into()));
+    let mut opts = options();
+    opts.spawn = Some(spawn);
+    let (_relay, driver) = Relay::new(path, emit, opts);
+    tokio::spawn(driver);
+
+    // 何周かバックオフを跨いで disconnected を複数回観測する
+    until(
+        || common::statuses_with_detail(&seen).len() >= 3,
+        "複数回の disconnected",
+    )
+    .await;
+
+    let details = common::statuses_with_detail(&seen);
+    assert!(
+        details.iter().all(|d| d.contains("dctld が見つかりません")),
+        "spawn 失敗の detail が上書きされている: {details:?}"
+    );
+    assert!(
+        details.iter().all(|d| !d.contains("接続できません")),
+        "spawn 失敗の直後に接続失敗の文言が出ている: {details:?}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn 生きていないソケットファイルが在っても_spawn_が呼ばれ_ファイルは消さない() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("dctld.sock");
+    // 「ファイルはあるが誰も listen していない」状態を作る。bind してすぐ drop すると
+    // ファイルは残るが、listen していたソケットは無くなる（Fake::stop がしているのと同じ）。
+    {
+        let listener = std::os::unix::net::UnixListener::bind(&path).unwrap();
+        drop(listener);
+    }
+    assert!(path.exists(), "テストの前提: ファイルは残っているはず");
+
+    // この環境で本当に ECONNREFUSED になることを、想定に頼らず確かめる
+    let err = tokio::net::UnixStream::connect(&path).await.unwrap_err();
+    assert_eq!(
+        err.kind(),
+        std::io::ErrorKind::ConnectionRefused,
+        "この環境では stale なソケットが違う種類のエラーになる: {err:?}"
+    );
+
+    let calls = Arc::new(AtomicUsize::new(0));
+    let calls2 = calls.clone();
+    let spawn: Spawner = Arc::new(move || {
+        calls2.fetch_add(1, Ordering::SeqCst);
+        Err("テスト用のダミー spawn".into())
+    });
+    let (emit, _seen) = collector();
+    let mut opts = options();
+    opts.spawn = Some(spawn);
+    let (_relay, driver) = Relay::new(path.clone(), emit, opts);
+    tokio::spawn(driver);
+
+    until(
+        || calls.load(Ordering::SeqCst) >= 1,
+        "stale ソケットでも spawn が呼ばれる",
+    )
+    .await;
+    assert!(path.exists(), "中継がソケットファイルを消してしまった");
 }
 
 const _: fn() = || {

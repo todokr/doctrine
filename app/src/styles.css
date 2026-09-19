@@ -160,7 +160,6 @@ th{color:var(--ink-3);font-size:11px;font-weight:500;border-top:0;background:var
 @media (max-width:1500px){.guide{position:static;max-height:none}}
 .guide-head{display:grid;gap:3px}
 .guide-head b{font-size:13px}
-.g-timeline{display:flex;align-items:center;flex-wrap:wrap;font-size:10.5px;gap:0}
 .g-step{display:flex;align-items:center;gap:4px;color:var(--ink-3);white-space:nowrap}
 .g-step.done{color:var(--ok)}
 .g-step.cur{color:var(--accent-text);font-weight:700}

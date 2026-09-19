@@ -61,6 +61,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let alive = true;
     let unlisteners: (() => void)[] = [];
+    // 接続中なのに取り直しが失敗している間だけ true。トーストは状態が変わった
+    // 瞬間（失敗し始め）にしか出さない。15 秒ごとに毎回出すと連打になる
+    let refreshFailing = false;
 
     async function refresh() {
       const token = refreshGate.begin();
@@ -70,6 +73,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           rpc("task.list", {}),
         ]);
         if (!alive || !refreshGate.isLatest(token)) return;
+        refreshFailing = false;
         // previous を渡さないと、stepRun.finished で付いた degraded のステップ名が
         // 15 秒ごとの取り直しのたびに消える
         const known = latest.current.tasks;
@@ -79,8 +83,20 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           tasks: tasks.map((row) => toTask(row, projects, known.find((t) => t.id === row.id))),
           now: Date.now(),
         });
-      } catch {
-        // 切断中は失敗して当然。理由はバナーが出している
+      } catch (e) {
+        // 切断中は失敗して当然。理由はバナーが出している。
+        // ただし接続中に失敗するのは、ソケットは開いているが dctld が固まっている
+        // ような場合で、バナーは緑のまま何も知らせない。ここでだけ表に出す。
+        // isLatest を条件にしないのは、固まっている間は 15 秒ごとの新しい取り直しが
+        // 常に古い方を追い越して「最新ではない」ままになり、トーストが一生出なくなるため。
+        if (alive && !refreshFailing && latest.current.conn.status === "connected") {
+          refreshFailing = true;
+          const message = e instanceof Error ? e.message : String(e);
+          dispatch({
+            type: "toast",
+            message: `一覧を取り直せません（${message}）。dctld が固まっている可能性があります。dctld を再起動してください`,
+          });
+        }
       }
     }
 

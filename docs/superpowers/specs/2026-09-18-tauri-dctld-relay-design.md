@@ -21,7 +21,7 @@
 | 範囲 | #41（中継）＋ #42（サイドバー）を 1 つにする | 1 |
 | ソケットパス | macOS の分岐を足す。`XDG_RUNTIME_DIR` が無い macOS では状態ディレクトリに置く | 3 |
 | 接続の保持と再接続 | **Rust** が 1 本の接続を保持し、指数バックオフで再接続する | 4 |
-| Tauri コマンド | `rpc` の 1 つだけ。Rust はメソッドの種類を知らない | 4 |
+| Tauri コマンド | `rpc`（中継本体）＋ `connection_status`（起動直後の追いつき用）。どちらも Rust はメソッドの種類を知らない | 4 |
 | Tauri イベント | `daemon-event`（素通し）と `daemon-connection`（接続状態） | 4 |
 | `dctld` の探索 | `DOCTRINE_DCTLD` → PATH の `dctld`。externalBin での同梱は配布を考える段で | 5 |
 | 切り離し起動 | `process_group(0)` ＋ stdin を `/dev/null` に | 5 |
@@ -83,7 +83,7 @@ app/src-tauri/tests/relay.rs   偽のソケットサーバーに対する結合�
 依存に `tokio`（`net` / `io-util` / `sync` / `time` / `rt`）を足す。CI は `cargo check --locked` を
 流すので `Cargo.lock` も一緒にコミットする。
 
-### コマンドは 1 つだけ
+### コマンドは `rpc` と `connection_status` の 2 つ
 
 ```rust
 #[tauri::command]
@@ -92,6 +92,13 @@ async fn rpc(method: String, params: Value, relay: State<'_, Relay>) -> Result<V
 
 **Rust は `method` の中身を見ない。** `params` は素通しする。デーモンの応答が `ok: true` なら `result` を
 返し、`ok: false` なら `error` を `Err` にする。デーモンの API が増えても Rust は変わらない。
+
+もう 1 つ、`connection_status` を足す。理由は `daemon-connection` イベントだけでは足りないから
+である。中継の接続は `setup()` の中でミリ秒のうちに終わるが、その時点ではフロントエンドはまだ
+`listen()` を呼んでおらず、最初の `connecting` / `connected` の emit は誰にも届かず捨てられる。
+画面は購読を張った直後にこのコマンドで今の状態を1度読み、追いつく。`method` を見ないという原則は
+ここでも保たれる。`connection_status` は method を受け取らない別口のコマンドであり、`rpc` の中で
+分岐しているわけではない。
 
 ### イベントは 2 本
 
@@ -108,8 +115,11 @@ async fn rpc(method: String, params: Value, relay: State<'_, Relay>) -> Result<V
 Rust の常駐タスクが次を回す。
 
 1. ソケットに接続を試みる
-2. 失敗し、かつ**ソケットファイルが存在しない**なら `dctld` を起動し、ソケットが現れるまで
-   100ms ごとに最大 5 秒待つ（5章）
+2. 失敗し、かつ**誰も listen していない**（`ENOENT` でファイルが無い、または `ECONNREFUSED` で
+   ファイルはあるが中身が古い）なら `dctld` を起動し、ソケットが現れるまで 100ms ごとに最大 5 秒
+   待つ（5章）。`ECONNREFUSED` も対象にするのは、ソケットファイルは tmpfs ではない状態ディレクトリ
+   に置かれる（macOS）ため、`dctld` が SIGKILL や電源断で失われてもファイルだけ残り、それを
+   `ENOENT` だけで判定すると自動起動が永久に働かなくなるからである
 3. つながったら `connected` を emit し、reader ループへ入る
 4. reader は行ごとに JSON を parse する。`id` があれば pending から `oneshot` を取り出して解決し、
    `event` があれば emit する。壊れた行は捨てて次の行へ進む
@@ -197,9 +207,16 @@ export function onConnection(fn: (c: ConnectionStatus) => void): () => void;
 
 ### 型は protocol.ts を直接 import する
 
-`app/tsconfig.json` の `include` に `../src/daemon` を足し、Vite の `server.fs.allow` にリポジトリルートを
-足す。コピーも生成もしない。CI のパス判定（`.github/workflows/ci.yml`）は既に
-`src/daemon/protocol.ts` をアプリ側のトリガに入れており、共有を前提にしている。
+`app/tsconfig.json` の `include` に `../src/daemon` を足す。コピーも生成もしない。CI のパス判定
+（`.github/workflows/ci.yml`）は既に `src/daemon/protocol.ts` をアプリ側のトリガに入れており、
+共有を前提にしている。
+
+Vite の `server.fs.allow` は足さない。`protocol.ts` の import は全て `import type`（`client.ts` /
+`model.test.ts`）で、`protocol.ts` 自体も型しか export しない。型だけの import は babel/esbuild の
+変換でコンパイル時に消えるので、Vite の開発サーバーはこのファイルを配信する必要が無い。むしろ
+`fs.allow` を広げてリポジトリルートを許可すると、将来 `src/daemon/` に値を export するコードが
+増えたときに、それが（Deno 専用のコードであっても）配信されてしまう側に倒れる。今は型検査
+（`tsc` / `deno check`）がそれぞれ別に守っており、Vite が守るべき領域ではない。
 
 `protocol.ts` は今 `Request` / `Response` / `ServerEvent` しか持たず、**メソッドごとの params と result の
 型が無い**。本specで使う分を `protocol.ts` に足す。正本を 1 つに保つという指示の筋であり、
