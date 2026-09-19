@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { type ChildProcess, spawn } from "node:child_process";
 import { startDaemon, tickCycle } from "../../src/daemon/main.ts";
 import { DatabaseSync } from "node:sqlite";
+import { createWarningLog } from "../../src/daemon/warnings.ts";
 import { openDbOn } from "../../src/db/migrate.ts";
 import { createMockAdapter } from "../../src/adapter/mock.ts";
 import type { DaemonContext } from "../../src/daemon/handlers.ts";
@@ -151,6 +152,7 @@ test("状態ディレクトリが存在しなくても、0o700 で作って起�
 test("スケジューリングの1周が失敗してもデーモンは落ちず、理由が出て次の周期は動く", async () => {
   const sqlite = new DatabaseSync(":memory:");
   const db = await openDbOn(sqlite);
+  const logged: string[] = [];
   const ctx: DaemonContext = {
     db,
     adapter: createMockAdapter({ result: { ok: true, text: "done" } }),
@@ -161,10 +163,9 @@ test("スケジューリングの1周が失敗してもデーモンは落ちず�
       throw new Error("使わない");
     },
     running: new Set(),
-    warnings: ["前の周で積まれた警告"],
+    warnings: createWarningLog({ broadcast: () => {}, write: (l) => logged.push(l) }),
   };
 
-  const logged: string[] = [];
   const realError = console.error;
   console.error = (...args: unknown[]) => {
     logged.push(args.map(String).join(" "));
@@ -188,8 +189,6 @@ test("スケジューリングの1周が失敗してもデーモンは落ちず�
       logged.some((l) => /\[tick\].*スケジューリングの1周に失敗/.test(l)),
       `失敗は黙って飲み込まず出す。実際: ${JSON.stringify(logged)}`,
     );
-    assert.ok(logged.some((l) => /前の周で積まれた警告/.test(l)), "失敗した周でも警告は吐き出す");
-    assert.equal(ctx.warnings.length, 0);
 
     // 次の周期は普通に回る（1周の失敗でスケジューリングを止めない）
     boom = false;

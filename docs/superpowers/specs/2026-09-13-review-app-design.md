@@ -362,10 +362,16 @@ src/stock/reserve.ts:36
 - **追加 `daemon.warning`** `{ event: "daemon.warning"; at: string; message: string; task_id?: string }`
   - 今は stderr に出るだけの `ctx.warnings`（起動時の孤児検出、後始末の失敗など）を UI に届ける
 - **変更 `log.line`**: follow は **1接続につき1タスク**とする。`task.logs` を `follow: true` で呼ぶと、
-  その接続の追従先を上書きする。`follow: false` で追従をやめる（今は止める手段が無い）
+  その接続の追従先を上書きする。`follow: false` で追従をやめる（今は止める手段が無い）。
+  `follow: false` が効くのはその `task_id` を追従しているときだけとする。画面の切り替えは
+  「前のタスクをやめる」と「次のタスクを追う」を別々に投げるので、無条件にやめると、
+  遅れて届いた前者が後者を取り消す
 
 ### リクエスト
 
+- **変更 `task.logs`** — `step_run_id` を省けるものとし、省いたときは**最新のステップ実行**の末尾を返す。
+  画面は「今のログ」を出すために、先に `task.get` を引いて最後の実行を探す必要がなくなる。
+  まだ1度もステップが走っていないタスクは `step_run_id: null` と空の行で返す
 - **追加 `daemon.warnings`** — 溜まった警告を新しい順に返す（メモリ上に直近100件。デーモン再起動で消える）。
   UI を後から開いても見えるようにするため
 - **変更 `worktree.list`**（#4 の解決。選択肢3を採る）— 孤児だけでなく、**ディスク上にある doctrine の worktree を全部**返す

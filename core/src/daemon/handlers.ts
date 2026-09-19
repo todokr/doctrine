@@ -17,6 +17,7 @@ import {
   getAwaitingStepRun,
   getStepRun,
   lastRejectedReview,
+  lastStepRun,
   listStepRuns,
 } from "../db/stepRuns.ts";
 import { commitStepBoundary, StateConflictError, type StepBoundary } from "../db/boundary.ts";
@@ -39,7 +40,8 @@ import { captureTree, releaseTrees } from "../domain/reviewTree.ts";
 import { assertTransition, isTerminal } from "../domain/states.ts";
 import type { AgentAdapter } from "../adapter/types.ts";
 import type { Handler } from "./server.ts";
-import type { ServerEvent } from "../../../shared/protocol.ts";
+import type { ServerEvent, TaskLogs } from "../../../shared/protocol.ts";
+import type { WarningLog } from "./warnings.ts";
 
 export type DaemonContext = {
   db: Db;
@@ -53,7 +55,7 @@ export type DaemonContext = {
   ): Promise<{ workflow: Workflow; warnings: string[] }>;
   running: Set<string>;
   /** 後始末を拒否したときなど、人に見せる必要のある警告 */
-  warnings: string[];
+  warnings: WarningLog;
 };
 
 function req(params: Record<string, unknown>, key: string): string {
@@ -170,7 +172,7 @@ export function createHandler(ctx: DaemonContext): Handler {
         // 同じ loadWorkflow を通るが、そちらは既存タスクを毎回再読込するので、
         // ここで積むと同じ警告が tick のたびに ctx.warnings に溜まり続ける
         // （デーモンのstderrを埋め尽くす）。作成時の1回だけに絞る。
-        for (const w of warnings) ctx.warnings.push(`タスク ${id} の作成時の検証: ${w}`);
+        for (const w of warnings) ctx.warnings.push(`作成時の検証: ${w}`, id);
         // dctl add はレスポンスをそのまま表示するCLIなので、ここに乗せておけば
         // ログを探しに行かなくてもユーザーの目の前に出る。
         return { ...task, warnings };
@@ -238,9 +240,7 @@ export function createHandler(ctx: DaemonContext): Handler {
         // 承認は既に成立しているので、後始末の失敗でこの要求を失敗させてはいけない
         // （cleanupAfterRun は内部で警告に倒すが、想定外の例外もここで受け止める）。
         if (after.state === "completed") {
-          await cleanupAfterRun(ctx, taskId).catch((e: Error) => {
-            ctx.warnings.push(`タスク ${taskId}: 承認後の後始末に失敗しました: ${e.message}`);
-          });
+          await cleanupAfterRun(ctx, taskId);
           // worktree_path は後始末で変わり得るので、応答は読み直した行を返す。
           return (await getTask(ctx.db, taskId))!;
         }
@@ -326,13 +326,27 @@ export function createHandler(ctx: DaemonContext): Handler {
       }
       case "task.logs": {
         const taskId = req(params, "task_id");
-        if (params.follow) conn.follow(taskId);
-        const stepRunId = Number(params.step_run_id);
-        const run = await getStepRun(ctx.db, stepRunId);
-        if (!run) throw new Error("ステップ実行がありません");
+        // 追従先は1接続につき1タスク。follow: true は追従先をこのタスクへ移し、
+        // false でやめる。省略したときは今の追従先を変えない（末尾を読むだけ）。
+        //
+        // やめるのは、そのタスクを追従していたときだけにする。アプリは画面を
+        // 切り替えるときに「前のタスクをやめる」と「次のタスクを追う」を別々に
+        // 投げるので、遅れて届いた前者が後者を取り消しうる。
+        if (params.follow === true) conn.follow(taskId);
+        else if (params.follow === false && conn.isFollowing(taskId)) conn.unfollow();
+        const run = params.step_run_id === undefined
+          ? await lastStepRun(ctx.db, taskId)
+          : await getStepRun(ctx.db, Number(params.step_run_id));
+        if (params.step_run_id !== undefined && !run) throw new Error("ステップ実行がありません");
+        // まだ1度もステップが走っていないタスク（queued）。追従だけ張って空で返す。
+        if (!run) return { step_run_id: null, log_path: null, lines: [] } satisfies TaskLogs;
         const text = await Deno.readTextFile(run.log_path).catch(() => "");
         const tailLines = typeof params.tail === "number" ? params.tail : 200;
-        return { log_path: run.log_path, lines: text.split("\n").slice(-tailLines) };
+        return {
+          step_run_id: run.id,
+          log_path: run.log_path,
+          lines: text.split("\n").slice(-tailLines),
+        } satisfies TaskLogs;
       }
       case "task.diff": {
         const taskId = req(params, "task_id");
@@ -397,6 +411,9 @@ export function createHandler(ctx: DaemonContext): Handler {
         return { removed: task.worktree_path };
       }
 
+      case "daemon.warnings":
+        return ctx.warnings.recent();
+
       case "ratelimit.recent":
         return await recentRateLimitSamples(
           ctx.db,
@@ -423,38 +440,61 @@ async function releaseReviewRefs(
   taskId: string,
 ): Promise<void> {
   await releaseTrees(projectPath, taskId).catch((e: Error) => {
-    ctx.warnings.push(`タスク ${taskId}: レビュー参照を消せませんでした: ${e.message}`);
+    ctx.warnings.push(`レビュー参照を消せませんでした: ${e.message}`, taskId);
   });
 }
 
-/** completed のみ worktree を削除する。failed / canceled は証拠として残す。 */
+/**
+ * completed のみ worktree を削除する。failed / canceled は証拠として残す。
+ *
+ * completed で worktree を持つタスクについては、消したか残したかを必ず
+ * `task.cleanedUp` で伝える。これが無いと、`completed` を受け取った直後に
+ * worktree を見に行くとまだ存在し、いつ消えるかをクライアントが知る手段が無い。
+ *
+ * この関数は投げない。呼ぶのは tick の実行後と task.approve の2箇所で、
+ * どちらも後始末の失敗で本来の仕事（実行の完了・承認の受理）を失敗させては
+ * いけない。想定外の例外も refused として届ける。
+ */
 export async function cleanupAfterRun(ctx: DaemonContext, taskId: string): Promise<void> {
   const task = await getTask(ctx.db, taskId);
   if (!task || task.state !== "completed" || !task.worktree_path) return;
-  const project = (await getProject(ctx.db, task.project_id))!;
+  const worktreePath = task.worktree_path;
+  const refuse = (warning: string) => {
+    ctx.warnings.push(warning, taskId);
+    ctx.broadcast({
+      event: "task.cleanedUp",
+      task_id: taskId,
+      outcome: "refused",
+      worktree_path: worktreePath,
+      warning,
+    });
+  };
   try {
+    const project = (await getProject(ctx.db, task.project_id))!;
     await removeWorktree({
       repoPath: project.path,
-      worktreePath: task.worktree_path,
+      worktreePath,
       force: false,
     });
     await releaseReviewRefs(ctx, project.path, taskId);
     await commitStepBoundary(ctx.db, { taskId, taskPatch: { worktree_path: null } });
+    ctx.broadcast({
+      event: "task.cleanedUp",
+      task_id: taskId,
+      outcome: "removed",
+      worktree_path: null,
+    });
   } catch (e) {
     if (e instanceof UncommittedChangesError) {
       // ワークフローの書き方のバグ。黙って消してよいものではない。
-      ctx.warnings.push(
-        `タスク ${taskId}: 完了時に未コミットの変更が残っているため worktree を削除しませんでした ` +
-          `(${task.worktree_path}): ${e.message}`,
+      refuse(
+        `完了時に未コミットの変更が残っているため worktree を削除しませんでした ` +
+          `(${worktreePath}): ${e.message}`,
       );
     } else {
       // git worktree remove 自体が失敗した場合など（原因不明）。未コミットの
       // 変更の話にすり替えず、そのまま見せる。
-      ctx.warnings.push(
-        `タスク ${taskId}: worktree の削除に失敗しました (${task.worktree_path}): ${
-          (e as Error).message
-        }`,
-      );
+      refuse(`worktree の削除に失敗しました (${worktreePath}): ${(e as Error).message}`);
     }
   }
 }
@@ -476,7 +516,7 @@ async function failTaskInTick(
   fromState: TaskState,
   reason: string,
 ): Promise<void> {
-  ctx.warnings.push(`タスク ${taskId}: ${reason}`);
+  ctx.warnings.push(reason, taskId);
   try {
     assertTransition(fromState, "failed");
     await commitStepBoundary(ctx.db, {
@@ -605,7 +645,7 @@ async function tickOnce(ctx: DaemonContext): Promise<void> {
         globalLimit: ctx.globalLimit,
         onStateChanged: (id, from, to) =>
           ctx.broadcast({ event: "task.stateChanged", task_id: id, from, to }),
-        onWarning: (id, message) => ctx.warnings.push(`タスク ${id}: ${message}`),
+        onWarning: (id, message) => ctx.warnings.push(message, id),
         onStepRunStarted: (id, stepRunId, stepId) => {
           currentStepRunId = stepRunId;
           ctx.broadcast({
@@ -649,11 +689,12 @@ async function tickOnce(ctx: DaemonContext): Promise<void> {
             if (after && !isTerminal(after.state)) {
               await failTaskInTick(ctx, task.id, after.state, message);
             } else {
-              ctx.warnings.push(`タスク ${task.id}: ${message}`);
+              ctx.warnings.push(message, task.id);
             }
           } catch (e2) {
             ctx.warnings.push(
-              `タスク ${task.id}: ${message}（failed への記録にも失敗: ${(e2 as Error).message}）`,
+              `${message}（failed への記録にも失敗: ${(e2 as Error).message}）`,
+              task.id,
             );
           }
         })
@@ -662,7 +703,7 @@ async function tickOnce(ctx: DaemonContext): Promise<void> {
       // void runTask(...) の呼び出し自体（Promise が返る前）で何か起きた場合も、
       // ctx.running の解放を必ず通す。
       ctx.running.delete(task.id);
-      ctx.warnings.push(`タスク ${task.id}: tick 中に例外が発生しました: ${(e as Error).message}`);
+      ctx.warnings.push(`tick 中に例外が発生しました: ${(e as Error).message}`, task.id);
     }
   }
 }

@@ -7,6 +7,15 @@ export function listStepRuns(db: Db, taskId: string): Promise<StepRunRow[]> {
     .execute();
 }
 
+/**
+ * 直近のステップ実行。task.logs が step_run_id を省かれたときに読む先で、
+ * 「今のログ」が指すのは常に最後に始まった実行である。
+ */
+export function lastStepRun(db: Db, taskId: string): Promise<StepRunRow | undefined> {
+  return db.selectFrom("step_runs").selectAll().where("task_id", "=", taskId)
+    .orderBy("id desc").executeTakeFirst();
+}
+
 export function getStepRun(db: Db, id: number): Promise<StepRunRow | undefined> {
   return db.selectFrom("step_runs").selectAll().where("id", "=", id).executeTakeFirst();
 }

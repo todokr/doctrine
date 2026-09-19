@@ -13,6 +13,7 @@ import { listStepRuns } from "../../src/db/stepRuns.ts";
 import { reviewRefName } from "../../src/domain/reviewTree.ts";
 import { createHandler, type DaemonContext, tick } from "../../src/daemon/handlers.ts";
 import { createMockAdapter } from "../../src/adapter/mock.ts";
+import { createWarningLog } from "../../src/daemon/warnings.ts";
 import { parseWorkflow } from "../../src/workflow/schema.ts";
 import type { ProjectSummary, ServerEvent, TaskListEntry } from "../../../shared/protocol.ts";
 import { branchNameFor } from "../../src/domain/worktree.ts";
@@ -60,7 +61,8 @@ async function context(events: ServerEvent[] = []): Promise<DaemonContext> {
     logRoot: join(root, "logs"),
     globalLimit: 4,
     broadcast: (ev) => events.push(ev),
-    warnings: [],
+    // 警告もイベントとして流れる（daemon.warning）。stderr へは出さない。
+    warnings: createWarningLog({ broadcast: (ev) => events.push(ev), write: () => {} }),
     loadWorkflow: async (projectPath, name) => {
       const { parseWorkflow } = await import("../../src/workflow/schema.ts");
       const { readFile } = await import("node:fs/promises");
@@ -123,8 +125,8 @@ test("非冪等コマンドを含むワークフローは task.create の応答�
   ) as { warnings: string[] };
   assert.equal(created.warnings.length, 1, "レスポンスに警告が乗る（ユーザーの目の前に出る）");
   assert.match(created.warnings[0], /gh pr create/);
-  assert.equal(ctx.warnings.length, 1, "デーモンのstderr相当（ctx.warnings）にも記録される");
-  assert.match(ctx.warnings[0], /gh pr create/);
+  assert.equal(ctx.warnings.recent().length, 1, "デーモンの警告にも記録される");
+  assert.match(ctx.warnings.recent()[0].message, /gh pr create/);
 });
 
 test("冪等なワークフローは task.create で警告を出さない", async () => {
@@ -137,7 +139,7 @@ test("冪等なワークフローは task.create で警告を出さない", asyn
     NOOP_CONN,
   ) as { warnings: string[] };
   assert.deepEqual(created.warnings, []);
-  assert.equal(ctx.warnings.length, 0);
+  assert.equal(ctx.warnings.recent().length, 0);
 });
 
 test("tick は非冪等コマンドの警告を毎周期 ctx.warnings に積み直さない", async () => {
@@ -152,16 +154,16 @@ test("tick は非冪等コマンドの警告を毎周期 ctx.warnings に積み�
   );
   await h("project.add", { path: repo }, NOOP_CONN);
   await h("task.create", { project: repo, title: "T", prompt: "p", workflow: "risky" }, NOOP_CONN);
-  ctx.warnings.length = 0; // task.create 自身が積んだ分をリセットし、tick 由来だけを見る
+  const afterCreate = ctx.warnings.recent().length; // task.create 自身が積んだ分
 
   await tick(ctx);
   await until(() => ctx.running.size === 0);
   await tick(ctx);
   await tick(ctx);
 
-  assert.deepEqual(
-    ctx.warnings,
-    [],
+  assert.equal(
+    ctx.warnings.recent().length,
+    afterCreate,
     "tick が同じワークフローを毎回読み込んでも、作成時に一度出た警告を再び積まない",
   );
 });
@@ -187,7 +189,7 @@ test("却下ループを何度回しても task.approve/task.reject は警告を
     NOOP_CONN,
   ) as { id: string; warnings: string[] };
   assert.equal(t.warnings.length, 1, "作成時に push ステップの警告が1件出る");
-  const afterCreate = ctx.warnings.length;
+  const afterCreate = ctx.warnings.recent().length;
   assert.equal(afterCreate, 1);
 
   // review へ到達するまで進める
@@ -206,7 +208,7 @@ test("却下ループを何度回しても task.approve/task.reject は警告を
   }
 
   assert.equal(
-    ctx.warnings.length,
+    ctx.warnings.recent().length,
     afterCreate,
     "却下ループ中、task.reject も tick も同じワークフローを読み直すが ctx.warnings は増えない",
   );
@@ -218,7 +220,7 @@ test("却下ループを何度回しても task.approve/task.reject は警告を
   await until(() => ctx.running.size === 0);
 
   assert.equal(
-    ctx.warnings.length,
+    ctx.warnings.recent().length,
     afterCreate,
     "task.approve も同じワークフローを読み直すが ctx.warnings を増やさない",
   );
@@ -378,7 +380,7 @@ test("未コミットの変更が残っていたら削除せず警告する", as
   await until(async () => (await getTask(ctx.db, t.id))?.state === "completed");
   await until(() => ctx.running.size === 0);
   assert.ok((await getTask(ctx.db, t.id))?.worktree_path, "削除を拒否して残す");
-  assert.ok(ctx.warnings.some((w) => /未コミット/.test(w)), "警告として出す");
+  assert.ok(ctx.warnings.recent().some((w) => /未コミット/.test(w.message)), "警告として出す");
 });
 
 test("失敗したタスクの worktree は削除しない", async () => {
@@ -423,7 +425,7 @@ test("tick 時点でワークフローが読めないタスクは failed にな�
     "failed",
     "queued のまま残すと毎周期リトライし続ける",
   );
-  assert.ok(ctx.warnings.some((w) => /ワークフロー/.test(w)));
+  assert.ok(ctx.warnings.recent().some((w) => /ワークフロー/.test(w.message)));
 
   // 2周目のtickでも再試行されず、他のタスクの進行を妨げない
   await tick(ctx);
@@ -451,7 +453,7 @@ test("runTask が例外を投げても daemon は落ちず、タスクは failed
   await until(async () => (await getTask(ctx.db, t.id))?.state === "failed");
   await until(() => ctx.running.size === 0);
   assert.equal((await getTask(ctx.db, t.id))?.state, "failed");
-  assert.ok(ctx.warnings.some((w) => /例外/.test(w)));
+  assert.ok(ctx.warnings.recent().some((w) => /例外/.test(w.message)));
 });
 
 test("stepRun.started の step_run_id は本物で、task.logs から引ける", async () => {
@@ -526,7 +528,7 @@ test("worktree 作成に失敗したタスクは failed になり、他プロジ
       "failed",
       "作れないまま queued に残すと毎周期リトライされ続ける",
     );
-    assert.ok(ctx.warnings.some((w) => /実行を開始できませんでした/.test(w)));
+    assert.ok(ctx.warnings.recent().some((w) => /実行を開始できませんでした/.test(w.message)));
     assert.equal(
       (await getTask(ctx.db, healthy.id))?.state,
       "suspended",
@@ -655,7 +657,7 @@ test("最終ステップの approval でも未コミットの変更が残って�
 
   assert.equal(after.state, "completed", "後始末に失敗しても承認自体は成立している");
   assert.ok((await getTask(ctx.db, t.id))?.worktree_path, "削除を拒否して残す");
-  assert.ok(ctx.warnings.some((w) => /未コミット/.test(w)), "警告として出す");
+  assert.ok(ctx.warnings.recent().some((w) => /未コミット/.test(w.message)), "警告として出す");
 });
 
 // --- tick の再入 ----------------------------------------------------------
@@ -937,7 +939,7 @@ test("受付候補を読んだ後に cancel が届いたタスクは、running �
   assert.equal(row.state, "canceled", "cancel を running で上書きしてはいけない");
   assert.equal(row.worktree_path, null, "見送ったタスクの worktree は作らない");
   assert.deepEqual(loaded, [], "ワークフローの読み込み（実行の開始）に進まない");
-  assert.deepEqual(ctx.warnings, [], "見送りは失敗ではない");
+  assert.deepEqual(ctx.warnings.recent(), [], "見送りは失敗ではない");
 });
 
 // --- project.add は最初に叩くコマンドなので、足りない .doctrine の雛形を作る ---
@@ -1674,4 +1676,182 @@ test("差し戻しの記録が無ければ since: last_review は全体に倒す
   };
   assert.equal(d.since_step_run_id, null, "承認済みの回は基準にしない");
   assert.deepEqual(d.files.map((f) => f.path), ["only.txt"]);
+});
+
+// --- task.cleanedUp / daemon.warnings / task.logs -------------------------
+
+/** 完了を伝えた stateChanged と、後始末を伝えた cleanedUp の並び。 */
+function cleanupOrder(events: ServerEvent[]): { completedAt: number; cleanedUpAt: number } {
+  return {
+    completedAt: events.findIndex((e) => e.event === "task.stateChanged" && e.to === "completed"),
+    cleanedUpAt: events.findIndex((e) => e.event === "task.cleanedUp"),
+  };
+}
+
+test("tick で完了したタスクは、stateChanged の後に task.cleanedUp が届く", async () => {
+  const events: ServerEvent[] = [];
+  const ctx = await context(events);
+  const h = createHandler(ctx);
+  await h("project.add", { path: repo }, NOOP_CONN);
+  await writeFile(
+    join(repo, ".doctrine", "workflows", "quick.yaml"),
+    'name: quick\nsteps:\n  - id: a\n    type: command\n    run: "true"\n',
+  );
+  const t = await h(
+    "task.create",
+    { project: repo, title: "T", prompt: "p", workflow: "quick" },
+    NOOP_CONN,
+  ) as { id: string };
+  await tick(ctx);
+  await until(() => events.some((e) => e.event === "task.cleanedUp"));
+
+  const { completedAt, cleanedUpAt } = cleanupOrder(events);
+  assert.ok(completedAt >= 0, "completed への stateChanged が出ている");
+  assert.ok(
+    completedAt < cleanedUpAt,
+    "cleanedUp が先に届くと、worktree を見に行っても消えていない理由が分からない",
+  );
+  const ev = events[cleanedUpAt];
+  if (ev.event !== "task.cleanedUp") throw new Error("型の絞り込み");
+  assert.equal(ev.task_id, t.id);
+  assert.equal(ev.outcome, "removed");
+  assert.equal(ev.worktree_path, null);
+});
+
+test("最終ステップが approval でも、stateChanged の後に task.cleanedUp が届く", async () => {
+  const events: ServerEvent[] = [];
+  const ctx = await context(events);
+  const h = createHandler(ctx);
+  await h("project.add", { path: repo }, NOOP_CONN);
+  // beforeEach の feature.yaml は approval 1ステップだけ。承認がそのまま完了になる。
+  const t = await h("task.create", { project: repo, title: "T", prompt: "p" }, NOOP_CONN) as {
+    id: string;
+  };
+  await tick(ctx);
+  await until(async () => (await getTask(ctx.db, t.id))?.state === "suspended");
+  await until(() => ctx.running.size === 0);
+  events.length = 0; // 承認以降のイベントだけを見る
+
+  await h("task.approve", { task_id: t.id }, NOOP_CONN);
+
+  const { completedAt, cleanedUpAt } = cleanupOrder(events);
+  assert.ok(completedAt >= 0 && cleanedUpAt >= 0, "承認の経路でも両方届く");
+  assert.ok(completedAt < cleanedUpAt, "承認の経路でも順序は同じ");
+});
+
+test("削除を拒否したら outcome: refused と理由を載せて届く", async () => {
+  const events: ServerEvent[] = [];
+  const ctx = await context(events);
+  const h = createHandler(ctx);
+  await h("project.add", { path: repo }, NOOP_CONN);
+  await writeFile(
+    join(repo, ".doctrine", "workflows", "dirty.yaml"),
+    'name: dirty\nsteps:\n  - id: a\n    type: command\n    run: "touch leftover.txt"\n',
+  );
+  const t = await h(
+    "task.create",
+    { project: repo, title: "T", prompt: "p", workflow: "dirty" },
+    NOOP_CONN,
+  ) as { id: string };
+  await tick(ctx);
+  await until(() => events.some((e) => e.event === "task.cleanedUp"));
+
+  const { completedAt, cleanedUpAt } = cleanupOrder(events);
+  assert.ok(completedAt < cleanedUpAt, "拒否したときも順序は同じ");
+  const ev = events[cleanedUpAt];
+  if (ev.event !== "task.cleanedUp") throw new Error("型の絞り込み");
+  assert.equal(ev.outcome, "refused");
+  assert.equal(ev.worktree_path, (await getTask(ctx.db, t.id))!.worktree_path);
+  assert.match(ev.warning ?? "", /未コミット/);
+});
+
+test("daemon.warnings は溜まった警告を新しい順に返す", async () => {
+  const events: ServerEvent[] = [];
+  const ctx = await context(events);
+  const h = createHandler(ctx);
+  ctx.warnings.push("古い");
+  ctx.warnings.push("新しい", "task-1");
+
+  const warnings = await h("daemon.warnings", {}, NOOP_CONN) as {
+    message: string;
+    task_id?: string;
+  }[];
+  assert.deepEqual(warnings.map((w) => w.message), ["新しい", "古い"]);
+  assert.equal(warnings[0].task_id, "task-1");
+  assert.ok(
+    events.some((e) => e.event === "daemon.warning"),
+    "溜めるだけでなく、つないでいるアプリへその場で流す",
+  );
+});
+
+test("task.logs は step_run_id を省くと最新のステップ実行の末尾を返す", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  await h("project.add", { path: repo }, NOOP_CONN);
+  await writeFile(
+    join(repo, ".doctrine", "workflows", "two.yaml"),
+    "name: two\nsteps:\n" +
+      '  - id: a\n    type: command\n    run: "echo ichi"\n' +
+      '  - id: b\n    type: command\n    run: "echo ni"\n',
+  );
+  const t = await h(
+    "task.create",
+    { project: repo, title: "T", prompt: "p", workflow: "two" },
+    NOOP_CONN,
+  ) as { id: string };
+
+  const empty = await h("task.logs", { task_id: t.id }, NOOP_CONN) as {
+    step_run_id: number | null;
+    lines: string[];
+  };
+  assert.equal(empty.step_run_id, null, "まだ1度も走っていないタスクは空で返る");
+
+  await tick(ctx);
+  await until(async () => (await getTask(ctx.db, t.id))?.state === "completed");
+  await until(() => ctx.running.size === 0);
+
+  const runs = await listStepRuns(ctx.db, t.id);
+  const logs = await h("task.logs", { task_id: t.id }, NOOP_CONN) as {
+    step_run_id: number | null;
+    lines: string[];
+  };
+  assert.equal(logs.step_run_id, runs.at(-1)!.id, "最後に始まった実行を指す");
+  assert.ok(logs.lines.join("\n").includes("ni"));
+
+  const first = await h(
+    "task.logs",
+    { task_id: t.id, step_run_id: runs[0].id },
+    NOOP_CONN,
+  ) as { step_run_id: number | null; lines: string[] };
+  assert.equal(first.step_run_id, runs[0].id, "指定すればそのステップ実行を返す");
+  assert.ok(first.lines.join("\n").includes("ichi"));
+});
+
+test("task.logs の follow は接続の追従先を上書きし、false でやめる", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  let following: string | null = null;
+  const conn = {
+    follow: (id: string) => following = id,
+    unfollow: () => following = null,
+    isFollowing: (id: string) => following === id,
+  };
+  await h("project.add", { path: repo }, NOOP_CONN);
+  const a = await h("task.create", { project: repo, title: "A", prompt: "p" }, NOOP_CONN) as {
+    id: string;
+  };
+  const b = await h("task.create", { project: repo, title: "B", prompt: "p" }, NOOP_CONN) as {
+    id: string;
+  };
+
+  await h("task.logs", { task_id: a.id, follow: true }, conn);
+  assert.equal(following, a.id);
+  await h("task.logs", { task_id: b.id, follow: true }, conn);
+  assert.equal(following, b.id, "1接続につき1タスク。前の追従先は上書きされる");
+  await h("task.logs", { task_id: b.id }, conn);
+  assert.equal(following, b.id, "follow を省いたときは追従先を変えない");
+  await h("task.logs", { task_id: a.id, follow: false }, conn);
+  assert.equal(following, b.id, "他のタスクをやめる指示で、今の追従先は外れない");
+  await h("task.logs", { task_id: b.id, follow: false }, conn);
+  assert.equal(following, null, "follow: false でやめられる");
 });

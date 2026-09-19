@@ -15,6 +15,15 @@ export type ServerEvent =
     status: string;
   }
   | { event: "log.line"; task_id: string; step_run_id: number; line: string }
+  | {
+    event: "task.cleanedUp";
+    task_id: string;
+    /** removed = worktree を消した / refused = 消さずに残した（理由は warning） */
+    outcome: "removed" | "refused";
+    worktree_path: string | null;
+    warning?: string;
+  }
+  | { event: "daemon.warning"; at: string; message: string; task_id?: string }
   | { event: "ratelimit.sample"; window: string; utilization: number; resets_at: string | null };
 
 export type TaskState =
@@ -48,6 +57,24 @@ export type TaskSummary = {
 /** task.list だけが has_degraded を持つ（approve / reject / cancel は行をそのまま返す）。 */
 export type TaskListEntry = TaskSummary & { has_degraded: boolean };
 
+/** task.get が返すステップ実行1回ぶん。step_runs の行のうち UI に見せる分。 */
+export type StepRun = {
+  id: number;
+  step_id: string;
+  attempt: number;
+  status: "running" | "awaiting" | "success" | "failed" | "degraded" | "interrupted";
+  exit_code: number | null;
+  started_at: string;
+  ended_at: string | null;
+};
+
+export type TaskDetail = { task: TaskSummary; stepRuns: StepRun[] };
+
+export type TaskLogs = { step_run_id: number | null; log_path: string | null; lines: string[] };
+
+/** daemon.warnings が返す1件。イベントの daemon.warning と同じ形。 */
+export type Warning = { at: string; message: string; task_id?: string };
+
 export type ProjectSummary = {
   id: number;
   path: string;
@@ -67,6 +94,16 @@ export type Methods = {
   "task.approve": { params: { task_id: string }; result: TaskSummary };
   "task.reject": { params: { task_id: string; comment: string }; result: TaskSummary };
   "task.cancel": { params: { task_id: string }; result: TaskSummary };
+  "task.get": { params: { task_id: string }; result: TaskDetail };
+  /**
+   * step_run_id を省くと最新のステップ実行の末尾を返す。follow は接続の追従先を
+   * 指定したタスクへ移し、false で追従をやめる（1接続につき1タスク）。
+   */
+  "task.logs": {
+    params: { task_id: string; step_run_id?: number; tail?: number; follow?: boolean };
+    result: TaskLogs;
+  };
+  "daemon.warnings": { params: Record<string, never>; result: Warning[] };
 };
 
 export type Method = keyof Methods;

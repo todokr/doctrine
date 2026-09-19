@@ -2,9 +2,14 @@ import { dirname, join } from "@std/path";
 import type { Request, Response, ServerEvent } from "../../../shared/protocol.ts";
 import { stateRoot } from "../util/home.ts";
 
+/**
+ * 追従先は1接続につき1タスク（レビューアプリ設計spec 9章）。アプリは1本の接続を
+ * 画面全体で共有するので、複数タスクを同時に追従できると、画面を切り替えた
+ * ぶんだけ追従先が増え、見ていないタスクのログまで流れ続ける。
+ */
 export type Connection = {
   follow(taskId: string): void;
-  unfollow(taskId: string): void;
+  unfollow(): void;
   isFollowing(taskId: string): boolean;
 };
 
@@ -49,7 +54,7 @@ export function socketPath(): string {
 
 type Client = {
   conn: Deno.UnixConn;
-  following: Set<string>;
+  following: string | null;
   closed: boolean;
   /** 書き込みは非同期なので、応答とイベントの順序を保つために直列につなぐ。 */
   writing: Promise<void>;
@@ -64,9 +69,9 @@ export function createServer(handler: Handler) {
 
   async function serve(client: Client): Promise<void> {
     const conn: Connection = {
-      follow: (id) => client.following.add(id),
-      unfollow: (id) => client.following.delete(id),
-      isFollowing: (id) => client.following.has(id),
+      follow: (id) => client.following = id,
+      unfollow: () => client.following = null,
+      isFollowing: (id) => client.following === id,
     };
     const decoder = new TextDecoder();
     const bytes = new Uint8Array(64 * 1024);
@@ -140,7 +145,7 @@ export function createServer(handler: Handler) {
           for await (const conn of l) {
             const client: Client = {
               conn,
-              following: new Set(),
+              following: null,
               closed: false,
               writing: Promise.resolve(),
             };
@@ -157,7 +162,7 @@ export function createServer(handler: Handler) {
     broadcast(ev: ServerEvent, opts: { taskId?: string; followersOnly?: boolean } = {}): void {
       const key = opts.taskId ?? ("task_id" in ev ? ev.task_id : undefined);
       for (const client of clients) {
-        if (opts.followersOnly && (key === undefined || !client.following.has(key))) continue;
+        if (opts.followersOnly && (key === undefined || client.following !== key)) continue;
         write(client, ev);
       }
     },

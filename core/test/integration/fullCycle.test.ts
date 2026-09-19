@@ -14,6 +14,7 @@ import {
   loadWorkflowFromDisk,
   tick,
 } from "../../src/daemon/handlers.ts";
+import { createWarningLog } from "../../src/daemon/warnings.ts";
 import { createMockAdapter } from "../../src/adapter/mock.ts";
 import type { ServerEvent } from "../../../shared/protocol.ts";
 import { makeRepo, tickWhenIdle, until } from "../helpers/repo.ts";
@@ -80,7 +81,7 @@ async function context(adapter = createMockAdapter({ result: { ok: true, text: "
     broadcast: (ev) => events.push(ev),
     loadWorkflow: loadWorkflowFromDisk,
     running: new Set(),
-    warnings: [],
+    warnings: createWarningLog({ broadcast: () => {}, write: () => {} }),
   };
   contexts.push(ctx);
   return { ctx, events, handler: createHandler(ctx) };
@@ -153,7 +154,8 @@ test("setup → agent → command → approval → 承認 → 完了まで通る
   // state が completed になった直後は cleanupAfterRun の後始末（.then チェーン）が
   // まだ走っていないことがある。worktree_path が消えるか警告が積まれるまで待つ。
   await until(
-    async () => (await getTask(ctx.db, t.id))?.worktree_path === null || ctx.warnings.length > 0,
+    async () =>
+      (await getTask(ctx.db, t.id))?.worktree_path === null || ctx.warnings.recent().length > 0,
     5000,
     "cleanupAfterRun が worktree 削除を試みて完了する（成功で null になるか、拒否されて警告が積まれる）まで待つ",
   );
@@ -170,8 +172,12 @@ test("setup → agent → command → approval → 承認 → 完了まで通る
   // 持たないために起きる意図された挙動（未コミットの後始末は黙って削除しない）。
   const wt = (await getTask(ctx.db, t.id))!.worktree_path;
   assert.ok(wt, "未コミットの変更があるので worktree は残っているはず");
-  assert.equal(ctx.warnings.length, 1, "worktree 削除が拒否されたことが警告として記録される");
-  assert.match(ctx.warnings[0], /未コミットの変更/);
+  assert.equal(
+    ctx.warnings.recent().length,
+    1,
+    "worktree 削除が拒否されたことが警告として記録される",
+  );
+  assert.match(ctx.warnings.recent()[0].message, /未コミットの変更/);
   assert.match(await readFile(join(wt!, "result.txt"), "utf8"), /done/);
 });
 
