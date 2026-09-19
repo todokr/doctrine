@@ -4,7 +4,7 @@ import type {
   ProjectSummary,
   ServerEvent,
   TaskListEntry,
-} from "../../src/daemon/protocol.ts";
+} from "../../shared/protocol.ts";
 import type { ConnectionStatus } from "./daemon/client";
 
 export const MIN = 60000;

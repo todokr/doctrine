@@ -1,6 +1,6 @@
 #!/usr/bin/env -S deno run --allow-all
 import { socketPath } from "../daemon/server.ts";
-import type { Response, ServerEvent } from "../daemon/protocol.ts";
+import type { Response, ServerEvent } from "../../../shared/protocol.ts";
 
 const NUMERIC = new Set(["priority", "limit", "tail", "step_run_id"]);
 const BOOLEAN = new Set(["force", "follow"]);

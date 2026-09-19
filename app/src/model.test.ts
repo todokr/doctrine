@@ -18,7 +18,7 @@ import {
   type State,
 } from "./model";
 import type { Task } from "./types";
-import type { ProjectSummary, TaskListEntry } from "../../src/daemon/protocol.ts";
+import type { ProjectSummary, TaskListEntry } from "../../shared/protocol.ts";
 
 const base = (overrides: Partial<State> = {}): State => ({
   tasks: seedTasks(),

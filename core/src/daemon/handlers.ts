@@ -39,7 +39,7 @@ import { captureTree, releaseTrees } from "../core/reviewTree.ts";
 import { assertTransition, isTerminal } from "../core/states.ts";
 import type { AgentAdapter } from "../adapter/types.ts";
 import type { Handler } from "./server.ts";
-import type { ServerEvent } from "./protocol.ts";
+import type { ServerEvent } from "../../../shared/protocol.ts";
 
 export type DaemonContext = {
   db: Db;

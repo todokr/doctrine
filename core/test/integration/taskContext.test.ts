@@ -12,7 +12,7 @@ import {
   tick,
 } from "../../src/daemon/handlers.ts";
 import { createMockAdapter } from "../../src/adapter/mock.ts";
-import type { ServerEvent } from "../../src/daemon/protocol.ts";
+import type { ServerEvent } from "../../../shared/protocol.ts";
 import { makeRepo, tickWhenIdle, until } from "../helpers/repo.ts";
 import type { ReviewFile } from "../../src/core/reviewFiles.ts";
 import type { CommandResult, ReviewEntry } from "../../src/core/taskContext.ts";

@@ -14,7 +14,7 @@ import { reviewRefName } from "../../src/core/reviewTree.ts";
 import { createHandler, type DaemonContext, tick } from "../../src/daemon/handlers.ts";
 import { createMockAdapter } from "../../src/adapter/mock.ts";
 import { parseWorkflow } from "../../src/workflow/schema.ts";
-import type { ProjectSummary, ServerEvent, TaskListEntry } from "../../src/daemon/protocol.ts";
+import type { ProjectSummary, ServerEvent, TaskListEntry } from "../../../shared/protocol.ts";
 import { branchNameFor } from "../../src/core/worktree.ts";
 import { randomUUID } from "node:crypto";
 import { makeRepo, tickWhenIdle, until } from "../helpers/repo.ts";
