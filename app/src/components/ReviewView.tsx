@@ -1,9 +1,25 @@
 import { useState } from "react";
 import { sendDecision } from "../decision";
-import { ago, canReject, clock, currentStep, diffStats, draftOf, filesFor } from "../model";
+import {
+  ago,
+  canReject,
+  clock,
+  contextOf,
+  currentStep,
+  diffOf,
+  draftOf,
+  fellBackToAll,
+  hasSince,
+  rejections,
+  reviewRound,
+  scopeOf,
+  type DiffView,
+  type Loaded,
+  type Scope,
+} from "../model";
 import { useDecide, useNotYet, useStore } from "../store";
-import type { ReviewFile, Task } from "../types";
-import { DiffFileBlock, fileAnchor } from "./DiffFileBlock";
+import type { ReviewFile, Task, TaskContext } from "../types";
+import { DiffFileBlock, fileAnchor, fileStat } from "./DiffFileBlock";
 import { GuidePanel, StepView } from "./Guide";
 import { Markdown } from "./text";
 
@@ -26,84 +42,74 @@ export function OpenInEditor() {
   return <button className="btn sm" onClick={() => notYet("エディタ／ターミナルで開くボタンは第2段階です")}>エディタで開く</button>;
 }
 
-function Context({ t }: { t: Task }) {
+/** 取れなかったものは黙って隠さない。人は「無い」と「取れていない」を区別できる必要がある */
+function LoadError({ what, message }: { what: string; message: string }) {
+  return (
+    <div className="box danger">
+      <b>{what}を取れませんでした</b>
+      <p className="mono">{message}</p>
+    </div>
+  );
+}
+
+function Context({ t, loaded }: { t: Task; loaded: Loaded<TaskContext> | undefined }) {
   const { s } = useStore();
-  const c = t.lastCommand;
   return (
     <div style={{ display: "grid", gap: 8 }}>
       <div>
+        {/* 元の指示だけは task.list が持っているので、経緯を取れなくても出せる */}
         <b>元の指示</b>
         <pre className="block" style={{ marginTop: 6, whiteSpace: "pre-wrap" }}>{t.prompt}</pre>
       </div>
-      {t.reviews.length > 0 && (
+      {(loaded === undefined || loaded.kind === "loading") && <p className="hint">経緯を読み込んでいます…</p>}
+      {loaded?.kind === "error" && <LoadError what="経緯（task.context）" message={loaded.message} />}
+      {loaded?.kind === "ok" && <History c={loaded.value} now={s.now} />}
+    </div>
+  );
+}
+
+function History({ c, now }: { c: TaskContext; now: number }) {
+  const past = rejections(c);
+  return (
+    <>
+      {past.length > 0 && (
         <details className="ctx">
-          <summary>これまでのレビュー（{t.reviews.length}件、差し戻し）</summary>
+          <summary>これまでのレビュー（{past.length}件、差し戻し）</summary>
           <div style={{ display: "grid", gap: 8 }}>
-            {t.reviews.map((r, i) => (
-              <div key={i}>
-                <span className="hint">{clock(r.at)} · {ago(r.at, s.now)}</span>
-                <pre className="block" style={{ marginTop: 4 }}>{r.comment}</pre>
-              </div>
-            ))}
+            {past.map((r) => {
+              const at = Date.parse(r.endedAt);
+              return (
+                <div key={r.stepRunId}>
+                  <span className="hint">{clock(at)} · {ago(at, now)} · <span className="mono">{r.stepId}</span></span>
+                  <pre className="block" style={{ marginTop: 4 }}>{r.comment}</pre>
+                </div>
+              );
+            })}
           </div>
         </details>
       )}
-      {c && (
+      {c.lastCommand && (
         <details className="ctx">
           <summary>
-            直近の command ステップの結果（<span className="mono">{c.stepId}</span> · exit{" "}
-            {c.exitCode === null ? "シグナルで停止（終了コードなし）" : c.exitCode}）
+            直近の command ステップの結果（<span className="mono">{c.lastCommand.stepId}</span> · exit{" "}
+            {c.lastCommand.exitCode === null ? "シグナルで停止（終了コードなし）" : c.lastCommand.exitCode}）
           </summary>
-          <pre className="block">{c.stdout}{c.stderr ? "\n" + c.stderr : ""}</pre>
+          <pre className="block">
+            {c.lastCommand.stdout}{c.lastCommand.stderr ? "\n" + c.lastCommand.stderr : ""}
+          </pre>
         </details>
       )}
-      {t.lastAgentMessage && (
+      {c.lastAgentMessage && (
         <div>
           <b>エージェントの最後の発言</b>
-          <pre className="block" style={{ marginTop: 6, whiteSpace: "pre-wrap" }}>{t.lastAgentMessage}</pre>
+          <pre className="block" style={{ marginTop: 6, whiteSpace: "pre-wrap" }}>{c.lastAgentMessage}</pre>
         </div>
       )}
-    </div>
+    </>
   );
 }
 
-function Diff({ t }: { t: Task }) {
-  const { s } = useStore();
-  const scope = s.scope[t.id] ?? "all";
-  const files = filesFor(t, scope);
-  const all = t.diff;
-  const step = currentStep(s, t);
-
-  // デーモンには task.diff があるが、画面はまだ呼んでいない（#46）。
-  // 見出し側で既に案内しているので、ここでは何も出さない
-  if (all.length === 0) return null;
-  if (t.guide && step !== null) return <StepView t={t} guide={t.guide} idx={step} />;
-
-  return (
-    <div className={`rv-body ${t.guide ? "has-guide" : ""}`}>
-      <nav className="filelist" aria-label="変更ファイル">
-        <header>{all.length} ファイル</header>
-        {files.map((f) => {
-          const { add, del } = diffStats(f);
-          return (
-            <button key={f.path} className="fl" onClick={() => document.getElementById(fileAnchor(f.path))?.scrollIntoView({ block: "start", behavior: "smooth" })}>
-              <span className="nm">{f.path}</span>
-              <span className="st"><span className="add">+{add}</span><span className="del">−{del}</span></span>
-            </button>
-          );
-        })}
-        {scope === "since" && all.length > files.length && (
-          <div className="hint" style={{ padding: "6px 10px" }}>前回から変わっていない {all.length - files.length} ファイルを隠しています</div>
-        )}
-      </nav>
-      <div className="diffs">{files.map((f) => <DiffFileBlock key={f.path} t={t} file={f} />)}</div>
-      {t.guide && <GuidePanel t={t} guide={t.guide} />}
-    </div>
-  );
-}
-
-function FileBody({ file }: { file: ReviewFile | undefined }) {
-  if (!file) return <p className="hint">(このステップは宣言していますが、まだ読めていません)</p>;
+function FileBody({ file }: { file: ReviewFile }) {
   switch (file.status) {
     case "ok":
       return <div className="md"><Markdown src={file.content} /></div>;
@@ -124,15 +130,65 @@ function FileBody({ file }: { file: ReviewFile | undefined }) {
   }
 }
 
+function Diff({ t, scope, loaded }: { t: Task; scope: Scope; loaded: Loaded<DiffView> | undefined }) {
+  const { s } = useStore();
+  const step = currentStep(s, t);
+
+  if (loaded === undefined || loaded.kind === "loading") return <p className="hint">diff を読み込んでいます…</p>;
+  if (loaded.kind === "error") return <LoadError what="diff（task.diff）" message={loaded.message} />;
+
+  const { meta, files } = loaded.value;
+  // 「取れなかった」と紛れないよう、ここまで来てから「変更なし」と言う
+  if (files.length === 0) {
+    return (
+      <p className="hint">
+        {scope === "since" && meta.since_step_run_id !== null
+          ? "前回のレビュー以降、変更はありません"
+          : `${meta.base.branch} との差分はありません`}
+      </p>
+    );
+  }
+  if (t.guide && step !== null) return <StepView t={t} guide={t.guide} files={files} idx={step} />;
+
+  return (
+    <>
+      {meta.truncated && (
+        <div className="box attn">
+          <b>diff が大きすぎるため途中で打ち切りました</b>
+          <p>
+            後ろのファイルは一覧にだけ出て、中身がありません。全部を読むには
+            worktree（<span className="mono">{t.worktree ?? "削除済み"}</span>）を直接見てください。
+          </p>
+        </div>
+      )}
+      <div className={`rv-body ${t.guide ? "has-guide" : ""}`}>
+        <nav className="filelist" aria-label="変更ファイル">
+          <header>{files.length} ファイル</header>
+          {files.map((f) => (
+            <button key={f.path} className="fl" onClick={() => document.getElementById(fileAnchor(f.path))?.scrollIntoView({ block: "start", behavior: "smooth" })}>
+              <span className="nm">{f.path}</span>
+              <span className="st">{fileStat(f)}</span>
+            </button>
+          ))}
+        </nav>
+        <div className="diffs">{files.map((f) => <DiffFileBlock key={f.path} t={t} file={f} />)}</div>
+        {t.guide && <GuidePanel guide={t.guide} files={files} />}
+      </div>
+    </>
+  );
+}
+
 export function ReviewView({ t }: { t: Task }) {
   const { s, dispatch } = useStore();
   const decide = useDecide();
   const draft = draftOf(s, t.id);
-  const scope = s.scope[t.id] ?? "all";
+  const scope = scopeOf(s, t.id);
+  const diff = diffOf(s, t.id, scope);
+  const context = contextOf(s, t.id);
   // 送信中は連打で二重送信しないよう承認ボタンを止める。成功したときだけ
   // 下書きを消す（approve の dispatch）ので、失敗時はここで再度押せる
   const [approving, setApproving] = useState(false);
-  const hasSince = t.reviews.length > 0 && t.diff.some((f) => f.since);
+  const c = context?.kind === "ok" ? context.value : null;
 
   return (
     <>
@@ -141,19 +197,19 @@ export function ReviewView({ t }: { t: Task }) {
         <h1>{t.title}</h1>
         <div className="headrow">
           <span className="pill p-attn">◆ {t.step ?? "レビュー待ち"}</span>
-          {t.reviews.length > 0 && <span className="pill p-muted">{t.reviews.length + 1}回目のレビュー</span>}
+          {c && reviewRound(c) > 1 && <span className="pill p-muted">{reviewRound(c)}回目のレビュー</span>}
           <span className="hint">{ago(t.since, s.now)}から待っています</span>
           <span className="mono hint">{t.branch}</span>
           <span className="spacer" />
           <OpenInEditor />
         </div>
 
-        <Context t={t} />
+        <Context t={t} loaded={context} />
 
         {/* 宣言されたパスの出どころはワークフロー定義ではなく task.context の応答。
             定義を引く口（workflow.list）は #58 で、それまではデーモンが解決した
-            この配列だけが根拠になる。未取得（#46）のうちは何も出ない */}
-        {(t.reviewFiles ?? []).map((file) => (
+            この配列だけが根拠になる */}
+        {(c?.reviewFiles ?? []).map((file) => (
           <section className="rv-files-md" key={file.path}>
             <header><span className="mono">{file.path}</span><span className="hint">このステップが見せるファイル（review.files）</span></header>
             <FileBody file={file} />
@@ -162,9 +218,17 @@ export function ReviewView({ t }: { t: Task }) {
 
         <div className="headrow">
           <b>変更</b>
-          <span className="hint">diff はまだ取りに行っていません（<span className="mono">task.diff</span> の呼び出しは #46）</span>
+          {diff?.kind === "ok" && (
+            <span className="hint">
+              {fellBackToAll(diff.value, scope)
+                ? "基準にできる前回のレビューが無いので全体を出しています"
+                : scope === "since"
+                  ? "前回のレビュー以降の変更"
+                  : `${diff.value.meta.base.branch} との差分`}
+            </span>
+          )}
           <span className="spacer" />
-          {hasSince && (
+          {c && hasSince(c) && (
             <span className="seg" role="group" aria-label="差分の範囲">
               <button aria-pressed={scope === "all"} onClick={() => dispatch({ type: "scope", scope: "all" })}>全体</button>
               <button aria-pressed={scope === "since"} onClick={() => dispatch({ type: "scope", scope: "since" })}>前回レビュー以降</button>
@@ -172,7 +236,7 @@ export function ReviewView({ t }: { t: Task }) {
           )}
         </div>
 
-        <Diff t={t} />
+        <Diff t={t} scope={scope} loaded={diff} />
       </div>
       <footer className="decide">
         <div>

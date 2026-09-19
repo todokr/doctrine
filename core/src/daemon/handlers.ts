@@ -24,7 +24,11 @@ import { commitStepBoundary, StateConflictError, type StepBoundary } from "../db
 import type { TaskRow } from "../db/tasks.ts";
 import type { Db } from "../db/schema.ts";
 import { recentRateLimitSamples } from "../db/rateLimits.ts";
-import { selectAdmissible } from "../domain/scheduler.ts";
+import {
+  hasActiveRateLimit,
+  releaseDueRateLimited,
+  selectAdmissible,
+} from "../domain/scheduler.ts";
 import { applyApproval, runTask } from "../domain/engine.ts";
 import {
   branchNameFor,
@@ -275,7 +279,10 @@ export function createHandler(ctx: DaemonContext): Handler {
         const taskId = req(params, "task_id");
         const task = await getTask(ctx.db, taskId);
         if (!task) throw new Error("タスクがありません");
-        if (task.state !== "paused" && task.state !== "suspended") {
+        if (
+          task.state !== "paused" && task.state !== "suspended" &&
+          task.state !== "rate_limited"
+        ) {
           throw new Error(`再開できる状態ではありません: ${task.state}`);
         }
         // 行列の先頭に入る。進行中の仕事を新規の仕事より先に終わらせる。
@@ -287,7 +294,9 @@ export function createHandler(ctx: DaemonContext): Handler {
         await commitStepBoundary(ctx.db, {
           taskId,
           requireState: task.state,
-          taskPatch: { state: "queued", resumed: 1 },
+          // 上限待ちからの再開は、人が「待たずに今やれ」と言ったということ。
+          // 期限を消さないと、次の tick が同じ行をもう一度解放しようとする。
+          taskPatch: { state: "queued", resumed: 1, rate_limited_until: null },
           stepRunUpdate: await closeAwaitingStepRun(ctx.db, task),
         });
         ctx.broadcast({
@@ -567,6 +576,19 @@ export async function tick(ctx: DaemonContext): Promise<void> {
 }
 
 async function tickOnce(ctx: DaemonContext): Promise<void> {
+  for (const taskId of await releaseDueRateLimited(ctx.db)) {
+    ctx.broadcast({
+      event: "task.stateChanged",
+      task_id: taskId,
+      from: "rate_limited",
+      to: "queued",
+    });
+  }
+  // 上限はアカウント全体に掛かるので、待っている間に新しいタスクを始めても
+  // 同じように弾かれ、step_run と worktree だけが増える。既に running のタスクは
+  // 止めない（自分で上限に当たれば同じ経路で待ちに入る）。
+  if (await hasActiveRateLimit(ctx.db)) return;
+
   for (const task of await selectAdmissible(ctx.db, ctx.globalLimit)) {
     if (ctx.running.has(task.id)) continue;
     ctx.running.add(task.id);

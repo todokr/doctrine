@@ -1,14 +1,14 @@
 import { useEffect, useRef, type CSSProperties } from "react";
 import { unguidedFiles } from "../model";
 import { useStore } from "../store";
-import type { Guide, Task } from "../types";
+import type { DiffFile, Guide, Task } from "../types";
 import { DiffFileBlock } from "./DiffFileBlock";
 import { RelationSvg, SequenceSvg } from "./Diagrams";
 
 const sec = (i: number) => ({ "--gi": i }) as CSSProperties;
 
-function UnguidedNote({ t }: { t: Task }) {
-  const missing = unguidedFiles(t);
+function UnguidedNote({ files, guide }: { files: DiffFile[]; guide: Guide }) {
+  const missing = unguidedFiles(files, guide);
   return missing.length ? (
     <p className="g-warn">
       ⚠ diff に含まれるがガイドが触れていないファイルが{missing.length}件:{" "}
@@ -20,7 +20,7 @@ function UnguidedNote({ t }: { t: Task }) {
 }
 
 /** レビュー画面の右に置く Review Guide */
-export function GuidePanel({ t, guide }: { t: Task; guide: Guide }) {
+export function GuidePanel({ guide, files }: { guide: Guide; files: DiffFile[] }) {
   const { dispatch } = useStore();
   return (
     <aside className="guide" aria-label="Review Guide">
@@ -53,7 +53,7 @@ export function GuidePanel({ t, guide }: { t: Task; guide: Guide }) {
             </li>
           ))}
         </ol>
-        <UnguidedNote t={t} />
+        <UnguidedNote files={files} guide={guide} />
       </section>
       <section className="g-sec" style={sec(4)}>
         <h3>Key Decisions</h3>
@@ -75,14 +75,14 @@ export function GuidePanel({ t, guide }: { t: Task; guide: Guide }) {
 }
 
 /** ガイドの Reading Order を1ステップずつ読む表示 */
-export function StepView({ t, guide, idx }: { t: Task; guide: Guide; idx: number }) {
+export function StepView({ t, guide, files: all, idx }: { t: Task; guide: Guide; files: DiffFile[]; idx: number }) {
   const { dispatch } = useStore();
   const ref = useRef<HTMLDivElement>(null);
   const steps = guide.readingOrder;
   const step = steps[idx];
-  const files = step.paths.flatMap((p) => t.diff.filter((f) => f.path === p));
+  const files = step.paths.flatMap((p) => all.filter((f) => f.path === p));
   const last = idx === steps.length - 1;
-  const missing = unguidedFiles(t);
+  const missing = unguidedFiles(all, guide);
 
   // ステップを移ったときだけ先頭へ送る。タスクを開いた直後は経緯から読めるようにそのまま
   const shown = useRef({ task: t.id, idx });

@@ -16,6 +16,19 @@ export function lastStepRun(db: Db, taskId: string): Promise<StepRunRow | undefi
     .orderBy("id desc").executeTakeFirst();
 }
 
+/** そのステップの直前の実行。ステップ開始時に「上限待ちからのやり直しか」を見るのに使う。 */
+export function lastStepRunFor(
+  db: Db,
+  taskId: string,
+  stepId: string,
+): Promise<StepRunRow | undefined> {
+  return db.selectFrom("step_runs").selectAll()
+    .where("task_id", "=", taskId)
+    .where("step_id", "=", stepId)
+    .orderBy("id", "desc")
+    .executeTakeFirst();
+}
+
 export function getStepRun(db: Db, id: number): Promise<StepRunRow | undefined> {
   return db.selectFrom("step_runs").selectAll().where("id", "=", id).executeTakeFirst();
 }

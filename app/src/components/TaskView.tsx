@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { rpc } from "../daemon/client";
 import { sendDecision } from "../decision";
-import { ago, clock, elapsed, isTerminal, stepRunHistory, stopReasons } from "../model";
+import { ago, clock, elapsed, hm, isTerminal, stepRunHistory, stopReasons } from "../model";
 import { useDecide, useNotYet, useStore } from "../store";
 import type { Task, TaskState } from "../types";
 import type { StepRun } from "../../../shared/protocol.ts";
@@ -12,6 +12,7 @@ const STATE_PILL: Record<TaskState, [string, string]> = {
   running: ["実行中", "p-run"],
   queued: ["待ち", "p-muted"],
   paused: ["一時停止", "p-muted"],
+  rate_limited: ["上限待ち", "p-muted"],
   failed: ["失敗", "p-danger"],
   completed: ["完了", "p-ok"],
   canceled: ["中止", "p-muted"],
@@ -180,6 +181,14 @@ export function TaskView({ t }: { t: Task }) {
           </section>
         );
       })}
+      {t.state === "rate_limited" && (
+        <section className="box quiet">
+          <p>
+            Claude の利用上限に達したので、{t.resumeAt ? `${hm(t.resumeAt)} ` : ""}枠が明けるのを待っています。
+            待っている間は他のタスクも始めません。明けたら同じ会話の続きから自動で再開します。
+          </p>
+        </section>
+      )}
       {t.state === "paused" && (
         <section className="box quiet"><p><span className="mono">dctl resume {t.id}</span> で再開できます（UIからの一時停止・再開は第2段階です）。</p></section>
       )}

@@ -1,5 +1,16 @@
 // 画面の状態と、そこから導く値。副作用を持たない（テストは model.test.ts）
-import type { DiffFile, Draft, LineComment, Project, Task, TaskState } from "./types";
+import type {
+  DiffFile,
+  Draft,
+  Guide,
+  LineComment,
+  Project,
+  ReviewEntry,
+  Task,
+  TaskContext,
+  TaskDiff,
+  TaskState,
+} from "./types";
 import type {
   ProjectSummary,
   ServerEvent,
@@ -17,6 +28,11 @@ export function clock(ms: number): string {
   const d = new Date(ms);
   return `${pad2(d.getMonth() + 1)}/${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
 }
+/** 再開予定時刻。今日か明日かまでは出さない（数時間先までしか待たない） */
+export function hm(ms: number): string {
+  const d = new Date(ms);
+  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
 export function elapsed(ms: number, now: number): string {
   const m = Math.round((now - ms) / MIN);
   return m < 60 ? `${m}分` : `${Math.floor(m / 60)}時間${pad2(m % 60)}分`;
@@ -32,10 +48,12 @@ export function ago(ms: number, now: number): string {
 // ---------------------------------------------------------------- サイドバーの区分
 export const isTerminal = (s: TaskState) => s === "completed" || s === "failed" || s === "canceled";
 
-export type Group = "review" | "check" | "running" | "queued" | "paused" | "done";
+export type Group = "review" | "check" | "running" | "limited" | "queued" | "paused" | "done";
 
 export function groupOf(t: Task): Group {
   if (t.state === "suspended") return "review";
+  // 要確認には入れない。人が何かする必要は無く、枠が明ければ自分で再開する
+  if (t.state === "rate_limited") return "limited";
   // failed を要確認に置くのは worktree が残っている間だけ（レビューアプリ設計spec 5章）。
   // 削除拒否の completed は refused の定義そのものが同じ規則になっている
   const failedWithEvidence = t.state === "failed" && t.worktree !== null;
@@ -50,6 +68,7 @@ export const GROUPS: { key: Exclude<Group, "done">; name: string; sort: (a: Task
   { key: "review", name: "レビュー待ち", sort: (a, b) => a.since - b.since },
   { key: "check", name: "要確認", sort: (a, b) => b.since - a.since },
   { key: "running", name: "実行中", sort: (a, b) => a.since - b.since },
+  { key: "limited", name: "上限待ち", sort: (a, b) => (a.resumeAt ?? Infinity) - (b.resumeAt ?? Infinity) },
   { key: "queued", name: "待ち", sort: (a, b) => a.prio - b.prio || a.since - b.since },
   { key: "paused", name: "一時停止", sort: (a, b) => b.since - a.since },
 ];
@@ -73,27 +92,25 @@ export function timeLabel(t: Task, now: number): string {
   const g = groupOf(t);
   if (g === "review") return clock(t.since);
   if (g === "running") return elapsed(t.since, now);
+  // task.stateChanged は期限を運ばないので、取り直しが来るまでは分からない
+  if (g === "limited") return t.resumeAt ? `${hm(t.resumeAt)} 再開` : "再開時刻は取得中";
   if (g === "queued") return `P${t.prio} · ${ago(t.since, now)}`;
   return ago(t.since, now);
 }
 
 // ---------------------------------------------------------------- diff
-export function diffStats(f: DiffFile): { add: number; del: number } {
-  let add = 0, del = 0;
-  for (const h of f.hunks) {
-    for (const l of h.body.split("\n")) {
-      if (l[0] === "+") add++;
-      else if (l[0] === "-") del++;
-    }
-  }
-  return { add, del };
-}
-
+/** 「全体」か「前回レビュー以降」か。task.diff の since に対応する */
 export type Scope = "all" | "since";
 
-export function filesFor(t: Task, scope: Scope): DiffFile[] {
-  return scope === "since" ? t.diff.filter((f) => f.since).map((f) => ({ ...f, hunks: f.since! })) : t.diff;
-}
+/** 組み立て済みの diff。meta は打ち切りや基準（base / since_step_run_id）を読むために残す */
+export type DiffView = { meta: TaskDiff; files: DiffFile[] };
+
+/**
+ * since を頼んだのに前回が無くて全体が返ってきた状態。デーモンは記録が無ければ
+ * merge-base に倒すので、このとき「前回レビュー以降」と名乗ると嘘になる。
+ */
+export const fellBackToAll = (d: DiffView, scope: Scope) =>
+  scope === "since" && d.meta.since_step_run_id === null;
 
 export type DiffLine = { kind: "a" | "d" | ""; text: string; old: number | null; new: number | null; line: number };
 
@@ -126,10 +143,9 @@ export function composeRejection(draft: Draft): string {
 export const canReject = (draft: Draft) => draft.comments.length > 0 || draft.overall.trim().length > 0;
 
 // ---------------------------------------------------------------- Review Guide
-export function unguidedFiles(t: Task): DiffFile[] {
-  if (!t.guide) return [];
-  const mentioned = new Set(t.guide.readingOrder.flatMap((r) => r.paths));
-  return t.diff.filter((f) => !mentioned.has(f.path));
+export function unguidedFiles(files: DiffFile[], guide: Guide): DiffFile[] {
+  const mentioned = new Set(guide.readingOrder.flatMap((r) => r.paths));
+  return files.filter((f) => !mentioned.has(f.path));
 }
 
 // ---------------------------------------------------------------- タスク画面
@@ -178,9 +194,29 @@ export function stepRunHistory(detail?: TaskDetail): StepRun[] {
   return detail ? [...detail.stepRuns].reverse() : [];
 }
 
+// ---------------------------------------------------------------- 経緯
+/**
+ * 今が何回目のレビューか。決着した回（承認・却下・中断）＋今の1回。
+ * reviews には今まさに人を待っている awaiting の回も入るので、
+ * 件数そのものに1を足すと1つ多く数える。
+ */
+export const reviewRound = (c: TaskContext) =>
+  c.reviews.filter((r) => r.status !== "awaiting").length + 1;
+
+/** 差し戻された回だけ。画面はここにコメントを並べる */
+export const rejections = (c: TaskContext) =>
+  c.reviews.filter((r): r is ReviewEntry & { status: "rejected" } => r.status === "rejected");
+
+/**
+ * 「前回レビュー以降」を出してよいか。記録（review_tree）の無い回は
+ * デーモンが基準にできないので、あっても切り替えを出さない。
+ */
+export const hasSince = (c: TaskContext) =>
+  rejections(c).some((r) => r.reviewTree !== null);
+
 // ---------------------------------------------------------------- デーモンの state 文字列の検証
 const TASK_STATES: ReadonlySet<Exclude<TaskState, "unknown">> = new Set([
-  "queued", "running", "suspended", "paused", "completed", "failed", "canceled",
+  "queued", "running", "suspended", "paused", "rate_limited", "completed", "failed", "canceled",
 ]);
 /**
  * protocol.ts の TaskState / ServerEvent#to は、デーモンから来る JSON に対する
@@ -218,6 +254,13 @@ function toKnownState(x: string, where: string): TaskState {
  */
 export const DEGRADED_UNKNOWN = "(ステップ不明)";
 
+/** 読めない時刻は捨てる。NaN を持ち回ると「Invalid Date」が画面に出る */
+function parseTime(iso: string | null): number | null {
+  if (!iso) return null;
+  const t = Date.parse(iso);
+  return Number.isNaN(t) ? null : t;
+}
+
 /** プロジェクトの表示名。デーモンはパスしか持たないので末尾を使う */
 export function projectKey(path: string): string {
   const parts = path.replace(/\/+$/, "").split("/");
@@ -237,7 +280,8 @@ export function toProject(p: ProjectSummary): Project {
 }
 
 /**
- * デーモンが持たない欄（diff / guide / reviews など）は空にする。埋めるのは #44〜#46。
+ * diff と経緯は task.list に乗らない。別の口（task.diff / task.context）で
+ * 取って State の diffs / contexts に置くので、ここでは作らない。
  * previous を渡すと、イベントで足した欄（degraded など）を引き継ぐ。
  */
 export function toTask(
@@ -263,8 +307,7 @@ export function toTask(
     prio: row.priority,
     // 「待ち始めた時刻」の記録は #43。それまでは最後に動いた時刻で代える
     since: Date.parse(row.updated_at),
-    diff: [],
-    reviews: [],
+    resumeAt: parseTime(row.rate_limited_until),
     // 完了したのに worktree が残っているのは、後始末が削除を拒否したということ
     refused: row.state === "completed" && row.worktree_path !== null,
     // groupOf は `t.degraded &&` で見るので、空文字にすると要確認から落ちる。
@@ -282,6 +325,15 @@ export type LogView = { stepRunId: number | null; lines: string[] };
 /** ログの保持行数。追従したまま放置しても増え続けないように上限を持つ */
 export const LOG_LINES_KEPT = 2000;
 
+/**
+ * 取りに行って返ってくるもの。読み込み中・失敗を「まだ無い」と同じ扱いにすると、
+ * 取れていないことを「変更なし」と見せてしまう。
+ */
+export type Loaded<T> =
+  | { kind: "loading" }
+  | { kind: "ok"; value: T }
+  | { kind: "error"; message: string };
+
 export type State = {
   tasks: Task[];
   projects: Project[];
@@ -293,6 +345,17 @@ export type State = {
   project: string;
   sel: string | null;
   scope: Record<string, Scope>;
+  /** タスクごと・範囲ごとの diff。範囲を切り替えるたびに取り直す */
+  diffs: Record<string, Partial<Record<Scope, Loaded<DiffView>>>>;
+  contexts: Record<string, Loaded<TaskContext>>;
+  /**
+   * タスクごとの取得の世代。捨てるたびに1つ上げる。取りに行った側は
+   * 始めた時点の世代を持ち帰り、その間に捨てられていたら書き込まない
+   * （そうしないと、承認で捨てた直後に1つ前の diff が復活する）。
+   */
+  gen: Record<string, number>;
+  /** データディレクトリから下書きを読み終えたか。読む前に書くと空で上書きしてしまう */
+  draftsLoaded: boolean;
   /** ガイドに沿って読むステップ。未設定ならガイドのあるタスクは最初のステップから、null は全体表示 */
   step: Record<string, number | null>;
   drafts: Record<string, Draft>;
@@ -304,6 +367,11 @@ export type State = {
 
 export const EMPTY_DRAFT: Draft = { comments: [], overall: "" };
 export const draftOf = (s: State, id: string): Draft => s.drafts[id] ?? EMPTY_DRAFT;
+export const diffOf = (s: State, id: string, scope: Scope): Loaded<DiffView> | undefined =>
+  s.diffs[id]?.[scope];
+export const contextOf = (s: State, id: string): Loaded<TaskContext> | undefined => s.contexts[id];
+export const scopeOf = (s: State, id: string): Scope => s.scope[id] ?? "all";
+export const genOf = (s: State, id: string): number => s.gen[id] ?? 0;
 export const selectedTask = (s: State) => s.tasks.find((t) => t.id === s.sel) ?? null;
 
 export function currentStep(s: State, t: Task): number | null {
@@ -325,6 +393,9 @@ export type Action =
   | { type: "comment.cancel" }
   | { type: "comment.delete"; index: number }
   | { type: "overall"; text: string }
+  | { type: "drafts.loaded"; drafts: Record<string, Draft> }
+  | { type: "diff"; id: string; scope: Scope; gen: number; loaded: Loaded<DiffView> }
+  | { type: "context"; id: string; gen: number; loaded: Loaded<TaskContext> }
   // approve / reject.confirm / cancel は判断そのものではない。ボタン側が rpc を
   // 送って成功したときにだけ dispatch される。ここでの役目は後片付け
   // （下書きを消す・次のレビュー待ちを選ぶ・トーストを出す）だけで、
@@ -340,10 +411,6 @@ export type Action =
   | { type: "sync"; tasks: Task[]; projects: Project[]; now: number }
   | { type: "daemon"; ev: ServerEvent; now: number }
   | { type: "connection"; conn: ConnectionStatus };
-
-/** 生き残った id のぶんだけ残す */
-const pick = <T,>(m: Record<string, T>, ids: Set<string>): Record<string, T> =>
-  Object.fromEntries(Object.entries(m).filter(([id]) => ids.has(id)));
 
 /**
  * 流れてきた1行を足す。step_run_id が持っているものと違えば、別のステップの
@@ -368,6 +435,17 @@ const withoutDraft = (s: State, id: string): Record<string, Draft> => {
   const { [id]: _, ...rest } = s.drafts;
   return rest;
 };
+
+/**
+ * そのタスクの取得済み diff / 経緯を捨てる。worktree は suspended の間は
+ * 凍っているので 15 秒ごとに取り直さないぶん、中身が変わり得る出来事
+ * （ステップが進んだ・判断を送った）では明示的に捨てる必要がある。
+ */
+function invalidate(s: State, id: string): Pick<State, "diffs" | "contexts" | "gen"> {
+  const { [id]: _d, ...diffs } = s.diffs;
+  const { [id]: _c, ...contexts } = s.contexts;
+  return { diffs, contexts, gen: { ...s.gen, [id]: genOf(s, id) + 1 } };
+}
 
 /** 判断の後は、次のレビュー待ちを選んだ状態にする（spec 6章） */
 function selectNextReview(s: State, except: string): string | null {
@@ -424,13 +502,24 @@ export function reduce(s: State, a: Action): State {
     }
     case "overall":
       return t ? { ...s, drafts: setDraft(s, t.id, { ...draftOf(s, t.id), overall: a.text }) } : s;
+    case "drafts.loaded": {
+      // 読み込みの間に書かれた下書きを消さない。同じタスクなら画面のものが新しい
+      const drafts = { ...a.drafts, ...s.drafts };
+      return { ...s, drafts, draftsLoaded: true };
+    }
+    case "diff":
+      if (a.gen !== genOf(s, a.id)) return s;
+      return { ...s, diffs: { ...s.diffs, [a.id]: { ...s.diffs[a.id], [a.scope]: a.loaded } } };
+    case "context":
+      if (a.gen !== genOf(s, a.id)) return s;
+      return { ...s, contexts: { ...s.contexts, [a.id]: a.loaded } };
     case "approve": {
       // rpc("task.approve") はもう成功している（呼び出し側が判定済み）。ここでの
       // 仕事は後片付けだけ。task.stateChanged は RPC の応答より先に届くことがあるので、
       // ローカルの t.state で「本当に受理されたか」を判定してはいけない
       // （判定するとイベントが先着した場合に後片付けが素通りし、下書きが古いまま残る）
       if (!t) return s;
-      const next = { ...s, drafts: withoutDraft(s, t.id), editing: null };
+      const next = { ...s, drafts: withoutDraft(s, t.id), editing: null, ...invalidate(s, t.id) };
       return { ...next, sel: selectNextReview(next, t.id), toast: `承認しました: ${t.title}` };
     }
     case "reject.preview":
@@ -444,6 +533,7 @@ export function reduce(s: State, a: Action): State {
         drafts: withoutDraft(s, t.id),
         editing: null,
         modal: null,
+        ...invalidate(s, t.id),
       };
       return { ...next, sel: selectNextReview(next, t.id), toast: `差し戻しました: ${t.title}` };
     }
@@ -464,18 +554,20 @@ export function reduce(s: State, a: Action): State {
       // 取り直しがイベントの取りこぼしを吸収する（レビューアプリ設計spec 4章）。
       // 連番も再送も持たないので、ここが唯一の合わせ込みの場所である。
       const ids = new Set(a.tasks.map((x) => x.id));
-      const drafts = Object.fromEntries(
-        Object.entries(s.drafts).filter(([id]) => ids.has(id)),
-      );
-      // 消えたタスクの詳細とログは捨てる。持ち続けても見る画面が無い
+      // 消えたタスクのぶんは捨てる。持ち続けても見る画面が無い
+      const keep = <T,>(r: Record<string, T>) =>
+        Object.fromEntries(Object.entries(r).filter(([id]) => ids.has(id)));
       const next: State = {
         ...s,
         tasks: a.tasks,
         projects: a.projects,
         now: a.now,
-        drafts,
-        detail: pick(s.detail, ids),
-        logs: pick(s.logs, ids),
+        drafts: keep(s.drafts),
+        detail: keep(s.detail),
+        logs: keep(s.logs),
+        diffs: keep(s.diffs),
+        contexts: keep(s.contexts),
+        gen: keep(s.gen),
       };
       if (s.sel !== null && ids.has(s.sel)) return next;
       const first = sidebarOrder(a.tasks, s.view, s.project)[0];
@@ -494,6 +586,8 @@ export function reduce(s: State, a: Action): State {
           ...s,
           now: a.now,
           tasks: updateTask(s, ev.task_id, { state, since: a.now }),
+          // 状態が動いた ＝ worktree が動いた。取ってある diff と経緯はもう古い
+          ...invalidate(s, ev.task_id),
         };
       }
       if (ev.event === "stepRun.started") {
@@ -527,7 +621,18 @@ export function reduce(s: State, a: Action): State {
       // ratelimit.sample は第2段階
       return s;
     }
-    case "connection":
-      return { ...s, conn: a.conn };
+    case "connection": {
+      if (a.conn.status !== "connected") return { ...s, conn: a.conn };
+      // 繋ぎ直せたので、前の接続で失敗した取得をやり直せるようにする。
+      // 失敗のまま置くと、needDiff が false のままで誰も取り直さない
+      const drop = <T,>(r: Record<string, T>, failed: (v: T) => boolean) =>
+        Object.fromEntries(Object.entries(r).filter(([, v]) => !failed(v)));
+      return {
+        ...s,
+        conn: a.conn,
+        diffs: drop(s.diffs, (byScope) => Object.values(byScope).every((v) => v?.kind === "error")),
+        contexts: drop(s.contexts, (v) => v.kind === "error"),
+      };
+    }
   }
 }

@@ -5,7 +5,7 @@ import { ReviewView } from "./components/ReviewView";
 import { Rail, Sidebar } from "./components/Sidebar";
 import { TaskView } from "./components/TaskView";
 import { sendDecision } from "./decision";
-import { composeRejection, currentStep, draftOf, filesFor, selectedTask } from "./model";
+import { composeRejection, currentStep, diffOf, draftOf, scopeOf, selectedTask } from "./model";
 import { useDecide, useStore } from "./store";
 
 function RejectModal() {
@@ -72,11 +72,13 @@ function useKeys() {
       if (e.key === "Escape" && s.modal) return dispatch({ type: "modal.close" });
       if (e.key === "j" || e.key === "k") return dispatch({ type: "move", delta: e.key === "j" ? 1 : -1 });
       const t = selectedTask(s);
-      if (!t || t.state !== "suspended" || !t.diff.length) return;
+      if (!t || t.state !== "suspended") return;
+      const loaded = diffOf(s, t.id, scopeOf(s, t.id));
+      if (loaded?.kind !== "ok") return;
       const step = currentStep(s, t);
       if ((e.key === "[" || e.key === "]") && step !== null) return dispatch({ type: "step", idx: step + (e.key === "]" ? 1 : -1) });
       if (e.key === "n" || e.key === "p") {
-        const files = filesFor(t, s.scope[t.id] ?? "all");
+        const files = loaded.value.files;
         if (!files.length) return;
         const i = Math.max(0, files.findIndex((f) => f.path === fileCursor.current[t.id]));
         const f = files[(i + (e.key === "n" ? 1 : files.length - 1)) % files.length];

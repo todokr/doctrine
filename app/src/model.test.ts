@@ -1,28 +1,40 @@
 import { describe, expect, test, vi } from "vitest";
-import { NOW, PROJECTS, seedTasks } from "./fixtures";
+import { NOW, PROJECTS, SAMPLE_DIFF, seedTasks } from "./fixtures";
 import {
   canReject,
   composeRejection,
   countReview,
   DEGRADED_UNKNOWN,
   diffLines,
-  diffStats,
-  filesFor,
+  diffOf,
+  fellBackToAll,
   groupOf,
+  hasSince,
   isTerminal,
   LOG_LINES_KEPT,
+  MIN,
   queuePosition,
   reduce,
+  rejections,
+  reviewRound,
   sidebarOrder,
   stepRunHistory,
   stopReasons,
+  timeLabel,
   toProject,
   toTask,
   unguidedFiles,
+  type DiffView,
   type State,
 } from "./model";
-import type { Task } from "./types";
-import type { ProjectSummary, StepRun, TaskDetail, TaskListEntry } from "../../shared/protocol.ts";
+import { buildDiff } from "./patch";
+import type { Guide, ReviewEntry, Task, TaskContext } from "./types";
+import type {
+  ProjectSummary,
+  StepRun,
+  TaskDetail,
+  TaskListEntry,
+} from "../../shared/protocol.ts";
 
 const base = (overrides: Partial<State> = {}): State => ({
   tasks: seedTasks(),
@@ -35,7 +47,11 @@ const base = (overrides: Partial<State> = {}): State => ({
   sel: "t-2b91",
   scope: {},
   step: {},
+  diffs: {},
+  contexts: {},
+  gen: {},
   drafts: {},
+  draftsLoaded: true,
   editing: null,
   modal: null,
   conn: { status: "connected" },
@@ -65,6 +81,11 @@ describe("groupOf", () => {
   });
   test("degraded でも終端状態になれば要確認から外れる", () => {
     expect(groupOf(t({ state: "canceled", degraded: "fix" }))).toBe("done");
+  });
+  test("上限待ちは要確認ではなく専用の区分に入る", () => {
+    // 人が何かする必要は無い。degraded が付いていても要確認へは寄せない
+    expect(groupOf(t({ state: "rate_limited" }))).toBe("limited");
+    expect(groupOf(t({ state: "rate_limited", degraded: "implement" }))).toBe("limited");
   });
   test("それ以外は状態のとおり", () => {
     expect(groupOf(t({ state: "running" }))).toBe("running");
@@ -107,6 +128,48 @@ describe("sidebarOrder", () => {
   });
 });
 
+describe("上限待ち", () => {
+  const t = (patch: Partial<Task>): Task => ({ ...seedTasks()[0], state: "rate_limited", ...patch });
+
+  test("サイドバーでは実行中と待ちの間に、再開の早い順で並ぶ", () => {
+    const tasks = [
+      t({ id: "late", resumeAt: 2000 }),
+      { ...seedTasks()[0], id: "run", state: "running" as const },
+      { ...seedTasks()[0], id: "q", state: "queued" as const },
+      t({ id: "early", resumeAt: 1000 }),
+    ];
+    expect(sidebarOrder(tasks, "tasks", "all").map((x) => x.id)).toEqual(["run", "early", "late", "q"]);
+  });
+
+  test("timeLabel は再開予定時刻を出す", () => {
+    const at = new Date(2026, 8, 19, 12, 20).getTime();
+    expect(timeLabel(t({ resumeAt: at }), at - MIN)).toBe("12:20 再開");
+  });
+
+  test("再開予定時刻が無くても Invalid Date にならない", () => {
+    // task.stateChanged は期限を運ばない。取り直しが来るまでは分からない
+    expect(timeLabel(t({ resumeAt: null }), 0)).toBe("再開時刻は取得中");
+  });
+
+  test("toTask は rate_limited_until を resumeAt に写し、読めない値は落とす", () => {
+    expect(t1({ rate_limited_until: "2026-09-19T03:20:00.000Z" }).resumeAt)
+      .toBe(Date.parse("2026-09-19T03:20:00.000Z"));
+    expect(t1({ rate_limited_until: null }).resumeAt).toBeNull();
+    expect(t1({ rate_limited_until: "いつか" }).resumeAt).toBeNull();
+  });
+
+  test("task.stateChanged で rate_limited を受け取っても unknown に落ちない", () => {
+    const s = base({ sel: null });
+    const id = s.tasks[0].id;
+    const next = reduce(s, {
+      type: "daemon",
+      ev: { event: "task.stateChanged", task_id: id, from: "running", to: "rate_limited" },
+      now: 1,
+    });
+    expect(task(next, id).state).toBe("rate_limited");
+  });
+});
+
 test("countReview は絞り込みに関係なく全プロジェクトを数える", () => {
   expect(countReview(seedTasks())).toBe(5);
 });
@@ -121,18 +184,40 @@ describe("diff", () => {
       ["", 12, 22, 22],
     ]);
   });
-  test("diffStats は追加と削除の行を数える", () => {
-    expect(diffStats({ path: "x", hunks: [{ old: 1, new: 1, body: " a\n-b\n+c\n+d" }] })).toEqual({ add: 2, del: 1 });
-  });
-  test("前回レビュー以降は since を持つファイルだけにする", () => {
-    const t = seedTasks().find((x) => x.id === "s-1103")!;
-    const files = filesFor(t, "since");
-    expect(files.map((f) => f.path)).toEqual(["src/stock/reserve.ts", "test/stock/reserve.test.ts"]);
-    expect(files[0].hunks).toBe(t.diff[0].since);
-  });
   test("ガイドが触れていないファイルを拾う", () => {
-    const t = seedTasks().find((x) => x.id === "t-9f21")!;
-    expect(unguidedFiles(t).map((f) => f.path)).toEqual(["test/db/migrations.test.ts"]);
+    const guide = { readingOrder: [{ paths: ["src/keep.ts", "src/added.ts"] }] } as Guide;
+    expect(unguidedFiles(buildDiff(SAMPLE_DIFF), guide).map((f) => f.path))
+      .toEqual(["logo.png", "src/gone.ts", "src/renamed.ts"]);
+  });
+  test("前回レビューの記録が無いまま since を頼んだ応答は「前回以降」と名乗らない", () => {
+    const view: DiffView = { meta: SAMPLE_DIFF, files: [] };
+    expect(fellBackToAll(view, "since")).toBe(true);
+    expect(fellBackToAll(view, "all")).toBe(false);
+    expect(fellBackToAll({ ...view, meta: { ...SAMPLE_DIFF, since_step_run_id: 7 } }, "since")).toBe(false);
+  });
+});
+
+describe("経緯", () => {
+  const entry = (o: Partial<ReviewEntry> & Pick<ReviewEntry, "status">): ReviewEntry =>
+    ({ stepRunId: 1, stepId: "review", attempt: 1, startedAt: "2026-09-18T00:00:00.000Z", reviewTree: "abc",
+       endedAt: "2026-09-18T00:05:00.000Z", comment: "直してください", ...o }) as ReviewEntry;
+  const ctx = (reviews: ReviewEntry[]): TaskContext =>
+    ({ prompt: "p", reviews, lastCommand: null, lastAgentMessage: null, reviewFiles: [] });
+
+  test("今が何回目かは、決着した回に1を足した数（今待っている回は数えない）", () => {
+    expect(reviewRound(ctx([entry({ status: "awaiting" })]))).toBe(1);
+    expect(reviewRound(ctx([entry({ status: "rejected" }), entry({ status: "awaiting" })]))).toBe(2);
+  });
+
+  test("差し戻された回だけを取り出す", () => {
+    const c = ctx([entry({ status: "approved" }), entry({ status: "rejected" }), entry({ status: "interrupted" })]);
+    expect(rejections(c).map((r) => r.comment)).toEqual(["直してください"]);
+  });
+
+  test("記録の無い差し戻ししか無ければ「前回レビュー以降」は出さない", () => {
+    expect(hasSince(ctx([entry({ status: "rejected", reviewTree: null })]))).toBe(false);
+    expect(hasSince(ctx([entry({ status: "rejected" })]))).toBe(true);
+    expect(hasSince(ctx([entry({ status: "awaiting" })]))).toBe(false);
   });
 });
 
@@ -286,6 +371,7 @@ const row = (o: Partial<TaskListEntry> = {}): TaskListEntry => ({
   current_step_id: null,
   branch: "doctrine/t-1",
   worktree_path: null,
+  rate_limited_until: null,
   priority: 2,
   created_at: "2026-09-18T00:00:00.000Z",
   updated_at: "2026-09-18T00:10:00.000Z",
@@ -361,7 +447,7 @@ describe("toProject / toTask", () => {
 
   test("知っている状態はそのまま通す", () => {
     // 「全部 unknown にする」という壊し方を、既存のテストは捕まえられない
-    for (const state of ["queued", "running", "suspended", "paused", "completed", "failed", "canceled"] as const) {
+    for (const state of ["queued", "running", "suspended", "paused", "rate_limited", "completed", "failed", "canceled"] as const) {
       expect(t1({ state }).state).toBe(state);
     }
   });
@@ -562,10 +648,86 @@ describe("daemon イベント", () => {
   });
 });
 
+describe("取ってきた diff と経緯", () => {
+  const view: DiffView = { meta: SAMPLE_DIFF, files: buildDiff(SAMPLE_DIFF) };
+  const loadedAll = (s: State) =>
+    reduce(s, { type: "diff", id: "t-2b91", scope: "all", gen: 0, loaded: { kind: "ok", value: view } });
+
+  test("範囲ごとに別々に持つ", () => {
+    let s = loadedAll(base());
+    s = reduce(s, { type: "diff", id: "t-2b91", scope: "since", gen: 0, loaded: { kind: "loading" } });
+    expect(diffOf(s, "t-2b91", "all")).toEqual({ kind: "ok", value: view });
+    expect(diffOf(s, "t-2b91", "since")).toEqual({ kind: "loading" });
+  });
+
+  test("状態が動いたら捨てる（取り直しの合図になる）", () => {
+    const s = reduce(loadedAll(base()), {
+      type: "daemon",
+      ev: { event: "task.stateChanged", task_id: "t-2b91", from: "suspended", to: "running" },
+      now: 1,
+    });
+    expect(diffOf(s, "t-2b91", "all")).toBeUndefined();
+  });
+
+  test("承認・差し戻しでも捨てる", () => {
+    expect(diffOf(reduce(loadedAll(base()), { type: "approve" }), "t-2b91", "all")).toBeUndefined();
+    const s = reduce(loadedAll(base({ modal: "reject-preview" })), { type: "reject.confirm" });
+    expect(diffOf(s, "t-2b91", "all")).toBeUndefined();
+  });
+
+  test("捨てた後に届いた古い応答は書き込まない", () => {
+    // 承認を送った直後に、その前に始めた task.diff が返ってくる順序がありうる。
+    // そのまま書くと、もう捨てたはずの diff が画面に戻ってしまう
+    const s = reduce(loadedAll(base()), { type: "approve" });
+    const late = reduce(s, { type: "diff", id: "t-2b91", scope: "all", gen: 0, loaded: { kind: "ok", value: view } });
+    expect(diffOf(late, "t-2b91", "all")).toBeUndefined();
+  });
+
+  test("消えたタスクのぶんは取り直しで落ちる", () => {
+    const s = loadedAll(base());
+    const a = t1({ id: "a", state: "suspended" });
+    const after = reduce(s, { type: "sync", tasks: [a], projects: [], now: 2 });
+    expect(after.diffs).toEqual({});
+    expect(after.gen).toEqual({});
+  });
+});
+
+describe("下書きの読み込み", () => {
+  test("読み込み中に書いた下書きは、後から届いたファイルの中身で上書きしない", () => {
+    const s = base({ draftsLoaded: false, drafts: { "t-2b91": { comments: [], overall: "いま書いた" } } });
+    const after = reduce(s, {
+      type: "drafts.loaded",
+      drafts: { "t-2b91": { comments: [], overall: "ファイルの古い方" }, "b-204": { comments: [], overall: "別のタスク" } },
+    });
+    expect(after.drafts["t-2b91"].overall).toBe("いま書いた");
+    expect(after.drafts["b-204"].overall).toBe("別のタスク");
+    expect(after.draftsLoaded).toBe(true);
+  });
+});
+
 describe("connection", () => {
   test("接続状態を持つ", () => {
     const after = reduce(base(), { type: "connection", conn: { status: "disconnected" } });
     expect(after.conn.status).toBe("disconnected");
+  });
+
+  test("繋ぎ直したら、失敗したままの取得を捨てて取り直せるようにする", () => {
+    // 失敗を残すと「取りに行くべきか」の判定が false のままで、
+    // dctld を再起動しても画面はエラーのまま固まる
+    const s = base({
+      diffs: { "t-2b91": { all: { kind: "error", message: "切断" } } },
+      contexts: { "t-2b91": { kind: "error", message: "切断" } },
+    });
+    const after = reduce(s, { type: "connection", conn: { status: "connected" } });
+    expect(after.diffs).toEqual({});
+    expect(after.contexts).toEqual({});
+  });
+
+  test("取れている diff は繋ぎ直しても捨てない", () => {
+    const value: DiffView = { meta: SAMPLE_DIFF, files: [] };
+    const s = base({ diffs: { "t-2b91": { all: { kind: "ok", value } } } });
+    const after = reduce(s, { type: "connection", conn: { status: "connected" } });
+    expect(diffOf(after, "t-2b91", "all")).toEqual({ kind: "ok", value });
   });
 });
 

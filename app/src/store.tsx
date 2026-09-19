@@ -8,25 +8,34 @@ import {
   type Dispatch,
   type ReactNode,
 } from "react";
-import { connectionStatus, onConnection, onDaemonEvent, rpc } from "./daemon/client";
-import { reduce, toProject, toTask, type Action, type State } from "./model";
+import {
+  connectionStatus,
+  loadDrafts,
+  onConnection,
+  onDaemonEvent,
+  rpc,
+  saveDrafts,
+} from "./daemon/client";
+import { buildDiff } from "./patch";
+import {
+  contextOf,
+  diffOf,
+  genOf,
+  reduce,
+  scopeOf,
+  selectedTask,
+  toProject,
+  toTask,
+  type Action,
+  type State,
+} from "./model";
 import { createRefreshGate } from "./refreshGate";
 import { settleListeners } from "./settleListeners";
-import type { Draft } from "./types";
-
-// 送信前の下書きは閉じても消さない。spec ではアプリのデータディレクトリに置くが、localStorage で代える
-const DRAFTS_KEY = "doctrine-drafts";
 
 /** 取りこぼしを吸収する保険。dctl add で作られた queued はイベントが飛ばない */
 const REFRESH_MS = 15_000;
 
-function loadDrafts(): Record<string, Draft> {
-  try {
-    return JSON.parse(localStorage.getItem(DRAFTS_KEY) ?? "{}");
-  } catch {
-    return {};
-  }
-}
+const errorMessage = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 function initialState(): State {
   return {
@@ -40,7 +49,11 @@ function initialState(): State {
     sel: null,
     scope: {},
     step: {},
-    drafts: loadDrafts(),
+    diffs: {},
+    contexts: {},
+    gen: {},
+    drafts: {},
+    draftsLoaded: false,
     editing: null,
     modal: null,
     toast: null,
@@ -161,13 +174,71 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // 起動時に1度だけ読む
   useEffect(() => {
-    try {
-      localStorage.setItem(DRAFTS_KEY, JSON.stringify(s.drafts));
-    } catch {
-      // 保存できなくても画面は動かす
-    }
-  }, [s.drafts]);
+    let alive = true;
+    void loadDrafts().then(
+      (drafts) => {
+        if (alive) dispatch({ type: "drafts.loaded", drafts });
+      },
+      (e) => {
+        // 読めなくてもレビューは続けられる。ただし「前に書いた下書きが出てこない」
+        // 理由が分からないと不審なので、その場で伝える
+        if (!alive) return;
+        console.warn("下書きを読めませんでした", e);
+        dispatch({ type: "drafts.loaded", drafts: {} });
+        dispatch({ type: "toast", message: `下書きを読めませんでした（${errorMessage(e)}）` });
+      },
+    );
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    // 読み終える前に書くと、まだ空の drafts でファイルを潰してしまう
+    if (!s.draftsLoaded) return;
+    void saveDrafts(s.drafts).catch((e) => console.warn("下書きを保存できませんでした", e));
+  }, [s.drafts, s.draftsLoaded]);
+
+  // レビュー画面が要る diff と経緯を取る。選ばれていて、まだ取っていないものだけ。
+  // worktree は suspended の間は凍っているので、15 秒ごとの取り直しには乗せない
+  // （2 MiB の git diff を定期的に走らせる意味が無い）。取り直しが要るのは
+  // 状態が動いたときで、そのとき reducer が捨てて gen を上げる。
+  const reviewing = (() => {
+    const t = selectedTask(s);
+    return t && t.state === "suspended" ? t.id : null;
+  })();
+  const scope = reviewing ? scopeOf(s, reviewing) : "all";
+  const needDiff = reviewing !== null && diffOf(s, reviewing, scope) === undefined;
+  const needContext = reviewing !== null && contextOf(s, reviewing) === undefined;
+  const gen = reviewing ? genOf(s, reviewing) : 0;
+
+  useEffect(() => {
+    if (!reviewing || !needDiff) return;
+    const id = reviewing;
+    dispatch({ type: "diff", id, scope, gen, loaded: { kind: "loading" } });
+    void rpc("task.diff", scope === "since" ? { task_id: id, since: "last_review" } : { task_id: id })
+      .then((meta) => {
+        // patch の組み立てもここで済ませる。壊れた patch は取得の失敗と同じ扱いでよい
+        const value = { meta, files: buildDiff(meta) };
+        dispatch({ type: "diff", id, scope, gen, loaded: { kind: "ok", value } });
+      })
+      .catch((e) => {
+        dispatch({ type: "diff", id, scope, gen, loaded: { kind: "error", message: errorMessage(e) } });
+      });
+  }, [reviewing, scope, needDiff, gen]);
+
+  useEffect(() => {
+    if (!reviewing || !needContext) return;
+    const id = reviewing;
+    dispatch({ type: "context", id, gen, loaded: { kind: "loading" } });
+    void rpc("task.context", { task_id: id })
+      .then((value) => dispatch({ type: "context", id, gen, loaded: { kind: "ok", value } }))
+      .catch((e) =>
+        dispatch({ type: "context", id, gen, loaded: { kind: "error", message: errorMessage(e) } })
+      );
+  }, [reviewing, needContext, gen]);
 
   useEffect(() => {
     if (!s.toast) return;
