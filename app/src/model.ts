@@ -261,6 +261,16 @@ function parseTime(iso: string | null): number | null {
   return Number.isNaN(t) ? null : t;
 }
 
+/**
+ * 差し戻しの通知文。どのステップの指摘で戻ったかは記録から決められない
+ * （差し戻したのは step であり、その手前のステップはワークフロー定義にしか無い）ので
+ * 推測せず、持っている事実だけで書く。「◯回目」が何の回数かを取り違えられないよう、
+ * 戻り先が何周目かではなく差し戻しの回数だと本文で言う。
+ */
+export function bounceNotice(b: NonNullable<Task["bounce"]>): string {
+  return `${b.step} が通らず ${b.goto} に差し戻しました（差し戻しは ${b.attempt} 回目）`;
+}
+
 /** プロジェクトの表示名。デーモンはパスしか持たないので末尾を使う */
 export function projectKey(path: string): string {
   const parts = path.replace(/\/+$/, "").split("/");
@@ -291,6 +301,7 @@ export function toTask(
 ): Task {
   // デーモンは project_id しか返さない。表示名はパスの末尾から作る
   const project = projects.find((p) => p.id === row.project_id);
+  const state = toKnownState(row.state, `task.list(${row.id})`);
   return {
     id: row.id,
     wf: row.workflow_name,
@@ -299,7 +310,7 @@ export function toTask(
     prompt: row.prompt,
     branch: row.branch,
     worktree: row.worktree_path,
-    state: toKnownState(row.state, `task.list(${row.id})`),
+    state,
     step: row.current_step_id,
     // 本当の試行回数は task.list の attempt_counts から作る必要があるが、それは別issue。
     // ここでは常に1を入れる代わりに、UI 側は t.attempt を表示に使わない（使うと常に「1回目」になる）
@@ -313,6 +324,11 @@ export function toTask(
     // groupOf は `t.degraded &&` で見るので、空文字にすると要確認から落ちる。
     // has_degraded だけではどのステップか分からないので、分からないと書く
     degraded: row.has_degraded ? (previous?.degraded ?? DEGRADED_UNKNOWN) : undefined,
+    // 差し戻しは task.list に載らない（進行中の一時的な出来事なので印を足さない）ので、
+    // イベントで立てた値を引き継がないと 15 秒で消える。ただし終端状態のタスクには
+    // 引き継がない。イベントを取りこぼすと取り直しだけで終端になることがあり、
+    // 引き継ぐと完了・失敗したタスクに差し戻し中の通知が残る
+    bounce: isTerminal(state) ? undefined : previous?.bounce,
   };
 }
 
@@ -585,7 +601,12 @@ export function reduce(s: State, a: Action): State {
         return {
           ...s,
           now: a.now,
-          tasks: updateTask(s, ev.task_id, { state, since: a.now }),
+          // 終わったタスクに差し戻し中の通知は無い（取り直し経路の toTask と同じ不変条件）
+          tasks: updateTask(s, ev.task_id, {
+            state,
+            since: a.now,
+            ...(isTerminal(state) ? { bounce: undefined } : {}),
+          }),
           // 状態が動いた ＝ worktree が動いた。取ってある diff と経緯はもう古い
           ...invalidate(s, ev.task_id),
         };
@@ -594,9 +615,24 @@ export function reduce(s: State, a: Action): State {
         if (!s.tasks.some((x) => x.id === ev.task_id)) return s;
         return { ...s, now: a.now, tasks: updateTask(s, ev.task_id, { step: ev.step_id }) };
       }
-      if (ev.event === "stepRun.finished" && ev.status === "degraded") {
-        if (!s.tasks.some((x) => x.id === ev.task_id)) return s;
-        return { ...s, now: a.now, tasks: updateTask(s, ev.task_id, { degraded: ev.step_id }) };
+      if (ev.event === "stepRun.finished") {
+        const target = s.tasks.find((x) => x.id === ev.task_id);
+        if (!target) return s;
+        // degraded を立てることと bounce を立てる・落とすことは、同じ1つのイベントに
+        // 対する独立したパッチとして両方あてる（片方で打ち切ると、一度差し戻された
+        // ステップが degraded で終わったときに差し戻しの通知が残ったままになる）
+        const patch: Partial<Task> = {};
+        if (ev.status === "degraded") patch.degraded = ev.step_id;
+        if (ev.status === "bounced" && ev.goto_step_id !== null) {
+          // 持つのは最新の1件だけ。経緯の一覧は dctl get の領分
+          patch.bounce = { step: ev.step_id, goto: ev.goto_step_id, attempt: ev.attempt };
+        } else if (target.bounce?.step === ev.step_id) {
+          // 差し戻したステップが今度は先へ進んだ（通った、あるいは本当に失敗した）。
+          // 落とさないと、この通知がワークフローの残り全部の間ずっと出たままになる
+          patch.bounce = undefined;
+        }
+        if (Object.keys(patch).length === 0) return s;
+        return { ...s, now: a.now, tasks: updateTask(s, ev.task_id, patch) };
       }
       if (ev.event === "log.line") {
         if (!s.tasks.some((x) => x.id === ev.task_id)) return s;

@@ -27,7 +27,9 @@ export type StepRunStatus =
   | "degraded"
   | "interrupted"
   /** 利用上限で打ち切られた実行。同じ会話で再開されるので失敗ではない。 */
-  | "rate_limited";
+  | "rate_limited"
+  /** 非0で終わった（却下された）が onFailure / onReject の goto で前のステップへ戻った。 */
+  | "bounced";
 
 export interface ProjectsTable {
   id: Generated<number>;
@@ -82,6 +84,12 @@ export interface StepRunsTable {
   duration_ms: number | null;
   /** approval ステップで suspended に入った時点の worktree 全体のツリー（5章）。 */
   review_tree: string | null;
+  /**
+   * 差し戻し先のステップid。status が bounced の行では必ず非 null、それ以外の
+   * status では常に null（「分岐しなかった」ことをこの null が表す）。この対応は
+   * DB の CHECK 制約でも固めてある（0005_step_run_bounced）。
+   */
+  goto_step_id: string | null;
 }
 
 /**

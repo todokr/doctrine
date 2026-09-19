@@ -71,6 +71,12 @@ export type Task = {
   dirty?: boolean;
   refused?: boolean;
   degraded?: string;
+  /**
+   * 直近の差し戻し（step が非0で終わり、onFailure / onReject の goto で goto へ
+   * 戻った）。ワークフローは続いているので失敗ではない。attempt は差し戻した側の
+   * 試行回数＝差し戻しが何回目か。
+   */
+  bounce?: { step: string; goto: string; attempt: number };
 };
 
 export type LineComment = { path: string; line: number; quote: string; text: string };

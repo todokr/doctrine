@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { rpc } from "../daemon/client";
 import { sendDecision } from "../decision";
-import { ago, clock, elapsed, hm, isTerminal, stepRunHistory, stopReasons } from "../model";
+import { ago, bounceNotice, clock, elapsed, hm, isTerminal, stepRunHistory, stopReasons } from "../model";
 import { useDecide, useNotYet, useStore } from "../store";
 import type { Task, TaskState } from "../types";
 import type { StepRun } from "../../../shared/protocol.ts";
@@ -187,6 +187,13 @@ export function TaskView({ t }: { t: Task }) {
             Claude の利用上限に達したので、{t.resumeAt ? `${hm(t.resumeAt)} ` : ""}枠が明けるのを待っています。
             待っている間は他のタスクも始めません。明けたら同じ会話の続きから自動で再開します。
           </p>
+        </section>
+      )}
+      {t.bounce && (
+        // 差し戻しは失敗ではない（ワークフローは続いている）ので、赤い見た目は使わない
+        <section className="box quiet">
+          <h2>{bounceNotice(t.bounce)}</h2>
+          <p>ワークフローは続いています。<span className="mono">{t.bounce.goto}</span> からやり直しています。</p>
         </section>
       )}
       {t.state === "paused" && (

@@ -383,6 +383,63 @@ test("未コミットの変更が残っていたら削除せず警告する", as
   assert.ok(ctx.warnings.recent().some((w) => /未コミット/.test(w.message)), "警告として出す");
 });
 
+test("差し戻しは task.get の stepRuns と stepRun.finished の両方から読める", async () => {
+  const events: ServerEvent[] = [];
+  const ctx = await context(events);
+  const h = createHandler(ctx);
+  await h("project.add", { path: repo }, NOOP_CONN);
+  // 既定ワークフローの plan-gate と同じ形（非0で終わって前のステップへ戻るゲート）。
+  await writeFile(
+    join(repo, ".doctrine", "workflows", "gate.yaml"),
+    "name: gate\nsteps:\n" +
+      '  - id: plan\n    type: command\n    run: "true"\n' +
+      '  - id: plan-gate\n    type: command\n    run: "exit 1"\n' +
+      "    onFailure:\n      goto: plan\n      maxAttempts: 2\n",
+  );
+  const t = await h(
+    "task.create",
+    { project: repo, title: "T", prompt: "p", workflow: "gate" },
+    NOOP_CONN,
+  ) as { id: string };
+  await tick(ctx);
+  await until(async () => (await getTask(ctx.db, t.id))?.state === "failed");
+  await until(() => ctx.running.size === 0);
+
+  const got = await h("task.get", { task_id: t.id }, NOOP_CONN) as {
+    stepRuns: { step_id: string; status: string; goto_step_id: string | null; attempt: number }[];
+  };
+  assert.deepEqual(
+    got.stepRuns.filter((r) => r.step_id === "plan-gate")
+      .map((r) => [r.status, r.goto_step_id, r.attempt]),
+    [["bounced", "plan", 1], ["failed", null, 2]],
+    "差し戻しと本当の失敗が dctl get から見分けられる",
+  );
+
+  const finished = events.filter((e) =>
+    e.event === "stepRun.finished" && e.step_id === "plan-gate"
+  );
+  assert.deepEqual(finished.map((e) => ({ ...e, task_id: "", step_run_id: 0 })), [
+    {
+      event: "stepRun.finished",
+      task_id: "",
+      step_run_id: 0,
+      step_id: "plan-gate",
+      status: "bounced",
+      goto_step_id: "plan",
+      attempt: 1,
+    },
+    {
+      event: "stepRun.finished",
+      task_id: "",
+      step_run_id: 0,
+      step_id: "plan-gate",
+      status: "failed",
+      goto_step_id: null,
+      attempt: 2,
+    },
+  ]);
+});
+
 test("失敗したタスクの worktree は削除しない", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
@@ -1579,13 +1636,13 @@ test("差し戻し後、since: last_review は前回レビュー以降の差分�
   // second.txt だけが出ることが「直近の」差し戻しを基準にできている証拠になる。
   assert.deepEqual(since.files.map((f) => f.path), ["second.txt"], "前回レビュー以降だけ");
   const rejected = (await listStepRuns(ctx.db, t.id))
-    .filter((r) => r.review_tree !== null && r.status === "failed");
+    .filter((r) => r.review_tree !== null && r.status === "bounced");
   assert.equal(rejected.length, 2, "差し戻しは2回起きている");
   assert.equal(since.since_step_run_id, rejected[1].id, "基準は直近（2回目）の差し戻し");
 });
 
 test("差し戻し後に承認が挟まっても since: last_review の基準は差し戻しのままで、承認後の変更も含む", async () => {
-  // lastRejectedReview は status = 'failed' の行しか見ない。承認（success）で基準を
+  // lastRejectedReview は却下で閉じた行（bounced / failed）しか見ない。承認（success）で基準を
   // 進めてしまうと、承認後に積んだ成果がレビュー対象から消える（B節の理由）。
   // ここでは「差し戻し→承認→さらに別のステップの成果」という順で進め、承認後に
   // 増えた分も since に出ること（＝基準が承認では進まないこと）を確かめる。
@@ -1644,12 +1701,12 @@ test("差し戻し後に承認が挟まっても since: last_review の基準は
     since_step_run_id: number | null;
     files: { path: string }[];
   };
-  const failed = (await listStepRuns(ctx.db, t.id))
-    .filter((r) => r.review_tree !== null && r.status === "failed");
-  assert.equal(failed.length, 1, "差し戻しは1回だけ");
-  assert.equal(since.since_step_run_id, failed[0].id, "承認された回では基準が進まない");
-  // extra.txt（承認された回の後に足したが、なお1回目の failed の後）と
-  // after.txt（承認後のステップの成果）の両方が出る。first.txt は failed の
+  const bounced = (await listStepRuns(ctx.db, t.id))
+    .filter((r) => r.review_tree !== null && r.status === "bounced");
+  assert.equal(bounced.length, 1, "差し戻しは1回だけ");
+  assert.equal(since.since_step_run_id, bounced[0].id, "承認された回では基準が進まない");
+  // extra.txt（承認された回の後に足したが、なお1回目の差し戻しの後）と
+  // after.txt（承認後のステップの成果）の両方が出る。first.txt は差し戻しの
   // 時点で既にツリーに入っているので出ない。
   assert.deepEqual(
     since.files.map((f) => f.path).sort(),

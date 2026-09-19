@@ -309,15 +309,30 @@ dctl get <task-id>
 `degraded` を見逃すと、「成功した」と思って進めたタスクが実質何も達成していない、
 という気づきにくい失敗を踏む。
 
+同じ `dctl get` で、非0終了が**失敗**だったのか**差し戻し**だったのかも読める。
+`onFailure` / `onReject` の `goto` が発火した実行は `status` が `bounced` になり、
+戻り先が `goto_step_id` に入る（`status` が `failed` の行に戻り先は無い）。
+
+```bash
+dctl get <task-id> | jq '.stepRuns[] | {step_id, attempt, status, goto_step_id}'
+# => {"step_id":"plan-gate","attempt":1,"status":"bounced","goto_step_id":"plan"}
+#    plan-gate が通らず plan へ差し戻した。タスクは失敗していない
+```
+
 ### ステップ実行の状態
 
 `dctl get <task-id>` の `.stepRuns[].status` が取る値。
 
 - `running` — 実行中
 - `awaiting` — `approval` ステップが人の承認・却下を待っている（1行＝レビュー1回）
-- `success` / `failed` — 終わった
+- `success` — 終わった
+- `bounced` — 非0で終わった（または却下された）が、`onFailure` / `onReject` の `goto` で
+  前のステップへ戻った。タスクは失敗していない。戻り先は同じ行の `goto_step_id`、
+  差し戻しが何回目かは同じ行の `attempt`
+- `failed` — 分岐先が無い、または `maxAttempts` を使い切って、そこでタスクが止まった
 - `degraded` — 成功扱いだが権限拒否があった（5章）
 - `interrupted` — デーモンのクラッシュで中断され、復帰時に閉じられた
+- `rate_limited` — Claude の利用上限で打ち切られた。枠が明けたら同じ会話で再開されるので失敗ではない
 
 ## 6. ステップ間で成果物を渡す
 

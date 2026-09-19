@@ -44,6 +44,8 @@ export type StepBoundary = {
     duration_ms?: number | null;
     /** approval ステップのみ。suspended に入った時点の worktree 全体のツリー。 */
     review_tree?: string | null;
+    /** status が "bounced" のときだけ渡す（差し戻し先のステップid）。 */
+    goto_step_id?: string | null;
   };
   /** ステップ終了時: 開始時の行を同じトランザクションで更新する。 */
   stepRunUpdate?: {
@@ -54,6 +56,8 @@ export type StepBoundary = {
     cost_usd?: number | null;
     num_turns?: number | null;
     duration_ms?: number | null;
+    /** status が "bounced" のときだけ渡す（差し戻し先のステップid）。 */
+    goto_step_id?: string | null;
   };
   /** ステップ開始時（agent ステップのみ）: そのロールのセッションを記録する。 */
   sessionUpsert?: { role: string; session_id: string };
@@ -133,6 +137,7 @@ export function commitStepBoundary(db: Db, b: StepBoundary): Promise<number | nu
           num_turns: s.num_turns ?? null,
           duration_ms: s.duration_ms ?? null,
           review_tree: s.review_tree ?? null,
+          goto_step_id: s.goto_step_id ?? null,
         })
         .executeTakeFirstOrThrow();
       stepRunId = Number(inserted.insertId);
@@ -148,6 +153,7 @@ export function commitStepBoundary(db: Db, b: StepBoundary): Promise<number | nu
           cost_usd: u.cost_usd ?? null,
           num_turns: u.num_turns ?? null,
           duration_ms: u.duration_ms ?? null,
+          goto_step_id: u.goto_step_id ?? null,
         })
         .where("id", "=", u.id)
         .execute();

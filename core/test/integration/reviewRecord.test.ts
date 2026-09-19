@@ -7,7 +7,7 @@ import { applyApproval, runTask } from "../../src/domain/engine.ts";
 import { parseWorkflow } from "../../src/workflow/schema.ts";
 import { openDb } from "../../src/db/migrate.ts";
 import { getTask, insertProject, insertTask } from "../../src/db/tasks.ts";
-import { listStepRuns } from "../../src/db/stepRuns.ts";
+import { lastRejectedReview, listStepRuns } from "../../src/db/stepRuns.ts";
 import { createWorktree } from "../../src/domain/worktree.ts";
 import { reviewRefName } from "../../src/domain/reviewTree.ts";
 import { createMockAdapter } from "../../src/adapter/mock.ts";
@@ -148,6 +148,44 @@ test("レビュー時点のツリーには未コミットの変更が入る", as
   const run = (await listStepRuns(db, "t1")).find((r) => r.step_id === "review")!;
   const { stdout } = await runCommand("git", ["-C", repo, "show", `${run.review_tree}:a.txt`]);
   assert.equal(stdout, "書き換えた\n");
+});
+
+test("差し戻し（bounced）が「前回レビュー」の基準点になる", async () => {
+  const { db, logRoot } = await fixture();
+  await runTask(db, "t1", WORKFLOW, deps(db, logRoot));
+  await applyApproval(db, "t1", { approved: false, comment: "直して" }, WORKFLOW);
+
+  const review = (await listStepRuns(db, "t1")).find((r) => r.step_id === "review")!;
+  assert.equal(review.status, "bounced");
+  assert.deepEqual(await lastRejectedReview(db, "t1"), {
+    step_run_id: review.id,
+    review_tree: review.review_tree!,
+  });
+});
+
+test("maxAttempts を使い切って failed で閉じた却下も基準点になる", async () => {
+  // 戻り先が無い却下（failed）を基準から外すと、その回のレビュー以降の差分が引けなくなる。
+  const workflow = parseWorkflow(`
+name: f
+steps:
+  - id: implement
+    type: command
+    run: "true"
+  - id: review
+    type: approval
+    title: "見て"
+    onReject:
+      goto: implement
+      maxAttempts: 1
+`).workflow;
+  const { db, logRoot } = await fixture();
+  await runTask(db, "t1", workflow, deps(db, logRoot));
+  await applyApproval(db, "t1", { approved: false, comment: "もう戻せない" }, workflow);
+
+  const review = (await listStepRuns(db, "t1")).find((r) => r.step_id === "review")!;
+  assert.equal(review.status, "failed");
+  assert.equal((await getTask(db, "t1"))!.state, "failed");
+  assert.equal((await lastRejectedReview(db, "t1"))?.step_run_id, review.id);
 });
 
 test("承認されたタスクも、そのレビュー時点のツリーを持つ", async () => {
