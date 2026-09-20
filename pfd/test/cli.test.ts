@@ -14,6 +14,7 @@ interface World {
   opened: string[];
   answers: string[];
   terminal: boolean;
+  openError?: Error;
   run: (...argv: string[]) => Promise<number>;
   writePfd: (text?: string) => Promise<void>;
 }
@@ -45,6 +46,7 @@ async function world(fn: (w: World) => Promise<void>): Promise<void> {
     isTerminal: () => w.terminal,
     ask: () => Promise.resolve(w.answers.shift() ?? ""),
     open: (p) => {
+      if (w.openError) return Promise.reject(w.openError);
       w.opened.push(p);
       return Promise.resolve();
     },
@@ -326,6 +328,16 @@ test("render: --no-open なら開かない", async () => {
     await w.writePfd();
     await w.run("render", w.project, "123", "--no-open");
     assert.deepEqual(w.opened, []);
+  });
+});
+
+test("render: ブラウザを開けなくても、場所を示して 0 で終わる", async () => {
+  await world(async (w) => {
+    await w.writePfd();
+    w.openError = new Error("open failed");
+    assert.equal(await w.run("render", w.project, "123"), 0);
+    const file = join(await pfdDir(w.project, 123), "pfd.html");
+    assert.ok(w.err.some((l) => l === `ブラウザを開けませんでした。${file} を開いてください`));
   });
 });
 

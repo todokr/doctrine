@@ -66,6 +66,34 @@ test("readRecord: ファイルが無ければ空の記録", async () => {
   }
 });
 
+test("readRecord: JSON として壊れていれば、場所を示して日本語で失敗する", async () => {
+  const dir = await Deno.makeTempDir();
+  try {
+    const file = join(dir, "dispatch.json");
+    await Deno.writeTextFile(file, "{ 壊れている");
+    await assert.rejects(readRecord(dir), (e: Error) => {
+      assert.equal(e.message, `dispatch.json を読めません: ${file}`);
+      return true;
+    });
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+test("readRecord: 形が違えば、場所を示して日本語で失敗する", async () => {
+  const dir = await Deno.makeTempDir();
+  try {
+    const file = join(dir, "dispatch.json");
+    await Deno.writeTextFile(file, JSON.stringify({ approved: null, tasks: null, done: {} }));
+    await assert.rejects(readRecord(dir), (e: Error) => {
+      assert.equal(e.message, `dispatch.json の形が正しくありません: ${file}`);
+      return true;
+    });
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
 test("writeRecord → readRecord: 書いたものが読める", async () => {
   const dir = await Deno.makeTempDir();
   try {

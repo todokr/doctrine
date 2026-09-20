@@ -1,4 +1,5 @@
 import { basename, join } from "@std/path";
+import { z } from "zod";
 
 /** doctrine（core/src/util/home.ts）と同じ規則。core は import しないので、規則だけを揃えている。 */
 export function stateRoot(): string {
@@ -36,15 +37,31 @@ export function emptyRecord(): DispatchRecord {
   return { approved: null, tasks: {}, done: {} };
 }
 
+const recordSchema = z.object({
+  approved: z.object({ hash: z.string(), at: z.string() }).nullable(),
+  tasks: z.record(z.unknown()),
+  done: z.record(z.unknown()),
+});
+
 export async function readRecord(dir: string): Promise<DispatchRecord> {
+  const file = join(dir, "dispatch.json");
   let text: string;
   try {
-    text = await Deno.readTextFile(join(dir, "dispatch.json"));
+    text = await Deno.readTextFile(file);
   } catch (err) {
     if (err instanceof Deno.errors.NotFound) return emptyRecord();
     throw err;
   }
-  return JSON.parse(text) as DispatchRecord;
+  let raw: unknown;
+  try {
+    raw = JSON.parse(text);
+  } catch {
+    throw new Error(`dispatch.json を読めません: ${file}`);
+  }
+  if (!recordSchema.safeParse(raw).success) {
+    throw new Error(`dispatch.json の形が正しくありません: ${file}`);
+  }
+  return raw as DispatchRecord;
 }
 
 export async function writeRecord(dir: string, record: DispatchRecord): Promise<void> {

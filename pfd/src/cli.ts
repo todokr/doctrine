@@ -165,7 +165,13 @@ async function run(argv: string[], deps: Deps): Promise<number> {
         toHtml(`#${pfd.issue} ${pfd.title}`, toMermaid(pfd, statuses)),
       );
       deps.out(file);
-      if (!flags["no-open"]) await deps.open(file);
+      if (!flags["no-open"]) {
+        try {
+          await deps.open(file);
+        } catch {
+          deps.err(`ブラウザを開けませんでした。${file} を開いてください`);
+        }
+      }
       return 0;
     }
 
