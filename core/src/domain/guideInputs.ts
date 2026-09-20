@@ -1,7 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { type GuideHunk, listHunks } from "../../../shared/guide/hunkId.ts";
-import { computeDiff, mergeBase } from "./diff.ts";
+import { computeDiff, type DiffFile, mergeBase } from "./diff.ts";
 import { captureTree } from "./reviewTree.ts";
 
 /** hunk の一覧を置く、worktree からの相対パス。 */
@@ -16,6 +16,11 @@ export type GuideInputs = {
   hunks: GuideHunk[];
   /** hunk 一覧の元になった patch。後続の検証がそのまま使う。 */
   patch: string;
+  /**
+   * 同じ diff の変更ファイル。パスの実在はこちらで見る（バイナリやモード変更だけの
+   * ファイルは hunk を持たないため）。
+   */
+  files: DiffFile[];
   truncated: boolean;
 };
 
@@ -34,7 +39,7 @@ export async function collectGuideInputs(o: {
 }): Promise<GuideInputs> {
   const base = await mergeBase(o.worktreePath, o.baseBranch);
   const tree = await captureTree(o.worktreePath);
-  const { patch, truncated } = await computeDiff({
+  const { files, patch, truncated } = await computeDiff({
     worktreePath: o.worktreePath,
     fromRef: base,
     toRef: tree,
@@ -46,5 +51,5 @@ export async function collectGuideInputs(o: {
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, JSON.stringify(hunks, null, 2));
 
-  return { tree, mergeBase: base, hunks, patch, truncated };
+  return { tree, mergeBase: base, hunks, patch, files, truncated };
 }

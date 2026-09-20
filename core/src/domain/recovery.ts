@@ -141,7 +141,9 @@ async function classifyInterruptedStep(
   if (task.current_step_id !== null) {
     const workflow = await lookupWorkflow(task);
     const step = workflow?.steps.find((s) => s.id === task.current_step_id);
-    if (step) return step.type === "agent" ? "resume-agent" : "rerun-command";
+    if (step) {
+      return step.type === "agent" || step.type === "guide" ? "resume-agent" : "rerun-command";
+    }
   }
   // ワークフロー定義が引けない（YAMLが消えた・壊れた等）、
   // またはステップが見つからない場合は判別材料が無いため、安全側に倒す。

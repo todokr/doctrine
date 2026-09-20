@@ -13,7 +13,7 @@
 - [1. セットアップ](#1-セットアップ)
   - [プロジェクトを登録し、タスクを作る](#プロジェクトを登録しタスクを作る)
 - [2. ワークフローを書く](#2-ワークフローを書く)
-  - [ステップは3種類だけ](#ステップは3種類だけ)
+  - [ステップは4種類だけ](#ステップは4種類だけ)
   - [role ごとの会話（`session`）](#role-ごとの会話session)
   - [`approval` ステップに読ませるファイル（`review.files`）](#approval-ステップに読ませるファイルreviewfiles)
   - [変数は4系統だけ](#変数は4系統だけ)
@@ -141,7 +141,7 @@ steps:
     run: "echo done > result.txt"
 ```
 
-### ステップは3種類だけ
+### ステップは4種類だけ
 
 - **`command`** — worktree内でシェルコマンドを実行する。非0終了でステップ失敗。
 - **`agent`** — Claude Code を headless 実行する。会話を role 単位（`session: <role>`）で
@@ -153,8 +153,18 @@ steps:
   合わず拒否されるため）を `--append-system-prompt` で常に付ける。
   ワークフロー側から書き換えたり足したりはできない。
 - **`approval`** — ワークフローを `suspended` にし、人の承認・却下・追加コメントを待つ。
+- **`guide`** — Review Guide を作る。置くだけでガイドが worktree に置かれる。
+  プロンプトは doctrine が持つので `prompt` は書けない。`session` は必須で、ガイドを別の役割に
+  書かせるか（`session: guide`）、実装の会話を継がせるか（`session: implementer`）を毎回決める。
+  `model` / `permissionMode` / `allowedTools` は `agent` と同じ書き方で任意。エージェントが
+  diff を読むには Bash が要るので、`allowedTools: ["Bash(git diff:*)"]` などを書く。
+  出力は `.doctrine-out/guide.json` に `{ tree, createdAt, guide }` の封筒で置かれる
+  （`tree` は説明している時点のツリー。`tree` と `createdAt` は doctrine が書く）。
+  形・id の整合・指す hunk とパスの実在のどれかに落ちるとステップは失敗し、`guide.json` は
+  書かれない。`onFailure` を書かなければ「自分に戻る・3回・失敗理由を feed」が既定で効き、
+  同じ会話に理由が戻る。
 
-失敗時の分岐は `onFailure`（`command` / `agent`）と `onReject`（`approval`）のみで、
+失敗時の分岐は `onFailure`（`command` / `agent` / `guide`）と `onReject`（`approval`）のみで、
 どちらも同じ形（`goto` / `maxAttempts` / `feed`）を持つ。分岐先へ戻った `agent` は
 同じ role のセッションIDで `--resume` されるので、会話は継続する（やり直しではない）。
 
