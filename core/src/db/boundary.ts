@@ -1,7 +1,13 @@
+import type { PermissionDenial, StepRunDenials } from "../../../shared/protocol.ts";
 import type { Db, StepRunStatus, TaskRow, TaskState } from "./schema.ts";
 
 /** DBに残す出力の上限。ログ本文はファイル、DBは末尾だけ。 */
 export const OUTPUT_TAIL_BYTES = 8192;
+
+/** 1回の実行について残す拒否の件数。超えた分は捨て、件数だけ total に残す。 */
+export const MAX_DENIALS = 20;
+/** 拒否1件の入力に残す文字列の長さ。コマンドは先頭が要るので、tail() と違い先頭側を残す。 */
+export const DENIAL_VALUE_CHARS = 2000;
 
 export type StepBoundary = {
   taskId: string;
@@ -58,6 +64,8 @@ export type StepBoundary = {
     duration_ms?: number | null;
     /** status が "bounced" のときだけ渡す（差し戻し先のステップid）。 */
     goto_step_id?: string | null;
+    /** 権限で拒否された操作。空・未指定なら列は NULL。DB に入れる前にここで削る。 */
+    permission_denials?: PermissionDenial[];
   };
   /** ステップ開始時（agent ステップのみ）: そのロールのセッションを記録する。 */
   sessionUpsert?: { role: string; session_id: string };
@@ -97,6 +105,25 @@ function tail(s: string): string {
   // so the tail never begins mid-character (which would decode to U+FFFD).
   while (start < buf.length && (buf[start] & 0xc0) === 0x80) start++;
   return buf.subarray(start).toString("utf8");
+}
+
+function head(s: string): string {
+  return s.length > DENIAL_VALUE_CHARS ? s.slice(0, DENIAL_VALUE_CHARS) : s;
+}
+
+/** step_runs.permission_denials に入る文字列（形は protocol の StepRunDenials）。 */
+function denialsColumn(denials: PermissionDenial[]): string | null {
+  if (denials.length === 0) return null;
+  const kept: StepRunDenials = {
+    total: denials.length,
+    denials: denials.slice(0, MAX_DENIALS).map((d) => ({
+      ...d,
+      input: Object.fromEntries(
+        Object.entries(d.input).map(([k, v]) => [k, typeof v === "string" ? head(v) : v]),
+      ),
+    })),
+  };
+  return JSON.stringify(kept);
 }
 
 /**
@@ -154,6 +181,7 @@ export function commitStepBoundary(db: Db, b: StepBoundary): Promise<number | nu
           num_turns: u.num_turns ?? null,
           duration_ms: u.duration_ms ?? null,
           goto_step_id: u.goto_step_id ?? null,
+          permission_denials: denialsColumn(u.permission_denials ?? []),
         })
         .where("id", "=", u.id)
         .execute();

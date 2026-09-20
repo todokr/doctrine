@@ -83,6 +83,9 @@ export type PermissionDenial = {
   input: Record<string, unknown>;
 };
 
+/** step_runs.permission_denials。denials は先頭 20 件で、total は実際に起きた件数。 */
+export type StepRunDenials = { total: number; denials: PermissionDenial[] };
+
 /** task.get が返すステップ実行1回ぶん。step_runs の行のうち UI に見せる分。 */
 export type StepRun = {
   id: number;

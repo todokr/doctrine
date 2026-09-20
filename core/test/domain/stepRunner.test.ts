@@ -150,6 +150,36 @@ test("permission_denials があれば degraded として返る", async () => {
   assert.equal(out.status, "degraded", "成功に見えるが何もできていない実行を区別する");
 });
 
+test("アダプタの permission_denials が StepOutcome に載る", async () => {
+  const denial = { tool_name: "Bash", tool_use_id: "tu_1", input: { command: "rm -rf /" } };
+  const adapter = createMockAdapter({
+    result: { ok: true, degraded: true, permissionDenials: [denial] },
+  });
+  const out = await runAgentStep(
+    { id: "a", type: "agent", prompt: "p" },
+    ctx,
+    {
+      cwd: root,
+      taskId: "t1",
+      attempt: 1,
+      sessionId: "s1",
+      resume: false,
+      deps: await deps({ adapter }),
+    },
+  );
+  assert.equal(out.status, "degraded");
+  assert.deepEqual(out.permissionDenials, [denial]);
+});
+
+test("command ステップの permissionDenials は空", async () => {
+  const out = await runCommandStep(
+    { id: "s", type: "command", run: "echo hello" },
+    ctx,
+    { cwd: root, taskId: "t1", attempt: 1, deps: await deps() },
+  );
+  assert.deepEqual(out.permissionDenials, []);
+});
+
 test("子プロセスのpidと開始時刻が通知される", async () => {
   const seen: { pid: number; startedAt: string }[] = [];
   const d = await deps({
