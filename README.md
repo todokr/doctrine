@@ -23,6 +23,7 @@
 - [5. `degraded` の意味](#5-degraded-の意味)
   - [ステップ実行の状態](#ステップ実行の状態)
 - [6. ステップ間で成果物を渡す](#6-ステップ間で成果物を渡す)
+- [7. 大きな Issue を PFD で分解してから流す](#7-大きな-issue-を-pfd-で分解してから流す)
 - [既知の制約](#既知の制約)
 
 ## 1. セットアップ
@@ -361,6 +362,52 @@ dctl get <task-id> | jq '.stepRuns[] | {step_id, attempt, status, goto_step_id}'
 
 対象を別の名前にしたい場合でも、この自動追記の対象は `.doctrine-out/` に固定されている
 点に注意する（変えたい場合は自分で `.git/info/exclude` に追記する）。
+
+## 7. 大きな Issue を PFD で分解してから流す
+
+1 つのタスクにするには大きい GitHub Issue は、PFD（成果物とプロセスの図）に分解し、
+入力が揃ったプロセスから順に doctrine のタスクにする。設計は
+[`docs/superpowers/specs/2026-09-20-pfd-decomposition-design.md`](docs/superpowers/specs/2026-09-20-pfd-decomposition-design.md) を参照。
+
+この仕組みは doctrine の外にある。`dctld` は PFD を知らず、`pfd` コマンドが `dctl ls` と
+`dctl add` を呼ぶだけである。`gh` CLI が要る。
+
+```bash
+mise run pfd:install                                                  # ~/.deno/bin に pfd を置く
+ln -s "$PWD/pfd/skill/pfd-decompose" ~/.claude/skills/pfd-decompose   # スキルを Claude Code に見せる
+```
+
+流れ:
+
+```bash
+# 1. 分解する — 対象リポジトリで Claude Code を開き、「Issue 123 を PFD で分解して」と頼む。
+#    スキルが pfd.yaml を書き、検証を通し、図をブラウザに開く
+
+# 2. 承認する — 図と内容を確かめ、端末から自分で実行する
+pfd approve /path/to/your/repo 123
+
+# 3. 投入する — 入力が揃ったプロセスだけが doctrine のタスクになる
+pfd dispatch /path/to/your/repo 123
+
+# 4. 進み具合を見る
+pfd status /path/to/your/repo 123
+
+# 5. PR をマージしたら、もう一度投入する — 下流のプロセスがタスクになる
+pfd dispatch /path/to/your/repo 123
+```
+
+- **成果物は baseBranch へのマージで下流に渡る。** 下流のプロセスは、上流のタスクのブランチから
+  作られた PR がマージされるまで始まらない。doctrine は PR を作ることを保証しないので、ワークフローの
+  最後で PR を作るか、タスクが `completed` になった後に残ったブランチから自分で作ること。
+  `pfd status` は、`completed` なのに PR が無いプロセスを「PR がありません」と示す
+- **`pfd dispatch` は何度叩いてもよい。** 同じプロセスを 2 回タスクにしない。タスクのタイトルの先頭の
+  `[pfd:123/2]` がその目印なので、このタイトルを書き換えないこと
+- **人の判断が要るプロセス**（`actor: human`）はタスクにならない。`pfd status` に「あなたの番」と出たら、
+  決めた内容を渡して完了にする: `pfd done /path/to/your/repo 123 3 --note "..."`。
+  その内容は、下流のタスクの prompt にそのまま載る
+- **承認の後に `pfd.yaml` を書き換えると、`pfd dispatch` は失敗する。** 内容を確かめて承認し直す
+- PFD の正本は `~/.local/state/doctrine/pfd/` 配下にあり、リポジトリにはコミットされない。
+  `pfd path /path/to/your/repo 123` で場所が分かる
 
 ## 既知の制約
 
