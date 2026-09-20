@@ -19,14 +19,6 @@ export type TaskState = "queued" | "running" | "suspended" | "paused" | "rate_li
 
 export type Project = { id: string; color: string; path: string; def: string };
 
-export type StepDef = {
-  id: string;
-  type: "command" | "agent" | "approval";
-  title?: string;
-  onReject?: string;
-  review?: { files: string[] };
-};
-
 export type DiffHunk = { old: number; new: number; body: string };
 
 /**
