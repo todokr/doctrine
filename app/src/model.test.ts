@@ -1043,6 +1043,10 @@ describe("利用上限の表示", () => {
     const v = viewOf(win({ utilization: 0.664, observedAt: NOW - 3 * MIN }));
     expect(v.percent).toBe("66%");
     expect(v.observed).toBe("3分前");
+    expect(viewOf(win({ utilization: 0.9996 })).percent).toBe("99%");
+    expect(viewOf(win({ utilization: 1 })).percent).toBe("100%");
+    // 0.29 * 100 は 28.999… になる
+    expect(viewOf(win({ utilization: 0.29 })).percent).toBe("29%");
     expect(viewOf(win({ utilization: 1.2 })).fill).toBe(1);
   });
 

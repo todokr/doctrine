@@ -400,8 +400,9 @@ function rateLimitView(w: RateLimitWindow, now: number): RateLimitView {
     window: w.window,
     label: WINDOW_LABEL[w.window] ?? w.window,
     fill: Math.min(1, Math.max(0, w.utilization)),
-    // 切り捨てる。四捨五入すると飽和の手前（0.996）が 100% に見える
-    percent: `${Math.floor(Math.round(w.utilization * 1000) / 10)}%`,
+    // 切り捨てる。四捨五入すると飽和の手前（0.9996）が 100% に見える。
+    // 1e-9 は 0.29 * 100 が 28.999… になる誤差のぶん
+    percent: `${Math.floor(w.utilization * 100 + 1e-9)}%`,
     severity,
     reset: w.resetsAt === null ? "明ける時刻は不明" : stale ? "明けました" : `${at(w.resetsAt)} 明け`,
     stale,
