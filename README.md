@@ -148,6 +148,9 @@ steps:
   記録し再開可能。`allowedTools:` に文字列のリストを書くと、そのツールを個別に許可できる
   （`- "Bash(git diff:*)"` のように1要素1パターンで書く）。`permissionMode: acceptEdits`
   のままでは Bash はすべて拒否されるので、使わせたいコマンドはここに書く。
+  doctrine はすべての `agent` ステップに、組み込みのシステムプロンプト（Bash を1回1コマンドに
+  保つ指示。`;` `&&` `|` で繋ぐと先頭一致の許可に合わず拒否されるため）を
+  `--append-system-prompt` で常に付ける。ワークフロー側から書き換えたり足したりはできない。
 - **`approval`** — ワークフローを `suspended` にし、人の承認・却下・追加コメントを待つ。
 
 失敗時の分岐は `onFailure`（`command` / `agent`）と `onReject`（`approval`）のみで、

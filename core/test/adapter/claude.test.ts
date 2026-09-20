@@ -82,6 +82,49 @@ test("allowedTools が空配列なら --allowedTools を付けない", () => {
   assert.equal(args.includes("--allowedTools"), false);
 });
 
+test("appendSystemPrompt を渡すと --append-system-prompt が値1引数で付く", () => {
+  const args = buildArgs("やって", {
+    cwd: "/wt",
+    sessionId: "s1",
+    appendSystemPrompt: "1コマンドずつ",
+  });
+  const i = args.indexOf("--append-system-prompt");
+  assert.notEqual(i, -1);
+  assert.equal(args[i + 1], "1コマンドずつ");
+});
+
+test("再開時も --append-system-prompt が付く", () => {
+  const args = buildArgs("追加で直して", {
+    cwd: "/wt",
+    sessionId: "s1",
+    appendSystemPrompt: "1コマンドずつ",
+  }, "s1");
+  const i = args.indexOf("--append-system-prompt");
+  assert.notEqual(i, -1);
+  assert.equal(args[i + 1], "1コマンドずつ");
+});
+
+test("appendSystemPrompt を渡さなければ --append-system-prompt を付けない", () => {
+  const unset = buildArgs("やって", { cwd: "/wt", sessionId: "s1" });
+  assert.equal(unset.includes("--append-system-prompt"), false);
+  const empty = buildArgs("やって", { cwd: "/wt", sessionId: "s1", appendSystemPrompt: "" });
+  assert.equal(empty.includes("--append-system-prompt"), false);
+});
+
+test("appendSystemPrompt と allowedTools を両方渡すと --allowedTools が末尾に残る", () => {
+  const args = buildArgs("やって", {
+    cwd: "/wt",
+    sessionId: "s1",
+    appendSystemPrompt: "1コマンドずつ",
+    allowedTools: ["Bash(grep:*)", "Bash(git diff:*)"],
+  });
+  assert.deepEqual(args.slice(-3), ["--allowedTools", "Bash(grep:*)", "Bash(git diff:*)"]);
+  assert.ok(
+    args.indexOf("--append-system-prompt") < args.indexOf("--allowedTools"),
+    "--allowedTools は可変長なので、後ろに置いたフラグはツール名として食われる",
+  );
+});
+
 test("jsonSchema を渡すと --json-schema が JSON 文字列 1 引数で付く", () => {
   const args = buildArgs("やって", {
     cwd: "/wt",

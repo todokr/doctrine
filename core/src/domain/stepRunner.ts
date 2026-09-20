@@ -6,6 +6,7 @@ import type { AgentAdapter, RateLimitObservation } from "../adapter/types.ts";
 import { renderEvent } from "../adapter/render.ts";
 import { exitCodeOf } from "../util/exec.ts";
 import type { PermissionDenial } from "../../../shared/protocol.ts";
+import { BUILTIN_APPEND_SYSTEM_PROMPT } from "./systemPrompt.ts";
 
 export type StepOutcome = {
   status: "success" | "failed" | "degraded" | "suspended";
@@ -252,6 +253,7 @@ export async function runAgentStep(
     permissionMode: step.permissionMode,
     model: step.model,
     allowedTools: step.allowedTools,
+    appendSystemPrompt: BUILTIN_APPEND_SYSTEM_PROMPT,
   };
 
   try {
