@@ -26,6 +26,7 @@ steps:
   - id: plan
     type: agent
     session: planner
+    model: claude-opus-5
     permissionMode: acceptEdits
     allowedTools:
       - "Bash(git status:*)"
@@ -63,6 +64,7 @@ steps:
   - id: plan-review
     type: agent
     session: plan-reviewer
+    model: claude-opus-5
     permissionMode: acceptEdits
     allowedTools:
       - "Bash(git status:*)"
@@ -108,6 +110,7 @@ steps:
   - id: implement
     type: agent
     session: implementer
+    model: claude-sonnet-5
     permissionMode: acceptEdits
     # acceptEdits では Bash がすべて拒否されるので、このリポジトリで要るものだけ許可する。
     allowedTools:
@@ -158,6 +161,7 @@ steps:
   - id: agent-review
     type: agent
     session: code-reviewer
+    model: claude-opus-5
     permissionMode: acceptEdits
     allowedTools:
       - "Bash(git status:*)"
