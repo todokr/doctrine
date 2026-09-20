@@ -10,7 +10,8 @@
 #
 # 2つのゲート（plan-gate / review-gate）は、審査役が書いた成果物ファイルの
 # 1行目が `verdict: approve` かどうかを grep で見るだけの command ステップ。
-# reject なら onFailure で前の工程へ戻り、feed で審査役の最終応答を渡す。
+# reject なら成果物ファイルを stdout に出して落ち、onFailure で前の工程へ戻る。
+# feed はゲート自身の last_stdout（＝審査結果のファイルの中身）を渡す。
 #   plan-gate   が落ちたら plan へ（最大3回）
 #   verify      が落ちたら implement へ（最大3回）
 #   review-gate が落ちたら implement へ（最大3回）
@@ -92,18 +93,17 @@ steps:
       plan-review.md の1行目は必ず `verdict: approve` か `verdict: reject` のどちらかにします。
       2行目以降に指摘を書いてください。修正が必要な具体的な指摘があるときだけ reject にします。
 
-      最終応答には plan-review.md の内容をそのまま書いてください
-      （後続のステップが参照できるのは最終応答だけです）。
+      指摘は plan-review.md から後続のステップへ渡ります。最終応答は verdict の1行だけで構いません。
 
   - id: plan-gate
     type: command
-    run: "grep -q '^verdict: approve' .doctrine-out/plan-review.md"
+    run: "grep -q '^verdict: approve' .doctrine-out/plan-review.md || { cat .doctrine-out/plan-review.md || echo 'plan-review.md が書かれていない'; exit 1; }"
     onFailure:
       goto: plan
       maxAttempts: 3
       feed: |
         計画がレビューで却下された:
-        {{ steps.plan-review.last_stdout }}
+        {{ steps.plan-gate.last_stdout }}
 
   - id: implement
     type: agent
@@ -170,7 +170,6 @@ steps:
     prompt: |
       型検査とテストは直前の verify ステップで通っています。自分で回す必要はありません。
 
-
       implement が積んだコミットを毎回読み直して審査し、結果を
       {{ worktree.path }}/.doctrine-out/review.md に上書きしてください。
 
@@ -184,18 +183,17 @@ steps:
       review.md の1行目は必ず `verdict: approve` か `verdict: reject` のどちらかにします。
       2行目以降に指摘を書いてください。修正が必要な具体的な指摘があるときだけ reject にします。
 
-      最終応答には review.md の内容をそのまま書いてください
-      （後続のステップが参照できるのは最終応答だけです）。
+      指摘は review.md から後続のステップへ渡ります。最終応答は verdict の1行だけで構いません。
 
   - id: review-gate
     type: command
-    run: "grep -q '^verdict: approve' .doctrine-out/review.md"
+    run: "grep -q '^verdict: approve' .doctrine-out/review.md || { cat .doctrine-out/review.md || echo 'review.md が書かれていない'; exit 1; }"
     onFailure:
       goto: implement
       maxAttempts: 3
       feed: |
         実装がレビューで却下された:
-        {{ steps.agent-review.last_stdout }}
+        {{ steps.review-gate.last_stdout }}
 
   - id: review
     type: approval
