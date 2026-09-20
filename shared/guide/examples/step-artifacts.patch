@@ -1,0 +1,568 @@
+diff --git a/src/core/engine.ts b/src/core/engine.ts
+index df93be3..804391a 100644
+--- a/src/core/engine.ts
++++ b/src/core/engine.ts
+@@ -5,10 +5,14 @@ import { commitStepBoundary, StateConflictError, type StepBoundary } from "../db
+ import { getStepOutputs, type StepRunStatus } from "../db/stepRuns.ts";
+ import { attemptCount, getProject, getTask, withAttempt, type TaskRow, type TaskState } from "../db/tasks.ts";
+ import { insertRateLimitSample } from "../db/rateLimits.ts";
++import { getSessionId } from "../db/sessions.ts";
+ import type { Db } from "../db/schema.ts";
+ import { assertTransition } from "./states.ts";
+ import { logPathFor, runAgentStep, runCommandStep, type RunnerDeps, type StepOutcome } from "./stepRunner.ts";
+ 
++/** session を省略した agent ステップが共有する暗黙のロール名。 */
++export const DEFAULT_SESSION_ROLE = "default";
++
+ export type Decision =
+   | { kind: "next"; stepId: string }
+   | { kind: "goto"; stepId: string; feed: string | null }
+@@ -123,12 +127,14 @@ export async function runTask(
+ 
+     const attempt = attemptCount(task, step.id) + 1;
+     const ctx = await contextFor(db, task);
+-    // session id はタスク全体で1つ。「このステップを始める時点で既に会話が
+-    // あったか」だけが resume すべきかを決める（ステップ内の再試行かどうかでは
+-    // ない）。agent ステップが2つ並ぶワークフローで2度 start すると、同じ
+-    // --session-id を使い回すことになり、CLI が拒否するか会話が継続しない。
+-    const hadSession = task.claude_session_id !== null;
+-    const sessionId = task.claude_session_id ?? crypto.randomUUID();
++    // セッションはロール単位（agent ステップの session、省略時は既定ロール）。
++    // 「このロールで会話が既にあったか」だけが resume すべきかを決める
++    // （ステップ内の再試行かどうかではない）。session を省略すると全 agent ステップが
++    // 同じ既定ロールを共有するので、今までどおり「タスクに会話は1本」になる。
++    const role = step.type === "agent" ? (step.session ?? DEFAULT_SESSION_ROLE) : null;
++    const existingSessionId = role ? await getSessionId(db, taskId, role) : undefined;
++    const hadSession = existingSessionId !== undefined;
++    const sessionId = existingSessionId ?? crypto.randomUUID();
+ 
+     const logPath = logPathFor(deps.logRoot, taskId, step.id, attempt);
+     // 開始時に running の行を立てる。クラッシュ復帰はこの行を見て、
+@@ -142,14 +148,13 @@ export async function runTask(
+         requireState: "running",
+         taskPatch: {
+           current_step_id: step.id, attempt_counts: withAttempt(task, step.id),
+-          // 会話を始めるのは agent ステップだけ。command ステップでも書くと、
+-          // 一度も start していない id が「会話がある」ことにされ、次の agent が
+-          // その id で resume してしまう（project.setup は全ワークフローの
+-          // 先頭に command ステップとして入るので、これは常道の形で必ず踏む）。
+-          // 既存の非null値を消さないよう、キーごと省く（null を書かない）。
+-          ...(step.type === "agent" ? { claude_session_id: sessionId } : {}),
+           pending_feed: null,
+         },
++        // 会話を始めるのは agent ステップだけ。command ステップでは書かない —
++        // 一度も start していないロールが「会話がある」ことにされ、次の agent が
++        // そのロールで resume してしまうのを防ぐ（project.setup は全ワークフローの
++        // 先頭に command ステップとして入るので、これは常道の形で必ず踏む）。
++        sessionUpsert: role ? { role, session_id: sessionId } : undefined,
+         stepRun: {
+           step_id: step.id, attempt, status: "running", exit_code: null,
+           started_at: new Date().toISOString(), ended_at: null, log_path: logPath,
+diff --git a/src/core/worktree.ts b/src/core/worktree.ts
+index 5474b22..d15cf20 100644
+--- a/src/core/worktree.ts
++++ b/src/core/worktree.ts
+@@ -1,4 +1,4 @@
+-import { basename, join, resolve } from "@std/path";
++import { basename, dirname, isAbsolute, join, resolve } from "@std/path";
+ import { runCommand } from "../util/exec.ts";
+ import { homeDir } from "../util/home.ts";
+ 
+@@ -38,11 +38,50 @@ export function branchNameFor(taskId: string, title: string): string {
+   return slug ? `doctrine/${taskId}-${slug}` : `doctrine/${taskId}`;
+ }
+ 
++/**
++ * 前段のエージェントが worktree 内に書く中間成果物の置き場所。doctrine 自身は
++ * この名前を強制しない（ワークフローの書き手がプロンプトで決める自由な文字列）が、
++ * git に見せないための exclude 設定だけはこの規約に合わせて自動で行う
++ * （step-artifacts spec 4章）。
++ */
++const DOCTRINE_OUT_EXCLUDE_LINE = ".doctrine-out/";
++
++/**
++ * `.doctrine-out/` を `.git/info/exclude` に追記し、git status / task.diff の
++ * write-tree の両方から見えなくする。プロジェクトの `.gitignore` は書き換えない
++ * （project-add が「既存のファイルを上書きしない」原則を持つのと同じ理由）。
++ *
++ * `git rev-parse --git-path` は、リポジトリのルートから呼ぶと相対パスを、
++ * リンクされた worktree から呼ぶと絶対パスを返す（common dir を指すため）。
++ * どちらでも動くよう、絶対パスでなければ repoPath からの相対として解決する。
++ *
++ * 既に同じ行があれば何もしない（複数タスクが同じリポジトリに何度も worktree を
++ * 作るので冪等にする）。
++ */
++export async function ensureDoctrineOutExcluded(repoPath: string): Promise<void> {
++  const { stdout } = await runCommand("git", ["-C", repoPath, "rev-parse", "--git-path", "info/exclude"]);
++  const raw = stdout.trim();
++  const excludePath = isAbsolute(raw) ? raw : join(repoPath, raw);
++
++  let content = "";
++  try {
++    content = await Deno.readTextFile(excludePath);
++  } catch (e) {
++    if (!(e instanceof Deno.errors.NotFound)) throw e;
++  }
++  if (content.split("\n").some((l) => l.trim() === DOCTRINE_OUT_EXCLUDE_LINE)) return;
++
++  const withTrailingNewline = content.length > 0 && !content.endsWith("\n") ? content + "\n" : content;
++  await Deno.mkdir(dirname(excludePath), { recursive: true });
++  await Deno.writeTextFile(excludePath, withTrailingNewline + DOCTRINE_OUT_EXCLUDE_LINE + "\n");
++}
++
+ /** 作成は自前の git worktree add。ライフサイクルの権威を1箇所に保つ。 */
+ export async function createWorktree(o: {
+   repoPath: string; worktreePath: string; branch: string; baseBranch: string;
+ }): Promise<void> {
+   await runCommand("git", ["-C", o.repoPath, "worktree", "add", "-b", o.branch, o.worktreePath, o.baseBranch]);
++  await ensureDoctrineOutExcluded(o.repoPath);
+ }
+ 
+ export async function hasUncommittedChanges(worktreePath: string): Promise<boolean> {
+diff --git a/src/db/boundary.ts b/src/db/boundary.ts
+index 3de75af..52ed54b 100644
+--- a/src/db/boundary.ts
++++ b/src/db/boundary.ts
+@@ -29,6 +29,8 @@ export type StepBoundary = {
+     id: number; status: StepRunStatus; exit_code: number | null; ended_at: string;
+     cost_usd?: number | null; num_turns?: number | null; duration_ms?: number | null;
+   };
++  /** ステップ開始時（agent ステップのみ）: そのロールのセッションを記録する。 */
++  sessionUpsert?: { role: string; session_id: string };
+   outputs?: { step_id: string; stdout: string; stderr: string; exit_code: number | null };
+ };
+ 
+@@ -100,6 +102,16 @@ export function commitStepBoundary(db: Db, b: StepBoundary): Promise<number | nu
+       stepRunId = u.id;
+     }
+ 
++    if (b.sessionUpsert) {
++      const s = b.sessionUpsert;
++      await trx.insertInto("task_sessions")
++        .values({ task_id: b.taskId, role: s.role, session_id: s.session_id })
++        .onConflict((oc) => oc.columns(["task_id", "role"]).doUpdateSet((eb) => ({
++          session_id: eb.ref("excluded.session_id"),
++        })))
++        .execute();
++    }
++
+     if (b.outputs) {
+       const o = b.outputs;
+       await trx.insertInto("step_outputs")
+diff --git a/src/db/migrations.ts b/src/db/migrations.ts
+index 1825a7d..efa4205 100644
+--- a/src/db/migrations.ts
++++ b/src/db/migrations.ts
+@@ -109,6 +109,24 @@ const migrations: Record<string, Migration> = {
+         .execute();
+     },
+   },
++  "0002_task_sessions": {
++    // deno-lint-ignore no-explicit-any
++    async up(db: Kysely<any>) {
++      await db.schema.createTable("task_sessions").ifNotExists()
++        .addColumn("task_id", "text", (c) => c.notNull().references("tasks.id"))
++        .addColumn("role", "text", (c) => c.notNull())
++        .addColumn("session_id", "text", (c) => c.notNull())
++        .addPrimaryKeyConstraint("task_sessions_pk", ["task_id", "role"])
++        .execute();
++
++      // 既存の tasks.claude_session_id を role "default" として移す。
++      // 列自体はここでは消さない（コードから参照しなくなるだけ、spec 5章）。
++      await sql`
++        INSERT INTO task_sessions (task_id, role, session_id)
++        SELECT id, 'default', claude_session_id FROM tasks WHERE claude_session_id IS NOT NULL
++      `.execute(db);
++    },
++  },
+ };
+ 
+ /** ファイルを動的 import しない（権限も要らず、deno check で型検査される）。 */
+diff --git a/src/db/schema.ts b/src/db/schema.ts
+index 11550b6..98d590e 100644
+--- a/src/db/schema.ts
++++ b/src/db/schema.ts
+@@ -43,6 +43,12 @@ export interface TasksTable {
+   updated_at: string;
+ }
+ 
++export interface TaskSessionsTable {
++  task_id: string;
++  role: string;
++  session_id: string;
++}
++
+ export interface StepRunsTable {
+   id: Generated<number>;
+   task_id: string;
+@@ -79,6 +85,7 @@ export interface Database {
+   tasks: TasksTable;
+   step_runs: StepRunsTable;
+   step_outputs: StepOutputsTable;
++  task_sessions: TaskSessionsTable;
+   rate_limit_samples: RateLimitSamplesTable;
+ }
+ 
+diff --git a/src/db/sessions.ts b/src/db/sessions.ts
+new file mode 100644
+index 0000000..eb7a2c8
+--- /dev/null
++++ b/src/db/sessions.ts
+@@ -0,0 +1,12 @@
++import type { Db } from "./schema.ts";
++
++/**
++ * タスクのロール別セッションIDを引く。無ければ undefined
++ * （そのロールではまだ agent ステップが start していない）。
++ */
++export async function getSessionId(db: Db, taskId: string, role: string): Promise<string | undefined> {
++  const row = await db.selectFrom("task_sessions").select("session_id")
++    .where("task_id", "=", taskId).where("role", "=", role)
++    .executeTakeFirst();
++  return row?.session_id;
++}
+diff --git a/src/workflow/schema.ts b/src/workflow/schema.ts
+index c3dfcb6..28a547f 100644
+--- a/src/workflow/schema.ts
++++ b/src/workflow/schema.ts
+@@ -4,7 +4,7 @@ import { z } from "zod";
+ export type Branch = { goto: string; maxAttempts: number; feed?: string };
+ export type CommandStep = { id: string; type: "command"; run: string; onFailure?: Branch };
+ export type AgentStep = {
+-  id: string; type: "agent"; prompt: string;
++  id: string; type: "agent"; prompt: string; session?: string;
+   permissionMode?: string; model?: string; onFailure?: Branch;
+ };
+ export type ApprovalStep = { id: string; type: "approval"; title: string; onReject?: Branch };
+@@ -39,6 +39,7 @@ const stepSchema = z.discriminatedUnion("type", [
+   z.object({ id: stepId, type: z.literal("command"), run: z.string().min(1), onFailure: branch.optional() }).strict(),
+   z.object({
+     id: stepId, type: z.literal("agent"), prompt: z.string().min(1),
++    session: z.string().min(1).regex(/^[a-zA-Z0-9_-]+$/, "sessionは英数字・ハイフン・アンダースコアのみ").optional(),
+     permissionMode: z.string().optional(), model: z.string().optional(), onFailure: branch.optional(),
+   }).strict(),
+   z.object({ id: stepId, type: z.literal("approval"), title: z.string().min(1), onReject: branch.optional() }).strict(),
+diff --git a/test/core/engine.test.ts b/test/core/engine.test.ts
+index 94711b5..ca36c34 100644
+--- a/test/core/engine.test.ts
++++ b/test/core/engine.test.ts
+@@ -230,6 +230,64 @@ steps:
+   assert.equal(adapter.calls[1].sessionId, adapter.calls[0].sessionId);
+ });
+ 
++test("異なる session を持つ agent ステップは独立した会話になる", async () => {
++  const { db, root, workflow } = await taskFixture(`
++name: f
++steps:
++  - id: plan
++    type: agent
++    session: planner
++    prompt: "計画して"
++  - id: implement
++    type: agent
++    session: implementer
++    prompt: "実装して"
++`);
++  const adapter = createMockAdapter({ result: { ok: true, text: "done" } });
++  await runTask(db, "t1", workflow, { db, adapter, logRoot: join(root, "logs"), globalLimit: 4 });
++
++  assert.equal(adapter.calls.length, 2);
++  assert.equal(adapter.calls[0].kind, "start");
++  assert.equal(adapter.calls[1].kind, "start", "role が違うので implementer は自分の会話を持たない");
++  assert.notEqual(adapter.calls[1].sessionId, adapter.calls[0].sessionId, "ロールごとに別の session id");
++});
++
++test("session ごとに独立した会話が保たれる（別ロールを挟んでも取り違えない）", async () => {
++  const { db, root, workflow } = await taskFixture(`
++name: f
++steps:
++  - id: implement
++    type: agent
++    session: implementer
++    prompt: "実装して"
++  - id: review
++    type: agent
++    session: reviewer
++    prompt: "レビューして"
++  - id: test
++    type: command
++    run: "false"
++    onFailure:
++      goto: implement
++      maxAttempts: 2
++      feed: "指摘があった"
++`);
++  const adapter = createMockAdapter({ result: { ok: true, text: "done" } });
++  await runTask(db, "t1", workflow, { db, adapter, logRoot: join(root, "logs"), globalLimit: 4 });
++
++  // implement(start) -> review(start) -> test(失敗) -> implement(resume) -> review(resume)
++  // -> test(失敗、maxAttempts=2 を使い切って failed)
++  assert.equal(adapter.calls.length, 4);
++  assert.equal(adapter.calls[0].kind, "start");
++  assert.equal(adapter.calls[1].kind, "start");
++  assert.equal(adapter.calls[2].kind, "resume");
++  assert.equal(adapter.calls[3].kind, "resume");
++  assert.equal(adapter.calls[2].sessionId, adapter.calls[0].sessionId, "implementer の会話が続く");
++  assert.equal(adapter.calls[3].sessionId, adapter.calls[1].sessionId, "reviewer の会話が続く");
++  assert.notEqual(adapter.calls[0].sessionId, adapter.calls[1].sessionId, "ロールごとに別の session id");
++  assert.equal((await getTask(db, "t1"))?.state, "failed", "maxAttempts を使い切って failed");
++});
++
+ test("先行する command ステップは session を消費しない（最初の agent は start）", async () => {
+   const { db, root, workflow } = await taskFixture(`
+ name: f
+diff --git a/test/core/worktree.test.ts b/test/core/worktree.test.ts
+index dac3345..3962cf3 100644
+--- a/test/core/worktree.test.ts
++++ b/test/core/worktree.test.ts
+@@ -2,13 +2,13 @@ import { test, beforeEach, afterEach } from "@std/testing/bdd";
+ import assert from "node:assert/strict";
+ import { execFile } from "node:child_process";
+ import { promisify } from "node:util";
+-import { mkdtemp, rm, writeFile, stat, realpath } from "node:fs/promises";
++import { mkdtemp, rm, writeFile, stat, realpath, mkdir, readFile } from "node:fs/promises";
+ import { tmpdir } from "node:os";
+ import { join, basename, sep } from "node:path";
+ import {
+   createWorktree, removeWorktree, hasUncommittedChanges, findOrphans,
+   branchNameFor, slugify, UncommittedChangesError,
+-  stateDir, worktreePathFor, listWorktrees,
++  stateDir, worktreePathFor, listWorktrees, ensureDoctrineOutExcluded,
+ } from "../../src/core/worktree.ts";
+ 
+ const run = promisify(execFile);
+@@ -49,6 +49,39 @@ test("baseBranch から worktree とブランチを生やす", async () => {
+   assert.equal(stdout.trim(), "doctrine/t1-x");
+ });
+ 
++test("worktree作成時に .doctrine-out/ を .git/info/exclude に追記する", async () => {
++  const wt = join(root, "wt", "t1");
++  await createWorktree({ repoPath: repo, worktreePath: wt, branch: "doctrine/t1-x", baseBranch: "main" });
++  const content = await readFile(join(repo, ".git", "info", "exclude"), "utf8");
++  assert.match(content, /^\.doctrine-out\/$/m);
++});
++
++test(".git/info/ が存在しなくても worktree作成時に .git/info/exclude を作成する", async () => {
++  await rm(join(repo, ".git", "info"), { recursive: true, force: true });
++  const wt = join(root, "wt", "t1b");
++  await createWorktree({ repoPath: repo, worktreePath: wt, branch: "doctrine/t1b-x", baseBranch: "main" });
++  const content = await readFile(join(repo, ".git", "info", "exclude"), "utf8");
++  assert.match(content, /^\.doctrine-out\/$/m);
++});
++
++test(".doctrine-out/ 配下の変更は hasUncommittedChanges で無視される", async () => {
++  const wt = join(root, "wt", "t2");
++  await createWorktree({ repoPath: repo, worktreePath: wt, branch: "doctrine/t2-x", baseBranch: "main" });
++  await mkdir(join(wt, ".doctrine-out"), { recursive: true });
++  await writeFile(join(wt, ".doctrine-out", "plan.md"), "plan\n");
++  assert.equal(await hasUncommittedChanges(wt), false);
++});
++
++test("2回 createWorktree しても info/exclude の行は重複しない", async () => {
++  const wt1 = join(root, "wt", "a");
++  const wt2 = join(root, "wt", "b");
++  await createWorktree({ repoPath: repo, worktreePath: wt1, branch: "doctrine/a", baseBranch: "main" });
++  await createWorktree({ repoPath: repo, worktreePath: wt2, branch: "doctrine/b", baseBranch: "main" });
++  const content = await readFile(join(repo, ".git", "info", "exclude"), "utf8");
++  const matches = content.match(/^\.doctrine-out\/$/gm) ?? [];
++  assert.equal(matches.length, 1);
++});
++
+ test("worktreePathFor はリポジトリの外のパスを組み立てる", async () => {
+   const tmpState = await mkdtemp(join(tmpdir(), "doctrine-state-"));
+   try {
+diff --git a/test/db/migrate.test.ts b/test/db/migrate.test.ts
+index a15ab74..ac5e35a 100644
+--- a/test/db/migrate.test.ts
++++ b/test/db/migrate.test.ts
+@@ -186,6 +186,7 @@ const COLUMNS = {
+     started_at: true, ended_at: true, log_path: true, cost_usd: true, num_turns: true, duration_ms: true,
+   },
+   step_outputs: { task_id: true, step_id: true, stdout: true, stderr: true, exit_code: true },
++  task_sessions: { task_id: true, role: true, session_id: true },
+   rate_limit_samples: { id: true, observed_at: true, window: true, utilization: true, resets_at: true },
+ } satisfies { [T in keyof Database]: { [C in keyof Database[T]]: true } };
+ 
+@@ -203,12 +204,12 @@ async function appliedMigrations(d: Db): Promise<string[]> {
+   return rows.map((r) => r.name);
+ }
+ 
+-test("マイグレーションで5つのテーブルができる", async () => {
++test("マイグレーションで6つのテーブルができる", async () => {
+   const d = await db();
+   const { rows } = await sql<{ name: string }>`SELECT name FROM sqlite_master WHERE type='table' ORDER BY name`
+     .execute(d);
+   const names = rows.map((r) => r.name);
+-  for (const t of ["projects", "rate_limit_samples", "step_outputs", "step_runs", "tasks"]) {
++  for (const t of ["projects", "rate_limit_samples", "step_outputs", "step_runs", "task_sessions", "tasks"]) {
+     assert.ok(names.includes(t), `${t} が無い: ${names.join(",")}`);
+   }
+ });
+@@ -269,12 +270,12 @@ test("開き直してもマイグレーションは二度流れず、データ
+   const path = await tempDbPath();
+   const first = await openDb(path);
+   await seed(first);
+-  assert.deepEqual(await appliedMigrations(first), ["0001_baseline"]);
++  assert.deepEqual(await appliedMigrations(first), ["0001_baseline", "0002_task_sessions"]);
+   await first.destroy();
+ 
+   const second = await openDb(path);
+   try {
+-    assert.deepEqual(await appliedMigrations(second), ["0001_baseline"]);
++    assert.deepEqual(await appliedMigrations(second), ["0001_baseline", "0002_task_sessions"]);
+     assert.equal((await second.selectFrom("projects").selectAll().execute()).length, 1);
+   } finally {
+     await second.destroy();
+@@ -299,7 +300,7 @@ test("pending_feed を足す前に作られたDBファイルは、行を保っ
+ 
+   const d = await openDb(path);
+   try {
+-    assert.deepEqual(await appliedMigrations(d), ["0001_baseline"]);
++    assert.deepEqual(await appliedMigrations(d), ["0001_baseline", "0002_task_sessions"]);
+     const old = await getTask(d, "old");
+     assert.equal(old?.state, "suspended", "既存の行は残る");
+     assert.equal(old?.pending_feed, null, "列が足されていて、読める");
+@@ -310,6 +311,30 @@ test("pending_feed を足す前に作られたDBファイルは、行を保っ
+   }
+ });
+ 
++test("claude_session_id を持つ既存タスクは role \"default\" として task_sessions に移される", async () => {
++  const path = await tempDbPath();
++  const legacy = new DatabaseSync(path);
++  legacy.exec(LEGACY_DDL);
++  legacy.prepare("INSERT INTO projects (path, default_workflow) VALUES ('/repo', 'feature')").run();
++  legacy.prepare(
++    `INSERT INTO tasks (id, project_id, title, prompt, workflow_name, state, branch, claude_session_id, created_at, updated_at)
++     VALUES ('old', 1, 'T', 'P', 'feature', 'running', 'b', 'sess-1', 'x', 'x')`,
++  ).run();
++  legacy.prepare(
++    `INSERT INTO tasks (id, project_id, title, prompt, workflow_name, state, branch, created_at, updated_at)
++     VALUES ('no-session', 1, 'T', 'P', 'feature', 'queued', 'b2', 'x', 'x')`,
++  ).run();
++  legacy.close();
++
++  const d = await openDb(path);
++  try {
++    const rows = await d.selectFrom("task_sessions").selectAll().execute();
++    assert.deepEqual(rows.map((r) => ({ task_id: r.task_id, role: r.role, session_id: r.session_id })), [{ task_id: "old", role: "default", session_id: "sess-1" }]);
++  } finally {
++    await d.destroy();
++  }
++});
++
+ test("手書き DDL 時代のDBを移行した形は、新規に作ったDBの形と一致する", async () => {
+   for (const ddl of [LEGACY_DDL, LEGACY_DDL_WITHOUT_PENDING_FEED]) {
+     const legacy = new DatabaseSync(":memory:");
+diff --git a/test/db/sessions.test.ts b/test/db/sessions.test.ts
+new file mode 100644
+index 0000000..bb36c0b
+--- /dev/null
++++ b/test/db/sessions.test.ts
+@@ -0,0 +1,42 @@
++import { test } from "@std/testing/bdd";
++import assert from "node:assert/strict";
++import { openDb } from "../../src/db/migrate.ts";
++import { insertProject, insertTask } from "../../src/db/tasks.ts";
++import { commitStepBoundary } from "../../src/db/boundary.ts";
++import { getSessionId } from "../../src/db/sessions.ts";
++import type { Db } from "../../src/db/schema.ts";
++
++async function fixture(): Promise<Db> {
++  const d = await openDb(":memory:");
++  const pid = await insertProject(d, {
++    path: "/repo", default_workflow: "f", max_concurrent: 1, base_branch: "main", setup: null,
++  });
++  await insertTask(d, { id: "t1", project_id: pid, title: "T", prompt: "P", workflow_name: "f", branch: "b", priority: 2 });
++  return d;
++}
++
++test("セッションが無いロールは undefined", async () => {
++  const d = await fixture();
++  assert.equal(await getSessionId(d, "t1", "planner"), undefined);
++});
++
++test("commitStepBoundary の sessionUpsert で書いたセッションが引ける", async () => {
++  const d = await fixture();
++  await commitStepBoundary(d, { taskId: "t1", taskPatch: {}, sessionUpsert: { role: "planner", session_id: "s1" } });
++  assert.equal(await getSessionId(d, "t1", "planner"), "s1");
++});
++
++test("同じロールへの2度目の sessionUpsert は上書きする", async () => {
++  const d = await fixture();
++  await commitStepBoundary(d, { taskId: "t1", taskPatch: {}, sessionUpsert: { role: "planner", session_id: "s1" } });
++  await commitStepBoundary(d, { taskId: "t1", taskPatch: {}, sessionUpsert: { role: "planner", session_id: "s2" } });
++  assert.equal(await getSessionId(d, "t1", "planner"), "s2");
++});
++
++test("ロールが違えば別のセッションとして残る", async () => {
++  const d = await fixture();
++  await commitStepBoundary(d, { taskId: "t1", taskPatch: {}, sessionUpsert: { role: "planner", session_id: "s1" } });
++  await commitStepBoundary(d, { taskId: "t1", taskPatch: {}, sessionUpsert: { role: "implementer", session_id: "s2" } });
++  assert.equal(await getSessionId(d, "t1", "planner"), "s1");
++  assert.equal(await getSessionId(d, "t1", "implementer"), "s2");
++});
+diff --git a/test/workflow/schema.test.ts b/test/workflow/schema.test.ts
+index 2513ba4..1758cde 100644
+--- a/test/workflow/schema.test.ts
++++ b/test/workflow/schema.test.ts
+@@ -1,6 +1,6 @@
+ import { test } from "@std/testing/bdd";
+ import assert from "node:assert/strict";
+-import { parseWorkflow, WorkflowValidationError, type CommandStep } from "../../src/workflow/schema.ts";
++import { parseWorkflow, WorkflowValidationError, type CommandStep, type AgentStep } from "../../src/workflow/schema.ts";
+ 
+ const VALID = `
+ name: feature
+@@ -169,3 +169,52 @@ steps:
+     return true;
+   });
+ });
++
++test("agent ステップの session を読める", () => {
++  const yaml = `
++name: roles
++steps:
++  - id: plan
++    type: agent
++    session: planner
++    prompt: "計画してください"
++  - id: review
++    type: approval
++    title: "確認してください"
++`;
++  const { workflow } = parseWorkflow(yaml);
++  assert.equal((workflow.steps[0] as AgentStep).session, "planner");
++});
++
++test("session を省略した agent ステップは undefined のまま", () => {
++  const { workflow } = parseWorkflow(VALID);
++  assert.equal((workflow.steps[0] as AgentStep).session, undefined);
++});
++
++test("session に使えない文字は日本語で案内する", () => {
++  const yaml = `
++name: bad
++steps:
++  - id: plan
++    type: agent
++    session: "plan ner"
++    prompt: "x"
++`;
++  assert.throws(() => parseWorkflow(yaml), (e: unknown) => {
++    assert.ok(e instanceof WorkflowValidationError);
++    assert.match(e.issues.join("\n"), /session/);
++    return true;
++  });
++});
++
++test("command ステップに session を書くと弾かれる", () => {
++  const yaml = `
++name: bad
++steps:
++  - id: a
++    type: command
++    run: "true"
++    session: x
++`;
++  assert.throws(() => parseWorkflow(yaml), WorkflowValidationError);
++});
