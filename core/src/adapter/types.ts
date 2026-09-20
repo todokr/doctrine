@@ -38,6 +38,8 @@ export type StartOptions = {
   permissionMode?: string;
   model?: string;
   allowedTools?: string[];
+  /** 渡すと claude -p に --append-system-prompt が付く。既定のシステムプロンプトは置き換えない。 */
+  appendSystemPrompt?: string;
   /** 渡すと claude -p に --json-schema が付く。JSON Schema のオブジェクトをそのまま渡す。 */
   jsonSchema?: Record<string, unknown>;
 };

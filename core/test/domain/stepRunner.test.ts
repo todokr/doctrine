@@ -12,6 +12,7 @@ import {
   stamp,
 } from "../../src/domain/stepRunner.ts";
 import { createMockAdapter } from "../../src/adapter/mock.ts";
+import { BUILTIN_APPEND_SYSTEM_PROMPT } from "../../src/domain/systemPrompt.ts";
 import type { TemplateContext } from "../../src/workflow/template.ts";
 
 let root: string;
@@ -131,6 +132,42 @@ test("resume: true なら resume が呼ばれる", async () => {
     "直して を直して",
     "resume でもプロンプトの変数が展開されている",
   );
+});
+
+test("agent ステップには組み込みのシステムプロンプトが常に渡る", async () => {
+  const adapter = createMockAdapter({ result: { ok: true, text: "できました" } });
+  await runAgentStep(
+    { id: "a", type: "agent", prompt: "p" },
+    ctx,
+    {
+      cwd: root,
+      taskId: "t1",
+      attempt: 1,
+      sessionId: "s1",
+      resume: false,
+      deps: await deps({ adapter }),
+    },
+  );
+  assert.equal(adapter.calls[0].kind, "start");
+  assert.equal(adapter.calls[0].opts.appendSystemPrompt, BUILTIN_APPEND_SYSTEM_PROMPT);
+});
+
+test("再開でも組み込みのシステムプロンプトが渡る", async () => {
+  const adapter = createMockAdapter({ result: { ok: true, text: "続きです" } });
+  await runAgentStep(
+    { id: "a", type: "agent", prompt: "p" },
+    ctx,
+    {
+      cwd: root,
+      taskId: "t1",
+      attempt: 2,
+      sessionId: "s1",
+      resume: true,
+      deps: await deps({ adapter }),
+    },
+  );
+  assert.equal(adapter.calls[0].kind, "resume");
+  assert.equal(adapter.calls[0].opts.appendSystemPrompt, BUILTIN_APPEND_SYSTEM_PROMPT);
 });
 
 test("permission_denials があれば degraded として返る", async () => {

@@ -20,7 +20,9 @@ export function buildArgs(prompt: string, opts: StartOptions, resumeSessionId?: 
   if (opts.permissionMode) args.push("--permission-mode", opts.permissionMode);
   args.push("--permission-prompts", "none");
   if (opts.model) args.push("--model", opts.model);
-  // --allowedTools が可変長なので、これより後ろに置くとスキーマがツール名として食われる。
+  // --allowedTools が可変長なので、これより後ろに置くとスキーマやシステムプロンプトが
+  // ツール名として食われる。
+  if (opts.appendSystemPrompt) args.push("--append-system-prompt", opts.appendSystemPrompt);
   if (opts.jsonSchema) args.push("--json-schema", JSON.stringify(opts.jsonSchema));
   // `Bash(git diff:*)` のように空白を含むパターンがあるので、カンマで連結せず
   // 1要素を1つの argv として渡す。
