@@ -69,8 +69,8 @@ jobs:
 
           matches() { echo "$changed" | grep -qE "$1"; }
 
-          # ワークフロー自身と mise.toml（ツールの版）は両方に効くので、
-          # 触ったら両方流す。
+          # ワークフロー自身と mise.toml（ツールの版）は全部に効くので、
+          # 触ったら全部流す。
           common='^(\.github/|mise\.toml$)'
 
           core=false

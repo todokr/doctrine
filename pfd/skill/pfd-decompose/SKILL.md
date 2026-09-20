@@ -57,6 +57,14 @@ artifacts:
     name: 集計テーブル
     description: 何であるかを 1〜2 文で
     verify: この成果物だけを確かめる方法（テスト・コマンド・目視の手順）
+  - id: metric-definition
+    name: 集計の定義
+    description: 人が決めた内容
+    verify: 決めた内容が pfd done の note に書かれている
+  - id: feature
+    name: 集計画面
+    description: goal の成果物。これがマージされたら Issue は完了
+    verify: 画面のテストが通る
 
 processes:
   - id: 1
@@ -73,6 +81,13 @@ processes:
     outputs: [metric-definition]
     purpose: 何を決めるのか
     done_when: 何が決まっていれば終わりか
+  - id: 3
+    name: 画面を繋ぐ
+    inputs: [new-table, metric-definition]
+    outputs: [feature]
+    purpose: なぜこの作業が要るか
+    steps: 何をどの順でやるか
+    done_when: 何をもって終わりとするか
 ```
 
 - **成果物から先に決める。** 「何を作れば Issue が終わるか」を `goal` に置き、それを作るのに

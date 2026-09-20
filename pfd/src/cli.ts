@@ -131,9 +131,11 @@ function reportViolations(pfd: Pfd, deps: Deps): boolean {
 
 async function run(argv: string[], deps: Deps): Promise<number> {
   const [cmd, ...rest] = argv;
-  if (cmd === undefined || cmd === "help" || cmd === "--help" || cmd === "-h") {
-    throw new Error(USAGE);
+  if (cmd === "help" || cmd === "--help" || cmd === "-h") {
+    deps.out(USAGE);
+    return 0;
   }
+  if (cmd === undefined) throw new Error(USAGE);
   const { flags, positional } = splitArgs(rest);
 
   switch (cmd) {
@@ -155,7 +157,7 @@ async function run(argv: string[], deps: Deps): Promise<number> {
       const t = await target(positional[0], positional[1]);
       const { pfd } = await load(t);
       const record = await readRecord(t.dir);
-      // 未承認の間はタスクが 1 つも無い。デーモンが起動していなくても図を見られるようにする
+      // 未承認の間はタスクが 1 つも無い
       const statuses = record.approved
         ? computeStatus(pfd, record, await gatherFacts(pfd, t.projectPath, deps.ports))
         : undefined;

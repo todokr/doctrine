@@ -1,7 +1,7 @@
 import { basename, join } from "@std/path";
 import { z } from "zod";
 
-/** doctrine（core/src/util/home.ts）と同じ規則。core は import しないので、規則だけを揃えている。 */
+/** doctrine（core/src/util/home.ts）と同じ規則。 */
 export function stateRoot(): string {
   const dir = Deno.env.get("DOCTRINE_STATE_DIR");
   if (dir) return dir;

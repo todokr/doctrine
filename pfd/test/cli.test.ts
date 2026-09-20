@@ -422,6 +422,26 @@ test("render: 未承認の間は dctl も gh も呼ばない", async () => {
   });
 });
 
+test("help: 使い方を out に出して 0", async () => {
+  await world(async (w) => {
+    for (const cmd of ["help", "--help", "-h"]) {
+      w.out.length = 0;
+      w.err.length = 0;
+      assert.equal(await w.run(cmd), 0);
+      assert.ok(w.out.some((l) => l.includes("使い方: pfd")));
+      assert.deepEqual(w.err, []);
+    }
+  });
+});
+
+test("引数が無ければ使い方を err に出して 1", async () => {
+  await world(async (w) => {
+    assert.equal(await w.run(), 1);
+    assert.ok(w.err.some((l) => l.includes("使い方: pfd")));
+    assert.deepEqual(w.out, []);
+  });
+});
+
 test("未知のコマンドは使い方を出して 1", async () => {
   await world(async (w) => {
     assert.equal(await w.run("frobnicate"), 1);
