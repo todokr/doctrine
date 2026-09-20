@@ -17,9 +17,11 @@ import type {
   RateLimitSample,
   ServerEvent,
   StepRun,
+  StepRunDenials,
   TaskDetail,
   TaskListEntry,
 } from "../../shared/protocol.ts";
+import { toolInputParts } from "../../shared/toolInput.ts";
 import type { ConnectionStatus } from "./daemon/client";
 
 export const MIN = 60000;
@@ -205,6 +207,17 @@ export function stopReasons(tasks: Task[], t: Task, detail?: TaskDetail): StopRe
 export function stepRunHistory(detail?: TaskDetail): StepRun[] {
   return detail ? [...detail.stepRuns].reverse() : [];
 }
+
+/** 拒否1件を「ツール名 + 主要引数」の並びにする。引数は切り詰めない（コマンドを読むため）。 */
+export function denialLines(d: StepRunDenials): { tool: string; detail: string }[] {
+  return d.denials.map((x) => ({
+    tool: x.tool_name,
+    detail: toolInputParts(x.tool_name, x.input).join("  "),
+  }));
+}
+
+/** 保存されなかった件数。0 なら出さない。 */
+export const omittedDenials = (d: StepRunDenials) => Math.max(0, d.total - d.denials.length);
 
 // ---------------------------------------------------------------- 経緯
 /**

@@ -431,6 +431,7 @@ export async function runTask(
             cost_usd: outcome.costUsd,
             num_turns: outcome.numTurns,
             duration_ms: outcome.durationMs,
+            permission_denials: outcome.permissionDenials,
           },
           outputs: {
             last_stdout: outcome.stdout,
@@ -483,6 +484,7 @@ export async function runTask(
         num_turns: outcome.numTurns,
         duration_ms: outcome.durationMs,
         goto_step_id: bounced ? decision.stepId : null,
+        permission_denials: outcome.permissionDenials,
       },
       outputs: {
         last_stdout: outcome.stdout,

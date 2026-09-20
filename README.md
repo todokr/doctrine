@@ -310,6 +310,17 @@ dctl get <task-id>
 `degraded` を見逃すと、「成功した」と思って進めたタスクが実質何も達成していない、
 という気づきにくい失敗を踏む。
 
+何が拒否されたかは、同じ行の `permission_denials` に入る。ツール名と入力
+（Bash ならコマンド）が読める。
+
+```bash
+dctl get <task-id> | jq '.stepRuns[] | select(.permission_denials) | .permission_denials.denials[] | {tool_name, input}'
+# => {"tool_name":"Bash","input":{"command":"git push origin main"}}
+```
+
+残すのは1回の実行につき先頭20件で、実際の件数は `permission_denials.total` に入る。
+入力のトップレベルの文字列は各2000字までで切る。拒否が無かった実行では `null`。
+
 同じ `dctl get` で、非0終了が**失敗**だったのか**差し戻し**だったのかも読める。
 `onFailure` / `onReject` の `goto` が発火した実行は `status` が `bounced` になり、
 戻り先が `goto_step_id` に入る（`status` が `failed` の行に戻り先は無い）。
@@ -331,7 +342,7 @@ dctl get <task-id> | jq '.stepRuns[] | {step_id, attempt, status, goto_step_id}'
   前のステップへ戻った。タスクは失敗していない。戻り先は同じ行の `goto_step_id`、
   差し戻しが何回目かは同じ行の `attempt`
 - `failed` — 分岐先が無い、または `maxAttempts` を使い切って、そこでタスクが止まった
-- `degraded` — 成功扱いだが権限拒否があった（5章）
+- `degraded` — 成功扱いだが権限拒否があった（5章）。拒否の中身は同じ行の `permission_denials`
 - `interrupted` — デーモンのクラッシュで中断され、復帰時に閉じられた
 - `rate_limited` — Claude の利用上限で打ち切られた。枠が明けたら同じ会話で再開されるので失敗ではない
 

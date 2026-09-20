@@ -222,6 +222,7 @@ const COLUMNS = {
     duration_ms: true,
     review_tree: true,
     goto_step_id: true,
+    permission_denials: true,
   },
   step_outputs: { step_run_id: true, last_stdout: true, last_stderr: true, exit_code: true },
   task_sessions: { task_id: true, role: true, session_id: true },
@@ -395,6 +396,7 @@ test("開き直してもマイグレーションは二度流れず、データ�
     "0004_step_outputs_last_names",
     "0005_rate_limited",
     "0006_step_run_bounced",
+    "0007_step_run_permission_denials",
   ]);
   await first.destroy();
 
@@ -407,6 +409,7 @@ test("開き直してもマイグレーションは二度流れず、データ�
       "0004_step_outputs_last_names",
       "0005_rate_limited",
       "0006_step_run_bounced",
+      "0007_step_run_permission_denials",
     ]);
     assert.equal((await second.selectFrom("projects").selectAll().execute()).length, 1);
   } finally {
@@ -439,6 +442,7 @@ test("pending_feed を足す前に作られたDBファイルは、行を保っ�
       "0004_step_outputs_last_names",
       "0005_rate_limited",
       "0006_step_run_bounced",
+      "0007_step_run_permission_denials",
     ]);
     const old = await getTask(d, "old");
     assert.equal(old?.state, "suspended", "既存の行は残る");

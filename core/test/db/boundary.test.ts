@@ -5,9 +5,12 @@ import { getTask, insertProject, insertTask } from "../../src/db/tasks.ts";
 import { getStepOutputs, listStepRuns } from "../../src/db/stepRuns.ts";
 import {
   commitStepBoundary,
+  DENIAL_VALUE_CHARS,
+  MAX_DENIALS,
   OUTPUT_TAIL_BYTES,
   StateConflictError,
 } from "../../src/db/boundary.ts";
+import type { PermissionDenial } from "../../../shared/protocol.ts";
 import type { StepRunStatus } from "../../src/db/stepRuns.ts";
 
 async function fixture() {
@@ -339,4 +342,78 @@ test("トランザクションの途中に他のクエリは割り込まない�
   const seen = getTask(d, "t1");
   await assert.rejects(() => failing);
   assert.equal((await seen)?.state, "queued");
+});
+
+/** running の行を立ててから stepRunUpdate で閉じ、閉じた行の permission_denials を返す。 */
+async function closeWithDenials(denials: PermissionDenial[] | undefined): Promise<string | null> {
+  const d = await fixture();
+  const id = await commitStepBoundary(d, {
+    taskId: "t1",
+    taskPatch: {},
+    stepRun: {
+      step_id: "a",
+      attempt: 1,
+      status: "running",
+      exit_code: null,
+      started_at: "a",
+      ended_at: null,
+      log_path: "/l",
+    },
+  });
+  await commitStepBoundary(d, {
+    taskId: "t1",
+    taskPatch: {},
+    stepRunUpdate: {
+      id: id!,
+      status: "degraded",
+      exit_code: 0,
+      ended_at: "b",
+      ...(denials === undefined ? {} : { permission_denials: denials }),
+    },
+  });
+  return (await listStepRuns(d, "t1"))[0].permission_denials;
+}
+
+function denial(command: string): PermissionDenial {
+  return { tool_name: "Bash", tool_use_id: "tu", input: { command } };
+}
+
+test("権限拒否は step_runs に JSON で入る", async () => {
+  const raw = await closeWithDenials([denial("git push"), denial("rm -rf /")]);
+  assert.deepEqual(JSON.parse(raw!), {
+    total: 2,
+    denials: [denial("git push"), denial("rm -rf /")],
+  });
+});
+
+test("拒否が無ければ列は NULL", async () => {
+  assert.equal(await closeWithDenials([]), null);
+  assert.equal(await closeWithDenials(undefined), null);
+});
+
+test("拒否が多いときは先頭 MAX_DENIALS 件だけ残し、件数は total に残る", async () => {
+  const many = Array.from({ length: MAX_DENIALS + 1 }, (_, i) => denial(`cmd ${i}`));
+  const saved = JSON.parse((await closeWithDenials(many))!);
+  assert.equal(saved.total, MAX_DENIALS + 1);
+  assert.equal(saved.denials.length, MAX_DENIALS);
+  assert.deepEqual(saved.denials[0], many[0]);
+});
+
+test("長い入力は先頭を残して切られる", async () => {
+  const saved = JSON.parse(
+    (await closeWithDenials([denial("x".repeat(DENIAL_VALUE_CHARS + 100))]))!,
+  );
+  const command: string = saved.denials[0].input.command;
+  assert.ok(command.length <= DENIAL_VALUE_CHARS);
+  assert.ok(command.startsWith("xxx"));
+});
+
+test("入力のネストした値は切らない", async () => {
+  const nested = { a: { b: "y".repeat(DENIAL_VALUE_CHARS + 100) } };
+  const saved = JSON.parse(
+    (await closeWithDenials([
+      { tool_name: "T", tool_use_id: null, input: nested },
+    ]))!,
+  );
+  assert.deepEqual(saved.denials[0].input, nested);
 });

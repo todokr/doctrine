@@ -440,6 +440,17 @@ const migrations: Record<string, Migration> = {
       }
     },
   },
+
+  /**
+   * 権限拒否の中身を残す。CHECK 制約を足さないので、0005 / 0006 のような
+   * テーブル再構築は要らない。
+   */
+  "0007_step_run_permission_denials": {
+    // deno-lint-ignore no-explicit-any
+    async up(db: Kysely<any>) {
+      await db.schema.alterTable("step_runs").addColumn("permission_denials", "text").execute();
+    },
+  },
 };
 
 /** ファイルを動的 import しない（権限も要らず、deno check で型検査される）。 */

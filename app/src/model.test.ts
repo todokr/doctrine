@@ -13,6 +13,7 @@ import {
   composeRejection,
   countReview,
   DEGRADED_UNKNOWN,
+  denialLines,
   diffLines,
   diffOf,
   fellBackToAll,
@@ -23,6 +24,7 @@ import {
   LIMIT_WARN_UTILIZATION,
   LOG_LINES_KEPT,
   MIN,
+  omittedDenials,
   queuePosition,
   rateLimitViews,
   reduce,
@@ -843,6 +845,7 @@ describe("止まった理由と実行履歴", () => {
     exit_code: 0,
     started_at: "2026-09-18T00:00:00.000Z",
     ended_at: "2026-09-18T00:01:00.000Z",
+    permission_denials: null,
     ...o,
   });
   const detail = (stepRuns: StepRun[]): TaskDetail =>
@@ -894,6 +897,37 @@ describe("止まった理由と実行履歴", () => {
     const d = detail([stepRun({ id: 1 }), stepRun({ id: 2 })]);
     expect(stepRunHistory(d).map((r) => r.id)).toEqual([2, 1]);
     expect(stepRunHistory(undefined)).toEqual([]);
+  });
+
+  test("拒否はツール名と引数の並びになる", () => {
+    expect(denialLines({
+      total: 1,
+      denials: [{ tool_name: "Bash", tool_use_id: null, input: { command: "git push origin main" } }],
+    })).toEqual([{ tool: "Bash", detail: "git push origin main" }]);
+  });
+
+  test("引数は切り詰めない", () => {
+    const command = `echo ${"x".repeat(500)}`;
+    const [line] = denialLines({
+      total: 1,
+      denials: [{ tool_name: "Bash", tool_use_id: null, input: { command } }],
+    });
+    expect(line.detail).toBe(command);
+  });
+
+  test("未知のツールは入力全体を出す", () => {
+    const [line] = denialLines({
+      total: 1,
+      denials: [{ tool_name: "MyTool", tool_use_id: null, input: { a: 1 } }],
+    });
+    expect(line.detail).toContain("a");
+    expect(line.detail).toContain("1");
+  });
+
+  test("保存しなかった件数を数える", () => {
+    const one = { tool_name: "Bash", tool_use_id: null, input: {} };
+    expect(omittedDenials({ total: 25, denials: Array(20).fill(one) })).toBe(5);
+    expect(omittedDenials({ total: 3, denials: Array(3).fill(one) })).toBe(0);
   });
 });
 

@@ -45,7 +45,12 @@ import { captureTree, releaseTrees } from "../domain/reviewTree.ts";
 import { assertTransition, isTerminal } from "../domain/states.ts";
 import type { AgentAdapter } from "../adapter/types.ts";
 import type { Handler } from "./server.ts";
-import type { RateLimitSample, ServerEvent, TaskLogs } from "../../../shared/protocol.ts";
+import type {
+  RateLimitSample,
+  ServerEvent,
+  StepRunDenials,
+  TaskLogs,
+} from "../../../shared/protocol.ts";
 import type { WarningLog } from "./warnings.ts";
 
 export type DaemonContext = {
@@ -62,6 +67,16 @@ export type DaemonContext = {
   /** 後始末を拒否したときなど、人に見せる必要のある警告 */
   warnings: WarningLog;
 };
+
+/** step_runs.permission_denials の JSON を読む。NULL も壊れた JSON も null（拒否なし扱い）。 */
+function parseDenials(raw: string | null): StepRunDenials | null {
+  if (raw === null) return null;
+  try {
+    return JSON.parse(raw) as StepRunDenials;
+  } catch {
+    return null;
+  }
+}
 
 function req(params: Record<string, unknown>, key: string): string {
   const v = params[key];
@@ -200,7 +215,12 @@ export function createHandler(ctx: DaemonContext): Handler {
       case "task.get": {
         const task = await getTask(ctx.db, req(params, "task_id"));
         if (!task) throw new Error("タスクがありません");
-        return { task, stepRuns: await listStepRuns(ctx.db, task.id) };
+        // dctl get の JSON に、エスケープされた文字列ではなく中身を出す。
+        const stepRuns = (await listStepRuns(ctx.db, task.id)).map((r) => ({
+          ...r,
+          permission_denials: parseDenials(r.permission_denials),
+        }));
+        return { task, stepRuns };
       }
 
       case "task.context": {

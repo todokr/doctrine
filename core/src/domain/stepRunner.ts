@@ -5,6 +5,7 @@ import { expand, type TemplateContext } from "../workflow/template.ts";
 import type { AgentAdapter, RateLimitObservation } from "../adapter/types.ts";
 import { renderEvent } from "../adapter/render.ts";
 import { exitCodeOf } from "../util/exec.ts";
+import type { PermissionDenial } from "../../../shared/protocol.ts";
 
 export type StepOutcome = {
   status: "success" | "failed" | "degraded" | "suspended";
@@ -22,6 +23,8 @@ export type StepOutcome = {
    * command ステップはアダプタを通らないので常に空。
    */
   rateLimits: RateLimitObservation[];
+  /** この実行で権限に拒否された操作。command ステップはアダプタを通らないので常に空。 */
+  permissionDenials: PermissionDenial[];
 };
 
 export type RunnerDeps = {
@@ -219,6 +222,7 @@ export async function runCommandStep(
       endedAt: new Date().toISOString(),
       logPath,
       rateLimits: [],
+      permissionDenials: [],
     };
   } finally {
     await log.close();
@@ -301,6 +305,7 @@ export async function runAgentStep(
       endedAt: new Date().toISOString(),
       logPath,
       rateLimits: [...rateLimits.values()],
+      permissionDenials: result.permissionDenials,
     };
   } finally {
     await log.close();

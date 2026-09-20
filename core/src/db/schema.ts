@@ -90,6 +90,11 @@ export interface StepRunsTable {
    * DB の CHECK 制約でも固めてある（0005_step_run_bounced）。
    */
   goto_step_id: string | null;
+  /**
+   * 権限で拒否された操作（JSON 文字列の { total, denials }）。拒否が無かった実行は NULL。
+   * degraded の行だけとは限らない（失敗・上限打ち切りの実行にも入り得る）。
+   */
+  permission_denials: string | null;
 }
 
 /**

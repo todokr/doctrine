@@ -197,6 +197,33 @@ test("permission_denials が空でなければ degraded", () => {
   assert.equal(r.degraded, true, "成功に見えるが何もできていない実行を区別する");
 });
 
+test("permission_denials の中身を構造化して返す", () => {
+  const r = resultFrom({
+    type: "result",
+    is_error: false,
+    permission_denials: [
+      { tool_name: "Bash", tool_use_id: "tu_1", tool_input: { command: "git push" } },
+    ],
+  }, 0);
+  assert.deepEqual(r.permissionDenials, [
+    { tool_name: "Bash", tool_use_id: "tu_1", input: { command: "git push" } },
+  ]);
+  assert.equal(r.degraded, true);
+});
+
+test("形の崩れた permission_denials でも件数は減らない", () => {
+  const r = resultFrom({
+    type: "result",
+    is_error: false,
+    permission_denials: [{ tool_name: "Bash" }, "こわれている", {}],
+  }, 0);
+  assert.equal(r.permissionDenials.length, 3);
+  assert.deepEqual(r.permissionDenials.map((d) => d.tool_name), ["Bash", "", ""]);
+  assert.deepEqual(r.permissionDenials.map((d) => d.input), [{}, {}, {}]);
+  assert.deepEqual(r.permissionDenials.map((d) => d.tool_use_id), [null, null, null]);
+  assert.equal(r.degraded, true, "degraded は生配列の長さで決まり、件数と食い違わない");
+});
+
 test("result 行が来なければ失敗とみなす", () => {
   const r = resultFrom(undefined, 1);
   assert.equal(r.ok, false);

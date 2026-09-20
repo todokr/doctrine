@@ -72,6 +72,20 @@ export type TaskSummary = {
 /** task.list だけが has_degraded を持つ（approve / reject / cancel は行をそのまま返す）。 */
 export type TaskListEntry = TaskSummary & { has_degraded: boolean };
 
+/**
+ * 権限で拒否された操作1件。
+ * 形は Claude Agent SDK の型定義（tool_name / tool_use_id / tool_input）に
+ * 合わせてあるが、実バイナリの出力では未確認。input は SDK の tool_input。
+ */
+export type PermissionDenial = {
+  tool_name: string;
+  tool_use_id: string | null;
+  input: Record<string, unknown>;
+};
+
+/** step_runs.permission_denials。denials は先頭 20 件で、total は実際に起きた件数。 */
+export type StepRunDenials = { total: number; denials: PermissionDenial[] };
+
 /** task.get が返すステップ実行1回ぶん。step_runs の行のうち UI に見せる分。 */
 export type StepRun = {
   id: number;
@@ -90,6 +104,11 @@ export type StepRun = {
   exit_code: number | null;
   started_at: string;
   ended_at: string | null;
+  /**
+   * 権限で拒否された操作。拒否が無かった実行は null。degraded の行だけとは限らない。
+   * この列だけはデーモンが JSON をパースして返す（他の列は DB の生値）。
+   */
+  permission_denials: StepRunDenials | null;
 };
 
 export type TaskDetail = { task: TaskSummary; stepRuns: StepRun[] };
