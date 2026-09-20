@@ -36,3 +36,36 @@ test("parsePfd: YAML として読めなければ、その旨を言う", () => {
 test("parsePfd: goal が空なら拒む", () => {
   assert.throws(() => parsePfd(EXAMPLE_YAML.replace("goal: [feature]", "goal: []")), /goal/);
 });
+
+test("parsePfd: 知らないキーのエラーは日本語で言う", () => {
+  const text = EXAMPLE_YAML.replace("    actor: human\n", "    actor: human\n    owner: me\n");
+  assert.throws(() => parsePfd(text), /知らないキーがあります: owner/);
+});
+
+test("parsePfd: goal が空のエラーは日本語で言う", () => {
+  assert.throws(
+    () => parsePfd(EXAMPLE_YAML.replace("goal: [feature]", "goal: []")),
+    /要素が足りません/,
+  );
+});
+
+test("parsePfd: 必須項目が無いエラーは日本語で言う", () => {
+  const text = EXAMPLE_YAML.replace("    name: 画面を繋ぐ\n", "");
+  assert.throws(() => parsePfd(text), /processes\.3\.name: 必須の項目がありません/);
+});
+
+test("parsePfd: enum 外の値のエラーは日本語で言う", () => {
+  const text = EXAMPLE_YAML.replace("actor: human", "actor: robot");
+  assert.throws(() => parsePfd(text), /次のいずれかが必要です: agent, human/);
+});
+
+test("parsePfd: 検証エラーのメッセージに zod の英語がそのまま出ない", () => {
+  const text = EXAMPLE_YAML.replace("    actor: human\n", "    actor: human\n    owner: me\n");
+  try {
+    parsePfd(text);
+    assert.fail("エラーが投げられるはず");
+  } catch (err) {
+    const message = (err as Error).message;
+    assert.doesNotMatch(message, /Unrecognized|Required|Expected|Invalid/);
+  }
+});
