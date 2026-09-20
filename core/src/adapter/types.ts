@@ -22,6 +22,8 @@ export type AgentResult = {
   exitCode: number | null;
   /** result 行が来ずに終わった実行を診断するための stderr 末尾（最大4KB）。 */
   stderrTail: string;
+  /** --json-schema で得た構造化出力。CLI が返さなかった・オブジェクトでなかったときは null。 */
+  structuredOutput: Record<string, unknown> | null;
 };
 
 export type StartOptions = {
@@ -30,6 +32,8 @@ export type StartOptions = {
   permissionMode?: string;
   model?: string;
   allowedTools?: string[];
+  /** 渡すと claude -p に --json-schema が付く。JSON Schema のオブジェクトをそのまま渡す。 */
+  jsonSchema?: Record<string, unknown>;
 };
 
 export type AgentRun = {

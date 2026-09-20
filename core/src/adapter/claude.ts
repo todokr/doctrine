@@ -85,6 +85,7 @@ export function resultFrom(
       permissionDenials: [],
       exitCode,
       stderrTail,
+      structuredOutput: null,
     };
   }
   const o = resultLine as Record<string, unknown>;
@@ -99,6 +100,7 @@ export function resultFrom(
     permissionDenials: denials,
     exitCode,
     stderrTail,
+    structuredOutput: null,
   };
 }
 

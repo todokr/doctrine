@@ -66,6 +66,12 @@ test("eventsSequence は呼び出しごとに違うイベントを流す", async
   );
 });
 
+test("DEFAULT の structuredOutput は null", async () => {
+  const run = createMockAdapter({ result: {} }).start("x", { cwd: "/wt", sessionId: "s1" });
+  const r = await run.result;
+  assert.equal(r.structuredOutput, null);
+});
+
 test("events はスクリプトどおりに流れる", async () => {
   const adapter = createMockAdapter({
     events: [{ kind: "assistant", text: "こんにちは" }],

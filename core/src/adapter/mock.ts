@@ -27,6 +27,7 @@ const DEFAULT: AgentResult = {
   permissionDenials: [],
   exitCode: 0,
   stderrTail: "",
+  structuredOutput: null,
 };
 
 export function createMockAdapter(script: MockScript): MockAdapter {
