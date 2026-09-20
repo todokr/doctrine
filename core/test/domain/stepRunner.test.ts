@@ -9,6 +9,7 @@ import {
   runAgentStep,
   runCommandStep,
   type RunnerDeps,
+  stamp,
 } from "../../src/domain/stepRunner.ts";
 import { createMockAdapter } from "../../src/adapter/mock.ts";
 import type { TemplateContext } from "../../src/workflow/template.ts";
@@ -66,6 +67,14 @@ test("コマンドの変数は実行前に展開される", async () => {
   );
   assert.match(out.stdout, /doctrine\/t1-t/);
 });
+
+test("時刻は yyyy-MM-dd HH:mm:ss（ローカル時刻）で1桁も0で埋める", () => {
+  assert.equal(stamp(new Date(2026, 0, 5, 9, 7, 3)), "2026-01-05 09:07:03");
+});
+
+/** ログ行の頭に付く `yyyy-MM-dd HH:mm:ss ` */
+const STAMP = /^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d /;
+const stripStamp = (line: string) => line.replace(STAMP, "");
 
 test("ログ本文はファイルに書かれる", async () => {
   const d = await deps();
@@ -256,7 +265,8 @@ test("stdout はexitではなくcloseまで待ってから確定する（大量�
   );
   assert.equal(out.stdout.length, n);
   const logged = await readFile(out.logPath, "utf8");
-  assert.equal(logged.length, n);
+  const body = logged.split("\n").filter((l) => l !== "").map(stripStamp).join("\n") + "\n";
+  assert.equal(body.length, n, "時刻を外せば出力がそのまま残っている");
 });
 
 test("run に未知の変数を使うとTemplateErrorが伝播する（握りつぶさない）", async () => {
@@ -304,4 +314,46 @@ test("失敗したagentステップは stderrTail を stderr として返す", a
   );
   assert.equal(out.status, "failed");
   assert.equal(out.stderr, "Error: something went wrong\n");
+});
+
+test("agent のログは整形済みのテキストで、ファイルと log.line に同じ行が流れる", async () => {
+  const adapter = createMockAdapter({
+    events: [
+      { kind: "system", subtype: "hook_started" },
+      { kind: "assistant", text: "" },
+      { kind: "toolUse", name: "Bash", input: { command: "ls -A" } },
+      { kind: "toolResult", isError: false, content: "a.ts\nb.ts" },
+      { kind: "assistant", text: "2つありました" },
+    ],
+    result: { ok: true, text: "できました" },
+  });
+  const live: string[] = [];
+  const d = await deps({ adapter, onLogLine: (l: string) => live.push(l) });
+  const out = await runAgentStep(
+    { id: "a", type: "agent", prompt: "{{ task.prompt }}" },
+    ctx,
+    { cwd: root, taskId: "t1", attempt: 1, sessionId: "s1", resume: false, deps: d },
+  );
+  const written = (await readFile(out.logPath, "utf8")).split("\n").filter((l) => l !== "");
+  assert.deepEqual(written, live, "保存したログと流した log.line は同じ行");
+  assert.deepEqual(
+    written.map(stripStamp),
+    ["Bash  ls -A", "  → a.ts b.ts", "2つありました"],
+    "hook や空の発話は行にならない",
+  );
+  assert.match(written[0], STAMP, "行頭に時刻が付く");
+});
+
+test("コマンドの出力は1行ずつ、行頭に時刻が付く", async () => {
+  const live: string[] = [];
+  const d = await deps({ onLogLine: (l: string) => live.push(l) });
+  const out = await runCommandStep(
+    { id: "s", type: "command", run: "printf '1行目\\n2行目\\n端数'" },
+    ctx,
+    { cwd: root, taskId: "t1", attempt: 1, deps: d },
+  );
+  const written = (await readFile(out.logPath, "utf8")).split("\n").filter((l) => l !== "");
+  assert.deepEqual(written, live, "保存したログと流した log.line は同じ行");
+  assert.deepEqual(written.map(stripStamp), ["1行目", "2行目", "端数"]);
+  for (const l of written) assert.match(l, STAMP);
 });
