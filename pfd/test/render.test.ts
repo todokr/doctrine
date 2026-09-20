@@ -36,6 +36,13 @@ test("toMermaid: 状態を渡せば塗り分ける", () => {
   assert.ok(!lines.some((l) => l.startsWith("  class p1 ")));
 });
 
+test("toMermaid: 記録にあるタスクが見つからないプロセスは stopped で塗る", () => {
+  const record = emptyRecord();
+  record.tasks["1"] = { task_id: "t1", branch: "doctrine/t1", at: "2026-09-20T00:00:00.000Z" };
+  const statuses = computeStatus(pfd, record, { tasks: [], prs: {} });
+  assert.ok(toMermaid(pfd, statuses).split("\n").includes("  class p0 stopped"));
+});
+
 test("toMermaid: ラベルの引用符を置き換える", () => {
   const quoted = parsePfd(EXAMPLE_YAML.replace("name: 既存スキーマ", 'name: 既存の "users" 表'));
   assert.ok(toMermaid(quoted).includes('a0["既存の #quot;users#quot; 表"]'));

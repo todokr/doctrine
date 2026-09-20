@@ -92,6 +92,20 @@ test("dispatch: 記録に無くても同じキーのタスクがあれば、投�
   }
 });
 
+test("dispatch: 記録にあるタスクが dctl ls に無ければ、何も投入せず何も書かずに失敗する", async () => {
+  const s = await setup();
+  try {
+    const record = await readRecord(s.dir);
+    record.tasks["1"] = { task_id: "t1", branch: "doctrine/t1", at: NOW };
+    await writeRecord(s.dir, record);
+    await assert.rejects(s.run(), /記録にあるタスク t1（プロセス 1）が dctl ls に見当たりません/);
+    assert.equal(s.ports.added.length, 0);
+    assert.deepEqual(await readRecord(s.dir), record);
+  } finally {
+    await s.cleanup();
+  }
+});
+
 test("dispatch: 上流がマージされ、人のプロセスが完了したら、下流を投入する", async () => {
   const s = await setup();
   try {

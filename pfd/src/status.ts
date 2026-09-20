@@ -15,6 +15,7 @@ export type ProcessState =
   | "pr_open"
   | "no_pr"
   | "task_stopped"
+  | "lost"
   | "running"
   | "ready"
   | "waiting";
@@ -37,7 +38,7 @@ function settledState(
   facts: Facts,
 ): ProcessState | undefined {
   if (p.actor === "human") return record.done[p.id] ? "done" : undefined;
-  if (!task) return undefined;
+  if (!task) return record.tasks[p.id] ? "lost" : undefined;
   const pr = facts.prs[task.branch] ?? "none";
   if (pr === "merged") return "merged";
   if (pr === "open") return "pr_open";
@@ -68,13 +69,14 @@ export function computeStatus(pfd: Pfd, record: DispatchRecord, facts: Facts): P
       ? "your_turn"
       : "ready";
     const state = settled.get(p.id) ?? open;
+    const recorded = state === "lost" ? record.tasks[p.id] : undefined;
     return {
       id: p.id,
       name: p.name,
       actor: p.actor,
       state,
-      task_id: task?.id,
-      branch: task?.branch,
+      task_id: recorded?.task_id ?? task?.id,
+      branch: recorded?.branch ?? task?.branch,
       waiting_for: state === "waiting" ? missing.map((i) => nameOf.get(i) ?? i) : [],
     };
   });

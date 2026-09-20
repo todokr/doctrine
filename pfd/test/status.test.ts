@@ -69,6 +69,17 @@ test("computeStatus: failed / canceled は task_stopped", () => {
   assert.equal(stateOf({ tasks: [task("1", "canceled")], prs: {} })["1"], "task_stopped");
 });
 
+test("computeStatus: 記録にタスクがあるのに dctl ls に無ければ lost、下流は入力待ちのまま", () => {
+  const record = emptyRecord();
+  record.tasks["1"] = { task_id: "t1", branch: "doctrine/t1", at: "2026-09-20T00:00:00.000Z" };
+  const all = computeStatus(pfd, record, noFacts);
+  assert.equal(all[0].state, "lost");
+  assert.equal(all[0].task_id, "t1");
+  assert.equal(all[0].branch, "doctrine/t1");
+  assert.equal(all[1].state, "waiting");
+  assert.deepEqual(all[1].waiting_for, ["集計テーブル", "集計の定義"]);
+});
+
 test("computeStatus: 1 がマージされただけでは 2 は始まらない（人の成果物を待つ）", () => {
   const facts: Facts = { tasks: [task("1", "completed")], prs: { "doctrine/t1": "merged" } };
   const all = computeStatus(pfd, emptyRecord(), facts);

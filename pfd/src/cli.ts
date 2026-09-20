@@ -102,6 +102,8 @@ function describe(s: ProcessStatus): string {
       return `PR がありません（ブランチ ${s.branch}）`;
     case "task_stopped":
       return `タスクが止まっています（${s.task_id}）`;
+    case "lost":
+      return `記録にあるタスクが見当たりません（${s.task_id}）`;
     case "running":
       return `実行中（${s.task_id}）`;
     case "ready":

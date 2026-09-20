@@ -10,6 +10,7 @@ const STATE_CLASS: Partial<Record<ProcessState, string>> = {
   pr_open: "active",
   no_pr: "stopped",
   task_stopped: "stopped",
+  lost: "stopped",
 };
 
 function label(text: string): string {
