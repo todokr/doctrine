@@ -1,7 +1,18 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { rpc } from "../daemon/client";
 import { sendDecision } from "../decision";
-import { ago, bounceNotice, clock, elapsed, hm, isTerminal, stepRunHistory, stopReasons } from "../model";
+import {
+  ago,
+  bounceNotice,
+  clock,
+  denialLines,
+  elapsed,
+  hm,
+  isTerminal,
+  omittedDenials,
+  stepRunHistory,
+  stopReasons,
+} from "../model";
 import { useDecide, useNotYet, useStore } from "../store";
 import { isAtBottom } from "../tailStick";
 import type { Task, TaskState } from "../types";
@@ -90,6 +101,8 @@ export function TaskView({ t }: { t: Task }) {
   const notYet = useNotYet();
   // 送信中だけ止める。失敗したら「中止しました」は出さず、もう一度押せる
   const [canceling, setCanceling] = useState(false);
+  // 実行履歴で拒否の一覧を開いている行（step_runs.id）
+  const [openDenials, setOpenDenials] = useState<number | null>(null);
   const logRef = useRef<HTMLPreElement>(null);
   // 末尾に貼り付いているか。ターミナルと同じく、遡ったら止まり、末尾に戻せばまた追う
   const stick = useRef(true);
@@ -285,14 +298,50 @@ export function TaskView({ t }: { t: Task }) {
               <tbody>
                 {history.map((r) => {
                   const [name, cls] = RUN_PILL[r.status];
+                  const denials = r.permission_denials;
+                  const open = denials !== null && openDenials === r.id;
                   return (
-                    <tr key={r.id}>
-                      <td className="mono">{r.step_id}</td>
-                      <td className="mono">#{r.attempt}</td>
-                      <td><span className={`pill ${cls}`}>{name}</span></td>
-                      <td className="hint">{clock(Date.parse(r.started_at))}</td>
-                      <td className="hint">{r.ended_at ? clock(Date.parse(r.ended_at)) : "—"}</td>
-                    </tr>
+                    <Fragment key={r.id}>
+                      <tr>
+                        <td className="mono">{r.step_id}</td>
+                        <td className="mono">#{r.attempt}</td>
+                        <td>
+                          {denials
+                            ? (
+                              <button
+                                className={`pill ${cls}`}
+                                aria-expanded={open}
+                                title="拒否された操作を見る"
+                                onClick={() => setOpenDenials(open ? null : r.id)}
+                              >
+                                {name}
+                              </button>
+                            )
+                            : <span className={`pill ${cls}`}>{name}</span>}
+                        </td>
+                        <td className="hint">{clock(Date.parse(r.started_at))}</td>
+                        <td className="hint">
+                          {r.ended_at ? clock(Date.parse(r.ended_at)) : "—"}
+                        </td>
+                      </tr>
+                      {denials && open && (
+                        <tr>
+                          <td colSpan={5} className="denials">
+                            {denialLines(denials).map((l, i) => (
+                              <div key={i} className="denial">
+                                <span className="mono">{l.tool}</span>
+                                <span className="mono denial-detail">{l.detail}</span>
+                              </div>
+                            ))}
+                            {omittedDenials(denials) > 0 && (
+                              <div className="hint">
+                                他 {omittedDenials(denials)} 件は保存していません
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
                   );
                 })}
               </tbody>
