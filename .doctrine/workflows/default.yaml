@@ -1,4 +1,4 @@
-# doctrine の既定ワークフロー（plan → plan-review → implement → verify → agent-review → review）
+# doctrine の既定ワークフロー（plan → plan-review → implement → verify → agent-review → review → open-pr）
 #
 # エージェントを planner / plan-reviewer / implementer / code-reviewer の4つの役割に分け、
 # 役割の間は .doctrine-out/ のファイルで成果物を受け渡す。
@@ -315,3 +315,19 @@ steps:
         - .doctrine-out/review.md
         - .doctrine-out/implement-notes.md
         - .doctrine-out/plan.md
+
+  # 人の承認が済んだものだけを PR にする。command ステップはクラッシュ復帰・resume の
+  # たびに頭から再実行されるので、既に PR があれば作らない形にしてある。push は同じ
+  # コミットを送り直すだけなので、二度実行しても効果が変わらない。
+  #
+  # gh pr create と git push は NON_IDEMPOTENT に引っかかり、dctl add のたびに警告が出る。
+  # 検出は文字列でしか見ないのでガードの有無を区別できない。警告は消さないでおく。
+  # 正規表現にガードを理解させると、ガードを外したときに黙って通るようになる。
+  #
+  # base を直書きしているのは、テンプレート変数が task / worktree / project / steps の
+  # 4系統だけで、project.yaml の baseBranch を展開できないため。
+  # 本文の implement-notes.md は implement が毎回上書きしていて、中身が
+  # 「やったこと・通した検証・できなかったこと」なので PR 本文としてそのまま読める。
+  - id: open-pr
+    type: command
+    run: "git push -u origin HEAD && { gh pr view --json url --jq .url || gh pr create --base develop --title \"{{ task.title }}\" --body-file .doctrine-out/implement-notes.md; }"
