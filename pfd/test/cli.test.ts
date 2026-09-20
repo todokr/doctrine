@@ -244,6 +244,64 @@ test("done: agent のプロセスは完了にできない", async () => {
   });
 });
 
+test("done: 端末でなければ何もせず失敗する", async () => {
+  await world(async (w) => {
+    await w.writePfd();
+    w.terminal = false;
+    assert.equal(await w.run("done", w.project, "123", "3", "--note", "決めた"), 1);
+    assert.match(w.err[0], /端末/);
+    assert.deepEqual((await readRecord(await pfdDir(w.project, 123))).done, {});
+  });
+});
+
+test("done: --note と --note-file は同時に指定できない", async () => {
+  await world(async (w) => {
+    await w.writePfd();
+    const file = join(w.project, "note.md");
+    await Deno.writeTextFile(file, "本文\n");
+    assert.equal(
+      await w.run("done", w.project, "123", "3", "--note", "決めた", "--note-file", file),
+      1,
+    );
+    assert.match(w.err[0], /同時に指定できません/);
+    assert.deepEqual((await readRecord(await pfdDir(w.project, 123))).done, {});
+  });
+});
+
+test("done: --note-file のファイルが無ければ、場所を示して失敗する", async () => {
+  await world(async (w) => {
+    await w.writePfd();
+    const file = join(w.project, "missing.md");
+    assert.equal(await w.run("done", w.project, "123", "3", "--note-file", file), 1);
+    assert.equal(w.err[0], `ファイルがありません: ${file}`);
+  });
+});
+
+test("done: 2 回目は既存の note を見せ、y でなければ置き換えない", async () => {
+  await world(async (w) => {
+    await w.writePfd();
+    await w.run("done", w.project, "123", "3", "--note", "最初の定義");
+    w.out.length = 0;
+    w.answers = ["n"];
+    assert.equal(await w.run("done", w.project, "123", "3", "--note", "次の定義"), 1);
+    assert.ok(w.out.some((l) => l === "すでに完了にしています: 最初の定義"));
+    assert.ok(w.err.some((l) => l === "置き換えませんでした"));
+    const record = await readRecord(await pfdDir(w.project, 123));
+    assert.equal(record.done["3"].note, "最初の定義");
+  });
+});
+
+test("done: 2 回目でも y なら置き換える", async () => {
+  await world(async (w) => {
+    await w.writePfd();
+    await w.run("done", w.project, "123", "3", "--note", "最初の定義");
+    w.answers = ["y"];
+    assert.equal(await w.run("done", w.project, "123", "3", "--note", "次の定義"), 0);
+    const record = await readRecord(await pfdDir(w.project, 123));
+    assert.equal(record.done["3"].note, "次の定義");
+  });
+});
+
 test("done: 存在しないプロセス", async () => {
   await world(async (w) => {
     await w.writePfd();

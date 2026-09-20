@@ -113,6 +113,15 @@ function describe(s: ProcessStatus): string {
   }
 }
 
+async function readNoteFile(path: string): Promise<string> {
+  try {
+    return await Deno.readTextFile(path);
+  } catch (err) {
+    if (err instanceof Deno.errors.NotFound) throw new Error(`ファイルがありません: ${path}`);
+    throw err;
+  }
+}
+
 /** 違反を err に出し、違反が無ければ true を返す。 */
 function reportViolations(pfd: Pfd, deps: Deps): boolean {
   const violations = validatePfd(pfd);
@@ -222,6 +231,11 @@ async function run(argv: string[], deps: Deps): Promise<number> {
     }
 
     case "done": {
+      if (!deps.isTerminal()) {
+        throw new Error(
+          "pfd done は、人が端末から実行してください（標準入力が端末ではありません）",
+        );
+      }
       const t = await target(positional[0], positional[1]);
       const processId = positional[2];
       if (!processId) throw new Error(USAGE);
@@ -233,8 +247,12 @@ async function run(argv: string[], deps: Deps): Promise<number> {
           `プロセス ${processId} は actor: human ではありません（エージェントのプロセスは PR のマージで完了します）`,
         );
       }
-      const note = typeof flags["note-file"] === "string"
-        ? (await Deno.readTextFile(flags["note-file"])).trim()
+      const noteFile = flags["note-file"];
+      if (typeof noteFile === "string" && typeof flags["note"] === "string") {
+        throw new Error("--note と --note-file は同時に指定できません");
+      }
+      const note = typeof noteFile === "string"
+        ? (await readNoteFile(noteFile)).trim()
         : typeof flags["note"] === "string"
         ? flags["note"].trim()
         : "";
@@ -244,6 +262,15 @@ async function run(argv: string[], deps: Deps): Promise<number> {
         );
       }
       const record = await readRecord(t.dir);
+      const already = record.done[processId];
+      if (already) {
+        deps.out(`すでに完了にしています: ${already.note}`);
+        const answer = await deps.ask("内容を置き換えますか? [y/N] ");
+        if (answer.trim().toLowerCase() !== "y") {
+          deps.err("置き換えませんでした");
+          return 1;
+        }
+      }
       record.done[processId] = { note, at: deps.now() };
       await writeRecord(t.dir, record);
       deps.out(`完了にしました: ${process.id} ${process.name}`);
