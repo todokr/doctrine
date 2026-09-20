@@ -19,7 +19,14 @@ function fakeRun(stdout: string): { run: Run; calls: Call[] } {
 
 test("listTasks: dctl ls を呼び、必要な列だけを返す", async () => {
   const { run, calls } = fakeRun(JSON.stringify([
-    { id: "t1", title: "[pfd:123/1] x", state: "running", branch: "doctrine/t1-x", prompt: "長い" },
+    {
+      id: "t1",
+      title: "[pfd:123/1] x",
+      state: "running",
+      branch: "doctrine/t1-x",
+      project_id: 1,
+      prompt: "長い",
+    },
   ]));
   const tasks = await realPorts(run).listTasks("/work/repo");
   assert.deepEqual(calls, [{
@@ -30,6 +37,22 @@ test("listTasks: dctl ls を呼び、必要な列だけを返す", async () => {
   assert.deepEqual(tasks, [
     { id: "t1", title: "[pfd:123/1] x", state: "running", branch: "doctrine/t1-x" },
   ]);
+});
+
+test("listTasks: project_id が 2 種類以上あれば、絞り込まれていないとして失敗する", async () => {
+  const { run } = fakeRun(JSON.stringify([
+    { id: "t1", title: "a", state: "running", branch: "b1", project_id: 1 },
+    { id: "t2", title: "b", state: "running", branch: "b2", project_id: 2 },
+  ]));
+  await assert.rejects(realPorts(run).listTasks("/work/repo"), /絞り込まれていません/);
+});
+
+test("listTasks: project_id がすべて同じなら通る", async () => {
+  const { run } = fakeRun(JSON.stringify([
+    { id: "t1", title: "a", state: "running", branch: "b1", project_id: 3 },
+    { id: "t2", title: "b", state: "running", branch: "b2", project_id: 3 },
+  ]));
+  assert.equal((await realPorts(run).listTasks("/work/repo")).length, 2);
 });
 
 test("addTask: dctl add を呼び、id と branch を返す", async () => {

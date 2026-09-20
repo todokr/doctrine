@@ -28,7 +28,7 @@ const USAGE = `使い方: pfd <command> <project> <issue> [options]
   done     <project> <issue> <process-id> (--note <text> | --note-file <path>)
                                           人が行うプロセスを完了にする
 
-<project> は対象リポジトリのルート（dctl project-add に渡したのと同じパス）。`;
+<project> は対象リポジトリのルート。dctl project-add に渡したのと同じ絶対パスを指定する。`;
 
 const BOOLEAN = new Set(["no-open"]);
 

@@ -33,10 +33,15 @@ function parseJson<T>(stdout: string, label: string): T {
 export function realPorts(run: Run = runStdout): Ports {
   return {
     async listTasks(projectPath) {
-      const rows = parseJson<TaskFact[]>(
+      const rows = parseJson<(TaskFact & { project_id: number })[]>(
         await run("dctl", ["ls", "--project", projectPath]),
         "dctl ls",
       );
+      if (new Set(rows.map((r) => r.project_id)).size > 1) {
+        throw new Error(
+          `dctl ls --project ${projectPath} がプロジェクトで絞り込まれていません。${projectPath} が dctl project-add に渡したパスと完全に一致しているか確かめてください`,
+        );
+      }
       return rows.map((r) => ({ id: r.id, title: r.title, state: r.state, branch: r.branch }));
     },
     async addTask(projectPath, title, prompt) {
