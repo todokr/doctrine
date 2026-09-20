@@ -377,8 +377,8 @@ export type RateLimitView = {
   /** 「66% 使用」 */
   percent: string;
   severity: RateLimitSeverity;
-  /** 「あと3時間54分でリセット」「リセット済み（値はリセット前）」「リセット時刻は不明」 */
-  reset: string;
+  /** 「あと3時間54分でリセット」「リセット時刻は不明」。もうリセットされた枠では null */
+  reset: string | null;
   /** 枠はもうリセットされていて、利用率はリセット前の値である */
   stale: boolean;
   /** いつ観測した値か（「3分前」） */
@@ -417,7 +417,7 @@ function rateLimitView(w: RateLimitWindow, now: number): RateLimitView {
     reset: w.resetsAt === null
       ? "リセット時刻は不明"
       : stale
-      ? "リセット済み（値はリセット前）"
+      ? null
       : `あと${remaining(w.resetsAt - now)}でリセット`,
     stale,
     observed: ago(w.observedAt, now),

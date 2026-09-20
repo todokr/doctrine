@@ -1050,7 +1050,7 @@ describe("利用上限の表示", () => {
 
   test("もうリセットされた枠は利用率を古い値として扱い、色も説明文も付けない", () => {
     const v = viewOf(win({ window: "seven_day", utilization: 1, resetsAt: NOW - MIN }));
-    expect(v).toMatchObject({ reset: "リセット済み（値はリセット前）", stale: true, severity: "calm", note: null });
+    expect(v).toMatchObject({ reset: null, stale: true, severity: "calm", note: null });
     expect(viewOf(win({ resetsAt: NOW })).stale).toBe(true);
     expect(viewOf(win({})).stale).toBe(false);
   });

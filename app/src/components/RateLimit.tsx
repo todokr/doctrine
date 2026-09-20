@@ -27,7 +27,7 @@ export function RateLimit() {
           </span>
           <div className="limit-meta">
             <span className="limit-pct">{v.percent}</span>
-            <span>{v.reset}</span>
+            {v.reset && <span>{v.reset}</span>}
           </div>
           {v.note && <p className="limit-note">{v.note}</p>}
         </div>
