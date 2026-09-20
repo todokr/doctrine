@@ -6,10 +6,12 @@
 # 探索履歴を抱えたまま再開されないようにするため。
 #
 # verify は型検査とテストを回すだけの command ステップ。通ったかどうかを
-# エージェントに確かめさせず、ここで機械的に落とす。
+# エージェントに確かめさせず、ここで機械的に落とす。core / app / pfd の3つとも流す。
+# app は依存の取得（pnpm install --frozen-lockfile）から始めるので、
+# pnpm-lock.yaml が package.json と食い違っていればここで落ちる。
 #
 # 2つのゲート（plan-gate / review-gate）は、審査役が書いた成果物ファイルの
-# 1行目が `verdict: approve` かどうかを grep で見るだけの command ステップ。
+# 1行目の verdict を grep で見るだけの command ステップ。
 # reject なら成果物ファイルを stdout に出して落ち、onFailure で前の工程へ戻る。
 # feed はゲート自身の last_stdout（＝審査結果のファイルの中身）を渡す。
 #   plan-gate   が落ちたら plan へ（最大3回）
@@ -18,6 +20,12 @@
 #   review（人の承認）で却下されたら implement へ（最大5回）
 # maxAttempts を使い切ってもゲートが通らない場合、タスクは failed になる。
 # そのとき worktree は削除されずに残るので、中を見て手で直すか、タスクを作り直す。
+#
+# review-gate は `verdict: escalate` も通す。implement が自分では直せない指摘
+# （許可されていないコマンドが要る、など）を implement へ戻しても同じ reject を
+# 繰り返して maxAttempts を使い切るだけなので、人の review へ進めて判断を仰ぐ。
+# implement は毎回 .doctrine-out/implement-notes.md にできなかったことを書き、
+# agent-review はそれを読んで reject と escalate を分ける。
 #
 # command ステップはクラッシュ復帰時に頭から再実行されるので、
 # 再実行しても安全なコマンドにすること（grep は安全、gh pr create は危険）。
@@ -113,11 +121,21 @@ steps:
     model: claude-sonnet-5
     permissionMode: acceptEdits
     # acceptEdits では Bash がすべて拒否されるので、このリポジトリで要るものだけ許可する。
+    # 許可は `&&` や `cd` でつないだ各コマンドに個別に照合されるため、`cd app && pnpm add`
+    # は通らない。app の依存は `pnpm -C app`、deno lint はパスを引数に渡して実行させる。
     allowedTools:
       - "Bash(mise run core:test:*)"
       - "Bash(mise run core:check:*)"
+      - "Bash(mise run core:deps:*)"
+      - "Bash(mise run app:deps:*)"
       - "Bash(mise run app:test:*)"
+      - "Bash(mise run app:build:*)"
+      - "Bash(mise run pfd:deps:*)"
+      - "Bash(mise run pfd:test:*)"
+      - "Bash(mise run pfd:check:*)"
+      - "Bash(pnpm -C app:*)"
       - "Bash(deno fmt:*)"
+      - "Bash(deno lint:*)"
       - "Bash(deno eval:*)"
       - "Bash(git status:*)"
       - "Bash(git diff:*)"
@@ -142,14 +160,34 @@ steps:
       plan.md が挙げたファイルと行から着手し、それ以外は必要になるまで読まないでください。
       plan.md が実際のコードと食い違っていたら、コードに合わせて実装し、食い違いを最終応答に書いてください。
 
-      テストを先に書いてから実装します。`mise run core:test` と `mise run core:check` を
-      通してから git commit してください。
+      テストを先に書いてから実装します。触ったディレクトリの検証を通してから git commit してください。
+
+      - core/ と shared/: `mise run core:check` と `mise run core:test`
+      - app/ と shared/: `mise run app:test` と `mise run app:build`
+      - pfd/: `mise run pfd:check` と `mise run pfd:test`
+
+      コマンドは1つずつ実行してください。`&&` や `cd` でつなぐと権限で拒否されます。
+      app の依存を足すときは `pnpm -C app add <パッケージ>` を使い、pnpm-lock.yaml は手で編集しないでください。
+      deno lint は `deno lint core/src/...` のようにパスを渡して実行します。
+
       差し戻されて再度呼ばれた場合は、指摘を直して再度コミットしてください。
 
+      最後に {{ worktree.path }}/.doctrine-out/implement-notes.md を毎回上書きしてください。書くのは次の3点です。
+
+      - 今回やったこと
+      - 実行して通した検証コマンド
+      - できなかったこと。権限で拒否されたコマンドはコマンド名をそのまま書き、
+        人に代わりにやってほしい手順があればそれも書きます。無ければ「なし」と書きます
+
+      必要なコマンドが権限で拒否されたときは、ロックファイルの手編集のような回避策を取らず、
+      できる範囲までコミットして、できなかったことを implement-notes.md に書いて終えてください。
+
   # deno test は失敗の詳細を stdout に、deno check は stderr に出すので両方渡す。
+  # app:deps を app:test の前に置くのは、implement が依存を足した直後でも
+  # node_modules が pnpm-lock.yaml と揃った状態でテストを流すため。
   - id: verify
     type: command
-    run: "mise run core:check && mise run core:test"
+    run: "mise run core:check && mise run core:test && mise run app:deps && mise run app:test && mise run app:build && mise run pfd:check && mise run pfd:test"
     onFailure:
       goto: implement
       maxAttempts: 3
@@ -172,26 +210,39 @@ steps:
       - "Bash(ls:*)"
       - "Bash(sed -n:*)"
     prompt: |
-      型検査とテストは直前の verify ステップで通っています。自分で回す必要はありません。
+      直前の verify ステップで、core の型検査とテスト、app の依存の取得
+      （pnpm install --frozen-lockfile）・テスト・ビルド（tsc と vite build）、
+      pfd の型検査とテストが通っています。自分で回す必要はありません。
+      deno fmt --check と deno lint、cargo は verify に含まれていません。
 
       implement が積んだコミットを毎回読み直して審査し、結果を
       {{ worktree.path }}/.doctrine-out/review.md に上書きしてください。
 
       `git diff develop...HEAD` と `git log develop..HEAD` で実装の差分とコミットを読み、
-      {{ worktree.path }}/.doctrine-out/plan.md と突き合わせます。見るのは次の3点です。
+      {{ worktree.path }}/.doctrine-out/plan.md と突き合わせます。
+      {{ worktree.path }}/.doctrine-out/implement-notes.md も読みます。実装者が、やったこと・
+      通した検証・できなかったことを書いています。見るのは次の3点です。
 
       - plan.md との乖離
       - テスト不足
       - CLAUDE.md の規約違反
 
-      review.md の1行目は必ず `verdict: approve` か `verdict: reject` のどちらかにします。
-      2行目以降に指摘を書いてください。修正が必要な具体的な指摘があるときだけ reject にします。
+      review.md の1行目は必ず `verdict: approve` / `verdict: reject` / `verdict: escalate` の
+      どれかにします。2行目以降に指摘を書いてください。
+
+      - reject: 修正が必要な具体的な指摘があり、実装者が直せるとき。実装者へ差し戻されます
+      - escalate: 修正が必要な指摘が残っているが、実装者には直せないとき。人のレビューへ進みます。
+        implement-notes.md に権限で拒否されたコマンドが書かれていて指摘の対応にそのコマンドが要る場合や、
+        前回と同じ指摘なのに HEAD が動いていない場合がこれに当たります。
+        同じ指摘で reject を繰り返さないでください。
+        2行目以降の先頭に、人にやってほしい手順をコマンドつきで書きます
+      - approve: それ以外
 
       指摘は review.md から後続のステップへ渡ります。最終応答は verdict の1行だけで構いません。
 
   - id: review-gate
     type: command
-    run: "grep -q '^verdict: approve' .doctrine-out/review.md || { cat .doctrine-out/review.md || echo 'review.md が書かれていない'; exit 1; }"
+    run: "grep -qE '^verdict: (approve|escalate)' .doctrine-out/review.md || { cat .doctrine-out/review.md || echo 'review.md が書かれていない'; exit 1; }"
     onFailure:
       goto: implement
       maxAttempts: 3
@@ -210,5 +261,6 @@ steps:
         {{ steps.review.last_stdout }}
     review:
       files:
-        - .doctrine-out/plan.md
         - .doctrine-out/review.md
+        - .doctrine-out/implement-notes.md
+        - .doctrine-out/plan.md
