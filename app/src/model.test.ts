@@ -849,7 +849,7 @@ describe("止まった理由と実行履歴", () => {
     ...o,
   });
   const detail = (stepRuns: StepRun[]): TaskDetail =>
-    ({ task: {} as TaskDetail["task"], stepRuns });
+    ({ task: {} as TaskDetail["task"], stepRuns, steps: null });
   const t = (patch: Partial<Task>): Task => ({ ...seedTasks()[0], ...patch });
 
   test("失敗したステップは task.get の stepRuns から取る", () => {

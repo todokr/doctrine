@@ -218,6 +218,28 @@ th{color:var(--ink-3);font-size:11px;font-weight:500;border-top:0;background:var
 .rel-field{font-family:var(--mono);font-size:9px;fill:var(--ink-3)}
 .rel-line{stroke:var(--ink-3);stroke-width:1.2}
 .rel-card{font-size:9.5px;fill:var(--ink-3)}
+.wr-scroll{overflow-x:auto}
+.wr{display:block}
+.wr-edge{stroke:var(--line);stroke-width:1.4}
+.wr-back{fill:none;stroke:var(--ink-3);stroke-width:1.2}
+.wr-arrowhead{fill:var(--ink-3)}
+.wr-arclbl{font-family:var(--mono);font-size:10px;fill:var(--ink-3)}
+.wr-node rect{fill:var(--surface-2);stroke:var(--line)}
+.wr-id{font-family:var(--mono);font-size:11px;fill:var(--ink-2)}
+.wr-ok rect{fill:var(--ok-bg)}
+.wr-ok .wr-id{fill:var(--ok)}
+.wr-run rect{fill:var(--run-bg)}
+.wr-run .wr-id{fill:var(--run)}
+.wr-attn rect{fill:var(--accent-soft)}
+.wr-attn .wr-id{fill:var(--accent-text)}
+.wr-danger rect{fill:var(--danger-bg)}
+.wr-danger .wr-id{fill:var(--danger)}
+.wr-deg rect{fill:var(--degraded-bg)}
+.wr-deg .wr-id{fill:var(--degraded)}
+.wr-node.unknown rect{stroke:var(--ink-3);stroke-dasharray:4 3}
+.wr-node[aria-current="step"] rect{stroke:var(--accent);stroke-width:2}
+.wr-badge rect{fill:var(--surface);stroke:var(--line)}
+.wr-badge text{font-family:var(--mono);font-size:9.5px;fill:var(--ink-2)}
 .g-start{width:100%;border:1px solid var(--accent);background:var(--accent);color:var(--accent-ink);border-radius:7px;padding:7px 10px;font-weight:700;text-align:center}
 .g-start:hover{filter:brightness(1.05)}
 

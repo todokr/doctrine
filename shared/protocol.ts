@@ -111,7 +111,23 @@ export type StepRun = {
   permission_denials: StepRunDenials | null;
 };
 
-export type TaskDetail = { task: TaskSummary; stepRuns: StepRun[] };
+/**
+ * ワークフローの1ステップのうち、帯が描くために要る分だけ。
+ * prompt / run / allowedTools / feed は出さない。
+ */
+export type StepView = {
+  id: string;
+  type: "command" | "agent" | "approval";
+  title?: string;
+  branch?: { goto: string; maxAttempts: number };
+};
+
+/**
+ * steps は setup を差し込んだ後の、実際に走る列。null は「ワークフロー YAML が
+ * 読めない」の意味で、読み取り専用の経路をワークフローの不備で失敗させないための
+ * 扱い（task.context と同じ理由）。それ以外の用途には使わない。
+ */
+export type TaskDetail = { task: TaskSummary; stepRuns: StepRun[]; steps: StepView[] | null };
 
 export type TaskLogs = { step_run_id: number | null; log_path: string | null; lines: string[] };
 

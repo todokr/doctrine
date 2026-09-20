@@ -1545,6 +1545,54 @@ test("task.context はワークフローが読めなくても経緯を返す", a
   assert.equal(got.reviews.length, 1, "current_step_id の行をレビューとして拾う");
 });
 
+test("task.get は setup を先頭に含む steps を返す", async () => {
+  await writeFile(
+    join(repo, ".doctrine", "project.yaml"),
+    "defaultWorkflow: feature\nmaxConcurrent: 1\nbaseBranch: main\nsetup: echo hi\n",
+  );
+  const ctx = await context();
+  const h = createHandler(ctx);
+  await h("project.add", { path: repo }, NOOP_CONN);
+  const t = await h("task.create", { project: repo, title: "T", prompt: "やって" }, NOOP_CONN) as {
+    id: string;
+  };
+
+  const got = await h("task.get", { task_id: t.id }, NOOP_CONN) as {
+    steps: { id: string; type: string; title?: string }[] | null;
+  };
+  // deepEqual で丸ごと比べると title: undefined のキーの有無で落ちるので、フィールド単位で見る。
+  assert.ok(got.steps);
+  assert.equal(got.steps.length, 2);
+  assert.equal(got.steps[0].id, "setup");
+  assert.equal(got.steps[0].type, "command");
+  assert.equal(got.steps[1].id, "review");
+  assert.equal(got.steps[1].type, "approval");
+  assert.equal(got.steps[1].title, "見て");
+});
+
+test("task.get はワークフロー YAML が読めないとき steps を null にし、task と stepRuns は従来どおり返す", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  await h("project.add", { path: repo }, NOOP_CONN);
+  const t = await h("task.create", { project: repo, title: "T", prompt: "やって" }, NOOP_CONN) as {
+    id: string;
+  };
+  await tick(ctx);
+  await until(async () => (await getTask(ctx.db, t.id))?.state === "suspended", 5000, "承認待ち");
+
+  // 承認待ちの間にワークフローが消える
+  await rm(join(repo, ".doctrine", "workflows", "feature.yaml"));
+
+  const got = await h("task.get", { task_id: t.id }, NOOP_CONN) as {
+    task: { id: string };
+    stepRuns: unknown[];
+    steps: unknown[] | null;
+  };
+  assert.equal(got.steps, null);
+  assert.equal(got.task.id, t.id);
+  assert.equal(got.stepRuns.length, 1);
+});
+
 test("task.context は無いタスクを名指しで断る", async () => {
   const ctx = await context();
   const h = createHandler(ctx);

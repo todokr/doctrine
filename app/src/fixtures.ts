@@ -1,5 +1,5 @@
 // テスト用の標本。画面はこれを使わない（画面のデータはデーモンから来る）
-import type { Guide, Project, StepDef, Task, TaskDiff } from "./types";
+import type { Guide, Project, Task, TaskDiff } from "./types";
 import type { ServerEvent } from "../../shared/protocol.ts";
 
 export const NOW = Date.parse("2026-09-15T15:00:00+09:00");
@@ -9,14 +9,6 @@ export const PROJECTS: Project[] = [
   { id: "shop-api", color: "#AA3A2C", path: "~/work/shop-api", def: "feature" },
   { id: "blog", color: "#296B49", path: "~/git/blog", def: "feature" },
 ];
-const st = (id: string, type: StepDef["type"], extra: Partial<StepDef> = {}): StepDef => ({ id, type, ...extra });
-export const WORKFLOWS: Record<string, StepDef[]> = {
-  "doctrine/feature": [st("setup","command"), st("implement","agent"), st("test","command"), st("review","approval",{ title: "差分を確認してください", onReject: "implement" }), st("open-pr","command")],
-  "doctrine/guided": [st("setup","command"), st("plan","agent"), st("plan-approval","approval",{ title: "計画を確認してください", onReject: "plan", review: { files: [".doctrine-out/plan.md"] } }), st("implement","agent"), st("code-review","agent"), st("human-review","approval",{ title: "変更を確認してください", onReject: "implement" }), st("open-pr","command")],
-  "shop-api/feature": [st("setup","command"), st("implement","agent"), st("lint","command"), st("test","command"), st("review","approval",{ title: "差分を確認してください", onReject: "implement" }), st("open-pr","command")],
-  "shop-api/hotfix": [st("setup","command"), st("fix","agent"), st("test","command"), st("confirm","approval",{ title: "本番反映前に確認してください", onReject: "fix" })],
-  "blog/feature": [st("setup","command"), st("implement","agent"), st("build","command"), st("review","approval",{ title: "差分を確認してください", onReject: "implement" }), st("deploy-preview","command")],
-};
 
 const GUIDE_9F21: Guide = {
   why: "差し戻しのたびに implement ステップの会話が単一の暗黙ロールに閉じていたため、plan ステップで積んだ文脈と implement ステップの文脈が同じ会話に混ざっていた。role ごとにセッションを分け、差し戻された agent ステップに戻ったとき、その役割の会話だけを --resume できるようにする。",
