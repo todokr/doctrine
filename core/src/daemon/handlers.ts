@@ -1,6 +1,6 @@
 import { join } from "@std/path";
 import { computeDiff, mergeBase, type TaskDiff } from "../domain/diff.ts";
-import { parseWorkflow, type Workflow } from "../workflow/schema.ts";
+import { branchOf, parseWorkflow, type Workflow } from "../workflow/schema.ts";
 import { parseProjectConfig, withSetupStep } from "../workflow/project.ts";
 import { ensureProjectScaffold } from "../workflow/scaffold.ts";
 import {
@@ -49,6 +49,7 @@ import type {
   RateLimitSample,
   ServerEvent,
   StepRunDenials,
+  StepView,
   TaskLogs,
 } from "../../../shared/protocol.ts";
 import type { WarningLog } from "./warnings.ts";
@@ -76,6 +77,17 @@ function parseDenials(raw: string | null): StepRunDenials | null {
   } catch {
     return null;
   }
+}
+
+/** 帯が描く分だけを残す。title は approval だけが持ち、branch の feed は画面へ流さない。 */
+function toStepViews(workflow: Workflow): StepView[] {
+  return workflow.steps.map((step) => {
+    const view: StepView = { id: step.id, type: step.type };
+    if (step.type === "approval") view.title = step.title;
+    const branch = branchOf(step);
+    if (branch) view.branch = { goto: branch.goto, maxAttempts: branch.maxAttempts };
+    return view;
+  });
 }
 
 function req(params: Record<string, unknown>, key: string): string {
@@ -220,7 +232,13 @@ export function createHandler(ctx: DaemonContext): Handler {
           ...r,
           permission_denials: parseDenials(r.permission_denials),
         }));
-        return { task, stepRuns };
+        const project = (await getProject(ctx.db, task.project_id))!;
+        // 読み取り専用の経路なので、ワークフローが読めないことで失敗させない（task.context と同じ）。
+        // 画面には setup を差し込んだ後の、実際に走る列を渡す。
+        const workflow = await ctx.loadWorkflow(project.path, task.workflow_name)
+          .then(({ workflow }) => withSetupStep(workflow, project.setup ?? undefined))
+          .catch(() => null);
+        return { task, stepRuns, steps: workflow && toStepViews(workflow) };
       }
 
       case "task.context": {
