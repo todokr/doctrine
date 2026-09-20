@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { rpc } from "../daemon/client";
 import { sendDecision } from "../decision";
 import { ago, bounceNotice, clock, elapsed, hm, isTerminal, stepRunHistory, stopReasons } from "../model";
 import { useDecide, useNotYet, useStore } from "../store";
+import { isAtBottom } from "../tailStick";
 import type { Task, TaskState } from "../types";
 import type { StepRun } from "../../../shared/protocol.ts";
 import { Crumbs, OpenInEditor } from "./ReviewView";
@@ -90,6 +91,8 @@ export function TaskView({ t }: { t: Task }) {
   // 送信中だけ止める。失敗したら「中止しました」は出さず、もう一度押せる
   const [canceling, setCanceling] = useState(false);
   const logRef = useRef<HTMLPreElement>(null);
+  // 末尾に貼り付いているか。ターミナルと同じく、遡ったら止まり、末尾に戻せばまた追う
+  const stick = useRef(true);
 
   useTaskDetail(t);
   useTaskLogs(t);
@@ -99,13 +102,18 @@ export function TaskView({ t }: { t: Task }) {
   const log = s.logs[t.id];
   const following = t.state === "running";
 
-  // 追従中は新しい行が見えている必要がある。手で遡っている最中は邪魔をしない
-  useEffect(() => {
+  // 行が増えたら末尾へ。遡っている間は動かさない（stick は人のスクロールで決まる）
+  useLayoutEffect(() => {
     const el = logRef.current;
-    if (!following || !el) return;
-    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
-    if (atBottom) el.scrollTop = el.scrollHeight;
-  }, [log, following]);
+    if (el && stick.current) el.scrollTop = el.scrollHeight;
+  }, [log]);
+
+  // 別のタスク・別のステップ実行を開いたときは、走っていなくても末尾から見せる
+  useLayoutEffect(() => {
+    const el = logRef.current;
+    stick.current = true;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [t.id, log?.stepRunId]);
 
   const [stateName, stateCls] = STATE_PILL[t.state];
   // 今のステップが何回目か。履歴の先頭が今の（または最後の）実行にあたる
@@ -245,7 +253,17 @@ export function TaskView({ t }: { t: Task }) {
         </span>
       </div>
       {log && log.lines.some((l) => l !== "")
-        ? <pre className="block" ref={logRef}>{log.lines.join("\n")}</pre>
+        ? (
+          <pre
+            className="block"
+            ref={logRef}
+            onScroll={(e) => {
+              stick.current = isAtBottom(e.currentTarget);
+            }}
+          >
+            {log.lines.join("\n")}
+          </pre>
+        )
         : (
           <div className="box quiet">
             <p>
