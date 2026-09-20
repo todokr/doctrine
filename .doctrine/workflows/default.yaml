@@ -80,6 +80,13 @@ steps:
       実装者が読む必要のないファイルは挙げないでください。
       計画を書くだけで、リポジトリのコードは変更しないでください。
 
+      作業ディレクトリは worktree のルートです。Bash に渡すパスは worktree のルートからの
+      相対で書いてください。コマンドは1つずつ実行してください。`&&` や `cd` でつなぐと
+      権限で拒否されます。許可は `&&` でつないだ各コマンドに個別に照合されるので、
+      `cd core && deno fmt --check` は `cd` の側で落ちます。
+      `git` に `-C` を付けないでください。`Bash(git diff:*)` のような許可に前方一致
+      しなくなります。`git diff develop...HEAD` のようにそのまま書きます。
+
       差し戻されて再度呼ばれた場合は、指摘を踏まえて plan.md を全文書き直してください。
 
   - id: plan-review
@@ -125,6 +132,13 @@ steps:
       - 計画に書かれたパス・関数名・型名が実在するか。grep や sed -n で、挙げられた箇所だけを確かめます
 
       リポジトリ全体を調べ直す必要はありません。計画が挙げた箇所を確かめれば足ります。
+
+      作業ディレクトリは worktree のルートです。Bash に渡すパスは worktree のルートからの
+      相対で書いてください。コマンドは1つずつ実行してください。`&&` や `cd` でつなぐと
+      権限で拒否されます。許可は `&&` でつないだ各コマンドに個別に照合されるので、
+      `cd core && deno fmt --check` は `cd` の側で落ちます。
+      `git` に `-C` を付けないでください。`Bash(git diff:*)` のような許可に前方一致
+      しなくなります。`git diff develop...HEAD` のようにそのまま書きます。
 
       plan-review.md の1行目は必ず `verdict: approve` か `verdict: reject` のどちらかにします。
       2行目以降に指摘を書いてください。修正が必要な具体的な指摘があるときだけ reject にします。
@@ -204,7 +218,9 @@ steps:
       - app/ と shared/: `mise run app:test` と `mise run app:build`
       - pfd/: `mise run pfd:check` と `mise run pfd:test`
 
+      作業ディレクトリは worktree のルートです。Bash に渡すパスは worktree のルートからの相対で書いてください。
       コマンドは1つずつ実行してください。`&&` や `cd` でつなぐと権限で拒否されます。
+      `git` に `-C` を付けないでください。`Bash(git diff:*)` のような許可に前方一致しなくなります。`git diff develop...HEAD` のようにそのまま書きます。
       app の依存を足すときは `pnpm -C app add <パッケージ>` を使い、pnpm-lock.yaml は手で編集しないでください。
       deno lint は `deno lint core/src/...` のようにパスを渡して実行します。
 
@@ -268,6 +284,14 @@ steps:
 
       implement が積んだコミットを毎回読み直して審査し、結果を
       {{ worktree.path }}/.doctrine-out/review.md に上書きしてください。
+
+      作業ディレクトリは worktree のルートです。Bash に渡すパスは worktree のルートからの
+      相対で書いてください。コマンドは1つずつ実行してください。`&&` や `cd` でつなぐと
+      権限で拒否されます。許可は `&&` でつないだ各コマンドに個別に照合されるので、
+      `cd core && deno fmt --check` は `cd` の側で落ちます。
+      `git` に `-C` を付けないでください。`Bash(git diff:*)` のような許可に前方一致
+      しなくなります。`git diff develop...HEAD` のようにそのまま書きます。
+      `deno fmt --check --config core/deno.json` のように、ルートからの相対パスで実行します。
 
       `git diff develop...HEAD` と `git log develop..HEAD` で実装の差分とコミットを読み、
       {{ worktree.path }}/.doctrine-out/plan.md と突き合わせます。
