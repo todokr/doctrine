@@ -38,6 +38,26 @@ description = "dctl / dctld の単一バイナリを作る"
 dir = "core"
 run = "deno task build"
 
+[tasks."pfd:deps"]
+description = "pfd の依存を取る"
+dir = "pfd"
+run = "deno install --frozen"
+
+[tasks."pfd:test"]
+description = "pfd のテスト"
+dir = "pfd"
+run = "deno task test"
+
+[tasks."pfd:check"]
+description = "pfd の型検査"
+dir = "pfd"
+run = "deno task check"
+
+[tasks."pfd:install"]
+description = "pfd を ~/.deno/bin に置く"
+dir = "pfd"
+run = "deno task install"
+
 [tasks."app:deps"]
 description = "アプリの依存を取る"
 dir = "app"
@@ -69,7 +89,7 @@ run = "pnpm tauri dev"
 # パース時点で走るため、タスク自身が自分の信頼をブートストラップすることはできない
 #
 # deno と pnpm はそれぞれの lock ファイルの隣で走る必要があり、1 つの dir では
-# 書けないので、実体を 2 つに割って depends で束ねている。
+# 書けないので、実体を 3 つに割って depends で束ねている。
 [tasks.setup]
 description = "worktree を作業可能な状態にする（依存の取得）"
-depends = ["core:deps", "app:deps"]
+depends = ["core:deps", "app:deps", "pfd:deps"]
