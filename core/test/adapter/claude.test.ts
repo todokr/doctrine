@@ -82,6 +82,71 @@ test("allowedTools が空配列なら --allowedTools を付けない", () => {
   assert.equal(args.includes("--allowedTools"), false);
 });
 
+test("jsonSchema を渡すと --json-schema が JSON 文字列 1 引数で付く", () => {
+  const args = buildArgs("やって", {
+    cwd: "/wt",
+    sessionId: "s1",
+    jsonSchema: {
+      type: "object",
+      properties: { name: { type: "string" } },
+      required: ["name"],
+    },
+  });
+  assert.deepEqual(args, [
+    "-p",
+    "やって",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--session-id",
+    "s1",
+    "--permission-prompts",
+    "none",
+    "--json-schema",
+    '{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}',
+  ]);
+});
+
+test("--json-schema は --allowedTools より前に入る", () => {
+  const args = buildArgs("やって", {
+    cwd: "/wt",
+    sessionId: "s1",
+    jsonSchema: { type: "object" },
+    allowedTools: ["Bash(grep:*)"],
+  });
+  assert.deepEqual(args.slice(-2), ["--allowedTools", "Bash(grep:*)"]);
+  assert.ok(
+    args.indexOf("--json-schema") < args.indexOf("--allowedTools"),
+    "--allowedTools は可変長なので、後ろに置いたフラグはツール名として食われる",
+  );
+});
+
+test("再開時も --json-schema はプロンプトの位置を崩さない", () => {
+  const args = buildArgs(
+    "追加で直して",
+    { cwd: "/wt", sessionId: "s1", jsonSchema: { type: "object" } },
+    "s1",
+  );
+  assert.deepEqual(args, [
+    "-p",
+    "--resume",
+    "s1",
+    "追加で直して",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--permission-prompts",
+    "none",
+    "--json-schema",
+    '{"type":"object"}',
+  ]);
+});
+
+test("jsonSchema を渡さなければ argv は従来どおり", () => {
+  const args = buildArgs("やって", { cwd: "/wt", sessionId: "s1", model: "claude-opus-5" });
+  assert.equal(args.includes("--json-schema"), false);
+});
+
 test("rate_limit_event を正規化する", () => {
   const ev = normalize({
     type: "rate_limit_event",
@@ -140,6 +205,48 @@ test("result 行が来なければ失敗とみなす", () => {
 
 test("is_error が true なら失敗", () => {
   const r = resultFrom({ type: "result", subtype: "error", is_error: true, result: "だめ" }, 0);
+  assert.equal(r.ok, false);
+});
+
+test("result 行から構造化出力を取り出す", () => {
+  const r = resultFrom({
+    type: "result",
+    subtype: "success",
+    is_error: false,
+    result: "できました",
+    structured_output: { title: "ガイド", steps: ["a", "b"] },
+  }, 0);
+  assert.deepEqual(r.structuredOutput, { title: "ガイド", steps: ["a", "b"] });
+  assert.equal(r.ok, true);
+  assert.equal(r.text, "できました");
+});
+
+test("構造化出力が無い result 行は null にする", () => {
+  const r = resultFrom(
+    { type: "result", subtype: "success", is_error: false, result: "できました" },
+    0,
+  );
+  assert.equal(r.structuredOutput, null);
+  assert.equal(r.ok, true, "構造化出力の有無は成功判定に影響しない");
+});
+
+test("構造化出力がオブジェクトでなければ null にして例外を投げない", () => {
+  for (const bad of ['{"a":1}', null, [1, 2, 3], 42]) {
+    const r = resultFrom({
+      type: "result",
+      subtype: "success",
+      is_error: false,
+      result: "できました",
+      structured_output: bad,
+    }, 0);
+    assert.equal(r.structuredOutput, null, `${JSON.stringify(bad)} は null になるはず`);
+    assert.equal(r.ok, true);
+  }
+});
+
+test("result 行が来なければ構造化出力も null", () => {
+  const r = resultFrom(undefined, 1);
+  assert.equal(r.structuredOutput, null);
   assert.equal(r.ok, false);
 });
 

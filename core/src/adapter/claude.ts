@@ -19,6 +19,8 @@ export function buildArgs(prompt: string, opts: StartOptions, resumeSessionId?: 
   if (opts.permissionMode) args.push("--permission-mode", opts.permissionMode);
   args.push("--permission-prompts", "none");
   if (opts.model) args.push("--model", opts.model);
+  // --allowedTools が可変長なので、これより後ろに置くとスキーマがツール名として食われる。
+  if (opts.jsonSchema) args.push("--json-schema", JSON.stringify(opts.jsonSchema));
   // `Bash(git diff:*)` のように空白を含むパターンがあるので、カンマで連結せず
   // 1要素を1つの argv として渡す。
   if (opts.allowedTools && opts.allowedTools.length > 0) {
@@ -85,6 +87,7 @@ export function resultFrom(
       permissionDenials: [],
       exitCode,
       stderrTail,
+      structuredOutput: null,
     };
   }
   const o = resultLine as Record<string, unknown>;
@@ -99,7 +102,22 @@ export function resultFrom(
     permissionDenials: denials,
     exitCode,
     stderrTail,
+    structuredOutput: structuredOutputOf(o),
   };
+}
+
+/**
+ * --json-schema の出力を result 行から取る。オブジェクトのときだけ返し、無い・null・
+ * 文字列・数値・配列は null。スキーマへの適合はここでは確かめない（呼び出し元の責務）。
+ *
+ * 未実測。`claude --help` の `--json-schema` の記載から `structured_output` と仮置きしている。
+ * 呼び出し元を作る作業で実際の result 行を見て直すこと。
+ */
+function structuredOutputOf(o: Record<string, unknown>): Record<string, unknown> | null {
+  const v = o.structured_output;
+  return typeof v === "object" && v !== null && !Array.isArray(v)
+    ? v as Record<string, unknown>
+    : null;
 }
 
 export function createClaudeAdapter(bin = "claude"): AgentAdapter {
