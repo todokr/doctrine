@@ -1,3 +1,5 @@
+import type { PermissionDenial } from "../../../shared/protocol.ts";
+
 /** rate_limit_event が伝える、ある枠（window）の消費率と明ける時刻。 */
 export type RateLimitObservation = {
   window: string;
@@ -22,7 +24,7 @@ export type AgentResult = {
   costUsd: number | null;
   numTurns: number | null;
   durationMs: number | null;
-  permissionDenials: unknown[];
+  permissionDenials: PermissionDenial[];
   exitCode: number | null;
   /** result 行が来ずに終わった実行を診断するための stderr 末尾（最大4KB）。 */
   stderrTail: string;

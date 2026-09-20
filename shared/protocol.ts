@@ -72,6 +72,17 @@ export type TaskSummary = {
 /** task.list だけが has_degraded を持つ（approve / reject / cancel は行をそのまま返す）。 */
 export type TaskListEntry = TaskSummary & { has_degraded: boolean };
 
+/**
+ * 権限で拒否された操作1件。
+ * 形は Claude Agent SDK の型定義（tool_name / tool_use_id / tool_input）に
+ * 合わせてあるが、実バイナリの出力では未確認。input は SDK の tool_input。
+ */
+export type PermissionDenial = {
+  tool_name: string;
+  tool_use_id: string | null;
+  input: Record<string, unknown>;
+};
+
 /** task.get が返すステップ実行1回ぶん。step_runs の行のうち UI に見せる分。 */
 export type StepRun = {
   id: number;
