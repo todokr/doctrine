@@ -1,6 +1,7 @@
 import { GROUPS, countReview, groupOf, sidebarOrder, timeLabel, visibleTasks } from "../model";
 import { useNotYet, useStore } from "../store";
 import type { Task } from "../types";
+import { RateLimit } from "./RateLimit";
 
 const icons = {
   inbox: (
@@ -99,6 +100,7 @@ export function Sidebar() {
         )}
         {count === 0 && <p className="hint" style={{ padding: 8 }}>ありません</p>}
       </div>
+      <RateLimit />
     </aside>
   );
 }

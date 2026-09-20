@@ -1,8 +1,16 @@
 import { describe, expect, test, vi } from "vitest";
-import { NOW, PROJECTS, SAMPLE_DIFF, seedTasks } from "./fixtures";
+import {
+  NOW,
+  PROJECTS,
+  RATELIMIT_NEAR_SATURATION,
+  RATELIMIT_NORMAL,
+  SAMPLE_DIFF,
+  seedTasks,
+} from "./fixtures";
 import {
   bounceNotice,
   canReject,
+  clock,
   composeRejection,
   countReview,
   DEGRADED_UNKNOWN,
@@ -11,10 +19,12 @@ import {
   fellBackToAll,
   groupOf,
   hasSince,
+  hm,
   isTerminal,
   LOG_LINES_KEPT,
   MIN,
   queuePosition,
+  rateLimitViews,
   reduce,
   rejections,
   reviewRound,
@@ -23,15 +33,18 @@ import {
   stopReasons,
   timeLabel,
   toProject,
+  toRateLimitWindow,
   toTask,
   unguidedFiles,
+  WEEKLY_WARN_UTILIZATION,
   type DiffView,
   type State,
 } from "./model";
 import { buildDiff } from "./patch";
-import type { Guide, ReviewEntry, Task, TaskContext } from "./types";
+import type { Guide, RateLimitWindow, ReviewEntry, Task, TaskContext } from "./types";
 import type {
   ProjectSummary,
+  ServerEvent,
   StepRun,
   TaskDetail,
   TaskListEntry,
@@ -42,6 +55,7 @@ const base = (overrides: Partial<State> = {}): State => ({
   projects: PROJECTS,
   detail: {},
   logs: {},
+  limits: {},
   now: NOW,
   view: "tasks",
   project: "all",
@@ -646,13 +660,11 @@ describe("daemon イベント", () => {
     expect(after.tasks[0].since).toBe(999);
   });
 
-  test("まだ扱わないイベントは無視する", () => {
+  test("知らない event は無視する", () => {
     const s = withTask();
     const after = reduce(s, {
       type: "daemon",
-      ev: {
-        event: "ratelimit.sample", window: "5h", utilization: 0.4, resets_at: null,
-      },
+      ev: { event: "なにか.新しい" } as unknown as ServerEvent,
       now: 999,
     });
     expect(after).toEqual(s);
@@ -882,5 +894,163 @@ describe("止まった理由と実行履歴", () => {
     const d = detail([stepRun({ id: 1 }), stepRun({ id: 2 })]);
     expect(stepRunHistory(d).map((r) => r.id)).toEqual([2, 1]);
     expect(stepRunHistory(undefined)).toEqual([]);
+  });
+});
+
+describe("利用上限の表示", () => {
+  const sample = (window: string, utilization: number, resets_at: string | null = null): ServerEvent => ({
+    event: "ratelimit.sample", window, utilization, resets_at,
+  });
+  const feed = (s: State, evs: ServerEvent[], now = NOW): State =>
+    evs.reduce((acc, ev) => reduce(acc, { type: "daemon", ev, now }), s);
+  const win = (patch: Partial<RateLimitWindow>): RateLimitWindow => ({
+    window: "five_hour", utilization: 0.5, resetsAt: NOW + 60 * MIN, observedAt: NOW, ...patch,
+  });
+  const viewOf = (w: RateLimitWindow, now = NOW) =>
+    rateLimitViews(base({ limits: { [w.window]: w }, now }))[0];
+
+  test("ratelimit.sample を受けると、その window の最新の値が入る", () => {
+    const after = feed(base(), [sample("five_hour", 0.4, "2026-09-15T09:05:00.000Z")], 999);
+    expect(after.limits).toEqual({
+      five_hour: {
+        window: "five_hour",
+        utilization: 0.4,
+        resetsAt: Date.parse("2026-09-15T09:05:00.000Z"),
+        observedAt: 999,
+      },
+    });
+  });
+
+  test("同じ window は置き換わり、別の window は残る", () => {
+    const after = feed(base(), [sample("five_hour", 0.4), sample("seven_day", 0.6), sample("five_hour", 0.5)]);
+    expect(after.limits.five_hour.utilization).toBe(0.5);
+    expect(after.limits.seven_day.utilization).toBe(0.6);
+  });
+
+  test("未知の window も捨てずに持ち、既知の枠の後ろに生のキーで出す", () => {
+    const after = feed(base(), [sample("seven_day_opus", 0.3), sample("seven_day", 0.6), sample("five_hour", 0.4)]);
+    expect(rateLimitViews(after).map((v) => [v.window, v.label])).toEqual([
+      ["five_hour", "5時間枠"],
+      ["seven_day", "7日枠"],
+      ["seven_day_opus", "seven_day_opus"],
+    ]);
+  });
+
+  test("読めない resets_at は null にする（Invalid Date を出さない）", () => {
+    const after = feed(base(), [sample("five_hour", 0.4, "1789828800.0")]);
+    expect(after.limits.five_hour.resetsAt).toBeNull();
+  });
+
+  test("sync は limits を消さない", () => {
+    const s = feed(base(), [sample("five_hour", 0.4)]);
+    const after = reduce(s, { type: "sync", tasks: [], projects: [], now: NOW + MIN });
+    expect(after.limits).toEqual(s.limits);
+  });
+
+  test("limits.recent は、イベントで届いた新しい値を DB の古い行で上書きしない", () => {
+    const s = feed(base(), [sample("five_hour", 0.8)], NOW);
+    const after = reduce(s, {
+      type: "limits.recent",
+      samples: [
+        win({ window: "five_hour", utilization: 0.2, observedAt: NOW - 30 * MIN }),
+        win({ window: "seven_day", utilization: 0.6, observedAt: NOW - 30 * MIN }),
+      ],
+    });
+    expect(after.limits.five_hour.utilization).toBe(0.8);
+    expect(after.limits.seven_day.utilization).toBe(0.6);
+  });
+
+  test("limits.recent に同じ window が複数あっても、並び順によらず最新1件に畳む", () => {
+    const rows = [
+      win({ utilization: 0.3, observedAt: NOW - 2 * MIN }),
+      win({ utilization: 0.5, observedAt: NOW - MIN }),
+      win({ utilization: 0.1, observedAt: NOW - 3 * MIN }),
+    ];
+    for (const samples of [rows, [...rows].reverse()]) {
+      expect(reduce(base(), { type: "limits.recent", samples }).limits.five_hour.utilization).toBe(0.5);
+    }
+  });
+
+  test("toRateLimitWindow は ISO を数値にし、観測時刻の読めない行を捨てる", () => {
+    const row = {
+      observed_at: "2026-09-15T05:00:00.000Z",
+      window: "seven_day",
+      utilization: 0.66,
+      resets_at: "2026-09-19T00:00:00.000Z",
+    };
+    expect(toRateLimitWindow(row)).toEqual({
+      window: "seven_day",
+      utilization: 0.66,
+      resetsAt: Date.parse(row.resets_at),
+      observedAt: Date.parse(row.observed_at),
+    });
+    expect(toRateLimitWindow({ ...row, resets_at: null })?.resetsAt).toBeNull();
+    expect(toRateLimitWindow({ ...row, observed_at: "いつか" })).toBeNull();
+  });
+
+  test("5時間枠は飽和しても calm のままで、新しいタスクが始まらないことだけ伝える", () => {
+    expect(viewOf(win({ utilization: 0.99 })).note).toBeNull();
+    const v = viewOf(win({ utilization: 1 }));
+    expect(v.severity).toBe("calm");
+    expect(v.note).toBe("新しいタスクは明けるまで始まりません");
+  });
+
+  test("7日枠は閾値で warn、飽和で danger になり、失敗に直結することを説明する", () => {
+    const seven = (utilization: number) =>
+      viewOf(win({ window: "seven_day", utilization, resetsAt: NOW + 4 * 1440 * MIN }));
+    expect(seven(WEEKLY_WARN_UTILIZATION - 0.01)).toMatchObject({ severity: "calm", note: null });
+    expect(seven(WEEKLY_WARN_UTILIZATION).severity).toBe("warn");
+    expect(seven(WEEKLY_WARN_UTILIZATION).note).toContain("待たずに失敗します");
+    expect(seven(1).severity).toBe("danger");
+    expect(seven(1).note).toContain("待たずに失敗します");
+  });
+
+  test("フィクスチャ: 通常の状態はどの行も calm", () => {
+    const views = rateLimitViews(feed(base(), RATELIMIT_NORMAL));
+    expect(views.map((v) => [v.window, v.severity])).toEqual([
+      ["five_hour", "calm"],
+      ["seven_day", "calm"],
+    ]);
+    expect(views.every((v) => v.note === null)).toBe(true);
+  });
+
+  test("フィクスチャ: 飽和が近い状態は7日枠だけが warn", () => {
+    const views = rateLimitViews(feed(base(), RATELIMIT_NEAR_SATURATION));
+    expect(views.map((v) => [v.window, v.severity])).toEqual([
+      ["five_hour", "calm"],
+      ["seven_day", "warn"],
+    ]);
+  });
+
+  test("明ける時刻は、5時間枠は時分だけ、7日枠は日付つきで出す", () => {
+    const at = NOW + 3 * 60 * MIN;
+    expect(viewOf(win({ resetsAt: at })).reset).toBe(`${hm(at)} 明け`);
+    const far = NOW + 4 * 1440 * MIN;
+    expect(viewOf(win({ window: "seven_day", resetsAt: far })).reset).toBe(`${clock(far)} 明け`);
+  });
+
+  test("もう明けた枠は利用率を古い値として扱い、警告しない", () => {
+    const v = viewOf(win({ window: "seven_day", utilization: 1, resetsAt: NOW - MIN }));
+    expect(v).toMatchObject({ reset: "明けました", stale: true, severity: "calm", note: null });
+    expect(viewOf(win({})).stale).toBe(false);
+  });
+
+  test("明ける時刻が分からなければそう出す", () => {
+    expect(viewOf(win({ resetsAt: null })).reset).toBe("明ける時刻は不明");
+  });
+
+  test("パーセント表記と、いつ観測した値か", () => {
+    const v = viewOf(win({ utilization: 0.664, observedAt: NOW - 3 * MIN }));
+    expect(v.percent).toBe("66%");
+    expect(v.observed).toBe("3分前");
+    expect(viewOf(win({ utilization: 0.9996 })).percent).toBe("99%");
+    expect(viewOf(win({ utilization: 1 })).percent).toBe("100%");
+    // 0.29 * 100 は 28.999… になる
+    expect(viewOf(win({ utilization: 0.29 })).percent).toBe("29%");
+    expect(viewOf(win({ utilization: 1.2 })).fill).toBe(1);
+  });
+
+  test("標本が無ければ行も無い", () => {
+    expect(rateLimitViews(base())).toEqual([]);
   });
 });

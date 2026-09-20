@@ -546,6 +546,62 @@ test("stepRun.started の step_run_id は本物で、task.logs から引ける",
   assert.ok(log.log_path.length > 0, "届いた step_run_id で本物のログが引ける");
 });
 
+test("ratelimit.sample と ratelimit.recent は、生の resetsAt を ISO 8601 か null に揃えて出す", async () => {
+  const events: ServerEvent[] = [];
+  const ctx = await context(events);
+  const iso = "2026-09-26T00:00:00.000Z";
+  const sec = Date.parse(iso) / 1000;
+  // 型注釈は string | null だが、アダプタは claude の JSON を素通しするので数値でも来る。
+  const raw = (window: string, resetsAt: unknown) => ({
+    kind: "rateLimit" as const,
+    window,
+    utilization: 0.5,
+    resetsAt: resetsAt as string | null,
+  });
+  ctx.adapter = createMockAdapter({
+    events: [
+      raw("number", sec),
+      raw("decimal", `${sec}.0`),
+      raw("iso", iso),
+      raw("broken", "いつか"),
+      raw("null", null),
+    ],
+    result: { ok: true, text: "done" },
+  });
+  const h = createHandler(ctx);
+  await h("project.add", { path: repo }, NOOP_CONN);
+  await writeFile(
+    join(repo, ".doctrine", "workflows", "one.yaml"),
+    'name: one\nsteps:\n  - id: a\n    type: agent\n    prompt: "p"\n',
+  );
+  const t = await h(
+    "task.create",
+    { project: repo, title: "T", prompt: "p", workflow: "one" },
+    NOOP_CONN,
+  ) as { id: string };
+  await tick(ctx);
+  await until(async () => (await getTask(ctx.db, t.id))?.state === "completed");
+  await until(() => ctx.running.size === 0);
+
+  const expected = { number: iso, decimal: iso, iso, broken: null, null: null };
+  const sampled = events.filter((e) => e.event === "ratelimit.sample");
+  assert.deepEqual(Object.fromEntries(sampled.map((e) => [e.window, e.resets_at])), expected);
+
+  const recent = await h("ratelimit.recent", {}, NOOP_CONN) as {
+    observed_at: string;
+    window: string;
+    utilization: number;
+    resets_at: string | null;
+  }[];
+  assert.deepEqual(Object.fromEntries(recent.map((r) => [r.window, r.resets_at])), expected);
+  assert.deepEqual(Object.keys(recent[0]).sort(), [
+    "observed_at",
+    "resets_at",
+    "utilization",
+    "window",
+  ]);
+});
+
 test("worktree 作成に失敗したタスクは failed になり、他プロジェクトの健全なタスクは同じ pass で進む", async () => {
   const ctx = await context();
   const h = createHandler(ctx);

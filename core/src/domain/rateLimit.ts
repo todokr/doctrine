@@ -28,15 +28,31 @@ export type RateLimitVerdict =
 /**
  * resetsAt を時刻として読む。型注釈は string だが、アダプタは claude の JSON を
  * 素通しするので、実データは数値（epoch 秒 / ミリ秒）や空文字であり得る。
+ * rate_limit_samples から読んだ値は "1789828800.0" の形で来る（TEXT 列に数値を bind した結果）。
  * 読めないものは null を返し、呼び出し側が「待てない」に倒す。
  */
 export function parseResetsAt(v: unknown): number | null {
-  const n = typeof v === "number" ? v : typeof v === "string" && /^\d+$/.test(v) ? Number(v) : null;
+  const n = typeof v === "number"
+    ? v
+    : typeof v === "string" && /^\d+(\.\d+)?$/.test(v)
+    ? Number(v)
+    : null;
   // 1e12 ミリ秒は 2001 年。これより小さい数は秒として読むほかない。
   if (n !== null) return Number.isFinite(n) ? (n < 1e12 ? n * 1000 : n) : null;
   if (typeof v !== "string") return null;
+  // V8 の Date.parse は ".5" や "1.2.3" を日付として読んでしまう。数字の崩れた形は渡さない。
+  if (/^\s*[+-]?[\d.]*\s*$/.test(v)) return null;
   const t = Date.parse(v);
   return Number.isNaN(t) ? null : t;
+}
+
+/** デーモンの外へ出す形。ISO 8601 か、読めない生値なら null。 */
+export function normalizeResetsAt(v: unknown): string | null {
+  const at = parseResetsAt(v);
+  if (at === null) return null;
+  const d = new Date(at);
+  // Date の範囲を超える数値は toISOString が投げる。
+  return Number.isNaN(d.getTime()) ? null : d.toISOString();
 }
 
 export function classifyRateLimit(o: {

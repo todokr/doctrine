@@ -24,6 +24,7 @@ import { commitStepBoundary, StateConflictError, type StepBoundary } from "../db
 import type { TaskRow } from "../db/tasks.ts";
 import type { Db } from "../db/schema.ts";
 import { recentRateLimitSamples } from "../db/rateLimits.ts";
+import { normalizeResetsAt } from "../domain/rateLimit.ts";
 import {
   hasActiveRateLimit,
   releaseDueRateLimited,
@@ -44,7 +45,7 @@ import { captureTree, releaseTrees } from "../domain/reviewTree.ts";
 import { assertTransition, isTerminal } from "../domain/states.ts";
 import type { AgentAdapter } from "../adapter/types.ts";
 import type { Handler } from "./server.ts";
-import type { ServerEvent, TaskLogs } from "../../../shared/protocol.ts";
+import type { RateLimitSample, ServerEvent, TaskLogs } from "../../../shared/protocol.ts";
 import type { WarningLog } from "./warnings.ts";
 
 export type DaemonContext = {
@@ -423,11 +424,18 @@ export function createHandler(ctx: DaemonContext): Handler {
       case "daemon.warnings":
         return ctx.warnings.recent();
 
-      case "ratelimit.recent":
-        return await recentRateLimitSamples(
+      case "ratelimit.recent": {
+        const rows = await recentRateLimitSamples(
           ctx.db,
           typeof params.limit === "number" ? params.limit : 50,
         );
+        return rows.map((r): RateLimitSample => ({
+          observed_at: r.observed_at,
+          window: r.window,
+          utilization: r.utilization,
+          resets_at: normalizeResetsAt(r.resets_at),
+        }));
+      }
 
       default:
         throw new Error(`未知のメソッドです: ${method}`);
@@ -692,7 +700,7 @@ async function tickOnce(ctx: DaemonContext): Promise<void> {
             event: "ratelimit.sample",
             window: s.window,
             utilization: s.utilization,
-            resets_at: s.resetsAt,
+            resets_at: normalizeResetsAt(s.resetsAt),
           }),
         onLogLine: (line) =>
           ctx.broadcast(
