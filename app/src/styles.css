@@ -73,24 +73,18 @@ button{cursor:pointer}
 .side-scroll{overflow-y:auto;flex:1;padding:6px 6px 10px}
 .limits{border-top:1px solid var(--line);padding:8px 10px 10px;display:grid;gap:6px;font-size:11.5px;color:var(--ink-2)}
 .limits-empty{margin:0;color:var(--ink-3)}
-.limit{display:grid;gap:2px;padding:4px 6px;border-radius:7px;border:1px solid transparent}
-.limit-row{display:grid;grid-template-columns:52px minmax(0,1fr) 36px;gap:8px;align-items:center}
-.limit-name{font-weight:700}
-.limit-bar{height:6px;border-radius:3px;background:var(--sunken);overflow:hidden}
+.limit{display:grid;gap:3px;padding:4px 6px}
+.limit-head,.limit-meta{display:flex;justify-content:space-between;gap:8px;color:var(--ink-3);font-variant-numeric:tabular-nums}
+.limit-name{font-weight:700;color:var(--ink-2)}
+.limit-bar{display:block;height:6px;border-radius:3px;background:var(--sunken);overflow:hidden}
 .limit-bar span{display:block;height:100%;background:var(--ink-3)}
-.limit-pct{text-align:right;font-variant-numeric:tabular-nums;color:var(--ink)}
-.limit-meta{display:flex;justify-content:space-between;gap:8px;color:var(--ink-3);font-variant-numeric:tabular-nums}
+.limit-pct{color:var(--ink)}
 .limit-note{margin:2px 0 0;line-height:1.5}
 .limit.stale .limit-bar span{opacity:.35}
 .limit.stale .limit-pct{color:var(--ink-3)}
-.limit.warn{background:var(--accent-soft);border-color:var(--accent)}
 .limit.warn .limit-bar span{background:var(--accent)}
-.limit.warn .limit-name,.limit.warn .limit-pct,.limit.warn .limit-note{color:var(--accent-text)}
-.limit.warn .limit-meta{color:var(--ink-2)}
-.limit.danger{background:var(--danger-bg);border-color:var(--danger)}
 .limit.danger .limit-bar span{background:var(--danger)}
-.limit.danger .limit-name,.limit.danger .limit-pct,.limit.danger .limit-note{color:var(--danger)}
-.limit.danger .limit-meta{color:var(--ink-2)}
+.limit.danger .limit-pct,.limit.danger .limit-note{color:var(--danger)}
 .grp{margin-top:8px}
 .grp h3{margin:0;padding:4px 8px;font-size:11.5px;font-weight:700;color:var(--ink-2);display:flex;gap:6px;align-items:center;letter-spacing:.02em}
 .grp h3 .count{color:var(--ink-3);font-weight:400;font-variant-numeric:tabular-nums}

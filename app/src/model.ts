@@ -39,6 +39,16 @@ export function elapsed(ms: number, now: number): string {
   const m = Math.round((now - ms) / MIN);
   return m < 60 ? `${m}分` : `${Math.floor(m / 60)}時間${pad2(m % 60)}分`;
 }
+/** 残り時間（「47分」「3時間54分」「6日7時間」）。切り捨てる */
+export function remaining(ms: number): string {
+  const mins = Math.floor(ms / MIN);
+  if (mins < 1) return "1分未満";
+  if (mins < 60) return `${mins}分`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return mins % 60 > 0 ? `${hours}時間${mins % 60}分` : `${hours}時間`;
+  const days = Math.floor(hours / 24);
+  return hours % 24 > 0 ? `${days}日${hours % 24}時間` : `${days}日`;
+}
 export function ago(ms: number, now: number): string {
   const m = Math.round((now - ms) / MIN);
   if (m < 1) return "たった今";
@@ -351,10 +361,11 @@ const WINDOW_ORDER = ["five_hour", "seven_day"];
 const WINDOW_LABEL: Record<string, string> = { five_hour: "5時間枠", seven_day: "7日枠" };
 
 /**
- * 7日枠がこの利用率に達したら警告に入る。デーモンが反応する飽和（利用率 1）とは別の値
+ * バーの色が変わる利用率。どの枠も同じ値で、デーモンが反応する飽和（利用率 1）とは別の値
  * （docs/superpowers/specs/2026-09-19-rate-limit-visibility-design.md）。
  */
-export const WEEKLY_WARN_UTILIZATION = 0.8;
+export const LIMIT_WARN_UTILIZATION = 0.7;
+export const LIMIT_DANGER_UTILIZATION = 0.8;
 
 export type RateLimitSeverity = "calm" | "warn" | "danger";
 
@@ -363,11 +374,12 @@ export type RateLimitView = {
   label: string;
   /** バーの長さ（0〜1） */
   fill: number;
+  /** 「66% 使用」 */
   percent: string;
   severity: RateLimitSeverity;
-  /** 「18:05 明け」「明けました」「明ける時刻は不明」 */
+  /** 「あと3時間54分でリセット」「リセット済み（値はリセット前）」「リセット時刻は不明」 */
   reset: string;
-  /** 枠はもう明けていて、利用率は明ける前の値である */
+  /** 枠はもうリセットされていて、利用率はリセット前の値である */
   stale: boolean;
   /** いつ観測した値か（「3分前」） */
   observed: string;
@@ -378,33 +390,35 @@ function rateLimitView(w: RateLimitWindow, now: number): RateLimitView {
   const stale = w.resetsAt !== null && w.resetsAt <= now;
   const weekly = w.window === "seven_day";
   const saturated = w.utilization >= 1;
-  const severity: RateLimitSeverity = stale || !weekly
+  const severity: RateLimitSeverity = stale
     ? "calm"
-    : saturated
+    : w.utilization >= LIMIT_DANGER_UTILIZATION
     ? "danger"
-    : w.utilization >= WEEKLY_WARN_UTILIZATION
+    : w.utilization >= LIMIT_WARN_UTILIZATION
     ? "warn"
     : "calm";
   const note = stale
     ? null
-    : severity === "danger"
-    ? "7日枠が飽和しています。明けるのが6時間より先なら、タスクは待たずに失敗します"
-    : severity === "warn"
-    ? "7日枠が飽和すると、明けるのが6時間より先になるのでタスクは待たずに失敗します"
+    : weekly && saturated
+    ? "7日枠が飽和しています。リセットが6時間より先なら、タスクは待たずに失敗します"
+    : weekly && severity === "danger"
+    ? "7日枠が飽和すると、リセットが6時間より先になるのでタスクは待たずに失敗します"
     : w.window === "five_hour" && saturated
-    ? "新しいタスクは明けるまで始まりません"
+    ? "新しいタスクはリセットまで始まりません"
     : null;
-  // hm は数時間先までの時刻にしか使えない。5時間枠のほかは日付を添える
-  const at = (ms: number) => (w.window === "five_hour" ? hm(ms) : clock(ms));
   return {
     window: w.window,
     label: WINDOW_LABEL[w.window] ?? w.window,
     fill: Math.min(1, Math.max(0, w.utilization)),
     // 切り捨てる。四捨五入すると飽和の手前（0.9996）が 100% に見える。
     // 1e-9 は 0.29 * 100 が 28.999… になる誤差のぶん
-    percent: `${Math.floor(w.utilization * 100 + 1e-9)}%`,
+    percent: `${Math.floor(w.utilization * 100 + 1e-9)}% 使用`,
     severity,
-    reset: w.resetsAt === null ? "明ける時刻は不明" : stale ? "明けました" : `${at(w.resetsAt)} 明け`,
+    reset: w.resetsAt === null
+      ? "リセット時刻は不明"
+      : stale
+      ? "リセット済み（値はリセット前）"
+      : `あと${remaining(w.resetsAt - now)}でリセット`,
     stale,
     observed: ago(w.observedAt, now),
     note,

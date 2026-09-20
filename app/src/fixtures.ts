@@ -126,7 +126,7 @@ export const RATELIMIT_NORMAL: ServerEvent[] = [
   rateLimit("seven_day", 0.66, 60 * 24 * 4 - 360),
 ];
 
-/** 飽和が近い状態。7日枠だけが警告に入る（5時間枠は 0.80 でも待てば明ける）。 */
+/** 飽和が近い状態。どちらも danger の色になり、説明文は7日枠にだけ付く。 */
 export const RATELIMIT_NEAR_SATURATION: ServerEvent[] = [
   rateLimit("five_hour", 0.8, 185),
   rateLimit("seven_day", 0.86, 60 * 24 * 4 - 360),
