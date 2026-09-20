@@ -104,6 +104,11 @@ export type StepRun = {
   exit_code: number | null;
   started_at: string;
   ended_at: string | null;
+  /**
+   * 権限で拒否された操作。拒否が無かった実行は null。degraded の行だけとは限らない。
+   * この列だけはデーモンが JSON をパースして返す（他の列は DB の生値）。
+   */
+  permission_denials: StepRunDenials | null;
 };
 
 export type TaskDetail = { task: TaskSummary; stepRuns: StepRun[] };

@@ -16,7 +16,7 @@ import {
 } from "../../src/daemon/handlers.ts";
 import { createWarningLog } from "../../src/daemon/warnings.ts";
 import { createMockAdapter } from "../../src/adapter/mock.ts";
-import type { ServerEvent } from "../../../shared/protocol.ts";
+import type { ServerEvent, TaskDetail } from "../../../shared/protocol.ts";
 import { makeRepo, tickWhenIdle, until } from "../helpers/repo.ts";
 
 const execFileAsync = promisify(execFile);
@@ -304,4 +304,49 @@ test("完了したタスクは worktree を消すがブランチは残す", asyn
   assert.equal(row.worktree_path, null, "completed の worktree は削除される");
   const { stdout } = await execFileAsync("git", ["-C", repo, "branch", "--list", row.branch]);
   assert.match(stdout, new RegExp(row.branch), "ブランチ自体は残る");
+});
+
+const AGENT_ONLY =
+  'name: solo\nsteps:\n  - id: work\n    type: agent\n    prompt: "{{ task.prompt }}"\n';
+
+/** agent ステップ1つのワークフローを最後まで走らせ、task.get の stepRuns を返す。 */
+async function runSolo(adapter: ReturnType<typeof createMockAdapter>) {
+  const repo = await makeRepo(root, {
+    ".doctrine/project.yaml": "defaultWorkflow: solo\nmaxConcurrent: 1\nbaseBranch: main\n",
+    ".doctrine/workflows/solo.yaml": AGENT_ONLY,
+  });
+  const { ctx, handler } = await context(adapter);
+  await handler("project.add", { path: repo }, NOOP_CONN);
+  const t = await handler("task.create", { project: repo, title: "T", prompt: "p" }, NOOP_CONN) as {
+    id: string;
+  };
+  await tick(ctx);
+  await until(
+    async () => (await getTask(ctx.db, t.id))?.state === "completed",
+    5000,
+    "agent ステップ1つのワークフローが completed に到達すること",
+  );
+  await until(() => ctx.running.size === 0);
+  const detail = await handler("task.get", { task_id: t.id }, NOOP_CONN) as TaskDetail;
+  return detail.stepRuns;
+}
+
+test("権限拒否を含む実行は task.get から中身が読める", async () => {
+  const denial = {
+    tool_name: "Bash",
+    tool_use_id: "tu_1",
+    input: { command: "git push origin main" },
+  };
+  const runs = await runSolo(createMockAdapter({
+    result: { ok: true, degraded: true, text: "やれませんでした", permissionDenials: [denial] },
+  }));
+  const work = runs.find((r) => r.step_id === "work")!;
+  assert.equal(work.status, "degraded");
+  assert.deepEqual(work.permission_denials, { total: 1, denials: [denial] });
+});
+
+test("拒否が無い実行の permission_denials は null", async () => {
+  const runs = await runSolo(createMockAdapter({ result: { ok: true, text: "やりました" } }));
+  assert.ok(runs.length > 0);
+  for (const r of runs) assert.equal(r.permission_denials, null);
 });

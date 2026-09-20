@@ -843,6 +843,7 @@ describe("止まった理由と実行履歴", () => {
     exit_code: 0,
     started_at: "2026-09-18T00:00:00.000Z",
     ended_at: "2026-09-18T00:01:00.000Z",
+    permission_denials: null,
     ...o,
   });
   const detail = (stepRuns: StepRun[]): TaskDetail =>
