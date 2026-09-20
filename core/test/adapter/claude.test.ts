@@ -82,6 +82,71 @@ test("allowedTools が空配列なら --allowedTools を付けない", () => {
   assert.equal(args.includes("--allowedTools"), false);
 });
 
+test("jsonSchema を渡すと --json-schema が JSON 文字列 1 引数で付く", () => {
+  const args = buildArgs("やって", {
+    cwd: "/wt",
+    sessionId: "s1",
+    jsonSchema: {
+      type: "object",
+      properties: { name: { type: "string" } },
+      required: ["name"],
+    },
+  });
+  assert.deepEqual(args, [
+    "-p",
+    "やって",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--session-id",
+    "s1",
+    "--permission-prompts",
+    "none",
+    "--json-schema",
+    '{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}',
+  ]);
+});
+
+test("--json-schema は --allowedTools より前に入る", () => {
+  const args = buildArgs("やって", {
+    cwd: "/wt",
+    sessionId: "s1",
+    jsonSchema: { type: "object" },
+    allowedTools: ["Bash(grep:*)"],
+  });
+  assert.deepEqual(args.slice(-2), ["--allowedTools", "Bash(grep:*)"]);
+  assert.ok(
+    args.indexOf("--json-schema") < args.indexOf("--allowedTools"),
+    "--allowedTools は可変長なので、後ろに置いたフラグはツール名として食われる",
+  );
+});
+
+test("再開時も --json-schema はプロンプトの位置を崩さない", () => {
+  const args = buildArgs(
+    "追加で直して",
+    { cwd: "/wt", sessionId: "s1", jsonSchema: { type: "object" } },
+    "s1",
+  );
+  assert.deepEqual(args, [
+    "-p",
+    "--resume",
+    "s1",
+    "追加で直して",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--permission-prompts",
+    "none",
+    "--json-schema",
+    '{"type":"object"}',
+  ]);
+});
+
+test("jsonSchema を渡さなければ argv は従来どおり", () => {
+  const args = buildArgs("やって", { cwd: "/wt", sessionId: "s1", model: "claude-opus-5" });
+  assert.equal(args.includes("--json-schema"), false);
+});
+
 test("rate_limit_event を正規化する", () => {
   const ev = normalize({
     type: "rate_limit_event",
