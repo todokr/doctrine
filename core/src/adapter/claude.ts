@@ -40,7 +40,9 @@ export function normalize(line: unknown): AgentEvent[] {
     case "system":
       return [{ kind: "system", subtype: String(o.subtype ?? "") }];
     case "assistant":
-      return [{ kind: "assistant", text: extractText(o) }];
+      return assistantEvents(o);
+    case "user":
+      return toolResults(o);
     case "result":
       return [{ kind: "result" }];
     case "rate_limit_event": {
@@ -61,10 +63,64 @@ export function normalize(line: unknown): AgentEvent[] {
   }
 }
 
-function extractText(o: Record<string, unknown>): string {
-  const msg = o.message as { content?: { type: string; text?: string }[] } | undefined;
-  if (!msg?.content) return "";
-  return msg.content.filter((c) => c.type === "text").map((c) => c.text ?? "").join("");
+type ContentBlock = {
+  type?: string;
+  text?: string;
+  name?: string;
+  input?: unknown;
+  content?: unknown;
+  is_error?: unknown;
+};
+
+function blocksOf(o: Record<string, unknown>): ContentBlock[] {
+  const content = (o.message as { content?: unknown } | undefined)?.content;
+  return Array.isArray(content) ? content as ContentBlock[] : [];
+}
+
+/**
+ * assistant 行はテキストと tool_use を1つの message に混ぜて運ぶ。
+ * 出た順に並べる — ログでは「こう言ってからこれを呼んだ」の順序が手がかりになる。
+ * thinking ブロックも来るが、本文は空で signature だけが入っている
+ * （2026-09-20 に claude v2 の plan モードで実測）。読む材料にならないので拾わない。
+ */
+function assistantEvents(o: Record<string, unknown>): AgentEvent[] {
+  const out: AgentEvent[] = [];
+  for (const b of blocksOf(o)) {
+    if (b.type === "text") out.push({ kind: "assistant", text: b.text ?? "" });
+    if (b.type === "tool_use") {
+      out.push({
+        kind: "toolUse",
+        name: typeof b.name === "string" ? b.name : "",
+        input: typeof b.input === "object" && b.input !== null && !Array.isArray(b.input)
+          ? b.input as Record<string, unknown>
+          : {},
+      });
+    }
+  }
+  return out;
+}
+
+/**
+ * ツールの返りは user 行として戻ってくる（2026-09-20 に claude v2 で実測）。
+ * 人間の追加入力も同じ type なので、tool_result ブロックだけを拾う。
+ */
+function toolResults(o: Record<string, unknown>): AgentEvent[] {
+  return blocksOf(o)
+    .filter((b) => b.type === "tool_result")
+    .map((b) => ({
+      kind: "toolResult" as const,
+      isError: b.is_error === true,
+      content: flattenContent(b.content),
+    }));
+}
+
+/** tool_result の content は文字列のことも、テキストブロックの配列のこともある。 */
+function flattenContent(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .map((c) => (typeof c === "object" && c !== null ? String((c as ContentBlock).text ?? "") : ""))
+    .join("");
 }
 
 /**

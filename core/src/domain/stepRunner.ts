@@ -3,6 +3,7 @@ import type { Db } from "../db/schema.ts";
 import type { AgentStep, CommandStep } from "../workflow/schema.ts";
 import { expand, type TemplateContext } from "../workflow/template.ts";
 import type { AgentAdapter, RateLimitObservation } from "../adapter/types.ts";
+import { renderEvent } from "../adapter/render.ts";
 import { exitCodeOf } from "../util/exec.ts";
 
 export type StepOutcome = {
@@ -45,6 +46,45 @@ export function logPathFor(
 }
 
 type Log = { write(chunk: string): void; close(): Promise<void> };
+
+/**
+ * 行頭の時刻。イベント自身も timestamp を持つが、ログに要るのは
+ * 「ここで手が止まっていた」が分かる粒度で、書いた時刻で足りる。
+ * 日付まで入れるのは、日をまたいで止まっていた実行を後から読むため。
+ */
+export function stamp(at = new Date()): string {
+  const p2 = (n: number) => String(n).padStart(2, "0");
+  const date = `${at.getFullYear()}-${p2(at.getMonth() + 1)}-${p2(at.getDate())}`;
+  return `${date} ${p2(at.getHours())}:${p2(at.getMinutes())}:${p2(at.getSeconds())}`;
+}
+
+/** 1行をログファイルと log.line の両方へ。時刻はここでだけ付ける。 */
+function emitLine(log: Log, deps: RunnerDeps, line: string): void {
+  const stamped = `${stamp()} ${line}`;
+  // log.line はアプリ側で1要素=1行として貯めるので改行を付けない。
+  log.write(stamped + "\n");
+  deps.onLogLine?.(stamped);
+}
+
+/**
+ * チャンクを行に切り直す。プロセスの出力はどこで切れて届くか決まっていないので、
+ * 改行が来るまで貯める。最後に残った改行なしの端数は flush で出す。
+ */
+function lineBuffer(emit: (line: string) => void): { push(c: string): void; flush(): void } {
+  let rest = "";
+  return {
+    push(chunk) {
+      const parts = (rest + chunk).split("\n");
+      rest = parts.pop() ?? "";
+      for (const line of parts) emit(line);
+    },
+    flush() {
+      if (rest === "") return;
+      emit(rest);
+      rest = "";
+    },
+  };
+}
 
 /**
  * ログファイルを開く。ディスクが満杯・ログ用ディレクトリの権限喪失・
@@ -147,21 +187,24 @@ export async function runCommandStep(
 
     let stdout = "";
     let stderr = "";
+    // 時刻は行頭に付くので、チャンクのまま書くと途中に時刻が割り込む。
+    const outLines = lineBuffer((l) => emitLine(log, o.deps, l));
+    const errLines = lineBuffer((l) => emitLine(log, o.deps, l));
     // 終了ステータスだけでなく stdout / stderr を読み切るまで待つ。プロセスの終了時点では
     // パイプにまだ読み残しがある可能性があり、先に確定させると出力を取りこぼす。
     const [status] = await Promise.all([
       child.status,
       drain(child.stdout, (c) => {
         stdout += c;
-        log.write(c);
-        o.deps.onLogLine?.(c);
+        outLines.push(c);
       }),
       drain(child.stderr, (c) => {
         stderr += c;
-        log.write(c);
-        o.deps.onLogLine?.(c);
+        errLines.push(c);
       }),
     ]);
+    outLines.flush();
+    errLines.flush();
     const exitCode = exitCodeOf(status);
 
     return {
@@ -218,7 +261,10 @@ export async function runAgentStep(
     const rateLimits = new Map<string, RateLimitObservation>();
 
     for await (const ev of run.events) {
-      log.write(JSON.stringify(ev) + "\n");
+      // ファイルと onLogLine には同じ文字列を流す。アプリは保存されたログと
+      // 流れてくる log.line を1つの画面につなげて出すので、形式が割れると読めない。
+      const line = renderEvent(ev);
+      if (line !== null) emitLine(log, o.deps, line);
       if (ev.kind === "rateLimit") {
         const observation = {
           window: ev.window,
@@ -228,7 +274,6 @@ export async function runAgentStep(
         rateLimits.set(ev.window, observation);
         await o.deps.onRateLimit?.(observation);
       }
-      if (ev.kind === "assistant" && ev.text) o.deps.onLogLine?.(ev.text);
     }
 
     const result = await run.result;

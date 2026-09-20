@@ -289,3 +289,75 @@ test("result行なしでstderrに出力して死んだプロセスは失敗＆st
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("assistant の tool_use をイベントにする", () => {
+  const ev = normalize({
+    type: "assistant",
+    message: {
+      content: [{
+        type: "tool_use",
+        id: "toolu_1",
+        name: "Bash",
+        input: { command: "ls -A /wt", description: "List files" },
+      }],
+    },
+  });
+  assert.deepEqual(ev, [
+    { kind: "toolUse", name: "Bash", input: { command: "ls -A /wt", description: "List files" } },
+  ]);
+});
+
+test("テキストと tool_use が同じ message に来たら両方を順に出す", () => {
+  const ev = normalize({
+    type: "assistant",
+    message: {
+      content: [
+        { type: "text", text: "調べます" },
+        { type: "tool_use", id: "toolu_1", name: "Grep", input: { pattern: "log" } },
+      ],
+    },
+  });
+  assert.deepEqual(ev, [
+    { kind: "assistant", text: "調べます" },
+    { kind: "toolUse", name: "Grep", input: { pattern: "log" } },
+  ]);
+});
+
+test("tool_result を運ぶ user 行をイベントにする", () => {
+  const ev = normalize({
+    type: "user",
+    message: {
+      content: [{
+        tool_use_id: "toolu_1",
+        type: "tool_result",
+        content: "err.txt\nraw.ndjson",
+        is_error: false,
+      }],
+    },
+  });
+  assert.deepEqual(ev, [
+    { kind: "toolResult", isError: false, content: "err.txt\nraw.ndjson" },
+  ]);
+});
+
+test("tool_result の content がブロック配列でも文字列にまとめる", () => {
+  const ev = normalize({
+    type: "user",
+    message: {
+      content: [{
+        tool_use_id: "toolu_1",
+        type: "tool_result",
+        content: [{ type: "text", text: "No matches found" }],
+        is_error: true,
+      }],
+    },
+  });
+  assert.deepEqual(ev, [{ kind: "toolResult", isError: true, content: "No matches found" }]);
+});
+
+test("tool_result 以外の user 行（人間の追加入力）はイベントにしない", () => {
+  assert.deepEqual(
+    normalize({ type: "user", message: { content: [{ type: "text", text: "やって" }] } }),
+    [],
+  );
+});

@@ -8,6 +8,10 @@ export type RateLimitObservation = {
 export type AgentEvent =
   | { kind: "system"; subtype: string }
   | { kind: "assistant"; text: string }
+  /** エージェントが道具を呼んだ。input はツールごとに形が違うので素のまま持つ。 */
+  | { kind: "toolUse"; name: string; input: Record<string, unknown> }
+  /** 道具が返した。content はブロック配列で来ることもあるので文字列に均してある。 */
+  | { kind: "toolResult"; isError: boolean; content: string }
   | ({ kind: "rateLimit" } & RateLimitObservation)
   | { kind: "result" };
 
