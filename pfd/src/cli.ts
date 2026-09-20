@@ -101,7 +101,7 @@ function describe(s: ProcessStatus): string {
     case "no_pr":
       return `PR がありません（ブランチ ${s.branch}）`;
     case "task_stopped":
-      return `タスクが止まっています（${s.task_id}）`;
+      return `タスクが止まっています（${s.task_id}）。やり直すには pfd.yaml でこのプロセスの id を変え、承認し直して投入する`;
     case "lost":
       return `記録にあるタスクが見当たりません（${s.task_id}）`;
     case "running":
@@ -184,16 +184,24 @@ async function run(argv: string[], deps: Deps): Promise<number> {
       const t = await target(positional[0], positional[1]);
       const { text, pfd } = await load(t);
       if (!reportViolations(pfd, deps)) return 1;
+      const artifactName = new Map(pfd.artifacts.map((a) => [a.id, a.name]));
+      const names = (ids: string[]) => ids.map((i) => artifactName.get(i) ?? i).join(", ");
       deps.out(`#${pfd.issue} ${pfd.title}`);
+      deps.out(`goal: ${names(pfd.goal)}`);
       for (const p of pfd.processes) {
-        deps.out(`  ${p.id} ${p.name}（${p.actor === "human" ? "人" : "エージェント"}）`);
+        const actor = p.actor === "human" ? "人" : "エージェント";
+        deps.out(`  ${p.id} ${p.name}（${actor}）: ${names(p.inputs)} → ${names(p.outputs)}`);
       }
+      const record = await readRecord(t.dir);
+      const dispatched = Object.keys(record.tasks);
+      const finished = Object.keys(record.done);
+      if (dispatched.length > 0) deps.out(`すでに投入済みのプロセス: ${dispatched.join(", ")}`);
+      if (finished.length > 0) deps.out(`すでに完了にしたプロセス: ${finished.join(", ")}`);
       const answer = await deps.ask("この PFD を承認しますか? [y/N] ");
       if (answer.trim().toLowerCase() !== "y") {
         deps.err("承認しませんでした");
         return 1;
       }
-      const record = await readRecord(t.dir);
       record.approved = { hash: await hashOf(text), at: deps.now() };
       await writeRecord(t.dir, record);
       deps.out("承認しました");
@@ -230,8 +238,19 @@ async function run(argv: string[], deps: Deps): Promise<number> {
       const record = await readRecord(t.dir);
       const facts = await gatherFacts(pfd, t.projectPath, deps.ports);
       deps.out(`#${pfd.issue} ${pfd.title}（${record.approved ? "承認済み" : "未承認"}）`);
-      for (const s of computeStatus(pfd, record, facts)) {
+      const statuses = computeStatus(pfd, record, facts);
+      for (const s of statuses) {
         deps.out(`  ${s.id} ${s.name}  ${describe(s)}`);
+      }
+      const goalProducers = pfd.processes.filter((p) =>
+        p.outputs.some((o) => pfd.goal.includes(o))
+      );
+      const reached = (id: string) => {
+        const state = statuses.find((s) => s.id === id)?.state;
+        return state === "merged" || state === "done";
+      };
+      if (goalProducers.length > 0 && goalProducers.every((p) => reached(p.id))) {
+        deps.out(`goal の成果物がすべて揃いました。Issue #${pfd.issue} は完了です`);
       }
       return 0;
     }

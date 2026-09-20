@@ -149,6 +149,79 @@ test("approve: 要約を出し、y で承認を記録する", async () => {
   });
 });
 
+test("approve: 要約に goal と、各プロセスの入出力を出す", async () => {
+  await world(async (w) => {
+    await w.writePfd();
+    w.answers = ["y"];
+    assert.equal(await w.run("approve", w.project, "123"), 0);
+    assert.ok(w.out.some((l) => l === "goal: 集計画面"));
+    assert.ok(
+      w.out.some((l) =>
+        l === "  2 API を実装する（エージェント）: 集計テーブル, 集計の定義 → 集計 API"
+      ),
+    );
+    assert.ok(w.out.some((l) => l === "  3 集計の定義を決める（人）: 既存スキーマ → 集計の定義"));
+  });
+});
+
+test("approve: すでに投入済み・完了済みのプロセスがあれば、承認の前に示す", async () => {
+  await world(async (w) => {
+    await w.writePfd();
+    w.answers = ["y"];
+    await w.run("approve", w.project, "123");
+    await w.run("dispatch", w.project, "123");
+    await w.run("done", w.project, "123", "3", "--note", "決めた");
+    w.out.length = 0;
+    w.answers = ["y"];
+    assert.equal(await w.run("approve", w.project, "123"), 0);
+    assert.ok(w.out.some((l) => l === "すでに投入済みのプロセス: 1"));
+    assert.ok(w.out.some((l) => l === "すでに完了にしたプロセス: 3"));
+  });
+});
+
+test("status: goal の成果物が揃っていれば、完了を伝える", async () => {
+  await world(async (w) => {
+    await w.writePfd();
+    w.ports.tasks.push({
+      id: "t4",
+      title: "[pfd:123/4] 画面を繋ぐ",
+      state: "completed",
+      branch: "doctrine/t4",
+    });
+    w.ports.prs["doctrine/t4"] = "merged";
+    assert.equal(await w.run("status", w.project, "123"), 0);
+    assert.ok(w.out.some((l) => l === "goal の成果物がすべて揃いました。Issue #123 は完了です"));
+  });
+});
+
+test("status: goal の成果物が揃っていなければ、完了を伝えない", async () => {
+  await world(async (w) => {
+    await w.writePfd();
+    assert.equal(await w.run("status", w.project, "123"), 0);
+    assert.ok(!w.out.some((l) => l.includes("すべて揃いました")));
+  });
+});
+
+test("status: 止まったタスクには、やり直し方を添える", async () => {
+  await world(async (w) => {
+    await w.writePfd();
+    w.ports.tasks.push({
+      id: "t1",
+      title: "[pfd:123/1] マイグレーションを書く",
+      state: "failed",
+      branch: "doctrine/t1",
+    });
+    await w.run("status", w.project, "123");
+    assert.ok(
+      w.out.some((l) =>
+        l.includes(
+          "タスクが止まっています（t1）。やり直すには pfd.yaml でこのプロセスの id を変え、承認し直して投入する",
+        )
+      ),
+    );
+  });
+});
+
 test("dispatch: 承認の後、入力が揃ったプロセスを投入して報告する", async () => {
   await world(async (w) => {
     await w.writePfd();

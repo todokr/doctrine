@@ -403,11 +403,12 @@ pfd dispatch /path/to/your/repo 123
 - **`pfd dispatch` は何度叩いてもよい。** 同じプロセスを 2 回タスクにしない。タスクのタイトルの先頭の
   `[pfd:123/2]` がその目印なので、このタイトルを書き換えないこと
 - **人の判断が要るプロセス**（`actor: human`）はタスクにならない。`pfd status` に「あなたの番」と出たら、
-  決めた内容を渡して完了にする: `pfd done /path/to/your/repo 123 3 --note "..."`。
+  決めた内容を渡して完了にする（端末から自分で実行する）: `pfd done /path/to/your/repo 123 3 --note "..."`。
   その内容は、下流のタスクの prompt にそのまま載る
 - **承認の後に `pfd.yaml` を書き換えると、`pfd dispatch` は失敗する。** 内容を確かめて承認し直す
 - PFD の正本は `~/.local/state/doctrine/pfd/` 配下にあり、リポジトリにはコミットされない。
   `pfd path /path/to/your/repo 123` で場所が分かる
+- **タスクが `failed` / `canceled` で止まったプロセス**は、`pfd dispatch` が投入し直さない。`pfd.yaml` でそのプロセスの id を変え（例: `2` → `2b`）、承認し直してから投入する
 
 ## 既知の制約
 
