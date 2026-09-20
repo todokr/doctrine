@@ -32,6 +32,7 @@ jobs:
     outputs:
       core: ${{ steps.filter.outputs.core }}
       app: ${{ steps.filter.outputs.app }}
+      pfd: ${{ steps.filter.outputs.pfd }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -48,6 +49,7 @@ jobs:
           run_all() {
             echo "core=true" >> "$GITHUB_OUTPUT"
             echo "app=true" >> "$GITHUB_OUTPUT"
+            echo "pfd=true" >> "$GITHUB_OUTPUT"
             echo "理由: $1 のため全ジョブを流す" >> "$GITHUB_STEP_SUMMARY"
             exit 0
           }
@@ -67,8 +69,8 @@ jobs:
 
           matches() { echo "$changed" | grep -qE "$1"; }
 
-          # ワークフロー自身と mise.toml（ツールの版）は両方に効くので、
-          # 触ったら両方流す。
+          # ワークフロー自身と mise.toml（ツールの版）は全部に効くので、
+          # 触ったら全部流す。
           common='^(\.github/|mise\.toml$)'
 
           core=false
@@ -82,8 +84,14 @@ jobs:
             app=true
           fi
 
+          pfd=false
+          if matches "$common" || matches '^pfd/'; then
+            pfd=true
+          fi
+
           echo "core=$core" >> "$GITHUB_OUTPUT"
           echo "app=$app" >> "$GITHUB_OUTPUT"
+          echo "pfd=$pfd" >> "$GITHUB_OUTPUT"
 
   # 整形・lint・型検査・バイナリのビルド。テストと違って OS・TZ に依存しないので
   # 1 回だけ流す。
@@ -229,12 +237,42 @@ jobs:
         working-directory: app/src-tauri
         run: cargo test --locked
 
+  # pfd は core のソースを import しないので、core/ の変更では流さない。
+  pfd:
+    name: pfd（整形・型・テスト）
+    needs: changes
+    if: needs.changes.outputs.pfd == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: pfd
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: jdx/mise-action@v4
+        with:
+          install_args: deno
+
+      - name: Deno の依存をキャッシュ
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/deno
+          key: deno-pfd-${{ runner.os }}-${{ hashFiles('pfd/deno.lock') }}
+          restore-keys: deno-pfd-${{ runner.os }}-
+
+      - run: deno install --frozen
+
+      - run: deno fmt --check
+      - run: deno lint
+      - run: deno task check
+      - run: deno task test
+
   # develop のブランチ保護はこのジョブ 1 つだけを必須チェックにする。
   # パスフィルタでスキップされたジョブがあっても、ここが緑ならマージしてよい。
   ci:
     name: CI
     if: always()
-    needs: [changes, core-check, core-test, app]
+    needs: [changes, core-check, core-test, app, pfd]
     runs-on: ubuntu-latest
     steps:
       - name: 落ちたジョブがないか確かめる
