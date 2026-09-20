@@ -18,6 +18,7 @@ import { isAtBottom } from "../tailStick";
 import type { Task, TaskState } from "../types";
 import type { StepRun } from "../../../shared/protocol.ts";
 import { Crumbs, OpenInEditor } from "./ReviewView";
+import { WorkflowRail } from "./WorkflowRail";
 
 const STATE_PILL: Record<TaskState, [string, string]> = {
   suspended: ["レビュー待ち", "p-attn"],
@@ -252,6 +253,8 @@ export function TaskView({ t }: { t: Task }) {
         )}
       </div>
       {t.worktree && <p className="mono hint">{t.worktree}</p>}
+
+      {detail && <WorkflowRail detail={detail} />}
 
       <div className="headrow">
         <b>ログ</b>
