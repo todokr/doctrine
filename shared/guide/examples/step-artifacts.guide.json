@@ -1,0 +1,312 @@
+{
+  "version": 1,
+  "why": "計画を立てたエージェントが、そのままレビューに回ると自分の計画を疑いにくい。そこで agent ステップごとに会話（セッション）を分け、同じ役割のステップだけが同じ会話を引き継げるようにする。あわせて、前のステップの成果物を全文で次のステップへ渡すために、git に見えない置き場所を worktree の中に用意する。",
+  "what": [
+    {
+      "name": "ロール単位のセッション",
+      "summary": "agent ステップに `session`（ロール名）を指定できるようになり、同じロールのステップは同じ会話を `--resume` で引き継ぐ。省略したステップは暗黙のロール `default` を共有するので、従来どおり「タスクに会話は 1 本」のまま動く。セッション ID の置き場所はタスクの列から `task_sessions` テーブルに移った。",
+      "paths": [
+        "src/workflow/schema.ts",
+        "src/core/engine.ts",
+        "src/db/sessions.ts",
+        "src/db/boundary.ts",
+        "src/db/schema.ts",
+        "src/db/migrations.ts"
+      ]
+    },
+    {
+      "name": "worktree 内の受け渡し場所",
+      "summary": "worktree を作るとき、`.git/info/exclude` に `.doctrine-out/` を 1 行だけ追記する。この場所に置いた成果物は `git status` にも `task.diff` にも現れない。プロジェクトの `.gitignore` は変更しない。",
+      "paths": ["src/core/worktree.ts"]
+    }
+  ],
+  "how": [
+    {
+      "body": "ステップを始めるとき、`runTask` は `session`（無ければ `default`）をロールとして `task_sessions` からセッション ID を引く。見つかれば `resume`、無ければ新しい UUID で `start` する。使った ID は、ステップ境界の `commitStepBoundary` が同じトランザクションの中でロール単位に upsert する。`command` ステップはロールを持たないので、何も書かない。",
+      "diagram": "d-flow"
+    },
+    {
+      "body": "セッションの読み書きは `getSessionId`（読み）と `commitStepBoundary`（書き）の 2 か所に分かれ、どちらも `task_sessions` を向く。`runTask` から `tasks.claude_session_id` への参照はなくなった。",
+      "diagram": "d-deps"
+    }
+  ],
+  "readingOrder": [
+    {
+      "title": "ワークフローに session を書けるようにする",
+      "body": "起点はワークフロー定義。`AgentStep` に任意の `session` が増え、zod の検証は英数字・ハイフン・アンダースコアだけを通す。`command` ステップに書くと弾かれる。",
+      "locations": [
+        { "path": "src/workflow/schema.ts", "hunk": "h_0dbe4335a69869" },
+        { "path": "src/workflow/schema.ts", "hunk": "h_0106de52c9da94" },
+        { "path": "test/workflow/schema.test.ts", "hunk": "h_1f1755dde56752" },
+        { "path": "test/workflow/schema.test.ts", "hunk": "h_1705c163eb9376" }
+      ],
+      "refs": {
+        "decisions": ["d-default-role"],
+        "risks": ["r-role-charset"],
+        "tests": ["t-schema-chars"],
+        "diagrams": []
+      }
+    },
+    {
+      "title": "セッションの置き場所 task_sessions",
+      "body": "`(task_id, role)` を複合主キーとする `task_sessions` テーブルを足し、型と `Database` に載せる。マイグレーション `0002_task_sessions` は、既存の非 null の `claude_session_id` を `role = 'default'` の行として移す。読み出しは `getSessionId` に集約されている。",
+      "locations": [
+        { "path": "src/db/schema.ts", "hunk": "h_0388b89e01d5e8" },
+        { "path": "src/db/schema.ts", "hunk": "h_08f93278a26139" },
+        { "path": "src/db/migrations.ts", "hunk": "h_127dbf6639d4fd" },
+        { "path": "src/db/sessions.ts", "hunk": "h_03bfd90580045e" },
+        { "path": "test/db/migrate.test.ts", "hunk": "h_0fa5205551c721" },
+        { "path": "test/db/migrate.test.ts", "hunk": "h_0b81c57be6b90a" },
+        { "path": "test/db/migrate.test.ts", "hunk": "h_08f5190780e5b1" }
+      ],
+      "refs": {
+        "decisions": ["d-table"],
+        "risks": ["r-column-kept"],
+        "tests": ["t-migrate-default"],
+        "diagrams": ["d-deps"]
+      }
+    },
+    {
+      "title": "ステップ開始時にロールでセッションを引く",
+      "body": "`runTask` がステップのロールを決め、`getSessionId` で既存の会話を探す。会話があれば `resume`、無ければ `start` になる。ここで `session` を省略したステップが `default` に集まる。テストは、ロールが違えば会話が独立し、別のロールを挟んでも取り違えないことを確かめる。",
+      "locations": [
+        { "path": "src/core/engine.ts", "hunk": "h_06d5ffb1d7e42c" },
+        { "path": "src/core/engine.ts", "hunk": "h_166dbb3cb89112" },
+        { "path": "test/core/engine.test.ts", "hunk": "h_000a3041c0683d" }
+      ],
+      "refs": {
+        "decisions": ["d-role-unit", "d-default-role"],
+        "risks": [],
+        "tests": ["t-engine-independent", "t-engine-roles"],
+        "diagrams": ["d-flow"]
+      }
+    },
+    {
+      "title": "ステップ境界でロールのセッションを書く",
+      "body": "`runTask` は `claude_session_id` をタスクの更新から外し、代わりに `sessionUpsert` を `commitStepBoundary` へ渡す。`StepBoundary` の型に `sessionUpsert` が増え、トランザクションの中で `task_sessions` に upsert される。同じロールへの 2 度目の書き込みは上書きになり、別のロールは別の行として残る。",
+      "locations": [
+        { "path": "src/core/engine.ts", "hunk": "h_180733771bf8d2" },
+        { "path": "src/db/boundary.ts", "hunk": "h_06adf6dc517ff0" },
+        { "path": "src/db/boundary.ts", "hunk": "h_0e69dd33815d82" },
+        { "path": "test/db/sessions.test.ts", "hunk": "h_12a18087d347d7" }
+      ],
+      "refs": {
+        "decisions": ["d-table"],
+        "risks": ["r-column-kept", "r-column-stale"],
+        "tests": ["t-sessions-upsert"],
+        "diagrams": ["d-flow", "d-deps"]
+      }
+    },
+    {
+      "title": "マイグレーションの適用記録の期待値",
+      "body": "適用済みマイグレーションの一覧を比べているテストの期待値に `0002_task_sessions` が加わっただけの変更。新しい振る舞いのテストではなく、一覧が 1 件増えたことへの追従。",
+      "locations": [
+        { "path": "test/db/migrate.test.ts", "hunk": "h_1e94685bc51d73" },
+        { "path": "test/db/migrate.test.ts", "hunk": "h_01c391c422ded9" }
+      ],
+      "refs": {
+        "decisions": [],
+        "risks": [],
+        "tests": ["t-migrate-default"],
+        "diagrams": []
+      }
+    },
+    {
+      "title": ".doctrine-out/ を git から隠す",
+      "body": "`createWorktree` の最後に `ensureDoctrineOutExcluded` を呼ぶ。`git rev-parse --git-path` が相対パスでも絶対パスでも返しうるので、絶対パスでなければリポジトリからの相対として解決する。同じ行が既にあれば何もしないので、何度 worktree を作っても行は増えない。",
+      "locations": [
+        { "path": "src/core/worktree.ts", "hunk": "h_096b4cdfa4ffdb" },
+        { "path": "src/core/worktree.ts", "hunk": "h_0cc6ee8cca07b3" },
+        { "path": "test/core/worktree.test.ts", "hunk": "h_0819baf85edec6" },
+        { "path": "test/core/worktree.test.ts", "hunk": "h_11333544d82437" }
+      ],
+      "refs": {
+        "decisions": ["d-exclude"],
+        "risks": ["r-exclude"],
+        "tests": ["t-worktree-exclude", "t-worktree-idempotent"],
+        "diagrams": []
+      }
+    }
+  ],
+  "decisions": [
+    {
+      "id": "d-role-unit",
+      "decision": "セッションの単位を、タスク単位でもステップ単位でもなく役割（ロール）単位にする",
+      "reason": "タスク単位では計画した会話がそのままレビューに使われてしまい、ステップ単位では実装の差し戻しで前回の会話を引き継げない。役割ごとに会話を持てば、計画と実装は引き継ぎつつ、レビューだけを別の目で行える。",
+      "source": {
+        "kind": "file",
+        "value": "docs/superpowers/specs/2026-09-13-step-artifacts-design.md"
+      }
+    },
+    {
+      "id": "d-table",
+      "decision": "セッション ID は `tasks` の列ではなく `task_sessions` テーブルに持つ",
+      "reason": "役割単位のセッションは 1 つのタスクが複数のセッション ID を持つ必要があり、単一の列では表せない。`(task_id, role)` を複合主キーにした別テーブルにすれば、ロールごとに 1 行で持てる。",
+      "source": {
+        "kind": "file",
+        "value": "docs/superpowers/specs/2026-09-13-step-artifacts-design.md"
+      }
+    },
+    {
+      "id": "d-exclude",
+      "decision": "`.doctrine-out/` はプロジェクトの `.gitignore` ではなく `.git/info/exclude` で隠す",
+      "reason": "`.gitignore` はユーザーのリポジトリの資産で、doctrine が無断で書き換えるべきではない。`info/exclude` はリポジトリの内容物ではなくローカルな git の設定で、コミットも共有もされず、共有の `.git` に 1 つだけあるので全 worktree に効く。",
+      "source": {
+        "kind": "file",
+        "value": "docs/superpowers/specs/2026-09-13-step-artifacts-design.md"
+      }
+    },
+    {
+      "id": "d-default-role",
+      "decision": "`session` を省略したステップは暗黙のロール `default` を共有する",
+      "reason": "省略時の挙動が従来の「タスクに会話は 1 本」と同じになるので、既存のワークフローは書き換えずに動く。",
+      "source": {
+        "kind": "file",
+        "value": "docs/superpowers/plans/2026-09-13-step-artifacts.md"
+      }
+    }
+  ],
+  "risks": [
+    {
+      "id": "r-exclude",
+      "kind": "considered",
+      "body": "プロジェクトの `.gitignore` は書き換えず、`.git/info/exclude` に `.doctrine-out/` の 1 行だけを追記する。`info/exclude` は共有の `.git` に 1 つだけあり、すべての worktree に効くことを、設計時に実測で確かめている。",
+      "locations": [{ "path": "src/core/worktree.ts", "hunk": "h_0cc6ee8cca07b3" }]
+    },
+    {
+      "id": "r-column-kept",
+      "kind": "considered",
+      "body": "`tasks.claude_session_id` 列はマイグレーションで消さず、コードからの参照だけを外した。マイグレーションは既存の非 null の値を `task_sessions` に写すだけで、元の列には手を付けない。",
+      "locations": [
+        { "path": "src/db/migrations.ts", "hunk": "h_127dbf6639d4fd" },
+        { "path": "src/core/engine.ts", "hunk": "h_180733771bf8d2" }
+      ]
+    },
+    {
+      "id": "r-column-stale",
+      "kind": "breaks",
+      "body": "この変更以後、`tasks.claude_session_id` は書かれない。列はマイグレーションで消えずに残るので、この列を読むものは、移行した時点の値か null を見ることになる。",
+      "locations": [
+        { "path": "src/core/engine.ts", "hunk": "h_180733771bf8d2" },
+        { "path": "src/db/migrations.ts", "hunk": "h_127dbf6639d4fd" }
+      ]
+    },
+    {
+      "id": "r-role-charset",
+      "kind": "assumption",
+      "body": "ロール名は `session` に書かれた文字列そのもので、英数字・ハイフン・アンダースコアに限られる。この範囲外の文字はワークフローの読み込み時に弾かれるので、`task_sessions` の `role` にはこの範囲の文字列しか入らない。",
+      "locations": [{ "path": "src/workflow/schema.ts", "hunk": "h_0106de52c9da94" }]
+    }
+  ],
+  "tests": [
+    {
+      "id": "t-schema-chars",
+      "behavior": "`session` に英数字・ハイフン・アンダースコア以外の文字を書くと、日本語のメッセージで弾かれる",
+      "path": "test/workflow/schema.test.ts",
+      "name": "session に使えない文字は日本語で案内する"
+    },
+    {
+      "id": "t-migrate-default",
+      "behavior": "`claude_session_id` を持つ既存タスクが、ロール `default` として `task_sessions` に移る",
+      "path": "test/db/migrate.test.ts",
+      "name": "claude_session_id を持つ既存タスクは role \"default\" として task_sessions に移される"
+    },
+    {
+      "id": "t-engine-independent",
+      "behavior": "`session` が違う agent ステップは、それぞれ別の会話を `start` する",
+      "path": "test/core/engine.test.ts",
+      "name": "異なる session を持つ agent ステップは独立した会話になる"
+    },
+    {
+      "id": "t-engine-roles",
+      "behavior": "差し戻しで同じロールのステップが戻ってきたとき、別のロールを挟んでいても自分の会話を `resume` する",
+      "path": "test/core/engine.test.ts",
+      "name": "session ごとに独立した会話が保たれる（別ロールを挟んでも取り違えない）"
+    },
+    {
+      "id": "t-sessions-upsert",
+      "behavior": "`commitStepBoundary` の `sessionUpsert` で書いたセッション ID が `getSessionId` で引ける",
+      "path": "test/db/sessions.test.ts",
+      "name": "commitStepBoundary の sessionUpsert で書いたセッションが引ける"
+    },
+    {
+      "id": "t-worktree-exclude",
+      "behavior": "worktree を作ると `.doctrine-out/` が `.git/info/exclude` に追記される",
+      "path": "test/core/worktree.test.ts",
+      "name": "worktree作成時に .doctrine-out/ を .git/info/exclude に追記する"
+    },
+    {
+      "id": "t-worktree-idempotent",
+      "behavior": "同じリポジトリに worktree を 2 回作っても、`info/exclude` の行は重複しない",
+      "path": "test/core/worktree.test.ts",
+      "name": "2回 createWorktree しても info/exclude の行は重複しない"
+    }
+  ],
+  "diagrams": [
+    {
+      "id": "d-flow",
+      "title": "ステップ開始時のセッションの引き方と書き方",
+      "body": {
+        "shape": "sequence",
+        "actors": ["runTask", "task_sessions", "Claude CLI"],
+        "messages": [
+          {
+            "from": "runTask",
+            "to": "task_sessions",
+            "label": "getSessionId(taskId, role) でロールのセッションを引く",
+            "change": "changed"
+          },
+          {
+            "from": "task_sessions",
+            "to": "runTask",
+            "label": "セッション ID、無ければ undefined",
+            "change": "changed"
+          },
+          {
+            "from": "runTask",
+            "to": "runTask",
+            "label": "無ければ crypto.randomUUID() で新しい ID を作る",
+            "change": "added"
+          },
+          {
+            "from": "runTask",
+            "to": "Claude CLI",
+            "label": "既存の会話があれば resume、無ければ start"
+          },
+          {
+            "from": "runTask",
+            "to": "task_sessions",
+            "label": "commitStepBoundary の sessionUpsert でロールのセッションを書く",
+            "change": "added"
+          }
+        ]
+      }
+    },
+    {
+      "id": "d-deps",
+      "title": "セッションの読み書きの移り先",
+      "body": {
+        "shape": "graph",
+        "kind": "dependency",
+        "nodes": [
+          { "id": "runTask", "label": "runTask" },
+          { "id": "getSessionId", "label": "getSessionId", "change": "added" },
+          { "id": "commitStepBoundary", "label": "commitStepBoundary" },
+          { "id": "task_sessions", "label": "task_sessions", "change": "added" },
+          { "id": "claude_session_id", "label": "tasks.claude_session_id" }
+        ],
+        "edges": [
+          { "from": "runTask", "to": "getSessionId", "label": "ロールで引く", "change": "added" },
+          { "from": "getSessionId", "to": "task_sessions", "label": "読む", "change": "added" },
+          {
+            "from": "commitStepBoundary",
+            "to": "task_sessions",
+            "label": "upsert",
+            "change": "added"
+          },
+          { "from": "runTask", "to": "claude_session_id", "label": "読み書き", "change": "removed" }
+        ]
+      }
+    }
+  ]
+}
