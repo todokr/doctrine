@@ -1,0 +1,479 @@
+export const snapshot = {};
+
+snapshot[`生成した JSON Schema がスナップショットと一致する 1`] = `
+'{
+  "\$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "version": {
+      "description": "この形式の版",
+      "type": "number",
+      "const": 1
+    },
+    "why": {
+      "description": "この変更の目的。GFM のうち、生の HTML・画像・見出しを除いた記法で書く。",
+      "type": "string"
+    },
+    "what": {
+      "description": "変更を概念の単位に分けたもの",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "description": "概念の名前",
+            "type": "string"
+          },
+          "summary": {
+            "description": "その概念について何が変わったか。GFM のうち、生の HTML・画像・見出しを除いた記法で書く。",
+            "type": "string"
+          },
+          "paths": {
+            "description": "この概念に属するファイルのパス。複数の概念に出てよい",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "name",
+          "summary",
+          "paths"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "how": {
+      "description": "実現方法を説明文と図の並びで示したもの",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "body": {
+            "description": "実現方法の説明。GFM のうち、生の HTML・画像・見出しを除いた記法で書く。",
+            "type": "string"
+          },
+          "diagram": {
+            "description": "この説明に添える diagrams の id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "body"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "readingOrder": {
+      "description": "diff を読む順に並べたグループ",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "description": "グループのタイトル",
+            "type": "string"
+          },
+          "body": {
+            "description": "このグループで何を読み取るか。GFM のうち、生の HTML・画像・見出しを除いた記法で書く。",
+            "type": "string"
+          },
+          "locations": {
+            "description": "読む箇所を読む順に並べたもの",
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "description": "リポジトリのルートからのファイルパス",
+                  "type": "string"
+                },
+                "hunk": {
+                  "description": "doctrine が振った hunk の id。省くとファイル全体を指す",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "refs": {
+            "type": "object",
+            "properties": {
+              "decisions": {
+                "description": "関連する decisions の id。無ければ空配列",
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "risks": {
+                "description": "関連する risks の id。無ければ空配列",
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "tests": {
+                "description": "関連する tests の id。無ければ空配列",
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "diagrams": {
+                "description": "関連する diagrams の id。無ければ空配列",
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "decisions",
+              "risks",
+              "tests",
+              "diagrams"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "title",
+          "body",
+          "locations",
+          "refs"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "decisions": {
+      "description": "設計上の判断",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "decisions の中で一意な id",
+            "type": "string"
+          },
+          "decision": {
+            "description": "下した判断",
+            "type": "string"
+          },
+          "reason": {
+            "description": "その理由。GFM のうち、生の HTML・画像・見出しを除いた記法で書く。",
+            "type": "string"
+          },
+          "source": {
+            "description": "判断の出典",
+            "type": "object",
+            "properties": {
+              "kind": {
+                "description": "step: ワークフローのステップ id / file: worktree 内のファイルパス",
+                "type": "string",
+                "enum": [
+                  "step",
+                  "file"
+                ]
+              },
+              "value": {
+                "description": "kind に応じたステップ id かファイルパス",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "value"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "id",
+          "decision",
+          "reason"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "risks": {
+      "description": "リスク。重大度は付けない",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "risks の中で一意な id",
+            "type": "string"
+          },
+          "kind": {
+            "description": "breaks: 壊れるもの / assumption: 置いた前提 / unknown: 確かめられていないこと / considered: 検討して問題ないと判断したこと",
+            "type": "string",
+            "enum": [
+              "breaks",
+              "assumption",
+              "unknown",
+              "considered"
+            ]
+          },
+          "body": {
+            "description": "事実として書いた文章。推測や評価は混ぜない。GFM のうち、生の HTML・画像・見出しを除いた記法で書く。",
+            "type": "string"
+          },
+          "locations": {
+            "description": "関係する箇所。無ければ空配列",
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "description": "リポジトリのルートからのファイルパス",
+                  "type": "string"
+                },
+                "hunk": {
+                  "description": "doctrine が振った hunk の id。省くとファイル全体を指す",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "body",
+          "locations"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "tests": {
+      "description": "変更を確かめるテスト",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "tests の中で一意な id",
+            "type": "string"
+          },
+          "behavior": {
+            "description": "そのテストが確かめる振る舞い",
+            "type": "string"
+          },
+          "path": {
+            "description": "テストのファイルパス",
+            "type": "string"
+          },
+          "name": {
+            "description": "テスト名",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "behavior",
+          "path",
+          "name"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "diagrams": {
+      "description": "図。形はシーケンスとグラフの 2 つだけ",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "diagrams の中で一意な id",
+            "type": "string"
+          },
+          "title": {
+            "description": "図のタイトル",
+            "type": "string"
+          },
+          "body": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "shape": {
+                    "type": "string",
+                    "const": "sequence"
+                  },
+                  "actors": {
+                    "description": "登場する主体を左から並べた名前",
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "messages": {
+                    "description": "時系列順のやり取り",
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "from": {
+                          "description": "送り手の actors 上の名前",
+                          "type": "string"
+                        },
+                        "to": {
+                          "description": "受け手の actors 上の名前",
+                          "type": "string"
+                        },
+                        "label": {
+                          "description": "やり取りの内容",
+                          "type": "string"
+                        },
+                        "change": {
+                          "description": "この要素がこの変更で加わった（added）・変わった（changed）・除かれた（removed）もの",
+                          "type": "string",
+                          "enum": [
+                            "added",
+                            "changed",
+                            "removed"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "from",
+                        "to",
+                        "label"
+                      ],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": [
+                  "shape",
+                  "actors",
+                  "messages"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "shape": {
+                    "type": "string",
+                    "const": "graph"
+                  },
+                  "kind": {
+                    "description": "relation: 関係 / dependency: 依存 / state: 状態遷移",
+                    "type": "string",
+                    "enum": [
+                      "relation",
+                      "dependency",
+                      "state"
+                    ]
+                  },
+                  "nodes": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "description": "この図の中で一意なノードの id",
+                          "type": "string"
+                        },
+                        "label": {
+                          "description": "ノードの表示名",
+                          "type": "string"
+                        },
+                        "change": {
+                          "description": "この要素がこの変更で加わった（added）・変わった（changed）・除かれた（removed）もの",
+                          "type": "string",
+                          "enum": [
+                            "added",
+                            "changed",
+                            "removed"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "label"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "edges": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "from": {
+                          "description": "始点のノードの id",
+                          "type": "string"
+                        },
+                        "to": {
+                          "description": "終点のノードの id",
+                          "type": "string"
+                        },
+                        "label": {
+                          "description": "辺の表示名。無ければ空文字",
+                          "type": "string"
+                        },
+                        "change": {
+                          "description": "この要素がこの変更で加わった（added）・変わった（changed）・除かれた（removed）もの",
+                          "type": "string",
+                          "enum": [
+                            "added",
+                            "changed",
+                            "removed"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "from",
+                        "to",
+                        "label"
+                      ],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": [
+                  "shape",
+                  "kind",
+                  "nodes",
+                  "edges"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "body"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "version",
+    "why",
+    "what",
+    "how",
+    "readingOrder",
+    "decisions",
+    "risks",
+    "tests",
+    "diagrams"
+  ],
+  "additionalProperties": false
+}'
+`;
