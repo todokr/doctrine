@@ -3,7 +3,10 @@ import type { AgentAdapter, AgentEvent, AgentResult, AgentRun, StartOptions } fr
 export type MockScript = {
   events?: AgentEvent[];
   result: Partial<AgentResult>;
-  /** 呼び出しごとに結果を変えたいとき。start/resume の通算回数で引く。 */
+  /**
+   * 呼び出しごとに結果を変えたいとき。start/resume の通算回数で引く。
+   * `structuredOutput` を出し分ければ、1回目は壊れた出力（null）、2回目は正しい出力、という実行が組める。
+   */
   sequence?: Partial<AgentResult>[];
   /**
    * 呼び出しごとにイベント列を変えたいとき（sequence と同じく通算回数で引く）。

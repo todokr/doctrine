@@ -72,6 +72,22 @@ test("DEFAULT の structuredOutput は null", async () => {
   assert.equal(r.structuredOutput, null);
 });
 
+test("sequence で呼び出しごとに壊れた出力と正しい出力を出し分けられる", async () => {
+  const adapter = createMockAdapter({
+    result: {},
+    sequence: [
+      { text: "壊れた出力", structuredOutput: null },
+      { text: "やり直した", structuredOutput: { title: "ガイド" } },
+    ],
+  });
+  const r1 = await adapter.start("a", { cwd: "/wt", sessionId: "s1" }).result;
+  const r2 = await adapter.resume("s1", "b", { cwd: "/wt", sessionId: "s1" }).result;
+  assert.equal(r1.text, "壊れた出力", "sequence の 1 回目が引かれた証拠（DEFAULT ではない）");
+  assert.equal(r1.structuredOutput, null, "1 回目は壊れた出力");
+  assert.equal(r2.text, "やり直した");
+  assert.deepEqual(r2.structuredOutput, { title: "ガイド" }, "2 回目のやり直しで正しい出力");
+});
+
 test("events はスクリプトどおりに流れる", async () => {
   const adapter = createMockAdapter({
     events: [{ kind: "assistant", text: "こんにちは" }],
