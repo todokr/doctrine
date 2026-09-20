@@ -410,8 +410,10 @@ test("長い入力は先頭を残して切られる", async () => {
 
 test("入力のネストした値は切らない", async () => {
   const nested = { a: { b: "y".repeat(DENIAL_VALUE_CHARS + 100) } };
-  const saved = JSON.parse((await closeWithDenials([
-    { tool_name: "T", tool_use_id: null, input: nested },
-  ]))!);
+  const saved = JSON.parse(
+    (await closeWithDenials([
+      { tool_name: "T", tool_use_id: null, input: nested },
+    ]))!,
+  );
   assert.deepEqual(saved.denials[0].input, nested);
 });

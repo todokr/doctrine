@@ -444,7 +444,7 @@ test("pending_feed を足す前に作られたDBファイルは、行を保っ�
       "0006_step_run_bounced",
       "0007_step_run_permission_denials",
     ]);
-    const old =await getTask(d, "old");
+    const old = await getTask(d, "old");
     assert.equal(old?.state, "suspended", "既存の行は残る");
     assert.equal(old?.pending_feed, null, "列が足されていて、読める");
     await d.updateTable("tasks").set({ pending_feed: "feed" }).where("id", "=", "old").execute();

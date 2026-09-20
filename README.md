@@ -319,7 +319,7 @@ dctl get <task-id> | jq '.stepRuns[] | select(.permission_denials) | .permission
 ```
 
 残すのは1回の実行につき先頭20件で、実際の件数は `permission_denials.total` に入る。
-入力の文字列は各2000字までで切る。拒否が無かった実行では `null`。
+入力のトップレベルの文字列は各2000字までで切る。拒否が無かった実行では `null`。
 
 同じ `dctl get` で、非0終了が**失敗**だったのか**差し戻し**だったのかも読める。
 `onFailure` / `onReject` の `goto` が発火した実行は `status` が `bounced` になり、
