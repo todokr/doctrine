@@ -1,12 +1,19 @@
-# doctrine の既定ワークフロー（plan → plan-review → implement → agent-review → review）
+# doctrine の既定ワークフロー（plan → plan-review → implement → verify → agent-review → review）
 #
-# エージェントを planner / reviewer / implementer の3つの役割に分け、
+# エージェントを planner / plan-reviewer / implementer / code-reviewer の4つの役割に分け、
 # 役割の間は .doctrine-out/ のファイルで成果物を受け渡す。
+# 審査役を計画用と実装用で分けているのは、agent-review が計画審査のときの
+# 探索履歴を抱えたまま再開されないようにするため。
 #
-# 2つのゲート（plan-gate / review-gate）は、reviewer が書いた成果物ファイルの
+# verify は型検査とテストを回すだけの command ステップ。通ったかどうかを
+# エージェントに確かめさせず、ここで機械的に落とす。
+#
+# 2つのゲート（plan-gate / review-gate）は、審査役が書いた成果物ファイルの
 # 1行目が `verdict: approve` かどうかを grep で見るだけの command ステップ。
-# reject なら onFailure で前の工程へ戻り、feed で reviewer の最終応答を渡す。
+# reject なら成果物ファイルを stdout に出して落ち、onFailure で前の工程へ戻る。
+# feed はゲート自身の last_stdout（＝審査結果のファイルの中身）を渡す。
 #   plan-gate   が落ちたら plan へ（最大3回）
+#   verify      が落ちたら implement へ（最大3回）
 #   review-gate が落ちたら implement へ（最大3回）
 #   review（人の承認）で却下されたら implement へ（最大5回）
 # maxAttempts を使い切ってもゲートが通らない場合、タスクは failed になる。
@@ -19,6 +26,7 @@ steps:
   - id: plan
     type: agent
     session: planner
+    model: claude-opus-5
     permissionMode: acceptEdits
     allowedTools:
       - "Bash(git status:*)"
@@ -36,14 +44,27 @@ steps:
       ---
 
       リポジトリを調べたうえで、計画を {{ worktree.path }}/.doctrine-out/plan.md に書いてください。
-      見出しは「変更するファイル」「変更内容」「テスト」「やらないこと」の4つにします。
-      計画を書くだけで、コードは書かないでください。
+      この計画を読む実装者は、あなたの調査結果を知らない別のエージェントです。
+      実装者がリポジトリを調べ直さずに着手できるように、調べて分かったことを計画に残します。
+      見出しは次の5つにします。
+
+      - 「調べて分かったこと」: 再利用する既存の関数・型・テストヘルパー（パスと名前）、
+        周辺コードが従っている書き方、実装者がはまりそうな点。
+      - 「変更するファイル」: パスごとに、触る関数名・型名と行番号の範囲。新規ファイルはその旨。
+      - 「変更内容」: 作業の順序とコミットの単位。追加・変更するシグネチャと型定義は書きます。
+        関数の中身は書かず、何をするかを文章で書きます。
+      - 「テスト」: 追加するテストファイルのパス、テストケースの名前、入力と期待値。
+      - 「やらないこと」
+
+      実装者が読む必要のないファイルは挙げないでください。
+      計画を書くだけで、リポジトリのコードは変更しないでください。
 
       差し戻されて再度呼ばれた場合は、指摘を踏まえて plan.md を全文書き直してください。
 
   - id: plan-review
     type: agent
-    session: reviewer
+    session: plan-reviewer
+    model: claude-opus-5
     permissionMode: acceptEdits
     allowedTools:
       - "Bash(git status:*)"
@@ -53,8 +74,6 @@ steps:
       - "Bash(cat:*)"
       - "Bash(ls:*)"
       - "Bash(sed -n:*)"
-      - "Bash(mise run core:test:*)"
-      - "Bash(mise run core:check:*)"
     prompt: |
       {{ worktree.path }}/.doctrine-out/plan.md を毎回読み直して審査し、結果を
       {{ worktree.path }}/.doctrine-out/plan-review.md に上書きしてください。
@@ -65,25 +84,33 @@ steps:
       {{ task.prompt }}
       ---
 
+      見るのは次の3点です。
+
+      - タスクの要求を満たす計画か。余計なことをしていないか
+      - 実装者がリポジトリを調べ直さずに着手できる具体さか（触る関数、シグネチャ、テストケースが書いてあるか）
+      - 計画に書かれたパス・関数名・型名が実在するか。grep や sed -n で、挙げられた箇所だけを確かめます
+
+      リポジトリ全体を調べ直す必要はありません。計画が挙げた箇所を確かめれば足ります。
+
       plan-review.md の1行目は必ず `verdict: approve` か `verdict: reject` のどちらかにします。
       2行目以降に指摘を書いてください。修正が必要な具体的な指摘があるときだけ reject にします。
 
-      最終応答には plan-review.md の内容をそのまま書いてください
-      （後続のステップが参照できるのは最終応答だけです）。
+      指摘は plan-review.md から後続のステップへ渡ります。最終応答は verdict の1行だけで構いません。
 
   - id: plan-gate
     type: command
-    run: "grep -q '^verdict: approve' .doctrine-out/plan-review.md"
+    run: "grep -q '^verdict: approve' .doctrine-out/plan-review.md || { cat .doctrine-out/plan-review.md || echo 'plan-review.md が書かれていない'; exit 1; }"
     onFailure:
       goto: plan
       maxAttempts: 3
       feed: |
         計画がレビューで却下された:
-        {{ steps.plan-review.last_stdout }}
+        {{ steps.plan-gate.last_stdout }}
 
   - id: implement
     type: agent
     session: implementer
+    model: claude-sonnet-5
     permissionMode: acceptEdits
     # acceptEdits では Bash がすべて拒否されるので、このリポジトリで要るものだけ許可する。
     allowedTools:
@@ -111,13 +138,30 @@ steps:
       {{ task.prompt }}
       ---
 
+      plan.md は、リポジトリを調べたうえで書かれ、審査を通っています。
+      plan.md が挙げたファイルと行から着手し、それ以外は必要になるまで読まないでください。
+      plan.md が実際のコードと食い違っていたら、コードに合わせて実装し、食い違いを最終応答に書いてください。
+
       テストを先に書いてから実装します。`mise run core:test` と `mise run core:check` を
       通してから git commit してください。
       差し戻されて再度呼ばれた場合は、指摘を直して再度コミットしてください。
 
+  # deno test は失敗の詳細を stdout に、deno check は stderr に出すので両方渡す。
+  - id: verify
+    type: command
+    run: "mise run core:check && mise run core:test"
+    onFailure:
+      goto: implement
+      maxAttempts: 3
+      feed: |
+        型検査かテストが失敗した:
+        {{ steps.verify.last_stdout }}
+        {{ steps.verify.last_stderr }}
+
   - id: agent-review
     type: agent
-    session: reviewer
+    session: code-reviewer
+    model: claude-opus-5
     permissionMode: acceptEdits
     allowedTools:
       - "Bash(git status:*)"
@@ -127,9 +171,9 @@ steps:
       - "Bash(cat:*)"
       - "Bash(ls:*)"
       - "Bash(sed -n:*)"
-      - "Bash(mise run core:test:*)"
-      - "Bash(mise run core:check:*)"
     prompt: |
+      型検査とテストは直前の verify ステップで通っています。自分で回す必要はありません。
+
       implement が積んだコミットを毎回読み直して審査し、結果を
       {{ worktree.path }}/.doctrine-out/review.md に上書きしてください。
 
@@ -143,18 +187,17 @@ steps:
       review.md の1行目は必ず `verdict: approve` か `verdict: reject` のどちらかにします。
       2行目以降に指摘を書いてください。修正が必要な具体的な指摘があるときだけ reject にします。
 
-      最終応答には review.md の内容をそのまま書いてください
-      （後続のステップが参照できるのは最終応答だけです）。
+      指摘は review.md から後続のステップへ渡ります。最終応答は verdict の1行だけで構いません。
 
   - id: review-gate
     type: command
-    run: "grep -q '^verdict: approve' .doctrine-out/review.md"
+    run: "grep -q '^verdict: approve' .doctrine-out/review.md || { cat .doctrine-out/review.md || echo 'review.md が書かれていない'; exit 1; }"
     onFailure:
       goto: implement
       maxAttempts: 3
       feed: |
         実装がレビューで却下された:
-        {{ steps.agent-review.last_stdout }}
+        {{ steps.review-gate.last_stdout }}
 
   - id: review
     type: approval
