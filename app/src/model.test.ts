@@ -10,7 +10,6 @@ import {
 import {
   bounceNotice,
   canReject,
-  clock,
   composeRejection,
   countReview,
   DEGRADED_UNKNOWN,
@@ -19,14 +18,16 @@ import {
   fellBackToAll,
   groupOf,
   hasSince,
-  hm,
   isTerminal,
+  LIMIT_DANGER_UTILIZATION,
+  LIMIT_WARN_UTILIZATION,
   LOG_LINES_KEPT,
   MIN,
   queuePosition,
   rateLimitViews,
   reduce,
   rejections,
+  remaining,
   reviewRound,
   sidebarOrder,
   stepRunHistory,
@@ -36,7 +37,6 @@ import {
   toRateLimitWindow,
   toTask,
   unguidedFiles,
-  WEEKLY_WARN_UTILIZATION,
   type DiffView,
   type State,
 } from "./model";
@@ -988,20 +988,29 @@ describe("利用上限の表示", () => {
     expect(toRateLimitWindow({ ...row, observed_at: "いつか" })).toBeNull();
   });
 
-  test("5時間枠は飽和しても calm のままで、新しいタスクが始まらないことだけ伝える", () => {
-    expect(viewOf(win({ utilization: 0.99 })).note).toBeNull();
-    const v = viewOf(win({ utilization: 1 }));
-    expect(v.severity).toBe("calm");
-    expect(v.note).toBe("新しいタスクは明けるまで始まりません");
+  test("色はどの枠も同じ閾値で決まる（0.7 から warn、0.8 から danger）", () => {
+    for (const window of ["five_hour", "seven_day", "seven_day_opus"]) {
+      const at = (utilization: number) => viewOf(win({ window, utilization })).severity;
+      expect(at(LIMIT_WARN_UTILIZATION - 0.01)).toBe("calm");
+      expect(at(LIMIT_WARN_UTILIZATION)).toBe("warn");
+      expect(at(LIMIT_DANGER_UTILIZATION - 0.01)).toBe("warn");
+      expect(at(LIMIT_DANGER_UTILIZATION)).toBe("danger");
+      expect(at(1)).toBe("danger");
+    }
   });
 
-  test("7日枠は閾値で warn、飽和で danger になり、失敗に直結することを説明する", () => {
+  test("5時間枠の説明文は飽和したときだけで、新しいタスクが始まらないことを伝える", () => {
+    expect(viewOf(win({ utilization: 0.99 })).note).toBeNull();
+    expect(viewOf(win({ utilization: 1 })).note).toBe("新しいタスクはリセットまで始まりません");
+  });
+
+  test("7日枠の説明文は danger から出て、失敗に直結することを説明する", () => {
     const seven = (utilization: number) =>
       viewOf(win({ window: "seven_day", utilization, resetsAt: NOW + 4 * 1440 * MIN }));
-    expect(seven(WEEKLY_WARN_UTILIZATION - 0.01)).toMatchObject({ severity: "calm", note: null });
-    expect(seven(WEEKLY_WARN_UTILIZATION).severity).toBe("warn");
-    expect(seven(WEEKLY_WARN_UTILIZATION).note).toContain("待たずに失敗します");
-    expect(seven(1).severity).toBe("danger");
+    expect(seven(LIMIT_DANGER_UTILIZATION - 0.01).note).toBeNull();
+    expect(seven(LIMIT_DANGER_UTILIZATION).note).toContain("飽和すると");
+    expect(seven(LIMIT_DANGER_UTILIZATION).note).toContain("待たずに失敗します");
+    expect(seven(1).note).toContain("飽和しています");
     expect(seven(1).note).toContain("待たずに失敗します");
   });
 
@@ -1014,39 +1023,50 @@ describe("利用上限の表示", () => {
     expect(views.every((v) => v.note === null)).toBe(true);
   });
 
-  test("フィクスチャ: 飽和が近い状態は7日枠だけが warn", () => {
+  test("フィクスチャ: 飽和が近い状態はどちらも danger で、説明文は7日枠だけ", () => {
     const views = rateLimitViews(feed(base(), RATELIMIT_NEAR_SATURATION));
-    expect(views.map((v) => [v.window, v.severity])).toEqual([
-      ["five_hour", "calm"],
-      ["seven_day", "warn"],
+    expect(views.map((v) => [v.window, v.severity, v.note !== null])).toEqual([
+      ["five_hour", "danger", false],
+      ["seven_day", "danger", true],
     ]);
   });
 
-  test("明ける時刻は、5時間枠は時分だけ、7日枠は日付つきで出す", () => {
-    const at = NOW + 3 * 60 * MIN;
-    expect(viewOf(win({ resetsAt: at })).reset).toBe(`${hm(at)} 明け`);
-    const far = NOW + 4 * 1440 * MIN;
-    expect(viewOf(win({ window: "seven_day", resetsAt: far })).reset).toBe(`${clock(far)} 明け`);
+  test("remaining は切り捨てで、分・時間と分・日と時間の3段階。端数が0なら省く", () => {
+    expect(remaining(59 * 1000)).toBe("1分未満");
+    expect(remaining(47 * MIN + 59 * 1000)).toBe("47分");
+    expect(remaining(59 * MIN)).toBe("59分");
+    expect(remaining(60 * MIN)).toBe("1時間");
+    expect(remaining(3 * 60 * MIN + 54 * MIN)).toBe("3時間54分");
+    expect(remaining(24 * 60 * MIN - 1)).toBe("23時間59分");
+    expect(remaining(24 * 60 * MIN)).toBe("1日");
+    expect(remaining((6 * 24 + 7) * 60 * MIN + 30 * MIN)).toBe("6日7時間");
   });
 
-  test("もう明けた枠は利用率を古い値として扱い、警告しない", () => {
+  test("リセットまでの残り時間を、どの枠も同じ書式で出す", () => {
+    expect(viewOf(win({ resetsAt: NOW + 3 * 60 * MIN + 54 * MIN })).reset).toBe("あと3時間54分でリセット");
+    const far = NOW + 4 * 1440 * MIN + 5 * 60 * MIN;
+    expect(viewOf(win({ window: "seven_day", resetsAt: far })).reset).toBe("あと4日5時間でリセット");
+  });
+
+  test("もうリセットされた枠は利用率を古い値として扱い、色も説明文も付けない", () => {
     const v = viewOf(win({ window: "seven_day", utilization: 1, resetsAt: NOW - MIN }));
-    expect(v).toMatchObject({ reset: "明けました", stale: true, severity: "calm", note: null });
+    expect(v).toMatchObject({ reset: null, stale: true, severity: "calm", note: null });
+    expect(viewOf(win({ resetsAt: NOW })).stale).toBe(true);
     expect(viewOf(win({})).stale).toBe(false);
   });
 
-  test("明ける時刻が分からなければそう出す", () => {
-    expect(viewOf(win({ resetsAt: null })).reset).toBe("明ける時刻は不明");
+  test("リセット時刻が分からなければそう出す", () => {
+    expect(viewOf(win({ resetsAt: null })).reset).toBe("リセット時刻は不明");
   });
 
   test("パーセント表記と、いつ観測した値か", () => {
     const v = viewOf(win({ utilization: 0.664, observedAt: NOW - 3 * MIN }));
-    expect(v.percent).toBe("66%");
+    expect(v.percent).toBe("66% 使用");
     expect(v.observed).toBe("3分前");
-    expect(viewOf(win({ utilization: 0.9996 })).percent).toBe("99%");
-    expect(viewOf(win({ utilization: 1 })).percent).toBe("100%");
+    expect(viewOf(win({ utilization: 0.9996 })).percent).toBe("99% 使用");
+    expect(viewOf(win({ utilization: 1 })).percent).toBe("100% 使用");
     // 0.29 * 100 は 28.999… になる
-    expect(viewOf(win({ utilization: 0.29 })).percent).toBe("29%");
+    expect(viewOf(win({ utilization: 0.29 })).percent).toBe("29% 使用");
     expect(viewOf(win({ utilization: 1.2 })).fill).toBe(1);
   });
 
