@@ -102,8 +102,22 @@ export function resultFrom(
     permissionDenials: denials,
     exitCode,
     stderrTail,
-    structuredOutput: null,
+    structuredOutput: structuredOutputOf(o),
   };
+}
+
+/**
+ * --json-schema の出力を result 行から取る。オブジェクトのときだけ返し、無い・null・
+ * 文字列・数値・配列は null。スキーマへの適合はここでは確かめない（呼び出し元の責務）。
+ *
+ * 未実測。`claude --help` の `--json-schema` の記載から `structured_output` と仮置きしている。
+ * 呼び出し元を作る作業で実際の result 行を見て直すこと。
+ */
+function structuredOutputOf(o: Record<string, unknown>): Record<string, unknown> | null {
+  const v = o.structured_output;
+  return typeof v === "object" && v !== null && !Array.isArray(v)
+    ? v as Record<string, unknown>
+    : null;
 }
 
 export function createClaudeAdapter(bin = "claude"): AgentAdapter {

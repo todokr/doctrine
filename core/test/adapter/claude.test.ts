@@ -208,6 +208,48 @@ test("is_error が true なら失敗", () => {
   assert.equal(r.ok, false);
 });
 
+test("result 行から構造化出力を取り出す", () => {
+  const r = resultFrom({
+    type: "result",
+    subtype: "success",
+    is_error: false,
+    result: "できました",
+    structured_output: { title: "ガイド", steps: ["a", "b"] },
+  }, 0);
+  assert.deepEqual(r.structuredOutput, { title: "ガイド", steps: ["a", "b"] });
+  assert.equal(r.ok, true);
+  assert.equal(r.text, "できました");
+});
+
+test("構造化出力が無い result 行は null にする", () => {
+  const r = resultFrom(
+    { type: "result", subtype: "success", is_error: false, result: "できました" },
+    0,
+  );
+  assert.equal(r.structuredOutput, null);
+  assert.equal(r.ok, true, "構造化出力の有無は成功判定に影響しない");
+});
+
+test("構造化出力がオブジェクトでなければ null にして例外を投げない", () => {
+  for (const bad of ['{"a":1}', null, [1, 2, 3], 42]) {
+    const r = resultFrom({
+      type: "result",
+      subtype: "success",
+      is_error: false,
+      result: "できました",
+      structured_output: bad,
+    }, 0);
+    assert.equal(r.structuredOutput, null, `${JSON.stringify(bad)} は null になるはず`);
+    assert.equal(r.ok, true);
+  }
+});
+
+test("result 行が来なければ構造化出力も null", () => {
+  const r = resultFrom(undefined, 1);
+  assert.equal(r.structuredOutput, null);
+  assert.equal(r.ok, false);
+});
+
 test("stderrTail はデフォルトで空文字", () => {
   const r = resultFrom(undefined, 1);
   assert.equal(r.stderrTail, "");
