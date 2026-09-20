@@ -13,6 +13,8 @@
     "isolatedModules": true,
     "noEmit": true,
     "jsx": "react-jsx",
+    /* ../shared から上には node_modules が無いので、shared/guide の zod をここへ向ける */
+    "paths": { "zod/v4": ["./node_modules/zod/v4"] },
 
     /* Linting */
     "strict": true,
