@@ -6,6 +6,7 @@ import { useStore } from "../store";
 import type { DiffFile, DiffHunk, MovedBlock, Task } from "../types";
 
 export const fileAnchor = (path: string) => `file-${path}`;
+export const hunkAnchor = (id: string) => `hunk-${id}`;
 
 /** ファイル一覧に出す増減。バイナリは行数を持たない（数えられない）ので、そう書く */
 export function fileStat(f: DiffFile): ReactNode {
@@ -107,7 +108,7 @@ function Hunk({ t, path, hunk, language, moves }: { t: Task; path: string; hunk:
 
   return (
     <>
-      <div className="hunk">@@ -{hunk.old} +{hunk.new} @@</div>
+      <div className="hunk" id={hunkAnchor(hunk.id)} data-anchor={hunk.id}>@@ -{hunk.old} +{hunk.new} @@</div>
       {out}
     </>
   );
@@ -132,7 +133,7 @@ export function DiffFileBlock({ t, file }: { t: Task; file: DiffFile }) {
             ? <p className="hint" style={{ padding: "8px 12px" }}>diff が打ち切られたため、このファイルの中身は届いていません</p>
             : file.hunks.length === 0
               ? <p className="hint" style={{ padding: "8px 12px" }}>中身の変更はありません（モードや名前だけの変更）</p>
-              : file.hunks.map((h, hi) => <Hunk key={hi} t={t} path={file.path} hunk={h} language={language} moves={file.moves} />)}
+              : file.hunks.map((h) => <Hunk key={h.id} t={t} path={file.path} hunk={h} language={language} moves={file.moves} />)}
       </div>
     </section>
   );

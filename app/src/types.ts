@@ -22,7 +22,13 @@ export type TaskState = "queued" | "running" | "suspended" | "paused" | "rate_li
 
 export type Project = { id: string; color: string; path: string; def: string };
 
-export type DiffHunk = { old: number; new: number; body: string };
+export type DiffHunk = {
+  /** ガイドが指す hunk の id（shared/guide/hunkId.ts の listHunks と同じ値） */
+  id: string;
+  old: number;
+  new: number;
+  body: string;
+};
 
 /**
  * 画面が描く1ファイル。task.diff の files[] の1件（DiffFileMeta）に、

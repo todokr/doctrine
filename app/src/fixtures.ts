@@ -1,6 +1,7 @@
 // テスト用の標本。画面はこれを使わない（画面のデータはデーモンから来る）
 import type { Project, Task, TaskDiff } from "./types";
 import type { ServerEvent } from "../../shared/protocol.ts";
+import examplePatch from "../../shared/guide/examples/step-artifacts.patch?raw";
 
 export const NOW = Date.parse("2026-09-15T15:00:00+09:00");
 export const MIN = 60000;
@@ -124,6 +125,34 @@ similarity index 100%
 rename from src/moved.ts
 rename to src/renamed.ts
 `,
+  truncated: false,
+};
+
+/**
+ * ガイドの見本（shared/guide/examples/step-artifacts.guide.json）と対になる patch から作った task.diff の応答。
+ * buildDiff も照合も行数を見ないので additions / deletions は 0 にしてある。
+ */
+const exampleFile = (path: string, status: "A" | "M" = "M") =>
+  ({ path, status, binary: false, additions: 0, deletions: 0 }) as const;
+
+export const EXAMPLE_DIFF: TaskDiff = {
+  base: { branch: "develop", merge_base: "3efbc75f70aeae7989a3dc4db95bdfc52b6c504a" },
+  since_step_run_id: null,
+  files: [
+    exampleFile("src/core/engine.ts"),
+    exampleFile("src/core/worktree.ts"),
+    exampleFile("src/db/boundary.ts"),
+    exampleFile("src/db/migrations.ts"),
+    exampleFile("src/db/schema.ts"),
+    exampleFile("src/db/sessions.ts", "A"),
+    exampleFile("src/workflow/schema.ts"),
+    exampleFile("test/core/engine.test.ts"),
+    exampleFile("test/core/worktree.test.ts"),
+    exampleFile("test/db/migrate.test.ts"),
+    exampleFile("test/db/sessions.test.ts", "A"),
+    exampleFile("test/workflow/schema.test.ts"),
+  ],
+  patch: examplePatch,
   truncated: false,
 };
 
