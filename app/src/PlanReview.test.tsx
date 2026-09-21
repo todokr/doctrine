@@ -78,6 +78,21 @@ describe("PfdElementPanel", () => {
   test("何も選んでいなければ計画の題名を出す", () => {
     expect(panel("p:nope")).toContain("注文の CSV 出力");
   });
+
+  test("固定の要素は印を出し、コメント欄を出さない", () => {
+    const html = panel("p:design", { frozen: true, onAddComment: null, onDeleteComment: null });
+    expect(html).toContain("固定");
+    expect(html).not.toContain("コメントを足す");
+  });
+
+  test("extra を定義の後に出す", () => {
+    expect(panel("p:design", { extra: <p>TRAIL</p> })).toContain("TRAIL");
+  });
+
+  test("コメントの入力も中身も無ければコメント欄を出さない", () => {
+    const html = panel("p:design", { onAddComment: null, comments: [] });
+    expect(html).not.toContain("<h3>コメント</h3>");
+  });
 });
 
 describe("PlanDecide", () => {

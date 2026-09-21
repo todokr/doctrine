@@ -101,9 +101,25 @@ describe("IntakeView の部品", () => {
   });
 
   test("改訂中は帯を出す", () => {
-    expect(renderToStaticMarkup(<RevisingBand intake={{ ...reviewing, revising: true }} />))
+    expect(renderToStaticMarkup(<RevisingBand intake={{ ...reviewing, revising: true }} pending={false} onAbandon={noop} />))
       .toContain("改訂中");
-    expect(renderToStaticMarkup(<RevisingBand intake={{ ...reviewing, revising: false }} />)).toBe("");
+    expect(renderToStaticMarkup(<RevisingBand intake={{ ...reviewing, revising: false }} pending={false} onAbandon={noop} />)).toBe("");
+  });
+
+  test("改訂中の帯は改訂をやめるボタンだけを持つ", () => {
+    const html = renderToStaticMarkup(
+      <RevisingBand intake={{ ...reviewing, revising: true }} pending={false} onAbandon={noop} />,
+    );
+    expect(html).toContain("改訂中");
+    expect(html).toContain("改訂をやめる");
+  });
+
+  test("見出しは終端でなければ中止を出す", () => {
+    const heading = (intake: typeof reviewing, onCancel?: () => void) =>
+      renderToStaticMarkup(<IntakeHeading intake={intake} project={PROJECTS[0]} onCancel={onCancel} />);
+    expect(heading(reviewing, noop)).toContain("中止…");
+    expect(heading({ ...reviewing, state: "completed" }, noop)).not.toContain("中止…");
+    expect(heading(reviewing)).not.toContain("中止…");
   });
 
   test("見出しに番号・タイトル・状態の語を出す", () => {

@@ -106,6 +106,10 @@ export function PfdElementPanel(p: {
   /** null ならコメント欄を出さない（経緯の読み返し） */
   onAddComment: ((body: string) => void) | null;
   onDeleteComment: ((index: number) => void) | null;
+  /** プロセスの定義の後、コメント欄の前に出す（進行中の面の状態・sub-issue・タスク・PR） */
+  extra?: ReactNode;
+  /** 改訂で変えられない要素 */
+  frozen?: boolean;
 }) {
   const { info } = p;
   if (!info) {
@@ -127,6 +131,7 @@ export function PfdElementPanel(p: {
       <div className="el-head">
         <b>{head.name}</b>
         <span className="mono hint">{`${info.kind === "artifact" ? "成果物" : "プロセス"} ${head.id}`}</span>
+        {p.frozen && <span className="tag">🔒 固定</span>}
       </div>
       {info.kind === "artifact"
         ? (
@@ -166,6 +171,7 @@ export function PfdElementPanel(p: {
             )}
           </>
         )}
+      {p.extra}
       {p.previous.length > 0 && (
         <Sec title="前の案へのコメント">
           {p.previous.map(({ comment, reply }) => (
@@ -176,7 +182,9 @@ export function PfdElementPanel(p: {
           ))}
         </Sec>
       )}
-      <CommentBox key={info.key} comments={p.comments} onAdd={p.onAddComment} onDelete={p.onDeleteComment} />
+      {(p.onAddComment !== null || p.comments.length > 0) && (
+        <CommentBox key={info.key} comments={p.comments} onAdd={p.onAddComment} onDelete={p.onDeleteComment} />
+      )}
     </aside>
   );
 }
