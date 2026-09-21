@@ -1,9 +1,11 @@
-# doctrine の既定ワークフロー（plan → plan-review → implement → verify → agent-review → review → open-pr）
+# doctrine の既定ワークフロー（plan → plan-review → implement → verify → agent-review → guide → review → open-pr）
 #
-# エージェントを planner / plan-reviewer / implementer / code-reviewer の4つの役割に分け、
+# エージェントを planner / plan-reviewer / implementer / code-reviewer / guide の5つの役割に分け、
 # 役割の間は .doctrine-out/ のファイルで成果物を受け渡す。
 # 審査役を計画用と実装用で分けているのは、agent-review が計画審査のときの
 # 探索履歴を抱えたまま再開されないようにするため。
+# guide も同じ理由で独立した役割にしてあり、実装や審査の探索履歴を継がずに
+# 差分だけを読んでガイドを書く。
 #
 # verify は型検査とテストを回すだけの command ステップ。通ったかどうかを
 # エージェントに確かめさせず、ここで機械的に落とす。core / app / pfd の3つとも流す。
@@ -17,8 +19,10 @@
 #   plan-gate   が落ちたら plan へ（最大3回）
 #   verify      が落ちたら implement へ（最大3回）
 #   review-gate が落ちたら implement へ（最大3回）
+#   guide       の検証が落ちたら guide 自身へ（最大3回。onFailure を書かない既定の分岐）
 #   review（人の承認）で却下されたら implement へ（最大5回）
 # maxAttempts を使い切ってもゲートが通らない場合、タスクは failed になる。
+# guide が3回とも検証に落ちたときも同じで、人の review に届かないまま failed になる。
 # そのとき worktree は削除されずに残るので、中を見て手で直すか、タスクを作り直す。
 #
 # review-gate は `verdict: escalate` も通す。implement が自分では直せない指摘
@@ -324,6 +328,37 @@ steps:
       feed: |
         実装がレビューで却下された:
         {{ steps.review-gate.last_stdout }}
+
+  # プロンプトは doctrine が組み立てるので prompt は書けない（書くとスキーマで落ちる）。
+  # onFailure を書いていないのは、guide ステップの既定が「自分へ戻る・3回・
+  # {{ steps.guide.last_stderr }} を feed」で、ここに置きたい値と同じため。
+  # 組み込みプロンプトが `git diff` を実行するので Bash(git diff:*) は外せない。
+  - id: guide
+    type: guide
+    session: guide
+    model: claude-opus-5
+    permissionMode: acceptEdits
+    allowedTools:
+      - "Bash(git status:*)"
+      - "Bash(git diff:*)"
+      - "Bash(git log:*)"
+      - "Bash(git show:*)"
+      - "Bash(git apply --stat:*)"
+      - "Bash(grep:*)"
+      - "Bash(cat:*)"
+      - "Bash(head:*)"
+      - "Bash(tail:*)"
+      - "Bash(wc:*)"
+      - "Bash(ls:*)"
+      - "Bash(find:*)"
+      - "Bash(sed -n:*)"
+      - "Bash(mise tasks:*)"
+      - "Bash(deno fmt --check:*)"
+      - "Bash(gh pr view:*)"
+      - "Bash(gh pr list:*)"
+      - "Bash(gh pr diff:*)"
+      - "Bash(gh issue view:*)"
+      - "Bash(gh issue list:*)"
 
   - id: review
     type: approval
