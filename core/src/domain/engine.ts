@@ -28,10 +28,12 @@ import {
 import { getSessionId } from "../db/sessions.ts";
 import type { Db } from "../db/schema.ts";
 import { assertTransition } from "./states.ts";
+import { buildTaskContext } from "./taskContext.ts";
 import {
   logPathFor,
   runAgentStep,
   runCommandStep,
+  runGuideStep,
   type RunnerDeps,
   type StepOutcome,
 } from "./stepRunner.ts";
@@ -316,7 +318,12 @@ export async function runTask(
     // 「このロールで会話が既にあったか」だけが resume すべきかを決める
     // （ステップ内の再試行かどうかではない）。session を省略すると全 agent ステップが
     // 同じ既定ロールを共有するので、今までどおり「タスクに会話は1本」になる。
-    const role = step.type === "agent" ? (step.session ?? DEFAULT_SESSION_ROLE) : null;
+    // guide の session は必須なので、既定ロールには落ちない。
+    const role = step.type === "agent"
+      ? (step.session ?? DEFAULT_SESSION_ROLE)
+      : step.type === "guide"
+      ? step.session
+      : null;
     const existingSessionId = role ? await getSessionId(db, taskId, role) : undefined;
     const hadSession = existingSessionId !== undefined;
     const sessionId = existingSessionId ?? crypto.randomUUID();
@@ -380,14 +387,32 @@ export async function runTask(
     // 上限で待ちに入るときに pending_feed へ書き戻す値。stepRunner が展開した
     // プロンプト文字列ではなく、goto の時点で expand 済みのこのローカル変数が正。
     const feedForThisStep = pendingFeed;
-    const outcome: StepOutcome = step.type === "command"
-      ? await runCommandStep(step, ctx, {
+    let outcome: StepOutcome;
+    if (step.type === "command") {
+      outcome = await runCommandStep(step, ctx, {
         cwd: task.worktree_path!,
         taskId,
         attempt,
         deps: runnerDeps,
-      })
-      : await runAgentStep(
+      });
+    } else if (step.type === "guide") {
+      // DB にしか無い入力（テスト結果と人の差し戻しコメント）はここで集めて渡す。
+      const taskContext = await buildTaskContext(db, task, workflow);
+      const project = (await getProject(db, task.project_id))!;
+      outcome = await runGuideStep(step, ctx, {
+        cwd: task.worktree_path!,
+        taskId,
+        attempt,
+        sessionId,
+        resume: isResume,
+        baseBranch: project.base_branch,
+        lastCommand: taskContext.lastCommand,
+        rejections: taskContext.reviews.flatMap((r) => r.status === "rejected" ? [r.comment] : []),
+        feed: pendingFeed,
+        deps: runnerDeps,
+      });
+    } else {
+      outcome = await runAgentStep(
         { ...step, prompt: pendingFeed ?? step.prompt },
         ctx,
         {
@@ -399,11 +424,12 @@ export async function runTask(
           deps: runnerDeps,
         },
       );
+    }
     pendingFeed = null;
 
-    // 上限に当たれるのはアダプタを通る agent ステップだけ。command ステップは
+    // 上限に当たれるのはアダプタを通る agent / guide ステップだけ。command ステップは
     // この分岐に入る余地がない。
-    const verdict: RateLimitDecision = step.type === "agent"
+    const verdict: RateLimitDecision = step.type === "agent" || step.type === "guide"
       ? await decideRateLimit(db, outcome, taskId, step.id)
       : { kind: "none" };
 

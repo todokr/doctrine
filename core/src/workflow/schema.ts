@@ -22,7 +22,20 @@ export type ApprovalStep = {
   onReject?: Branch;
   review?: ReviewDecl;
 };
-export type Step = CommandStep | AgentStep | ApprovalStep;
+/**
+ * Review Guide を作るステップ。プロンプトは doctrine が持つので prompt は書けない。
+ * session は必須で、暗黙の既定ロールは持たない。
+ */
+export type GuideStep = {
+  id: string;
+  type: "guide";
+  session: string;
+  permissionMode?: string;
+  model?: string;
+  allowedTools?: string[];
+  onFailure?: Branch;
+};
+export type Step = CommandStep | AgentStep | ApprovalStep | GuideStep;
 export type Workflow = { name: string; steps: Step[] };
 
 export const RESERVED_STEP_IDS = ["setup"] as const;
@@ -79,6 +92,11 @@ const review = z.object({
   files: z.array(reviewPath).min(1, "review.files は1つ以上必要です"),
 }).strict();
 
+const sessionRole = z.string().min(1).regex(
+  /^[a-zA-Z0-9_-]+$/,
+  "sessionは英数字・ハイフン・アンダースコアのみ",
+);
+
 const stepSchema = z.discriminatedUnion("type", [
   z.object({
     id: stepId,
@@ -90,10 +108,7 @@ const stepSchema = z.discriminatedUnion("type", [
     id: stepId,
     type: z.literal("agent"),
     prompt: z.string().min(1),
-    session: z.string().min(1).regex(
-      /^[a-zA-Z0-9_-]+$/,
-      "sessionは英数字・ハイフン・アンダースコアのみ",
-    ).optional(),
+    session: sessionRole.optional(),
     permissionMode: z.string().optional(),
     model: z.string().optional(),
     allowedTools: z.array(z.string().min(1)).optional(),
@@ -106,6 +121,15 @@ const stepSchema = z.discriminatedUnion("type", [
     onReject: branch.optional(),
     review: review.optional(),
   }).strict(),
+  z.object({
+    id: stepId,
+    type: z.literal("guide"),
+    session: sessionRole,
+    permissionMode: z.string().optional(),
+    model: z.string().optional(),
+    allowedTools: z.array(z.string().min(1)).optional(),
+    onFailure: branch.optional(),
+  }).strict(),
 ]);
 
 const workflowSchema = z.object({
@@ -115,12 +139,24 @@ const workflowSchema = z.object({
 
 /**
  * ステップの「失敗時の分岐」を型を問わず取り出す。
- * approval は onReject、それ以外（command / agent）は onFailure。
+ * approval は onReject、それ以外（command / agent / guide）は onFailure。
+ * guide は onFailure を書かなければ、自分に戻って理由を feed する既定の分岐を持つ。
  * ワークフローエンジン（後続タスク）も同じアクセサを使う。
  */
 export function branchOf(step: Step): Branch | undefined {
-  return step.type === "approval" ? step.onReject : step.onFailure;
+  if (step.type === "approval") return step.onReject;
+  if (step.type === "guide" && step.onFailure === undefined) {
+    return {
+      goto: step.id,
+      maxAttempts: DEFAULT_GUIDE_MAX_ATTEMPTS,
+      feed: `{{ steps.${step.id}.last_stderr }}`,
+    };
+  }
+  return step.onFailure;
 }
+
+/** guide ステップが既定で持つ「自分に戻ってやり直す」回数。 */
+export const DEFAULT_GUIDE_MAX_ATTEMPTS = 3;
 
 /** 既にスキーマ側でカスタムメッセージ（日本語）が設定されているかの簡易判定。 */
 const containsJapanese = (s: string): boolean => /[぀-ヿ㐀-鿿]/.test(s);

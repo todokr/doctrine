@@ -3,7 +3,9 @@ import assert from "node:assert/strict";
 import {
   type AgentStep,
   type ApprovalStep,
+  branchOf,
   type CommandStep,
+  type GuideStep,
   parseWorkflow,
   WorkflowValidationError,
 } from "../../src/workflow/schema.ts";
@@ -344,4 +346,85 @@ steps:
       diff: true
 `;
   assert.throws(() => parseWorkflow(yaml), WorkflowValidationError);
+});
+
+// --- guide ステップ ---------------------------------------------------------
+
+const guideWorkflow = (step: string) => `
+name: g
+steps:
+  - id: implement
+    type: agent
+    prompt: "x"
+${step}
+`;
+
+test("guide ステップを parse できる", () => {
+  const { workflow } = parseWorkflow(guideWorkflow(`  - id: guide
+    type: guide
+    session: guide`));
+  assert.deepEqual(workflow.steps[1], { id: "guide", type: "guide", session: "guide" });
+});
+
+test("guide ステップの session は必須", () => {
+  const yaml = guideWorkflow(`  - id: guide
+    type: guide`);
+  assert.throws(() => parseWorkflow(yaml), (e: unknown) => {
+    assert.ok(e instanceof WorkflowValidationError);
+    assert.match(e.issues.join("\n"), /steps\.1\.session/);
+    return true;
+  });
+});
+
+test("guide ステップに prompt は書けない", () => {
+  const yaml = guideWorkflow(`  - id: guide
+    type: guide
+    session: guide
+    prompt: "自分で書く"`);
+  assert.throws(() => parseWorkflow(yaml), (e: unknown) => {
+    assert.ok(e instanceof WorkflowValidationError);
+    assert.match(e.issues.join("\n"), /認識できないキー.*prompt/);
+    return true;
+  });
+});
+
+test("guide ステップの session の形式は agent と同じ", () => {
+  const yaml = guideWorkflow(`  - id: guide
+    type: guide
+    session: "a b"`);
+  assert.throws(() => parseWorkflow(yaml), WorkflowValidationError);
+});
+
+test("guide ステップに model / permissionMode / allowedTools を書ける", () => {
+  const { workflow } = parseWorkflow(guideWorkflow(`  - id: guide
+    type: guide
+    session: implementer
+    model: opus
+    permissionMode: acceptEdits
+    allowedTools: ["Bash(git diff:*)"]`));
+  const step = workflow.steps[1] as GuideStep;
+  assert.equal(step.model, "opus");
+  assert.equal(step.permissionMode, "acceptEdits");
+  assert.deepEqual(step.allowedTools, ["Bash(git diff:*)"]);
+});
+
+test("branchOf は onFailure を書かない guide ステップに既定の分岐を返す", () => {
+  const { workflow } = parseWorkflow(guideWorkflow(`  - id: write-guide
+    type: guide
+    session: guide`));
+  assert.deepEqual(branchOf(workflow.steps[1]), {
+    goto: "write-guide",
+    maxAttempts: 3,
+    feed: "{{ steps.write-guide.last_stderr }}",
+  });
+});
+
+test("guide ステップに書いた onFailure は既定を上書きする", () => {
+  const { workflow } = parseWorkflow(guideWorkflow(`  - id: write-guide
+    type: guide
+    session: guide
+    onFailure:
+      goto: implement
+      maxAttempts: 1`));
+  assert.deepEqual(branchOf(workflow.steps[1]), { goto: "implement", maxAttempts: 1 });
 });

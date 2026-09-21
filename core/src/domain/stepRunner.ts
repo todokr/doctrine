@@ -1,12 +1,27 @@
 import { dirname, join } from "@std/path";
 import type { Db } from "../db/schema.ts";
-import type { AgentStep, CommandStep } from "../workflow/schema.ts";
+import type { AgentStep, CommandStep, GuideStep } from "../workflow/schema.ts";
 import { expand, type TemplateContext } from "../workflow/template.ts";
-import type { AgentAdapter, RateLimitObservation } from "../adapter/types.ts";
+import type {
+  AgentAdapter,
+  AgentResult,
+  AgentRun,
+  RateLimitObservation,
+  StartOptions,
+} from "../adapter/types.ts";
 import { renderEvent } from "../adapter/render.ts";
 import { exitCodeOf } from "../util/exec.ts";
 import type { PermissionDenial } from "../../../shared/protocol.ts";
+import type { Guide } from "../../../shared/guide/schema.ts";
+import type { GuideHunk } from "../../../shared/guide/hunkId.ts";
+import { guideJsonSchema } from "../../../shared/guide/jsonSchema.ts";
+import { validateGuide } from "../../../shared/guide/validate.ts";
 import { BUILTIN_APPEND_SYSTEM_PROMPT } from "./systemPrompt.ts";
+import type { DiffFile } from "./diff.ts";
+import { checkGuideLocations, writeGuideFile } from "./guideFile.ts";
+import { collectGuideInputs } from "./guideInputs.ts";
+import { buildGuidePrompt } from "./guidePrompt.ts";
+import type { CommandResult } from "./taskContext.ts";
 
 export type StepOutcome = {
   status: "success" | "failed" | "degraded" | "suspended";
@@ -257,32 +272,7 @@ export async function runAgentStep(
   };
 
   try {
-    const run = o.resume
-      ? o.deps.adapter.resume(o.sessionId, prompt, opts)
-      : o.deps.adapter.start(prompt, opts);
-    await o.deps.onChildSpawned?.(run.pid, run.startedAt);
-
-    // window ごとの最新だけを持つ。同じ枠の古い値を混ぜると、明けた後の
-    // 実行で飽和していた時点の値が判定に残る。
-    const rateLimits = new Map<string, RateLimitObservation>();
-
-    for await (const ev of run.events) {
-      // ファイルと onLogLine には同じ文字列を流す。アプリは保存されたログと
-      // 流れてくる log.line を1つの画面につなげて出すので、形式が割れると読めない。
-      const line = renderEvent(ev);
-      if (line !== null) emitLine(log, o.deps, line);
-      if (ev.kind === "rateLimit") {
-        const observation = {
-          window: ev.window,
-          utilization: ev.utilization,
-          resetsAt: ev.resetsAt,
-        };
-        rateLimits.set(ev.window, observation);
-        await o.deps.onRateLimit?.(observation);
-      }
-    }
-
-    const result = await run.result;
+    const { run, result, rateLimits } = await driveAgent(o, prompt, opts, log);
 
     // ワークフローは止めない。判断材料を出すところまでがステップ実行器の責務。
     // degraded（権限で止められたが is_error: false で「成功」に見える）は
@@ -306,10 +296,166 @@ export async function runAgentStep(
       startedAt: run.startedAt,
       endedAt: new Date().toISOString(),
       logPath,
-      rateLimits: [...rateLimits.values()],
+      rateLimits,
       permissionDenials: result.permissionDenials,
     };
   } finally {
     await log.close();
   }
+}
+
+/**
+ * アダプタを呼び、イベントをログへ流し、結果が出るまで待つ。agent と guide で共通。
+ * 子プロセスの通知と rate_limit_event の収集もここで行う。
+ */
+async function driveAgent(
+  o: {
+    sessionId: string;
+    resume: boolean;
+    deps: RunnerDeps;
+  },
+  prompt: string,
+  opts: StartOptions,
+  log: Log,
+): Promise<{ run: AgentRun; result: AgentResult; rateLimits: RateLimitObservation[] }> {
+  const run = o.resume
+    ? o.deps.adapter.resume(o.sessionId, prompt, opts)
+    : o.deps.adapter.start(prompt, opts);
+  await o.deps.onChildSpawned?.(run.pid, run.startedAt);
+
+  // window ごとの最新だけを持つ。同じ枠の古い値を混ぜると、明けた後の
+  // 実行で飽和していた時点の値が判定に残る。
+  const rateLimits = new Map<string, RateLimitObservation>();
+
+  for await (const ev of run.events) {
+    // ファイルと onLogLine には同じ文字列を流す。アプリは保存されたログと
+    // 流れてくる log.line を1つの画面につなげて出すので、形式が割れると読めない。
+    const line = renderEvent(ev);
+    if (line !== null) emitLine(log, o.deps, line);
+    if (ev.kind === "rateLimit") {
+      const observation = {
+        window: ev.window,
+        utilization: ev.utilization,
+        resetsAt: ev.resetsAt,
+      };
+      rateLimits.set(ev.window, observation);
+      await o.deps.onRateLimit?.(observation);
+    }
+  }
+
+  return { run, result: await run.result, rateLimits: [...rateLimits.values()] };
+}
+
+/**
+ * ガイド作成ステップを実行する。プロンプトは doctrine が組み立てる。
+ *
+ * 順序: 入力を集める（hunk 一覧の書き出しと tree の確定）→ プロンプト → アダプタ →
+ * 構造化出力の検証 → 通ったときだけ guide.json を書く。封筒の tree は最初に取った値で、
+ * 検証後に取り直さない（hunk 一覧を作ったツリーとずれるため）。
+ * 検証に落ちたときは status を failed にして理由を stderr に入れる。feed で戻すのは
+ * engine の onFailure の仕事で、ここに別のループは持たない。
+ */
+export async function runGuideStep(
+  step: GuideStep,
+  ctx: TemplateContext,
+  o: {
+    cwd: string;
+    taskId: string;
+    attempt: number;
+    sessionId: string;
+    resume: boolean;
+    baseBranch: string;
+    /** buildGuidePrompt に渡す、DB にしか無い入力。 */
+    lastCommand: CommandResult | null;
+    rejections: string[];
+    /** onFailure の feed で戻ってきた文字列。無ければ null。 */
+    feed: string | null;
+    deps: RunnerDeps;
+  },
+): Promise<StepOutcome> {
+  const inputs = await collectGuideInputs({ worktreePath: o.cwd, baseBranch: o.baseBranch });
+  let prompt = buildGuidePrompt({
+    ctx,
+    mergeBase: inputs.mergeBase,
+    tree: inputs.tree,
+    lastCommand: o.lastCommand,
+    rejections: o.rejections,
+  });
+  if (o.feed !== null) {
+    prompt += `\n## 前回の出力が受け付けられなかった理由\n\n${o.feed}\n`;
+  }
+
+  const logPath = logPathFor(o.deps.logRoot, o.taskId, step.id, o.attempt);
+  const log = await openLog(logPath);
+  const opts = {
+    cwd: o.cwd,
+    sessionId: o.sessionId,
+    permissionMode: step.permissionMode,
+    model: step.model,
+    allowedTools: step.allowedTools,
+    appendSystemPrompt: BUILTIN_APPEND_SYSTEM_PROMPT,
+    jsonSchema: guideJsonSchema(),
+  };
+
+  try {
+    const { run, result, rateLimits } = await driveAgent(o, prompt, opts, log);
+
+    let status: StepOutcome["status"] = !result.ok
+      ? "failed"
+      : result.degraded
+      ? "degraded"
+      : "success";
+    let stderr = result.stderrTail;
+
+    if (result.ok) {
+      const checked = checkOutput(result.structuredOutput, inputs);
+      if ("guide" in checked) {
+        // 書くのは検証を全部通ったときだけ。
+        await writeGuideFile(o.cwd, {
+          tree: inputs.tree,
+          createdAt: new Date().toISOString(),
+          guide: checked.guide,
+        });
+      } else {
+        // 検証に落ちたら failed が degraded に勝つ。exitCode は CLI 自体のものをそのまま写す。
+        status = "failed";
+        stderr = checked.issues.join("\n");
+      }
+    }
+
+    return {
+      status,
+      exitCode: result.exitCode,
+      stdout: result.text,
+      stderr,
+      costUsd: result.costUsd,
+      numTurns: result.numTurns,
+      durationMs: result.durationMs,
+      startedAt: run.startedAt,
+      endedAt: new Date().toISOString(),
+      logPath,
+      rateLimits,
+      permissionDenials: result.permissionDenials,
+    };
+  } finally {
+    await log.close();
+  }
+}
+
+/** 構造化出力を、形・id・参照先・指す hunk とパスの順に確かめる。 */
+function checkOutput(
+  output: Record<string, unknown> | null,
+  inputs: { hunks: GuideHunk[]; files: DiffFile[] },
+): { guide: Guide } | { issues: string[] } {
+  if (output === null) {
+    return {
+      issues: [
+        "構造化出力が返りませんでした。最終応答に、スキーマに沿ったガイドの JSON を返してください。",
+      ],
+    };
+  }
+  const validation = validateGuide(output);
+  if (!validation.ok) return { issues: validation.issues };
+  const issues = checkGuideLocations(validation.guide, inputs);
+  return issues.length > 0 ? { issues } : { guide: validation.guide };
 }
