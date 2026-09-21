@@ -1,7 +1,8 @@
 // task.guide の応答を画面の形に落とす。副作用を持たない（テストは guide.test.ts）
-import type { Guide } from "../../shared/guide/schema.ts";
+import type { Guide, GuideLocation, Risk } from "../../shared/guide/schema.ts";
 import { validateGuide } from "../../shared/guide/validate.ts";
 import type { TaskGuide } from "../../shared/protocol.ts";
+import type { DiffFile } from "./types";
 
 /** 画面が持つガイド。デーモンの TaskGuide をアプリ側の検証に通した後の形。 */
 export type GuideView =
@@ -42,4 +43,40 @@ export function locationPaths(locations: { path: string }[]): string[] {
 /** 読む順のグループ1つが指すパス。出現順・重複なし。 */
 export function groupPaths(group: Guide["readingOrder"][number]): string[] {
   return locationPaths(group.locations);
+}
+
+/** impact の強い順 */
+export const IMPACT_ORDER: readonly Risk["impact"][] = ["high", "medium", "low"];
+
+/** impact の強い順に並べる。同じ impact の中はガイドに書かれた順（安定ソート）。元の配列は変えない */
+export function sortRisks(risks: readonly Risk[]): Risk[] {
+  return [...risks].sort((a, b) => IMPACT_ORDER.indexOf(a.impact) - IMPACT_ORDER.indexOf(b.impact));
+}
+
+/** 既定で開いて出すものと畳むものに分ける。considered と low は畳む。どちらも sortRisks の順 */
+export function splitRisks(risks: readonly Risk[]): { shown: Risk[]; folded: Risk[] } {
+  const sorted = sortRisks(risks);
+  const isFolded = (r: Risk) => r.kind === "considered" || r.impact === "low";
+  return { shown: sorted.filter((r) => !isFolded(r)), folded: sorted.filter(isFolded) };
+}
+
+/**
+ * 箇所を、画面上の飛び先に解決する。今の diff に無ければ null。
+ * hunk 付きは id が一致する hunk（id はパスを含んで決まるので path は見ない）で、hunk 見出しの data-anchor の値。
+ * パスだけはそのファイルの見出しで、ファイル見出しの data-jump の値（`file:<path>`）。
+ */
+export function locationAnchor(
+  files: readonly DiffFile[],
+  loc: GuideLocation,
+): { anchor: string; file: DiffFile; hunk: number | null } | null {
+  if (loc.hunk !== undefined) {
+    for (const file of files) {
+      const hunk = file.hunks.findIndex((h) => h.id === loc.hunk);
+      if (hunk >= 0) return { anchor: loc.hunk, file, hunk };
+    }
+    return null;
+  }
+  // コピー（C）の old_path は元のファイルが残っているので、一致に使わない
+  const file = files.find((f) => f.path === loc.path || (f.status === "R" && f.old_path === loc.path));
+  return file ? { anchor: `file:${file.path}`, file, hunk: null } : null;
 }

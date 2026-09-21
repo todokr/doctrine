@@ -28,7 +28,16 @@ const riskSchema = z.strictObject({
     .describe(
       "breaks: 壊れるもの / assumption: 置いた前提 / unknown: 確かめられていないこと / considered: 検討して問題ないと判断したこと",
     ),
-  body: z.string().describe(`事実として書いた文章。推測や評価は混ぜない。${prose}`),
+  impact: z
+    .enum(["high", "medium", "low"])
+    .describe(
+      "この項目が悪い方に転んだとき（壊れた・前提が崩れた・分からないことが悪い側だった・問題ないという判断が外れた）に起きることの大きさ。high: データの消失・破損や権限・秘密の露出、またはコードを戻すだけでは元に戻らない / medium: 既存の動作が変わるか誤った結果を返すが、コードを戻せば元に戻る / low: 利用者から見える動作は変わらない",
+    ),
+  body: z
+    .string()
+    .describe(
+      `事実として書いた文章。悪い方に転んだとき何が起きるかを含め、impact の根拠が読めるようにする。推測や評価は混ぜない。${prose}`,
+    ),
   locations: z.array(locationSchema).describe("関係する箇所。無ければ空配列"),
 });
 
@@ -127,7 +136,7 @@ export const guideSchema = z.strictObject({
       }),
     )
     .describe("設計上の判断"),
-  risks: z.array(riskSchema).describe("リスク。重大度は付けない"),
+  risks: z.array(riskSchema).describe("リスク。事実を書き、読み手への指示は書かない"),
   tests: z
     .array(
       z.strictObject({

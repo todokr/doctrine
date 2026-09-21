@@ -20,7 +20,13 @@ function validGuide(): Record<string, unknown> {
   return {
     ...minimalGuide(),
     decisions: [{ id: "d1", decision: "キャッシュを捨てる", reason: "古い値が残るため" }],
-    risks: [{ id: "r1", kind: "breaks", body: "初回表示が遅くなる", locations: [] }],
+    risks: [{
+      id: "r1",
+      kind: "breaks",
+      impact: "medium",
+      body: "初回表示が遅くなる",
+      locations: [],
+    }],
     tests: [{
       id: "t1",
       behavior: "古い値が返らない",

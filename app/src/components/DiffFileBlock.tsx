@@ -8,6 +8,19 @@ import type { DiffFile, DiffHunk, MovedBlock, Task } from "../types";
 export const fileAnchor = (path: string) => `file-${path}`;
 export const hunkAnchor = (id: string) => `hunk-${id}`;
 
+/**
+ * locationAnchor が返す飛び先へスクロールする。hunk 見出しは data-anchor、ファイル見出しは data-jump で探す
+ * （ファイル見出しの data-anchor は n / p の止まり先なので、hunk を持たないファイルにしか付けない）。
+ * 同じファイルが流れの中で何度か出ても、文書順で最初の見出し（パスに紐づく注記がある所）に着く。
+ * 注記は hunk 見出しの真上に出るので、上端に寄せると隠れる。中央に寄せる
+ */
+export const scrollToAnchor = (anchor: string): void => {
+  const key = CSS.escape(anchor);
+  document
+    .querySelector(`[data-anchor="${key}"], [data-jump="${key}"]`)
+    ?.scrollIntoView({ block: "center", behavior: "smooth" });
+};
+
 /** ファイル一覧に出す増減。バイナリは行数を持たない（数えられない）ので、そう書く */
 export function fileStat(f: DiffFile): ReactNode {
   if (f.binary) return <span className="hint">バイナリ</span>;
@@ -146,7 +159,7 @@ export function DiffFileBlock({ t, files, file, only, anchored = true, head, not
   const empty = file.hunks.length === 0;
   return (
     <section className="file" id={anchored ? fileAnchor(file.path) : undefined}>
-      <header data-anchor={empty ? `file:${file.path}` : undefined}>
+      <header data-anchor={empty ? `file:${file.path}` : undefined} data-jump={`file:${file.path}`}>
         <span className="nm">{file.path}</span>
         {(file.status === "R" || file.status === "C") && (
           <span className="hint mono">← {file.status === "C" ? "コピー元: " : ""}{file.old_path}</span>

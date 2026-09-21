@@ -201,7 +201,7 @@ snapshot[`生成した JSON Schema がスナップショットと一致する 1`
       }
     },
     "risks": {
-      "description": "リスク。重大度は付けない",
+      "description": "リスク。事実を書き、読み手への指示は書かない",
       "type": "array",
       "items": {
         "type": "object",
@@ -220,8 +220,17 @@ snapshot[`生成した JSON Schema がスナップショットと一致する 1`
               "considered"
             ]
           },
+          "impact": {
+            "description": "この項目が悪い方に転んだとき（壊れた・前提が崩れた・分からないことが悪い側だった・問題ないという判断が外れた）に起きることの大きさ。high: データの消失・破損や権限・秘密の露出、またはコードを戻すだけでは元に戻らない / medium: 既存の動作が変わるか誤った結果を返すが、コードを戻せば元に戻る / low: 利用者から見える動作は変わらない",
+            "type": "string",
+            "enum": [
+              "high",
+              "medium",
+              "low"
+            ]
+          },
           "body": {
-            "description": "事実として書いた文章。推測や評価は混ぜない。GFM のうち、生の HTML・画像・見出しを除いた記法で書く。",
+            "description": "事実として書いた文章。悪い方に転んだとき何が起きるかを含め、impact の根拠が読めるようにする。推測や評価は混ぜない。GFM のうち、生の HTML・画像・見出しを除いた記法で書く。",
             "type": "string"
           },
           "locations": {
@@ -249,6 +258,7 @@ snapshot[`生成した JSON Schema がスナップショットと一致する 1`
         "required": [
           "id",
           "kind",
+          "impact",
           "body",
           "locations"
         ],

@@ -55,10 +55,28 @@ test("読む箇所は hunk を省ける", () => {
 test("risk の kind は 4 つだけ", () => {
   const withKind = (kind: string) => ({
     ...minimalGuide(),
-    risks: [{ id: "r1", kind, body: "壊れうる", locations: [] }],
+    risks: [{ id: "r1", kind, impact: "high", body: "壊れうる", locations: [] }],
   });
   assert.equal(guideSchema.safeParse(withKind("breaks")).success, true);
   assert.equal(guideSchema.safeParse(withKind("critical")).success, false);
+});
+
+test("risk の impact は high / medium / low だけで、省けない", () => {
+  const withImpact = (impact?: string) => ({
+    ...minimalGuide(),
+    risks: [{
+      id: "r1",
+      kind: "breaks",
+      ...(impact === undefined ? {} : { impact }),
+      body: "壊れうる",
+      locations: [],
+    }],
+  });
+  for (const impact of ["high", "medium", "low"]) {
+    assert.equal(guideSchema.safeParse(withImpact(impact)).success, true, impact);
+  }
+  assert.equal(guideSchema.safeParse(withImpact("critical")).success, false);
+  assert.equal(guideSchema.safeParse(withImpact()).success, false);
 });
 
 test("図はシーケンスとグラフの 2 形だけ", () => {

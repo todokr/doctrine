@@ -168,6 +168,27 @@ test("スキーマは通るが存在しない hunk を指すガイドは失敗�
   assert.match(outputs["write-guide"].last_stderr, /h_00000000000000/);
 });
 
+test("スキーマは通るが、risks が存在しない hunk を指すガイドは失敗する", async () => {
+  const bad = {
+    ...(await validGuide()),
+    risks: [{
+      id: "r1",
+      kind: "breaks",
+      impact: "high",
+      body: "壊れうる",
+      locations: [{ path: "README.md", hunk: "h_00000000000000" }],
+    }],
+  };
+  const adapter = createMockAdapter({ result: { structuredOutput: bad } });
+  await go(ONE_SHOT, adapter);
+
+  assert.equal((await getTask(db, "t1"))?.state, "failed");
+  assert.equal(await exists(join(repo, GUIDE_RELPATH)), false);
+  const outputs = await getStepOutputs(db, "t1");
+  assert.match(outputs["write-guide"].last_stderr, /risks\.0\.locations\.0/);
+  assert.match(outputs["write-guide"].last_stderr, /h_00000000000000/);
+});
+
 test("実在する hunk id でも、パスが違えば失敗する", async () => {
   const { hunks } = await collect();
   const bad = guideAt({ path: "other.ts", hunk: hunks[0].id });

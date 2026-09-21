@@ -103,6 +103,28 @@ test("Risks は事実を書かせ、読み手への指示を書かせない", ()
   assert.ok(p.includes("読み手への指示は書かない"));
 });
 
+test("Risks に impact の 3 段階を書かせる", () => {
+  const p = buildGuidePrompt(inputOf());
+  for (const k of ["impact", "high", "medium", "low"]) {
+    assert.ok(p.includes(k), k);
+  }
+});
+
+test("impact は、悪い方に転んだときに起きることで選ばせる", () => {
+  assert.ok(buildGuidePrompt(inputOf()).includes("悪い方に転んだとき"));
+});
+
+test("considered に残すものを、経緯のある論点に絞らせる", () => {
+  const p = buildGuidePrompt(inputOf());
+  assert.ok(p.includes("計画レビュー"));
+  assert.ok(p.includes("セルフコードレビュー"));
+  assert.ok(p.includes("論点になり"));
+});
+
+test("重大度を付けないという指示は残っていない", () => {
+  assert.ok(!buildGuidePrompt(inputOf()).includes("重大度も付けません"));
+});
+
 test("図はシーケンスとグラフの2形に限らせる", () => {
   const p = buildGuidePrompt(inputOf());
   assert.ok(p.includes("sequence"));

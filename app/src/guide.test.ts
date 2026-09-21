@@ -1,9 +1,11 @@
 import { describe, expect, test } from "vitest";
 import example from "../../shared/guide/examples/step-artifacts.guide.json";
 import { validateGuide } from "../../shared/guide/validate.ts";
-import type { Guide } from "../../shared/guide/schema.ts";
+import type { Guide, GuideLocation, Risk } from "../../shared/guide/schema.ts";
 import type { TaskGuide } from "../../shared/protocol.ts";
-import { groupPaths, receiveGuide } from "./guide";
+import { EXAMPLE_DIFF, SAMPLE_DIFF } from "./fixtures";
+import { groupPaths, locationAnchor, receiveGuide, sortRisks, splitRisks } from "./guide";
+import { buildDiff } from "./patch";
 
 // JSON の import では version が number になり、Guide のリテラル型に合わない。
 // キャストせず、アプリ側の検証を通して Guide 型で取り出す（見本がアプリ側の検証を通る確認も兼ねる）。
@@ -59,5 +61,70 @@ describe("groupPaths", () => {
       { path: "a.ts" }, { path: "b.ts", hunk: "h1" }, { path: "a.ts", hunk: "h2" },
     ] };
     expect(groupPaths(g)).toEqual(["a.ts", "b.ts"]);
+  });
+});
+
+const risk = (id: string, kind: Risk["kind"], impact: Risk["impact"], locations: GuideLocation[] = []): Risk =>
+  ({ id, kind, impact, body: "", locations });
+const ids = (risks: Risk[]) => risks.map((r) => r.id);
+
+describe("sortRisks", () => {
+  test("impact の強い順に並べ、同じ impact の中は元の順を保つ", () => {
+    const input = [
+      risk("a", "breaks", "low"), risk("b", "breaks", "high"),
+      risk("c", "breaks", "medium"), risk("d", "breaks", "high"),
+    ];
+    expect(ids(sortRisks(input))).toEqual(["b", "d", "c", "a"]);
+    expect(ids(input)).toEqual(["a", "b", "c", "d"]);
+  });
+});
+
+describe("splitRisks", () => {
+  test("considered と low は畳み、それ以外は開いて出す", () => {
+    const { shown, folded } = splitRisks([
+      risk("a", "breaks", "low"), risk("b", "considered", "high"),
+      risk("c", "assumption", "medium"), risk("d", "unknown", "high"),
+    ]);
+    expect(ids(shown)).toEqual(["d", "c"]);
+    expect(ids(folded)).toEqual(["b", "a"]);
+  });
+
+  test("見本では high の breaks だけが開いて出る", () => {
+    const { shown, folded } = splitRisks(guide.risks);
+    expect(ids(shown)).toEqual(["r-column-stale"]);
+    expect(ids(folded)).toEqual(["r-exclude", "r-column-kept", "r-role-charset"]);
+  });
+});
+
+describe("locationAnchor", () => {
+  test("hunk を指す箇所はその hunk へ飛ぶ", () => {
+    const files = buildDiff(EXAMPLE_DIFF);
+    const res = locationAnchor(files, { path: "src/core/engine.ts", hunk: "h_180733771bf8d2" });
+    expect(res?.anchor).toBe("h_180733771bf8d2");
+    expect(res?.file.path).toBe("src/core/engine.ts");
+    expect(res?.hunk).toBe(res?.file.hunks.findIndex((h) => h.id === "h_180733771bf8d2"));
+    expect(res?.hunk).not.toBeNull();
+    expect(res?.hunk).toBeGreaterThanOrEqual(0);
+  });
+
+  test("パスだけの箇所はファイルの見出しへ飛ぶ", () => {
+    const files = buildDiff(SAMPLE_DIFF);
+    const keep = locationAnchor(files, { path: "src/keep.ts" });
+    expect(keep?.anchor).toBe("file:src/keep.ts");
+    expect(keep?.hunk).toBeNull();
+    const png = locationAnchor(files, { path: "logo.png" });
+    expect(png?.anchor).toBe("file:logo.png");
+    expect(png?.hunk).toBeNull();
+  });
+
+  test("リネームは旧名で指しても新しい名前の見出しへ飛ぶ", () => {
+    const files = buildDiff(SAMPLE_DIFF);
+    expect(locationAnchor(files, { path: "src/moved.ts" })?.anchor).toBe("file:src/renamed.ts");
+  });
+
+  test("今の diff に無い箇所は null", () => {
+    const files = buildDiff(SAMPLE_DIFF);
+    expect(locationAnchor(files, { path: "src/nowhere.ts" })).toBeNull();
+    expect(locationAnchor(files, { path: "src/keep.ts", hunk: "h_00000000000000" })).toBeNull();
   });
 });
