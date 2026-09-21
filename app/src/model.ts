@@ -87,7 +87,7 @@ export const GROUPS: { key: Exclude<Group, "done">; name: string; sort: (a: Task
   { key: "paused", name: "一時停止", sort: (a, b) => b.since - a.since },
 ];
 
-export type View = "tasks" | "done";
+export type View = "tasks" | "done" | "intake";
 
 export const visibleTasks = (tasks: Task[], project: string) =>
   tasks.filter((t) => project === "all" || t.project === project);
@@ -298,6 +298,7 @@ export function toProject(p: ProjectSummary): Project {
   for (const ch of p.path) h = (h * 31 + ch.charCodeAt(0)) % 360;
   return {
     id: projectKey(p.path),
+    daemonId: p.id,
     path: p.path,
     def: p.default_workflow,
     color: `hsl(${h} 45% 38%)`,

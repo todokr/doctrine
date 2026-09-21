@@ -411,6 +411,10 @@ describe("toProject / toTask", () => {
     expect(toProject(summary({ path: "/home/u/work/shop-api/" })).id).toBe("shop-api");
   });
 
+  test("デーモンの id を daemonId に持つ", () => {
+    expect(toProject(summary({ id: 7 })).daemonId).toBe(7);
+  });
+
   test("同じパスからは同じ色が出る", () => {
     expect(toProject(summary()).color).toBe(toProject(summary()).color);
     expect(toProject(summary()).color).not.toBe(toProject(summary({ path: "/x/y" })).color);
