@@ -1089,14 +1089,24 @@ test("project.add: .doctrine が無ければ雛形を作り、そのままタス
   assert.equal((await getTask(ctx.db, t.id))!.state, "queued");
 });
 
-test("project.add: 既定のワークフローは agent と approval だけで、command を含まない", async () => {
+test("project.add: 既定のワークフローは 4 章の手順（計画→レビュー→実装→検証→レビュー→ガイド→人）になっている", async () => {
   const bare = await bareRepo("bare");
   const h = createHandler(await context());
   await h("project.add", { path: bare }, NOOP_CONN);
   const { workflow } = parseWorkflow(
     await readFile(join(bare, ".doctrine", "workflows", "default.yaml"), "utf8"),
   );
-  assert.deepEqual(workflow.steps.map((s) => s.type), ["agent", "approval"]);
+  assert.deepEqual(workflow.steps.map((s) => s.id), [
+    "plan",
+    "plan-review",
+    "plan-gate",
+    "implement",
+    "verify",
+    "agent-review",
+    "review-gate",
+    "guide",
+    "review",
+  ]);
 });
 
 test("project.add: 雛形の project.yaml に setup を書かない（パッケージマネージャを強制しない）", async () => {
