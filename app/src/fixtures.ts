@@ -3,6 +3,7 @@ import type { Project, Task, TaskDiff } from "./types";
 import type { ServerEvent } from "../../shared/protocol.ts";
 import type { Pfd } from "../../shared/intake/pfd.ts";
 import type { PrFact, ProcessStatus } from "../../shared/intake/processStatus.ts";
+import type { Answer, Question } from "../../shared/intake/question.ts";
 import examplePatch from "../../shared/guide/examples/step-artifacts.patch?raw";
 
 export const NOW = Date.parse("2026-09-15T15:00:00+09:00");
@@ -243,3 +244,73 @@ export const PFD_STATUSES_B: Record<string, ProcessStatus> = {
   approve: { state: "your_turn" },
   ship: { state: "waiting", missing: ["review"] },
 };
+
+/** 質問の面の標本。3 種の質問と 4 種の判断材料をすべて含む */
+export const QUESTIONS: Question[] = [
+  {
+    id: "q1",
+    prompt: "書き込みをどう扱うか",
+    kind: "single",
+    options: [
+      { id: "a", label: "同期", description: "呼び出しの中で書く" },
+      { id: "b", label: "非同期", description: "キューに積む" },
+    ],
+    recommendation: { optionIds: ["a"], text: null, reason: "単純で十分速い" },
+    materials: [
+      { kind: "text", body: "現状は **同期** で書き込んでいる" },
+      {
+        kind: "table",
+        caption: "案の比較",
+        columns: ["案", "利点", "欠点"],
+        rows: [["a", "単純", "遅い"], ["b", "速い", "複雑"]],
+      },
+      {
+        kind: "code",
+        caption: "いまの書き込み",
+        language: "ts",
+        path: "core/src/x.ts",
+        code: "await write(x);",
+      },
+    ],
+  },
+  {
+    id: "q2",
+    prompt: "対象にするものを選ぶ",
+    kind: "multiple",
+    options: [
+      { id: "a", label: "A", description: "説明 A" },
+      { id: "b", label: "B", description: "説明 B" },
+      { id: "c", label: "C", description: "説明 C" },
+    ],
+    recommendation: { optionIds: ["a", "c"], text: null, reason: "使われているため" },
+    materials: [{
+      kind: "diagram",
+      caption: "状態",
+      diagram: {
+        id: "g2",
+        title: "状態遷移",
+        body: {
+          shape: "graph",
+          kind: "state",
+          nodes: [{ id: "n1", label: "開始" }, { id: "n2", label: "終了" }],
+          edges: [{ from: "n1", to: "n2", label: "完了" }],
+        },
+      },
+    }],
+  },
+  {
+    id: "q3",
+    prompt: "ほかに考慮すべきことは",
+    kind: "free",
+    options: [],
+    recommendation: { optionIds: [], text: "特に無い", reason: "範囲が小さいため" },
+    materials: [],
+  },
+];
+
+/** QUESTIONS へのそろった回答。その他と補足を含む */
+export const ANSWERS: Answer[] = [
+  { questionId: "q1", optionIds: ["a"], other: null, note: "移行は後で" },
+  { questionId: "q2", optionIds: ["b"], other: "D も入れる", note: null },
+  { questionId: "q3", optionIds: [], other: "ログの量", note: "急がない" },
+];

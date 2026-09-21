@@ -111,6 +111,26 @@ test("agent ステップは最終テキストを stdout にする", async () => 
   assert.equal(adapter.calls[0].prompt, "直して", "プロンプトの変数が展開されている");
 });
 
+test("feed はそのままプロンプトになり、中の {{ }} を展開しない", async () => {
+  const adapter = createMockAdapter({ result: { ok: true, text: "直しました" } });
+  const feed = "計画がレビューで却下された:\n`[ -z '{{ issue.closes }}' ]` の形にするとよい";
+  const out = await runAgentStep(
+    { id: "a", type: "agent", prompt: "{{ task.prompt }}" },
+    ctx,
+    {
+      cwd: root,
+      taskId: "t1",
+      attempt: 2,
+      sessionId: "s1",
+      resume: true,
+      feed,
+      deps: await deps({ adapter }),
+    },
+  );
+  assert.equal(out.status, "success");
+  assert.equal(adapter.calls[0].prompt, feed);
+});
+
 test("resume: true なら resume が呼ばれる", async () => {
   const adapter = createMockAdapter({ result: { ok: true, text: "続きです" } });
   await runAgentStep(

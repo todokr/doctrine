@@ -100,21 +100,23 @@ export function validateQuestions(input: unknown): QuestionsValidation {
   return { ok: true, questions: parsed.data };
 }
 
-function checkAnswerChoice(question: Question, answer: Answer, path: string, issues: string[]) {
+/** 質問 1 件への答えが、種類ごとの約束（single は 1 つか other など）を満たすか。満たせば null */
+export function answerChoiceIssue(question: Question, answer: Answer): string | null {
   const chosen = answer.optionIds.length;
   const hasOther = answer.other !== null;
 
   if (question.kind === "single") {
     if (!((chosen === 1 && !hasOther) || (chosen === 0 && hasOther))) {
-      issues.push(`${path}: single の回答は選択肢 1 つか other のどちらか 1 つです`);
+      return "single の回答は選択肢 1 つか other のどちらか 1 つです";
     }
   } else if (question.kind === "multiple") {
     if (chosen === 0 && !hasOther) {
-      issues.push(`${path}: multiple の回答に選択も other もありません`);
+      return "multiple の回答に選択も other もありません";
     }
   } else if (chosen > 0 || !hasOther) {
-    issues.push(`${path}: free の回答は other に書きます`);
+    return "free の回答は other に書きます";
   }
+  return null;
 }
 
 // 質問との照合。質問は検証済みとして信頼する
@@ -145,7 +147,8 @@ function checkAnswers(questions: Question[], answers: Answer[]): string[] {
       issues.push(`${path}.optionIds.${j}: id が重複しています: ${answer.optionIds[j]}`);
     }
 
-    checkAnswerChoice(question, answer, path, issues);
+    const choiceIssue = answerChoiceIssue(question, answer);
+    if (choiceIssue !== null) issues.push(`${path}: ${choiceIssue}`);
   });
 
   for (const question of questions) {

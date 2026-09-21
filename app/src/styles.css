@@ -393,3 +393,33 @@ kbd{font-family:var(--mono);font-size:10.5px;border:1px solid var(--line);border
   font-size: 13px;
 }
 .conn-banner .hint { color: #d8c3a5; }
+
+/* 質問の面 */
+.qcard{border:1px solid var(--line);border-radius:10px;padding:14px 16px;display:grid;gap:10px}
+.qcard.missing{border-color:var(--danger);box-shadow:inset 3px 0 0 var(--danger)}
+.qhead{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}
+.qno{font-family:var(--mono);font-size:12px;color:var(--ink-3)}
+.qhead h2{margin:0;font-size:14px;flex:1;min-width:240px;text-wrap:balance}
+.qkind{font-size:11px;color:var(--ink-3);border:1px solid var(--line);border-radius:999px;padding:0 7px}
+.material{background:var(--surface-2);border-radius:8px;padding:10px 12px;display:grid;gap:6px}
+.material .cap{font-size:11px;color:var(--ink-3);letter-spacing:.02em}
+.material table{background:var(--surface);border-radius:6px;overflow:hidden}
+.material th,.material td{font-size:12px;padding:5px 8px}
+.material pre{margin:0;font-family:var(--mono);font-size:11.5px;background:var(--sunken);border-radius:6px;padding:8px 10px;overflow-x:auto}
+.opts{display:grid;gap:6px}
+.opt{display:grid;grid-template-columns:20px minmax(0,1fr);gap:0 6px;border:1px solid var(--line);border-radius:8px;padding:8px 10px;cursor:pointer}
+.opt:hover{border-color:var(--ink-3)}
+.opt.on{border-color:var(--accent);background:var(--accent-soft)}
+.opt input{margin:3px 0 0}
+.opt .lb{font-weight:700;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.opt .ds{grid-column:2;color:var(--ink-2);font-size:12px}
+.rec{font-size:10.5px;font-weight:700;color:var(--ok);border:1px solid var(--ok);border-radius:3px;padding:0 5px;line-height:16px}
+.opt .recwhy{color:var(--ok)}
+.opt.rec-row{cursor:default}
+.opt.readonly,.opt.rec-row{grid-template-columns:minmax(0,1fr)}
+.opt.readonly .ds,.opt.rec-row .ds{grid-column:1}
+.qextra{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.qextra label,.qextra .ro{display:grid;gap:3px;font-size:11.5px;color:var(--ink-3)}
+.qextra .ro .g-md{color:var(--ink)}
+.qextra textarea{min-height:40px}
+.qmissing{color:var(--danger);font-size:12px;margin:0}
