@@ -573,6 +573,10 @@ export function createHandler(ctx: DaemonContext): Handler {
         );
         return issues.map((i) => ({ ...i, intake_id: open.get(i.url) ?? null }));
       }
+      case "github.issue": {
+        const project = await reqProject(ctx, params);
+        return await ctx.tracker.readIssue(project.path, req(params, "url"));
+      }
 
       case "intake.start": {
         const project = await reqProject(ctx, params);

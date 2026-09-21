@@ -1,6 +1,6 @@
 // テスト用の標本。画面はこれを使わない（画面のデータはデーモンから来る）
 import type { Project, Task, TaskDiff } from "./types";
-import type { ServerEvent } from "../../shared/protocol.ts";
+import type { GithubIssue, IntakeSummary, ServerEvent } from "../../shared/protocol.ts";
 import type { Pfd } from "../../shared/intake/pfd.ts";
 import type { PrFact, ProcessStatus } from "../../shared/intake/processStatus.ts";
 import type { Answer, Question } from "../../shared/intake/question.ts";
@@ -9,9 +9,9 @@ import examplePatch from "../../shared/guide/examples/step-artifacts.patch?raw";
 export const NOW = Date.parse("2026-09-15T15:00:00+09:00");
 export const MIN = 60000;
 export const PROJECTS: Project[] = [
-  { id: "doctrine", color: "#2E6CA4", path: "~/git/doctrine", def: "feature" },
-  { id: "shop-api", color: "#AA3A2C", path: "~/work/shop-api", def: "feature" },
-  { id: "blog", color: "#296B49", path: "~/git/blog", def: "feature" },
+  { id: "doctrine", daemonId: 1, color: "#2E6CA4", path: "~/git/doctrine", def: "feature" },
+  { id: "shop-api", daemonId: 2, color: "#AA3A2C", path: "~/work/shop-api", def: "feature" },
+  { id: "blog", daemonId: 3, color: "#296B49", path: "~/git/blog", def: "feature" },
 ];
 
 // 状態は doctrine の7状態。refused はフラグ。
@@ -313,4 +313,57 @@ export const ANSWERS: Answer[] = [
   { questionId: "q1", optionIds: ["a"], other: null, note: "移行は後で" },
   { questionId: "q2", optionIds: ["b"], other: "D も入れる", note: null },
   { questionId: "q3", optionIds: [], other: "ログの量", note: "急がない" },
+];
+
+const at = (minutesAgo: number) => new Date(NOW - minutesAgo * MIN).toISOString();
+
+function intake(n: number, o: Partial<IntakeSummary>): IntakeSummary {
+  return {
+    id: `i${n}`,
+    project_id: 1,
+    issue_url: `https://github.com/o/r/issues/${n}`,
+    issue_title: `Issue ${n} のタイトル`,
+    state: "investigating",
+    revising: false,
+    attention_reason: null,
+    dispatch_paused: false,
+    rate_limited_until: null,
+    progress: { done: 0, total: 0 },
+    needs_human: false,
+    watch: { lastSucceededAt: null, consecutiveFailures: 0, lastError: null },
+    created_at: at(300),
+    updated_at: at(5),
+    ...o,
+  };
+}
+
+/** 並びを確かめられるよう、区分や更新の順とは違う並びで持つ */
+export const INTAKES: IntakeSummary[] = [
+  intake(4, { state: "decomposing", project_id: 2, rate_limited_until: at(-40), updated_at: at(20) }),
+  intake(6, { state: "canceled", project_id: 2, updated_at: at(100) }),
+  intake(2, { state: "active", needs_human: true, project_id: 2, progress: { done: 1, total: 4 }, updated_at: at(10) }),
+  intake(5, { state: "active", revising: true, progress: { done: 2, total: 5 }, updated_at: at(30) }),
+  intake(1, { state: "reviewing", needs_human: true, updated_at: at(60) }),
+  intake(7, { state: "completed", updated_at: at(200) }),
+  intake(3, { state: "investigating", updated_at: at(5) }),
+];
+
+/** intake_id のあるもの（進行中の Intake の Issue）と無いもの */
+export const GITHUB_ISSUES: GithubIssue[] = [
+  {
+    url: "https://github.com/o/r/issues/5",
+    number: 5,
+    title: "Issue 5 のタイトル",
+    assignees: ["me"],
+    updatedAt: at(30),
+    intake_id: "i5",
+  },
+  {
+    url: "https://github.com/o/r/issues/8",
+    number: 8,
+    title: "Issue 8 のタイトル",
+    assignees: [],
+    updatedAt: at(90),
+    intake_id: null,
+  },
 ];

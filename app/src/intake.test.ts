@@ -1,7 +1,22 @@
 import { describe, expect, test } from "vitest";
 import { validateAnswers, validateQuestions } from "../../shared/intake/validateQuestion.ts";
-import { ANSWERS, QUESTIONS } from "./fixtures";
-import { answerIssues, normalizeAnswers, toggleOption, updateAnswer } from "./intake";
+import type { IntakeState } from "../../shared/intake/state.ts";
+import { ANSWERS, INTAKES, PROJECTS, QUESTIONS } from "./fixtures";
+import {
+  answerIssues,
+  countIntakeAttention,
+  ghGuidance,
+  intakeFace,
+  intakeOrder,
+  intakeProgress,
+  intakeSection,
+  issueNumber,
+  issueTarget,
+  normalizeAnswers,
+  parseIssueInput,
+  toggleOption,
+  updateAnswer,
+} from "./intake";
 
 const [Q1, Q2] = QUESTIONS;
 
@@ -109,4 +124,153 @@ describe("toggleOption", () => {
 test("標本が質問と回答の検証を通る", () => {
   expect(validateQuestions(QUESTIONS).ok).toBe(true);
   expect(validateAnswers(QUESTIONS, ANSWERS).ok).toBe(true);
+});
+
+const REPO = { nameWithOwner: "o/r" };
+const sections = (list: typeof INTAKES) => list.map(intakeSection);
+const times = (list: typeof INTAKES) => list.map((i) => Date.parse(i.updated_at));
+
+describe("countIntakeAttention", () => {
+  test("needs_human だけを数える", () => {
+    expect(countIntakeAttention(INTAKES)).toBe(2);
+  });
+
+  test("1 件もなければ 0", () => {
+    expect(countIntakeAttention([])).toBe(0);
+  });
+});
+
+describe("intakeOrder", () => {
+  const order = intakeOrder(INTAKES, PROJECTS, "all", false);
+
+  test("対応が要るもの・調査・分解中・進行中の順に並ぶ", () => {
+    expect(sections(order)).toEqual(["attention", "attention", "working", "working", "active"]);
+  });
+
+  test("対応が要るものは更新の古い順", () => {
+    const [a, b] = times(order.slice(0, 2));
+    expect(a).toBeLessThan(b);
+  });
+
+  test("調査・分解中と進行中は更新の新しい順", () => {
+    const [a, b] = times(order.slice(2, 4));
+    expect(a).toBeGreaterThan(b);
+  });
+
+  test("既定では終了した Intake を含まない", () => {
+    expect(order.map((i) => i.state)).not.toContain("completed");
+    expect(order.map((i) => i.state)).not.toContain("canceled");
+  });
+
+  test("すべてでは末尾に終了した Intake が新しい順で並ぶ", () => {
+    const all = intakeOrder(INTAKES, PROJECTS, "all", true);
+    expect(sections(all.slice(5))).toEqual(["closed", "closed"]);
+    expect(all.slice(5).map((i) => i.state)).toEqual(["canceled", "completed"]);
+  });
+
+  test("プロジェクトで絞る", () => {
+    const out = intakeOrder(INTAKES, PROJECTS, "shop-api", false);
+    expect(out.length).toBeGreaterThan(0);
+    expect(out.every((i) => i.project_id === 2)).toBe(true);
+  });
+
+  test("状態だけ変わった行も一覧から消えない", () => {
+    const stale = { ...INTAKES[6], state: "answering" as const, needs_human: false };
+    expect(intakeSection(stale)).toBe("working");
+    expect(intakeOrder([stale], PROJECTS, "all", false)).toEqual([stale]);
+  });
+});
+
+describe("issueNumber / intakeProgress", () => {
+  test("URL の末尾から番号を取る", () => {
+    expect(issueNumber("https://github.com/o/r/issues/12")).toBe("12");
+    expect(issueNumber("https://example.com/x")).toBeNull();
+  });
+
+  test("承認前は進み具合を出さない", () => {
+    expect(intakeProgress({ ...INTAKES[0], progress: { done: 2, total: 5 } })).toBe("2/5");
+    expect(intakeProgress({ ...INTAKES[0], progress: { done: 0, total: 0 } })).toBeNull();
+  });
+});
+
+describe("intakeFace", () => {
+  test("状態ごとの面", () => {
+    const expected: Record<IntakeState, string> = {
+      investigating: "running",
+      decomposing: "running",
+      answering: "questions",
+      reviewing: "review",
+      needs_attention: "attention",
+      active: "progress",
+      completed: "progress",
+      canceled: "progress",
+    };
+    for (const [state, face] of Object.entries(expected)) {
+      expect(intakeFace(state as IntakeState)).toBe(face);
+    }
+  });
+});
+
+describe("parseIssueInput", () => {
+  const url = "https://github.com/o/r/issues/12";
+
+  test.each(["#12", "12", " 12 ", url, "https://github.com/O/R/issues/12#issuecomment-1"])(
+    "%s は URL にする",
+    (input) => {
+      expect(parseIssueInput(input, REPO)).toBe(url);
+    },
+  );
+
+  test.each(["https://github.com/x/y/issues/12", "", "abc", "#", "https://github.com/o/r/pull/12"])(
+    "%s は null",
+    (input) => {
+      expect(parseIssueInput(input, REPO)).toBeNull();
+    },
+  );
+});
+
+describe("ghGuidance", () => {
+  test("gh が無い", () => {
+    const g = ghGuidance({ ok: false, reason: "not_installed", message: "" });
+    expect(g.title).toBe("gh が見つかりません");
+    expect(g.fix).toContain("https://cli.github.com");
+    expect(g.command).toBeNull();
+  });
+
+  test("ログインしていない", () => {
+    const g = ghGuidance({ ok: false, reason: "not_logged_in", message: "" });
+    expect(g.title).toBe("gh にログインしていません");
+    expect(g.command).toBe("gh auth login");
+  });
+
+  test("GitHub の remote が無い", () => {
+    const g = ghGuidance({ ok: false, reason: "no_github_remote", message: "" });
+    expect(g.title).toBe("このリポジトリに GitHub の remote がありません");
+    expect(g.command).toBeNull();
+  });
+});
+
+describe("issueTarget", () => {
+  const active = INTAKES.find((i) => i.state === "active" && !i.needs_human)!;
+
+  test("進行中の Intake がある Issue は開始の代わりに開く", () => {
+    expect(issueTarget({ url: "https://github.com/o/r/issues/9", intake_id: "i1" }, []))
+      .toEqual({ kind: "open", intakeId: "i1" });
+  });
+
+  test("直接入力の Issue も一覧の Intake と照合して開く", () => {
+    expect(issueTarget({ url: active.issue_url }, INTAKES))
+      .toEqual({ kind: "open", intakeId: active.id });
+  });
+
+  test("終了した Intake しかない Issue は開始できる", () => {
+    const canceled = INTAKES.find((i) => i.state === "canceled")!;
+    expect(issueTarget({ url: canceled.issue_url }, [canceled]))
+      .toEqual({ kind: "start", url: canceled.issue_url });
+  });
+
+  test("Intake の無い Issue は開始", () => {
+    const url = "https://github.com/o/r/issues/99";
+    expect(issueTarget({ url }, INTAKES)).toEqual({ kind: "start", url });
+  });
 });
