@@ -9,6 +9,7 @@ import {
   diffOf,
   draftOf,
   fellBackToAll,
+  guideOf,
   hasSince,
   rejections,
   reviewRound,
@@ -20,7 +21,7 @@ import {
 import { useDecide, useNotYet, useStore } from "../store";
 import type { ReviewFile, Task, TaskContext } from "../types";
 import { DiffFileBlock, fileAnchor, fileStat } from "./DiffFileBlock";
-import { GuidePanel, StepView } from "./Guide";
+import { GuideNotice, GuidePanel, StepView } from "./Guide";
 import { Markdown } from "./text";
 
 export function Crumbs({ t }: { t: Task }) {
@@ -133,6 +134,7 @@ function FileBody({ file }: { file: ReviewFile }) {
 function Diff({ t, scope, loaded }: { t: Task; scope: Scope; loaded: Loaded<DiffView> | undefined }) {
   const { s } = useStore();
   const step = currentStep(s, t);
+  const guideView = guideOf(s, t.id);
 
   if (loaded === undefined || loaded.kind === "loading") return <p className="hint">diff を読み込んでいます…</p>;
   if (loaded.kind === "error") return <LoadError what="diff（task.diff）" message={loaded.message} />;
@@ -148,10 +150,18 @@ function Diff({ t, scope, loaded }: { t: Task; scope: Scope; loaded: Loaded<Diff
       </p>
     );
   }
-  if (t.guide && step !== null) return <StepView t={t} guide={t.guide} files={files} idx={step} />;
+  // ガイドの注意書きは、ステップモードで StepView を先に返す前に置く（後ろに置くと、
+  // ステップモードでは古いガイドの注意書きが一度も出ない）
+  const notice = <GuideNotice view={guideView} />;
+  const guide = guideView?.kind === "ok" && guideView.value.kind === "ok" ? guideView.value.guide : null;
+  // 前回レビュー以降を見ている間は、ガイドが指す箇所が画面に無いのでステップモードにしない
+  if (guide && step !== null && scope === "all") {
+    return <>{notice}<StepView t={t} guide={guide} files={files} idx={step} /></>;
+  }
 
   return (
     <>
+      {notice}
       {meta.truncated && (
         <div className="box attn">
           <b>diff が大きすぎるため途中で打ち切りました</b>
@@ -161,7 +171,7 @@ function Diff({ t, scope, loaded }: { t: Task; scope: Scope; loaded: Loaded<Diff
           </p>
         </div>
       )}
-      <div className={`rv-body ${t.guide ? "has-guide" : ""}`}>
+      <div className={`rv-body ${guide ? "has-guide" : ""}`}>
         <nav className="filelist" aria-label="変更ファイル">
           <header>{files.length} ファイル</header>
           {files.map((f) => (
@@ -172,7 +182,7 @@ function Diff({ t, scope, loaded }: { t: Task; scope: Scope; loaded: Loaded<Diff
           ))}
         </nav>
         <div className="diffs">{files.map((f) => <DiffFileBlock key={f.path} t={t} file={f} />)}</div>
-        {t.guide && <GuidePanel guide={t.guide} files={files} />}
+        {guide && <GuidePanel guide={guide} files={files} scope={scope} />}
       </div>
     </>
   );

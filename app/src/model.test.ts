@@ -12,11 +12,13 @@ import {
   canReject,
   composeRejection,
   countReview,
+  currentStep,
   denialLines,
   diffLines,
   diffOf,
   fellBackToAll,
   groupOf,
+  guideOf,
   hasSince,
   isTerminal,
   LIMIT_DANGER_UTILIZATION,
@@ -39,8 +41,10 @@ import {
   toTask,
   unguidedFiles,
   type DiffView,
+  type Loaded,
   type State,
 } from "./model";
+import type { GuideView } from "./guide";
 import { buildDiff } from "./patch";
 import type { Guide, RateLimitWindow, ReviewEntry, Task, TaskContext } from "./types";
 import type {
@@ -65,6 +69,7 @@ const base = (overrides: Partial<State> = {}): State => ({
   step: {},
   diffs: {},
   contexts: {},
+  guides: {},
   gen: {},
   drafts: {},
   draftsLoaded: true,
@@ -195,8 +200,11 @@ describe("diff", () => {
       ["", 12, 22, 22],
     ]);
   });
-  test("ガイドが触れていないファイルを拾う", () => {
-    const guide = { readingOrder: [{ paths: ["src/keep.ts", "src/added.ts"] }] } as Guide;
+  test("ガイドが触れていないファイルを拾う（readingOrder と risks の箇所を見る）", () => {
+    const guide = {
+      readingOrder: [{ locations: [{ path: "src/keep.ts" }] }],
+      risks: [{ locations: [{ path: "src/added.ts", hunk: "h1" }] }],
+    } as unknown as Guide;
     expect(unguidedFiles(buildDiff(SAMPLE_DIFF), guide).map((f) => f.path))
       .toEqual(["logo.png", "src/gone.ts", "src/renamed.ts"]);
   });
@@ -356,7 +364,9 @@ describe("reduce", () => {
   });
 
   test("ガイドのステップは範囲外へ動かない", () => {
-    const s = base({ sel: "t-9f21" });
+    const guide = { readingOrder: [{}, {}, {}, {}], risks: [] } as unknown as Guide;
+    const view: GuideView = { kind: "ok", guide, createdAt: "2026-09-21T00:00:00Z", stale: false };
+    const s = base({ sel: "t-9f21", guides: { "t-9f21": { kind: "ok", value: view } } });
     expect(reduce(s, { type: "step", idx: 4 })).toBe(s);
     expect(reduce(s, { type: "step", idx: 3 }).step["t-9f21"]).toBe(3);
     expect(reduce(s, { type: "step", idx: null }).step["t-9f21"]).toBeNull();
@@ -737,6 +747,70 @@ describe("取ってきた diff と経緯", () => {
     const after = reduce(s, { type: "sync", tasks: [a], projects: [], now: 2 });
     expect(after.diffs).toEqual({});
     expect(after.gen).toEqual({});
+  });
+});
+
+describe("取ってきたガイド", () => {
+  const guide = {
+    readingOrder: [{ locations: [{ path: "a.ts" }] }, { locations: [{ path: "b.ts" }] }],
+    risks: [],
+  } as unknown as Guide;
+  const okView: GuideView = { kind: "ok", guide, createdAt: "2026-09-21T00:00:00Z", stale: false };
+  const loaded = (view: GuideView): Loaded<GuideView> => ({ kind: "ok", value: view });
+  const withGuide = (view: GuideView) => base({ guides: { "t-2b91": loaded(view) } });
+
+  test("状態が動いたら捨てる", () => {
+    const s = reduce(withGuide(okView), {
+      type: "daemon",
+      ev: { event: "task.stateChanged", task_id: "t-2b91", from: "suspended", to: "running" },
+      now: 1,
+    });
+    expect(guideOf(s, "t-2b91")).toBeUndefined();
+  });
+
+  test("世代の合わない guide は書き込まない", () => {
+    const s = base({ gen: { "t-2b91": 1 } });
+    const after = reduce(s, { type: "guide", id: "t-2b91", gen: 0, loaded: loaded(okView) });
+    expect(after.guides).toEqual({});
+    const fresh = reduce(s, { type: "guide", id: "t-2b91", gen: 1, loaded: loaded(okView) });
+    expect(guideOf(fresh, "t-2b91")).toEqual(loaded(okView));
+  });
+
+  test("消えたタスクのガイドは sync で落ちる", () => {
+    const a = t1({ id: "a", state: "suspended" });
+    const after = reduce(withGuide(okView), { type: "sync", tasks: [a], projects: [], now: 2 });
+    expect(after.guides).toEqual({});
+  });
+
+  test("繋ぎ直したら失敗したガイドだけ捨てる", () => {
+    const s = base({
+      guides: { "t-2b91": { kind: "error", message: "切断" }, "s-1103": loaded(okView) },
+    });
+    const after = reduce(s, { type: "connection", conn: { status: "connected" } });
+    expect(guideOf(after, "t-2b91")).toBeUndefined();
+    expect(guideOf(after, "s-1103")).toEqual(loaded(okView));
+  });
+
+  test("ガイドが無ければステップモードに入らない", () => {
+    const s = withGuide({ kind: "none" });
+    expect(currentStep(s, task(s, "t-2b91"))).toBeNull();
+    expect(reduce(s, { type: "step", idx: 0 })).toBe(s);
+  });
+
+  test("壊れている・まだ無い・取得前のガイドはステップモードにしない", () => {
+    for (const view of [{ kind: "broken", issues: ["x"] }, { kind: "missing" }] as GuideView[]) {
+      const s = withGuide(view);
+      expect(currentStep(s, task(s, "t-2b91"))).toBeNull();
+    }
+    expect(currentStep(base(), task(base(), "t-2b91"))).toBeNull();
+  });
+
+  test("ガイドがあればステップを進められる", () => {
+    const s = withGuide(okView);
+    expect(currentStep(s, task(s, "t-2b91"))).toBe(0);
+    const next = reduce(s, { type: "step", idx: 1 });
+    expect(currentStep(next, task(next, "t-2b91"))).toBe(1);
+    expect(reduce(s, { type: "step", idx: 2 })).toBe(s);
   });
 });
 
