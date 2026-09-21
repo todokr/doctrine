@@ -254,12 +254,15 @@ export async function runAgentStep(
     attempt: number;
     sessionId: string;
     resume: boolean;
+    /** goto で戻ってきたときの feed。engine が goto の時点で展開済みなので、ここでは展開しない。 */
+    feed?: string | null;
     deps: RunnerDeps;
   },
 ): Promise<StepOutcome> {
   // expand は未知の変数や壊れたプレースホルダーで TemplateError を投げる。
   // ここでは意図的に握りつぶさない — ワークフロー作者に見える形で伝播させる。
-  const prompt = expand(step.prompt, ctx);
+  // feed には前のステップの出力（plan-review.md など）が入っており、中の {{ }} は変数ではない。
+  const prompt = o.feed ?? expand(step.prompt, ctx);
   const logPath = logPathFor(o.deps.logRoot, o.taskId, step.id, o.attempt);
   const log = await openLog(logPath);
   const opts = {
