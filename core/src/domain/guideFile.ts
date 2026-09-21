@@ -102,7 +102,8 @@ export async function readGuideFile(worktreePath: string): Promise<GuideRead> {
     return { status: "broken", issues: [`JSON として読めません: ${(e as Error).message}`] };
   }
 
-  const envelope = guideEnvelopeSchema.safeParse(json);
+  // 誤りの文面は validateGuide と同じ日本語ロケールに揃える
+  const envelope = guideEnvelopeSchema.safeParse(json, { error: z.locales.ja().localeError });
   if (!envelope.success) {
     return {
       status: "broken",

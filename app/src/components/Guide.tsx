@@ -67,7 +67,7 @@ export function GuideNotice({ view }: { view: Loaded<GuideView> | undefined }): 
       const at = Date.parse(g.createdAt);
       return (
         <div className="box attn">
-          <b>このガイドは古いかもしれません</b>
+          <b>このガイドは古いです</b>
           <p>
             このガイドは作成時点（{Number.isNaN(at) ? g.createdAt : clock(at)}）の worktree を説明しています。
             そのあと worktree が変わっているので、指している箇所が無いことがあります。
