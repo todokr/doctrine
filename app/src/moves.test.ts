@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { moveGroups } from "./moves";
+import { moveGroups, moveLabel, type MoveGroup } from "./moves";
 import { diffLines } from "./model";
 import type { MovedBlock } from "./types";
 
@@ -69,5 +69,42 @@ describe("moveGroups", () => {
 
   test("移動が無ければ空配列", () => {
     expect(moveGroups(hunk(1, 1, "+a"), "b.ts", [])).toEqual([]);
+  });
+});
+
+describe("moveLabel", () => {
+  const m = block(
+    { path: "src/a.ts", startLine: 12, endLine: 18 },
+    { path: "src/b.ts", startLine: 3, endLine: 9 },
+    [{ fromStart: 12, toStart: 3, lineCount: 7 }],
+  );
+  const group = (side: "from" | "to", move: MovedBlock = m): MoveGroup => ({ start: 0, end: 6, move, side });
+
+  test("移動先には移動元を、移動元には移動先を示す", () => {
+    expect(moveLabel(group("to"))).toEqual({
+      lead: "←", path: "src/a.ts", range: "12-18", tail: "から移動（変更なし）",
+    });
+    expect(moveLabel(group("from"))).toEqual({
+      lead: "→", path: "src/b.ts", range: "3-9", tail: "へ移動（変更なし）",
+    });
+  });
+
+  test("変更を含む移動は「変更なし」と言わない", () => {
+    expect(moveLabel(group("to", { ...m, edited: true })).tail).toBe("から移動（この移動には変更が含まれます）");
+  });
+
+  test("インデントが変わった移動はそのことを添える", () => {
+    expect(moveLabel(group("to", { ...m, indentOnly: true })).tail).toBe("から移動（インデントが変わっています）");
+    expect(moveLabel(group("to", { ...m, edited: true, indentOnly: true })).tail)
+      .toBe("から移動（この移動には変更が含まれます・インデントが変わっています）");
+  });
+
+  test("1行だけの範囲は行番号を1つで書く", () => {
+    const one = block(
+      { path: "a.ts", startLine: 5, endLine: 5 },
+      { path: "b.ts", startLine: 1, endLine: 1 },
+      [{ fromStart: 5, toStart: 1, lineCount: 1 }],
+    );
+    expect(moveLabel(group("to", one)).range).toBe("5");
   });
 });

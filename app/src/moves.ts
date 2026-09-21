@@ -31,6 +31,23 @@ export function moveGroups(lines: DiffLine[], path: string, moves: MovedBlock[])
   return groups.sort((a, b) => a.start - b.start);
 }
 
+/** 畳んだ範囲の見出し。相手側のパスは、画面でそのファイルへ飛べるよう切り分けて返す */
+export function moveLabel(g: MoveGroup): { lead: string; path: string; range: string; tail: string } {
+  const { move, side } = g;
+  // この hunk に出ているのが移動先なら、示すのは移動元
+  const other = side === "to" ? move.from : move.to;
+  const notes: string[] = [];
+  if (move.edited) notes.push("この移動には変更が含まれます");
+  if (move.indentOnly) notes.push("インデントが変わっています");
+  if (notes.length === 0) notes.push("変更なし");
+  return {
+    lead: side === "to" ? "←" : "→",
+    path: other.path,
+    range: other.startLine === other.endLine ? `${other.startLine}` : `${other.startLine}-${other.endLine}`,
+    tail: `${side === "to" ? "から" : "へ"}移動（${notes.join("・")}）`,
+  };
+}
+
 function collect(
   out: MoveGroup[],
   lines: DiffLine[],
