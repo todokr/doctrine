@@ -77,7 +77,7 @@ dctl diff <task-id> --since last_review  # 直近の差し戻し以降だけの 
 
 `project-add` は最初に叩くコマンドで、`.doctrine/` が無ければ雛形を作る。
 
-- `.doctrine/project.yaml` と `.doctrine/workflows/default.yaml`（agent → approval の最小構成）を作り、
+- `.doctrine/project.yaml` と `.doctrine/workflows/default.yaml`（計画 → 計画レビュー → 実装 → 検証 → コードレビュー → ガイド → 人のレビュー）を作り、
   作ったファイルのパスを `created` に出す。**コミットはしない。** 何をコミットするかは自分で決める
 - `baseBranch` は git から取る（リモートの既定ブランチ、無ければ現在のブランチ）。`setup` は書かない
   — doctrine はパッケージマネージャを決めないので、必要なら自分で足す
@@ -106,40 +106,71 @@ dctl diff <task-id> --since last_review  # 直近の差し戻し以降だけの 
 ```yaml
 # .doctrine/project.yaml
 setup: pnpm install --frozen-lockfile   # 全ワークフローの先頭に自動挿入される
-defaultWorkflow: feature
+defaultWorkflow: default
 maxConcurrent: 1
 baseBranch: main
 ```
 
+雛形の `default.yaml` は、計画 → 計画レビュー → 実装 → 検証 → コードレビュー → ガイド → 人のレビュー
+の順に並んでいる。役割ごとに `session` を分け（`planner` / `plan-reviewer` / `implementer` /
+`code-reviewer` / `guide`）、役割の間は `.doctrine-out/` の下のファイル
+（`plan.md` / `plan-review.md` / `implement-notes.md` / `review.md`）で受け渡す。
+プロンプトや `allowedTools` の全文は雛形を見る。骨格だけ書くと次のとおり。
+
 ```yaml
-# .doctrine/workflows/feature.yaml
-name: feature
+# .doctrine/workflows/default.yaml（骨格。プロンプトと allowedTools は省略）
+name: default
 steps:
+  - id: plan                # 計画 → .doctrine-out/plan.md
+    type: agent
+    session: planner
+  - id: plan-review         # 計画のレビュー。1行目に verdict: approve / reject を書く
+    type: agent
+    session: plan-reviewer
+  - id: plan-gate           # verdict を grep で見る。通らなければ計画へ差し戻す
+    type: command
+    run: "grep -q '^verdict: approve' .doctrine-out/plan-review.md || { cat .doctrine-out/plan-review.md; exit 1; }"
+    onFailure: { goto: plan, maxAttempts: 3, feed: "{{ steps.plan-gate.last_stdout }}" }
   - id: implement
     type: agent
-    prompt: "{{ task.prompt }}"
-    permissionMode: acceptEdits
-
-  - id: verify
+    session: implementer
+  - id: verify              # 型検査・テスト。落ちたら実装へ戻る
     type: command
-    run: "pnpm test"
-    onFailure:
-      goto: implement
-      maxAttempts: 3
-      feed: "テストが失敗した:\n{{ steps.verify.last_stderr }}"
-
-  - id: review
+    run: "true"             # ← 自分のプロジェクトのテストコマンドに書き換える
+    onFailure: { goto: implement, maxAttempts: 3, feed: "{{ steps.verify.last_stderr }}" }
+  - id: agent-review        # コードレビュー。1行目に verdict: approve / reject / escalate
+    type: agent
+    session: code-reviewer
+  - id: review-gate         # 通らなければ実装へ差し戻す
+    type: command
+    run: "grep -qE '^verdict: (approve|escalate)' .doctrine-out/review.md || { cat .doctrine-out/review.md; exit 1; }"
+    onFailure: { goto: implement, maxAttempts: 3, feed: "{{ steps.review-gate.last_stdout }}" }
+  - id: guide               # Review Guide。prompt は書けない
+    type: guide
+    session: guide
+  - id: review              # 人のレビュー。却下されたら実装へ戻る
     type: approval
-    title: "差分を確認してください"
-    onReject:
-      goto: implement
-      maxAttempts: 5
-      feed: "レビューで却下された:\n{{ steps.review.last_stdout }}"
-
-  - id: record
-    type: command
-    run: "echo done > result.txt"
+    title: "変更を確認してください"
+    onReject: { goto: implement, maxAttempts: 5, feed: "{{ steps.review.last_stdout }}" }
+    review:
+      files: [.doctrine-out/review.md, .doctrine-out/implement-notes.md, .doctrine-out/plan.md]
 ```
+
+雛形のままでも検証は通るが、プロジェクトに合わせて書き換える場所が2つある。
+
+- **`verify` の `run`** — 雛形は何も検証しない `"true"`。型検査やテストのコマンドに書き換える
+- **`implement` の `allowedTools`** — `acceptEdits` では Bash がすべて拒否されるので、
+  実装中に流させたいコマンド（テストや lint）をここへ足す
+
+エージェントによるレビューの差し戻しは、専用の分岐ではなく `command` ステップの `grep` で表す。
+審査役が書いたファイルの1行目の `verdict:` をゲートが見て、通らなければファイルの中身を
+標準出力に出して非0で終わり、`onFailure` が前の工程へ戻す（`feed` にはその中身が渡る）。
+`verdict: escalate` は実装者には直せない指摘で、`review-gate` を通して人のレビューへ進める。
+
+`agent-review` が読む `git diff <baseBranch>...HEAD` の `<baseBranch>` は、雛形を作った時点の
+`project.yaml` の `baseBranch` が文字列で埋め込まれる（テンプレート変数に `baseBranch` が無いため）。
+後から `baseBranch` を変えたら、`default.yaml` の `agent-review` のプロンプトも直す。
+PR の作成（`open-pr`）は雛形に入っていない。
 
 ### ステップは4種類だけ
 
