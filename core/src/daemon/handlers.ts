@@ -42,7 +42,8 @@ import {
   rejectIntake,
   startIntake,
 } from "../intake/commands.ts";
-import { toIntakeDetail, toIntakeSummary } from "../intake/view.ts";
+import { previewTaskPrompt } from "../intake/dispatch.ts";
+import { intakeDraft, toIntakeDetail, toIntakeSummary } from "../intake/view.ts";
 import type { IntakeWatcher } from "../intake/watch.ts";
 import type { Tracker } from "../github/tracker.ts";
 import { applyApproval, runTask } from "../domain/engine.ts";
@@ -650,6 +651,16 @@ export function createHandler(ctx: DaemonContext): Handler {
         void ctx.intakeWatcher.request(summary.project_id);
         return summary;
       }
+      case "intake.draft":
+        return await intakeDraft(ctx.db, req(params, "intake_id"), reqNumber(params, "draft_id"));
+      case "intake.processPrompt":
+        return {
+          prompt: await previewTaskPrompt(ctx.db, {
+            intakeId: req(params, "intake_id"),
+            draftId: reqNumber(params, "draft_id"),
+            processId: req(params, "process_id"),
+          }),
+        };
       case "intake.cancel": {
         const intakeId = req(params, "intake_id");
         // leave / stop のどちらも今は同じ動き。stop の、タスクを止めて sub-issue を閉じる部分は別の作業が足す。

@@ -9,13 +9,13 @@ import {
   listQuestionSets,
   replaceCurrentTask,
 } from "../db/intakes.ts";
-import type { Db } from "../db/schema.ts";
+import type { Db, IntakeProcessRow } from "../db/schema.ts";
 import { getProject, insertTask, type NewTask } from "../db/tasks.ts";
 import { branchNameFor } from "../domain/worktree.ts";
 import { sha256Hex } from "./pfd/hash.ts";
 import { buildTaskPrompt } from "./pfd/prompt.ts";
 import { computeProcessStatuses } from "./pfd/status.ts";
-import { processProgressOf } from "./view.ts";
+import { intakeDraft, processProgressOf } from "./view.ts";
 
 export type ApprovedPlan = { pfd: Pfd; draftId: number };
 
@@ -63,6 +63,55 @@ export type DispatchReport = {
   errors: { processId: string; message: string }[];
 };
 
+/** 人の完了の記録と決定の回答。投入と R-3 のプレビューが同じものを使う。 */
+async function promptFacts(db: Db, intakeId: string): Promise<{
+  rows: Map<string, IntakeProcessRow>;
+  humanNotes: Record<string, string>;
+  decisions: Record<string, string>;
+}> {
+  const rows = new Map(
+    (await listProcesses(db, intakeId)).filter((r) => r.retired_at === null)
+      .map((r) => [r.process_id, r]),
+  );
+  const humanNotes: Record<string, string> = {};
+  for (const r of rows.values()) {
+    if (r.human_done_at !== null) humanNotes[r.process_id] = r.human_note ?? "";
+  }
+  const decisions = decisionTexts(
+    (await listQuestionSets(db, intakeId)).map((q) => ({
+      questions: JSON.parse(q.questions) as Question[],
+      answers: q.answers === null ? null : JSON.parse(q.answers) as Answer[],
+    })),
+  );
+  return { rows, humanNotes, decisions };
+}
+
+/**
+ * 案のプロセスがタスクになったときの prompt（R-3）。承認の前でも組める。
+ * 決定の回答や人の完了が無ければ、投入と同じ理由で投げる。
+ */
+export async function previewTaskPrompt(
+  db: Db,
+  o: { intakeId: string; draftId: number; processId: string },
+): Promise<string> {
+  const intake = await getIntake(db, o.intakeId);
+  if (!intake) throw new Error(`Intake がありません: ${o.intakeId}`);
+  const { pfd } = await intakeDraft(db, o.intakeId, o.draftId);
+  const process = pfd.processes.find((p) => p.id === o.processId);
+  if (!process) throw new Error(`プロセス ${o.processId} は案にありません`);
+  if (process.actor === "human") throw new Error("人のプロセスはタスクになりません");
+
+  const { rows, humanNotes, decisions } = await promptFacts(db, o.intakeId);
+  return buildTaskPrompt({
+    pfd,
+    processId: o.processId,
+    parentIssue: { url: intake.issue_url, title: intake.issue_title },
+    subIssueUrl: rows.get(o.processId)?.sub_issue_url ?? null,
+    humanNotes,
+    decisions,
+  });
+}
+
 /**
  * active・revising 0・dispatch_paused 0 の Intake について、ready で blockedBy が null の
  * エージェントのプロセスをタスクにする。DB だけを読み書きし、gh は呼ばない。
@@ -86,20 +135,7 @@ export async function dispatchIntake(db: Db, intakeId: string): Promise<Dispatch
     progress: await processProgressOf(db, intakeId),
   });
 
-  const rows = new Map(
-    (await listProcesses(db, intakeId)).filter((r) => r.retired_at === null)
-      .map((r) => [r.process_id, r]),
-  );
-  const humanNotes: Record<string, string> = {};
-  for (const r of rows.values()) {
-    if (r.human_done_at !== null) humanNotes[r.process_id] = r.human_note ?? "";
-  }
-  const decisions = decisionTexts(
-    (await listQuestionSets(db, intakeId)).map((q) => ({
-      questions: JSON.parse(q.questions) as Question[],
-      answers: q.answers === null ? null : JSON.parse(q.answers) as Answer[],
-    })),
-  );
+  const { rows, humanNotes, decisions } = await promptFacts(db, intakeId);
 
   for (const status of statuses) {
     if (status.state !== "ready" || status.blockedBy !== null) continue;
