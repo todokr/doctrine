@@ -86,9 +86,9 @@ h1,h2,h3,h4,h5,h6,b,strong{font-weight:500}
 .grp{margin-top:8px}
 .grp h3{margin:0;padding:4px 8px;font-size:11.5px;font-weight:500;color:var(--ink-2);display:flex;gap:6px;align-items:center;letter-spacing:.02em}
 .grp h3 .count{color:var(--ink-3);font-weight:400;font-variant-numeric:tabular-nums}
-.it{width:100%;border:0;background:transparent;border-radius:8px;padding:6px 8px 6px 6px;display:grid;grid-template-columns:18px minmax(0,1fr);gap:2px 6px;text-align:left}
+.it{width:100%;border:0;background:transparent;border-radius:6px;padding:6px 8px 6px 6px;display:grid;grid-template-columns:18px minmax(0,1fr);gap:2px 6px;text-align:left}
 .it:hover{background:var(--surface-2)}
-.it[aria-current="true"]{background:var(--accent-soft);box-shadow:inset 3px 0 0 var(--accent)}
+.it[aria-current="true"]{background:var(--accent-soft);}
 .it .ico{grid-row:span 2;display:grid;place-items:center;height:20px}
 .it .t{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:500}
 .it .m{display:flex;gap:6px;align-items:center;color:var(--ink-3);font-size:11.5px;min-width:0}
