@@ -61,9 +61,9 @@ export function splitRisks(risks: readonly Risk[]): { shown: Risk[]; folded: Ris
 }
 
 /**
- * 箇所を、画面上の飛び先（data-anchor の値）に解決する。今の diff に無ければ null。
- * hunk 付きは id が一致する hunk（id はパスを含んで決まるので path は見ない）、
- * パスだけはそのファイルの見出し（`file:<path>`）。
+ * 箇所を、画面上の飛び先に解決する。今の diff に無ければ null。
+ * hunk 付きは id が一致する hunk（id はパスを含んで決まるので path は見ない）で、hunk 見出しの data-anchor の値。
+ * パスだけはそのファイルの見出しで、ファイル見出しの data-jump の値（`file:<path>`）。
  */
 export function locationAnchor(
   files: readonly DiffFile[],

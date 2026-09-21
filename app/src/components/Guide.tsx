@@ -24,7 +24,7 @@ export const IMPACT_LABEL: Record<Risk["impact"], string> = {
   low: "影響 小",
 };
 
-export const prose =(src: string) => <div className="g-md"><Markdown src={src} /></div>;
+export const prose = (src: string) => <div className="g-md"><Markdown src={src} /></div>;
 
 const sourceLabel = (s: NonNullable<Decision["source"]>) => (s.kind === "step" ? `ステップ ${s.value}` : s.value);
 
