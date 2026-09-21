@@ -8,7 +8,7 @@ Tauri v2 + React + Vite で組んだもの。デーモンとの接続は
 返せない項目（diff・ログの追従など）はモックで埋めず、「まだありません」という注記を出す
 （[Tauri↔dctld 中継設計](../docs/superpowers/specs/2026-09-18-tauri-dctld-relay-design.md) 7章のとおり、
 本物と作り物のデータが混ざった画面を残すより、この方が誠実である）。
-`src/fixtures.ts` はテスト（`src/model.test.ts`）専用のフィクスチャで、画面には出てこない。
+`src/fixtures.ts` はテストと開発用のプレビュー（`src/dev/`）専用のフィクスチャで、アプリの画面は import しない。
 
 ```bash
 mise install          # Deno / Node / pnpm / Rust（リポジトリ直下の mise.toml）
@@ -18,6 +18,8 @@ mise run app:tauri    # ウィンドウで開く（起動時に dctld を自動�
 mise run app:dev      # ブラウザで開く（http://localhost:1420。Tauri の invoke が無いのでデーモンにはつながらない）
 mise run app:test     # 状態の更新と導出（src/model.ts など）の単体テスト
 ```
+
+PFD の図の目視: `mise run app:dev` で開発サーバーを起こし、`http://localhost:1420/pfd-preview.html` を開く。
 
 `~/.deno/bin` が PATH に無いと `mise run app:tauri` が `dctld` を見つけられない。
 `export PATH="$HOME/.deno/bin:$PATH"` を通してから起動する（`mise run core:install` の出力にも同じ案内が出る）。
@@ -33,7 +35,8 @@ Linux では WebKitGTK 4.1 などが要る（[Tauri の前提](https://tauri.app
 - `src/highlight.ts` — diff のシンタックスハイライト（Prism）。hunk 単位で解析するので、
   ブロックコメントやテンプレートリテラルのように行をまたぐトークンも続きの行に色が付く。
   削除行と追加行は別々の流れとして解析する（対になる変更で引用符が繋がらないようにするため）
-- `src/fixtures.ts` — `src/model.test.ts` 用のフィクスチャ。画面はここを import しない
+- `src/pfd.ts` — PFD の図の配置と見た目の導出（`layoutGraph` を借りる）
+- `src/fixtures.ts` — テストと開発用のプレビュー用のフィクスチャ。アプリの画面はここを import しない
 - `src/daemon/client.ts` — `invoke("rpc")` / `listen("daemon-event")` / `listen("daemon-connection")` を
   呼ぶ唯一の場所。`../../../shared/protocol.ts` の型をそのまま import する（正本は 1 つ）
 - `src/store.tsx` — reducer の置き場所、`task.list` / `project.list` の取得と 15 秒ごとの取り直し、
@@ -44,6 +47,7 @@ Linux では WebKitGTK 4.1 などが要る（[Tauri の前提](https://tauri.app
   読み書きは Rust 側の `load_drafts` / `save_drafts`。アプリを閉じても消えず、
   承認・差し戻しがデーモンに受理されたときにだけ捨てる
 - `src/components/` — 画面（`ConnectionBanner.tsx` が接続状態のバナー）
+- `src/components/PfdDiagram.tsx` — PFD の図。どの画面にもまだ置いていない
 - `src-tauri/src/relay.rs` — ソケット接続を 1 本保持し `rpc` を中継する。method の種類は見ない
 - `src-tauri/src/daemon.rs` — ソケットパスの解決、`dctld` の探索・切り離し起動・ログ
 - `src-tauri/` — Tauri の最小構成
