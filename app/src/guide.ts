@@ -43,11 +43,3 @@ export function locationPaths(locations: { path: string }[]): string[] {
 export function groupPaths(group: Guide["readingOrder"][number]): string[] {
   return locationPaths(group.locations);
 }
-
-/** ガイドが指しているファイルのパス（readingOrder と risks の箇所）。出現順・重複なし。 */
-export function guidePaths(guide: Guide): string[] {
-  return uniq([
-    ...guide.readingOrder.flatMap((g) => g.locations.map((l) => l.path)),
-    ...guide.risks.flatMap((r) => r.locations.map((l) => l.path)),
-  ]);
-}

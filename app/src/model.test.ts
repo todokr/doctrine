@@ -40,7 +40,6 @@ import {
   toProject,
   toRateLimitWindow,
   toTask,
-  unguidedFiles,
   type DiffView,
   type Loaded,
   type State,
@@ -200,14 +199,6 @@ describe("diff", () => {
       ["a", null, 21, 21],
       ["", 12, 22, 22],
     ]);
-  });
-  test("ガイドが触れていないファイルを拾う（readingOrder と risks の箇所を見る）", () => {
-    const guide = {
-      readingOrder: [{ locations: [{ path: "src/keep.ts" }] }],
-      risks: [{ locations: [{ path: "src/added.ts", hunk: "h1" }] }],
-    } as unknown as Guide;
-    expect(unguidedFiles(buildDiff(SAMPLE_DIFF), guide).map((f) => f.path))
-      .toEqual(["logo.png", "src/gone.ts", "src/renamed.ts"]);
   });
   test("前回レビューの記録が無いまま since を頼んだ応答は「前回以降」と名乗らない", () => {
     const view: DiffView = { meta: SAMPLE_DIFF, files: [] };

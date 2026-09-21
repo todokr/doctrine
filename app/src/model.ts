@@ -2,7 +2,6 @@
 import type {
   DiffFile,
   Draft,
-  Guide,
   LineComment,
   Project,
   RateLimitWindow,
@@ -22,7 +21,7 @@ import type {
   TaskSummary,
 } from "../../shared/protocol.ts";
 import { toolInputParts } from "../../shared/toolInput.ts";
-import { guidePaths, type GuideView } from "./guide";
+import type { GuideView } from "./guide";
 import type { ConnectionStatus } from "./daemon/client";
 
 export const MIN = 60000;
@@ -163,12 +162,6 @@ export function composeRejection(draft: Draft): string {
 }
 
 export const canReject = (draft: Draft) => draft.comments.length > 0 || draft.overall.trim().length > 0;
-
-// ---------------------------------------------------------------- Review Guide
-export function unguidedFiles(files: DiffFile[], guide: Guide): DiffFile[] {
-  const mentioned = new Set(guidePaths(guide));
-  return files.filter((f) => !mentioned.has(f.path));
-}
 
 // ---------------------------------------------------------------- タスク画面
 

@@ -157,7 +157,7 @@ function Diff({ t, scope, loaded }: { t: Task; scope: Scope; loaded: Loaded<Diff
   const guide = guideView?.kind === "ok" && guideView.value.kind === "ok" ? guideView.value.guide : null;
   // 前回レビュー以降を見ている間は currentStep が null を返す（ステップモードにならない）
   if (guide && step !== null) {
-    return <>{notice}<StepView t={t} guide={guide} files={files} idx={step} /></>;
+    return <>{notice}<StepView t={t} guide={guide} files={files} truncated={meta.truncated} idx={step} /></>;
   }
 
   return (
@@ -183,7 +183,7 @@ function Diff({ t, scope, loaded }: { t: Task; scope: Scope; loaded: Loaded<Diff
           ))}
         </nav>
         <div className="diffs">{files.map((f) => <DiffFileBlock key={f.path} t={t} file={f} />)}</div>
-        {guide && <GuidePanel guide={guide} files={files} partial={isPartial(loaded.value, scope)} />}
+        {guide && <GuidePanel guide={guide} files={files} truncated={meta.truncated} partial={isPartial(loaded.value, scope)} />}
       </div>
     </>
   );

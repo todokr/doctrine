@@ -9,9 +9,9 @@ import type {
   TaskDiff,
   TaskGuide,
 } from "../../shared/protocol.ts";
-import type { Diagram, Guide } from "../../shared/guide/schema.ts";
+import type { Diagram, Guide, GuideLocation, Risk } from "../../shared/guide/schema.ts";
 
-export type { CommandResult, Diagram, Guide, MovedBlock, ReviewEntry, ReviewFile, TaskContext, TaskDiff, TaskGuide };
+export type { CommandResult, Diagram, Guide, GuideLocation, MovedBlock, Risk, ReviewEntry, ReviewFile, TaskContext, TaskDiff, TaskGuide };
 
 /**
  * デーモンが知らない状態を返したとき用。版のずれ（新しい dctld ＋ 古い画面）で起こりうる。

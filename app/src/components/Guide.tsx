@@ -1,6 +1,7 @@
 import { useEffect, useRef, type CSSProperties, type ReactNode } from "react";
 import { groupPaths, locationPaths, type GuideView } from "../guide";
-import { clock, unguidedFiles, type Loaded } from "../model";
+import { findUnguided } from "../flow";
+import { clock, type Loaded } from "../model";
 import { useStore } from "../store";
 import type { DiffFile, Guide, Task } from "../types";
 import { DiffFileBlock } from "./DiffFileBlock";
@@ -78,15 +79,14 @@ export function GuideNotice({ view }: { view: Loaded<GuideView> | undefined }): 
   }
 }
 
-function UnguidedNote({ files, guide }: { files: DiffFile[]; guide: Guide }) {
-  const missing = unguidedFiles(files, guide);
-  return missing.length ? (
-    <p className="g-warn">
-      ⚠ diff に含まれるがガイドが触れていないファイルが{missing.length}件:{" "}
-      {missing.map((f, i) => <span key={f.path}>{i > 0 && "、"}<span className="mono">{f.path}</span></span>)}
-    </p>
-  ) : (
-    <p className="g-ok">✓ diff の全ファイルがガイドに触れています</p>
+function UnguidedNote({ files, guide, truncated }: { files: DiffFile[]; guide: Guide; truncated: boolean }) {
+  const { items } = findUnguided(files, guide, truncated);
+  if (items.length === 0) return <p className="g-ok">✓ diff のすべての変更がガイドの読む順に入っています</p>;
+  return (
+    <>
+      <p className="g-warn">⚠ ガイドの読む順に入っていない変更が{items.length}件あります</p>
+      {truncated && <p className="hint">diff が打ち切られているため、ガイドの見落としとは限りません</p>}
+    </>
   );
 }
 
@@ -111,7 +111,7 @@ function DecisionItem({ d }: { d: Decision }) {
 }
 
 /** レビュー画面の右に置く Review Guide */
-export function GuidePanel({ guide, files, partial }: { guide: Guide; files: DiffFile[]; partial: boolean }) {
+export function GuidePanel({ guide, files, truncated, partial }: { guide: Guide; files: DiffFile[]; truncated: boolean; partial: boolean }) {
   const { dispatch } = useStore();
   const diagram = (id: string | undefined) => guide.diagrams.find((d) => d.id === id);
   return (
@@ -167,7 +167,7 @@ export function GuidePanel({ guide, files, partial }: { guide: Guide; files: Dif
             </li>
           ))}
         </ol>
-        <UnguidedNote files={files} guide={guide} />
+        <UnguidedNote files={files} guide={guide} truncated={truncated} />
       </section>
       {guide.decisions.length > 0 && (
         <section className="g-sec" style={sec(4)}>
@@ -199,7 +199,7 @@ export function GuidePanel({ guide, files, partial }: { guide: Guide; files: Dif
 }
 
 /** ガイドの Reading Order を1グループずつ読む表示 */
-export function StepView({ t, guide, files: all, idx }: { t: Task; guide: Guide; files: DiffFile[]; idx: number }) {
+export function StepView({ t, guide, files: all, truncated, idx }: { t: Task; guide: Guide; files: DiffFile[]; truncated: boolean; idx: number }) {
   const { dispatch } = useStore();
   const ref = useRef<HTMLDivElement>(null);
   const steps = guide.readingOrder;
@@ -208,7 +208,7 @@ export function StepView({ t, guide, files: all, idx }: { t: Task; guide: Guide;
   const files = paths.flatMap((p) => all.filter((f) => f.path === p));
   const absent = paths.filter((p) => !all.some((f) => f.path === p));
   const last = idx === steps.length - 1;
-  const missing = unguidedFiles(all, guide);
+  const missing = findUnguided(all, guide, truncated).items.map((i) => i.file).filter((f, k, a) => a.indexOf(f) === k);
 
   // グループが束ねる節。ガイド全体を探し直さなくても、そのステップの中で読める
   const decisions = guide.decisions.filter((d) => step.refs.decisions.includes(d.id));

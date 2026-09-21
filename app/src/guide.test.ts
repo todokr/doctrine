@@ -3,10 +3,7 @@ import example from "../../shared/guide/examples/step-artifacts.guide.json";
 import { validateGuide } from "../../shared/guide/validate.ts";
 import type { Guide } from "../../shared/guide/schema.ts";
 import type { TaskGuide } from "../../shared/protocol.ts";
-import { SAMPLE_DIFF } from "./fixtures";
-import { groupPaths, guidePaths, receiveGuide } from "./guide";
-import { unguidedFiles } from "./model";
-import { buildDiff } from "./patch";
+import { groupPaths, receiveGuide } from "./guide";
 
 // JSON の import では version が number になり、Guide のリテラル型に合わない。
 // キャストせず、アプリ側の検証を通して Guide 型で取り出す（見本がアプリ側の検証を通る確認も兼ねる）。
@@ -56,31 +53,11 @@ describe("receiveGuide", () => {
   });
 });
 
-describe("guidePaths", () => {
-  test("出現順で重複を除く", () => {
-    const paths = guidePaths(guide);
-    expect(paths[0]).toBe(guide.readingOrder[0].locations[0].path);
-    expect(new Set(paths).size).toBe(paths.length);
-    for (const g of guide.readingOrder) for (const l of g.locations) expect(paths).toContain(l.path);
-    for (const r of guide.risks) for (const l of r.locations) expect(paths).toContain(l.path);
-  });
-
-  test("グループ1つが指すパスも出現順で重複を除く", () => {
+describe("groupPaths", () => {
+  test("グループ1つが指すパスは出現順で重複を除く", () => {
     const g = { ...guide.readingOrder[0], locations: [
       { path: "a.ts" }, { path: "b.ts", hunk: "h1" }, { path: "a.ts", hunk: "h2" },
     ] };
     expect(groupPaths(g)).toEqual(["a.ts", "b.ts"]);
-  });
-});
-
-describe("unguidedFiles", () => {
-  test("ガイドが触れていないファイルを返す", () => {
-    const only = {
-      ...guide,
-      readingOrder: [{ ...guide.readingOrder[0], locations: [{ path: "src/keep.ts" }] }],
-      risks: [],
-    };
-    expect(unguidedFiles(buildDiff(SAMPLE_DIFF), only).map((f) => f.path))
-      .toEqual(["logo.png", "src/added.ts", "src/gone.ts", "src/renamed.ts"]);
   });
 });
