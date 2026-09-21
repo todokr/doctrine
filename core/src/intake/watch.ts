@@ -274,7 +274,12 @@ export function createIntakeWatcher(deps: {
       record(projectId, [describe(e)]);
       return;
     }
-    if (report.watched.length === 0) return;
+    if (report.watched.length === 0) {
+      // 見る Intake が無い周は健康状態に入れない（入れると、空の周が成功で治すまで失敗が残る）。
+      // Intake の一覧を読む前に落ちた失敗だけは、ここで残す
+      for (const e of report.errors) console.error("intake watch failed:", e);
+      return;
+    }
 
     const errors = [...report.errors];
     for (const t of report.transitions) safely(errors, () => deps.onStateChanged(t));
