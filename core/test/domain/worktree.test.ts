@@ -8,6 +8,7 @@ import { basename, join, sep } from "node:path";
 import {
   branchNameFor,
   changedPaths,
+  checkoutDetached,
   createDetachedWorktree,
   createWorktree,
   findOrphans,
@@ -316,6 +317,20 @@ test("createDetachedWorktree はブランチを作らない", async () => {
   await assert.rejects(run("git", ["-C", wt, "symbolic-ref", "-q", "HEAD"]));
   const { stdout } = await run("git", ["-C", repo, "branch", "--format=%(refname:short)"]);
   assert.deepEqual(stdout.trim().split("\n"), ["main"]);
+});
+
+test("checkoutDetached は既存の worktree を ref の位置へ detached で進める", async () => {
+  const wt = join(root, "wt", "intake-i1");
+  await createDetachedWorktree({ repoPath: repo, worktreePath: wt, baseBranch: "main" });
+  await writeFile(join(repo, "next.txt"), "n\n");
+  await run("git", ["-C", repo, "add", "."]);
+  await run("git", ["-C", repo, "commit", "-m", "next"]);
+  const head = (await run("git", ["-C", repo, "rev-parse", "main"])).stdout.trim();
+
+  await checkoutDetached(wt, "main");
+  assert.equal((await run("git", ["-C", wt, "rev-parse", "HEAD"])).stdout.trim(), head);
+  assert.ok((await stat(join(wt, "next.txt"))).isFile());
+  await assert.rejects(run("git", ["-C", wt, "symbolic-ref", "-q", "HEAD"]));
 });
 
 test("changedPaths と restoreWorktree", async () => {

@@ -2325,9 +2325,13 @@ test("Intake の実行が例外で落ちたら、行を failed・Intake を要�
   const h = createHandler(ctx);
   const project = await h("project.add", { path: repo }, NOOP_CONN) as { id: number };
   await addIntake(ctx, project.id);
-  // 改訂の実行はまだ扱えず、runIntakeRun が例外を投げる
-  await updateIntake(ctx.db, "i1", { state: "decomposing" });
-  await enqueueIntakeRun(ctx.db, "i1", "revise", { logRoot: ctx.logRoot, resume: false });
+  // worktree が消えていて、書き換えの検出（changedPaths）が try の外で例外を投げる
+  await updateIntake(ctx.db, "i1", {
+    state: "decomposing",
+    worktree_path: join(ctx.logRoot, "no-such-worktree"),
+    claude_session_id: "s1",
+  });
+  await enqueueIntakeRun(ctx.db, "i1", "decompose", { logRoot: ctx.logRoot, resume: false });
 
   await tick(ctx);
   await until(() => ctx.runningIntakeRuns.size === 0);

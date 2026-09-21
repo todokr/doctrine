@@ -1,5 +1,7 @@
 import type { IntakeRunPurpose } from "../db/schema.ts";
 import type { IssueDetail } from "../../../shared/intake/github.ts";
+import type { Pfd } from "../../../shared/intake/pfd.ts";
+import type { FrozenPart } from "./pfd/validate.ts";
 
 /**
  * 調査・分解エージェントへ送る文面。guidePrompt.ts と同じく expand() に通さず、
@@ -140,6 +142,79 @@ ${QUESTION_RULES}
 
 この実行では PFD を返しません。Issue とリポジトリを調べ、\`kind: "questions"\` で質問のまとまりを返してください。
 \`pfd\` と \`replies\` は null にします。
+`;
+}
+
+function formatFrozen(frozen: FrozenPart): string {
+  if (frozen.processes.length === 0 && frozen.artifacts.length === 0) {
+    return "固定された部分はありません。";
+  }
+  const lines = [
+    "次のプロセスと成果物は、投入済みか完了済み、またはその入出力です。",
+    "id・中身・入出力とも一字も変えずに、新しい案へ含めてください。変えた案は受け付けません。",
+    "",
+  ];
+  for (const p of frozen.processes) lines.push(`- プロセス ${p.id}「${p.name}」`);
+  for (const a of frozen.artifacts) lines.push(`- 成果物 ${a.id}「${a.name}」`);
+  return lines.join("\n");
+}
+
+/** 改訂の会話の最初に送る。承認済みの計画・固定された部分・決定の記録・改訂のコメントを載せる。 */
+export function buildRevisionPrompt(input: {
+  issue: IssueDetail;
+  approved: Pfd;
+  frozen: FrozenPart;
+  retiredProcessIds: readonly string[];
+  /** decisionTexts の結果（質問 id → 回答の文章）。 */
+  decisions: Record<string, string>;
+  /** buildFeedback(approved, 改訂の開始コメント) の結果。 */
+  feedback: string;
+}): string {
+  const retired = input.retiredProcessIds.length === 0 ? "" : `## 使えない id
+
+前の改訂で取りやめたプロセスの id は、新しい案で使えません。別の id にしてください。
+
+${input.retiredProcessIds.map((id) => `- ${id}`).join("\n")}
+
+`;
+  const decided = Object.entries(input.decisions);
+  const decisions = decided.length === 0
+    ? "なし"
+    : decided.map(([id, text]) => `- ${id}: ${text}`).join("\n");
+  return `あなたは、承認されて進行中の計画（PFD）を、人のコメントに沿って直す役です。
+リポジトリは読むだけで、書き換えません。出力は最終応答の構造化出力で返し、ファイルには書きません。
+
+## Issue
+
+${formatIssue(input.issue)}
+
+${DECOMPOSITION_RULES}
+
+${QUESTION_RULES}
+
+## 承認済みの計画
+
+\`\`\`json
+${JSON.stringify(input.approved, null, 2)}
+\`\`\`
+
+## 固定された部分
+
+${formatFrozen(input.frozen)}
+
+${retired}## 人が決めたこと
+
+${decisions}
+
+固定されたプロセスが入力に取っていない決定は、質問を出し直して問い直してかまいません。
+そのときは新しい質問 id を使います。
+
+${input.feedback}
+
+## 今回の出力
+
+固定された部分を含めた計画全体を \`kind: "pfd"\` で返してください。
+人に決めてもらう事項があれば、PFD の代わりに \`kind: "questions"\` で質問を返してかまいません。
 `;
 }
 
