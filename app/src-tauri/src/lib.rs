@@ -1,4 +1,5 @@
 pub mod daemon;
+pub mod launch;
 pub mod relay;
 pub mod settings;
 
@@ -95,6 +96,13 @@ fn save_settings(app: AppHandle, settings: settings::Settings) -> Result<(), Str
     settings::save(&app_data_file(&app, "settings.json")?, &settings)
 }
 
+/// 設定のコマンドに worktree のパスを渡して起動する。終了は待たない。
+/// コマンドは画面が設定から読んで渡す。起動の度にファイルを読み直さない。
+#[tauri::command]
+fn open_path(command: String, path: String) -> Result<(), String> {
+    launch::launch(&command, std::path::Path::new(&path))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -123,7 +131,8 @@ pub fn run() {
             load_drafts,
             save_drafts,
             load_settings,
-            save_settings
+            save_settings,
+            open_path
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
