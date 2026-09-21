@@ -1,5 +1,6 @@
 export type TemplateContext = {
   task: { id: string; title: string; prompt: string; branch: string };
+  issue: { url: string | null; parent_url: string | null };
   worktree: { path: string };
   project: { path: string };
   steps: Record<string, { last_stdout: string; last_stderr: string; exitCode: string }>;
@@ -14,6 +15,7 @@ export class TemplateError extends Error {
 
 const PATTERN = /\{\{\s*([^}]+?)\s*\}\}/g;
 const TASK_FIELDS = ["id", "title", "prompt", "branch"] as const;
+const ISSUE_FIELDS = ["url", "parent_url", "closes"] as const;
 const STEP_FIELDS = ["last_stdout", "last_stderr", "exitCode"] as const;
 
 export function expand(template: string, ctx: TemplateContext): string {
@@ -82,6 +84,17 @@ function resolve(expr: string, ctx: TemplateContext): string {
   ) {
     return ctx.task[parts[1] as (typeof TASK_FIELDS)[number]];
   }
+  if (parts[0] === "issue") {
+    if (parts.length !== 2 || !(ISSUE_FIELDS as readonly string[]).includes(parts[1])) {
+      throw new TemplateError(
+        `{{ ${expr} }}: issue のフィールドは ${ISSUE_FIELDS.join(" / ")} のみです`,
+      );
+    }
+    const { url, parent_url } = ctx.issue;
+    if (parts[1] === "url") return url ?? "";
+    if (parts[1] === "parent_url") return parent_url ?? "";
+    return url ? `Closes ${url}` : "";
+  }
   if (expr === "worktree.path") return ctx.worktree.path;
   if (expr === "project.path") return ctx.project.path;
   if (parts[0] === "steps") {
@@ -111,6 +124,6 @@ function resolve(expr: string, ctx: TemplateContext): string {
     return out[parts[2] as (typeof STEP_FIELDS)[number]];
   }
   throw new TemplateError(
-    `{{ ${expr} }}: 使える変数は task.* / worktree.path / project.path / steps.<id>.* のみです`,
+    `{{ ${expr} }}: 使える変数は task.* / issue.* / worktree.path / project.path / steps.<id>.* のみです`,
   );
 }

@@ -16,7 +16,7 @@
   - [ステップは4種類だけ](#ステップは4種類だけ)
   - [role ごとの会話（`session`）](#role-ごとの会話session)
   - [`approval` ステップに読ませるファイル（`review.files`）](#approval-ステップに読ませるファイルreviewfiles)
-  - [変数は4系統だけ](#変数は4系統だけ)
+  - [変数は5系統だけ](#変数は5系統だけ)
   - [`setup` は予約されたステップid](#setup-は予約されたステップid)
 - [3. `command` ステップは再実行安全でなければならない](#3-command-ステップは再実行安全でなければならない)
 - [4. worktree は失敗・中止時に残る](#4-worktree-は失敗中止時に残る)
@@ -253,9 +253,12 @@ doctrine は宣言されたファイルの中身を理解しない。読んで�
 - UTF-8 のテキストとして読めなければ `binary`
 - ここまでを通れば `ok`（中身と大きさを返す）
 
-### 変数は4系統だけ
+### 変数は5系統だけ
 
 - `{{ task.id }}` `{{ task.title }}` `{{ task.prompt }}` `{{ task.branch }}`
+- `{{ issue.url }}` `{{ issue.parent_url }}` `{{ issue.closes }}`
+  — Intake から投入されたタスクの sub-issue の URL、親 Issue の URL、`Closes <sub-issue の URL>`。
+  Intake 由来でないタスクではどれも空文字。
 - `{{ worktree.path }}`
 - `{{ project.path }}`
 - `{{ steps.<id>.last_stdout }}` `{{ steps.<id>.last_stderr }}` `{{ steps.<id>.exitCode }}`

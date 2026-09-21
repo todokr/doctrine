@@ -109,6 +109,7 @@ async function contextFor(db: Db, task: TaskRow): Promise<TemplateContext> {
   const project = (await getProject(db, task.project_id))!;
   return {
     task: { id: task.id, title: task.title, prompt: task.prompt, branch: task.branch },
+    issue: { url: task.issue_url, parent_url: task.parent_issue_url },
     worktree: { path: task.worktree_path ?? "" },
     project: { path: project.path },
     steps: await getStepOutputs(db, task.id),

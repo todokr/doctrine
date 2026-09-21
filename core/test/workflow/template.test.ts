@@ -4,18 +4,43 @@ import { expand, type TemplateContext, TemplateError } from "../../src/workflow/
 
 const ctx: TemplateContext = {
   task: { id: "t1", title: "ログイン修正", prompt: "直して", branch: "doctrine/t1-login" },
+  issue: { url: "https://github.com/o/r/issues/2", parent_url: "https://github.com/o/r/issues/1" },
   worktree: { path: "/state/wt/t1" },
   project: { path: "/repo" },
   steps: { test: { last_stdout: "ok", last_stderr: "3 failing", exitCode: "1" } },
 };
 
-test("4系統すべてを展開する", () => {
+test("5系統すべてを展開する", () => {
   assert.equal(expand("{{ task.prompt }}", ctx), "直して");
   assert.equal(expand("{{ task.branch }}", ctx), "doctrine/t1-login");
+  assert.equal(expand("{{ issue.url }}", ctx), "https://github.com/o/r/issues/2");
+  assert.equal(expand("{{ issue.parent_url }}", ctx), "https://github.com/o/r/issues/1");
+  assert.equal(expand("{{ issue.closes }}", ctx), "Closes https://github.com/o/r/issues/2");
   assert.equal(expand("{{ worktree.path }}", ctx), "/state/wt/t1");
   assert.equal(expand("{{ project.path }}", ctx), "/repo");
   assert.equal(expand("{{ steps.test.last_stderr }}", ctx), "3 failing");
   assert.equal(expand("{{ steps.test.exitCode }}", ctx), "1");
+});
+
+test("Intake 由来でないタスクでは issue 系統が空文字になる", () => {
+  const plain: TemplateContext = { ...ctx, issue: { url: null, parent_url: null } };
+  assert.equal(
+    expand("[{{ issue.url }}][{{ issue.parent_url }}][{{ issue.closes }}]", plain),
+    "[][][]",
+  );
+});
+
+test("issue の未知のフィールドは落とす", () => {
+  for (const expr of ["{{ issue.number }}", "{{ issue }}"]) {
+    assert.throws(() => expand(expr, ctx), (e: unknown) => {
+      assert.ok(e instanceof TemplateError);
+      assert.match(
+        (e as Error).message,
+        /issue のフィールドは url \/ parent_url \/ closes のみです/,
+      );
+      return true;
+    });
+  }
 });
 
 test("空白の有無を問わない", () => {
@@ -84,6 +109,7 @@ test("プレースホルダー内に中括弧を含むと落とす", () => {
 test("代入された値に{{ }}を含むテンプレートは展開してもスルーする（再展開しない）", () => {
   const ctxWithTemplate: TemplateContext = {
     task: ctx.task,
+    issue: ctx.issue,
     worktree: ctx.worktree,
     project: ctx.project,
     steps: {

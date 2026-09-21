@@ -69,6 +69,13 @@ export type TaskSummary = {
   priority: number;
   created_at: string;
   updated_at: string;
+  /** Intake から投入されたタスクだけが持つ。intake_id と intake_process_id は両方 null か両方非 null。 */
+  intake_id: string | null;
+  intake_process_id: string | null;
+  /** このタスクが実装する sub-issue の URL。 */
+  issue_url: string | null;
+  /** sub-issue の親 Issue の URL。 */
+  parent_issue_url: string | null;
 };
 
 /**

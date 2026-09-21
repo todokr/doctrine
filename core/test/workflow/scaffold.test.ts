@@ -27,6 +27,20 @@ test("雛形のワークフローはスキーマ検証を通り、警告も出�
   assert.deepEqual(warnings, [], "再実行で二重に効くコマンドを雛形に入れない");
 });
 
+test("雛形は PR を開くステップを持たず、足すときの本文の書き方を案内する", () => {
+  const yaml = defaultWorkflowYamlFor("main");
+  assert.ok(!stepsOf().some((s) => s.id === "open-pr"));
+  assert.ok(yaml.includes("{{ issue.closes }}"));
+  // 案内の run の行は、コメントを外せばそのままステップとして読める。
+  const example = yaml.split("\n").find((l) => l.startsWith("#   run:"))!;
+  const { workflow } = parseWorkflow(
+    `name: x\nsteps:\n  - id: open-pr\n    type: command\n  ${example.slice(2)}\n`,
+  );
+  const run = (workflow.steps[0] as CommandStep).run;
+  assert.match(run, /--base main /);
+  assert.match(run, /printf '\\n%s\\n' '\{\{ issue\.closes \}\}'/);
+});
+
 test("雛形は 4 章の手順の順に並んでいる", () => {
   assert.deepEqual(stepsOf().map((s) => s.id), [
     "plan",
@@ -91,6 +105,7 @@ test("雛形のプロンプトと feed はテンプレート展開を通る", ()
   const empty = { last_stdout: "", last_stderr: "", exitCode: "0" };
   const ctx: TemplateContext = {
     task: { id: "t", title: "T", prompt: "P", branch: "b" },
+    issue: { url: null, parent_url: null },
     worktree: { path: "/w" },
     project: { path: "/p" },
     steps: Object.fromEntries(steps.map((s) => [s.id, empty])),

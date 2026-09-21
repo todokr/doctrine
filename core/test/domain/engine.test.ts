@@ -149,6 +149,46 @@ steps:
   ], ["b", "success"]]);
 });
 
+const ISSUE_ECHO = `
+name: f
+steps:
+  - id: a
+    type: command
+    run: "printf '%s|%s|%s' '{{ issue.url }}' '{{ issue.parent_url }}' '{{ issue.closes }}'"
+`;
+
+test("command ステップの issue 系統はタスクの issue_url・parent_issue_url から展開される", async () => {
+  const { db, root, workflow } = await taskFixture(ISSUE_ECHO);
+  // intake_id は入れない（CHECK は issue_url / parent_issue_url に掛からない）。
+  await db.updateTable("tasks").set({
+    issue_url: "https://github.com/o/r/issues/2",
+    parent_issue_url: "https://github.com/o/r/issues/1",
+  }).where("id", "=", "t1").execute();
+  await runTask(db, "t1", workflow, {
+    db,
+    adapter: createMockAdapter({ result: {} }),
+    logRoot: join(root, "logs"),
+    globalLimit: 4,
+  });
+  assert.equal((await getTask(db, "t1"))?.state, "completed");
+  assert.equal(
+    (await getStepOutputs(db, "t1")).a.last_stdout.trimEnd(),
+    "https://github.com/o/r/issues/2|https://github.com/o/r/issues/1|Closes https://github.com/o/r/issues/2",
+  );
+});
+
+test("紐づけの無いタスクでは command ステップの issue 系統が空文字になる", async () => {
+  const { db, root, workflow } = await taskFixture(ISSUE_ECHO);
+  await runTask(db, "t1", workflow, {
+    db,
+    adapter: createMockAdapter({ result: {} }),
+    logRoot: join(root, "logs"),
+    globalLimit: 4,
+  });
+  assert.equal((await getTask(db, "t1"))?.state, "completed");
+  assert.equal((await getStepOutputs(db, "t1")).a.last_stdout.trimEnd(), "||");
+});
+
 // 元の brief のテストは「テストが失敗したらエージェントに差し戻し、2周目で通る」と
 // 銘打ちながら、常に成功するモックと「常に見つからないファイルを見る」コマンドを
 // 組み合わせていたため、名前どおりには決して通らず、実際には

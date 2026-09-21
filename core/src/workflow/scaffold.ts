@@ -184,6 +184,11 @@ export function defaultWorkflowYamlFor(baseBranch: string | undefined): string {
 #
 # command ステップはクラッシュ復帰時に頭から再実行されるので、
 # 再実行しても安全なコマンドにすること（grep や pnpm test は安全、gh pr create は危険）。
+#
+# この雛形は PR を開くステップを持たない（gh pr create は再実行で二重に効くため）。
+# 足すときは PR 本文に {{ issue.closes }} を入れる。Intake から投入されたタスクの PR は
+# sub-issue を閉じ、Intake 由来でないタスクでは空文字になる。例（--base は雛形を作った時点の値）:
+#   run: "git push -u origin HEAD && { gh pr view --json url --jq .url || { cat .doctrine-out/implement-notes.md; if [ -n '{{ issue.closes }}' ]; then printf '\\\\n%s\\\\n' '{{ issue.closes }}'; fi; } | gh pr create --base ${base} --title \\"{{ task.title }}\\" --body-file -; }"
 name: ${DEFAULT_WORKFLOW_NAME}
 steps:
   - id: plan

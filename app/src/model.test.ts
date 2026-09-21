@@ -385,6 +385,10 @@ const row = (o: Partial<TaskSummary> = {}): TaskSummary => ({
   priority: 2,
   created_at: "2026-09-18T00:00:00.000Z",
   updated_at: "2026-09-18T00:10:00.000Z",
+  intake_id: null,
+  intake_process_id: null,
+  issue_url: null,
+  parent_issue_url: null,
   ...o,
 });
 

@@ -7,6 +7,7 @@ function inputOf(over: Partial<GuidePromptInput> = {}): GuidePromptInput {
   return {
     ctx: {
       task: { id: "t1", title: "タイトル", prompt: "Issue #49 を実装する", branch: "b" },
+      issue: { url: null, parent_url: null },
       worktree: { path: "/w" },
       project: { path: "/p" },
       steps: {},
