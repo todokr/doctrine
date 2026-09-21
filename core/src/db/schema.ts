@@ -30,6 +30,31 @@ export type StepRunStatus =
   /** 非0で終わった（却下された）が onFailure / onReject の goto で前のステップへ戻った。 */
   | "bounced";
 
+/** Intake の状態と遷移は 2026-09-21-intake-core-design.md 5 章。 */
+export type IntakeState =
+  | "investigating"
+  | "answering"
+  | "decomposing"
+  | "reviewing"
+  | "active"
+  | "needs_attention"
+  | "completed"
+  | "canceled";
+
+export type IntakeRunPurpose = "investigate" | "decompose" | "revise";
+
+export type IntakeRunStatus =
+  | "queued"
+  | "running"
+  | "success"
+  | "failed"
+  | "rate_limited"
+  | "interrupted";
+
+export type IntakeCommentTarget = "artifact" | "process" | "whole";
+
+export type PrState = "OPEN" | "MERGED" | "CLOSED";
+
 export interface ProjectsTable {
   id: Generated<number>;
   path: string;
@@ -60,6 +85,12 @@ export interface TasksTable {
   resumed: Generated<number>;
   created_at: string;
   updated_at: string;
+  /** intake_id と intake_process_id は両方 null か両方非 null（0009 の CHECK）。 */
+  intake_id: string | null;
+  intake_process_id: string | null;
+  /** このタスクが実装する sub-issue の URL。 */
+  issue_url: string | null;
+  parent_issue_url: string | null;
 }
 
 export interface TaskSessionsTable {
@@ -116,6 +147,122 @@ export interface RateLimitSamplesTable {
   resets_at: string | null;
 }
 
+/**
+ * JSON の列（attention_reason・questions・answers・pfd・replies・output・issues）は
+ * 文字列のまま持つ。中身の型は shared/intake/ が定義し、この層は形を知らない。
+ */
+export interface IntakesTable {
+  id: string;
+  project_id: number;
+  issue_url: string;
+  issue_node_id: string;
+  issue_title: string;
+  state: IntakeState;
+  /** 0/1。1 は承認済みの計画があり、改訂の中にいること。 */
+  revising: Generated<number>;
+  attention_reason: string | null;
+  dispatch_paused: Generated<number>;
+  worktree_path: string | null;
+  claude_session_id: string | null;
+  child_pid: number | null;
+  child_started_at: string | null;
+  rate_limited_until: string | null;
+  created_at: string;
+  updated_at: string;
+  ended_at: string | null;
+}
+
+export interface IntakeRunsTable {
+  id: Generated<number>;
+  intake_id: string;
+  purpose: IntakeRunPurpose;
+  attempt: number;
+  status: IntakeRunStatus;
+  /** queued の間は null。 */
+  started_at: string | null;
+  ended_at: string | null;
+  log_path: string;
+  cost_usd: number | null;
+  num_turns: number | null;
+  duration_ms: number | null;
+  /** 検証を通った出力の JSON。 */
+  output: string | null;
+  /** 検証に落ちた理由（string[] の JSON）。 */
+  issues: string | null;
+  permission_denials: string | null;
+}
+
+export interface IntakeQuestionSetsTable {
+  id: Generated<number>;
+  intake_id: string;
+  run_id: number;
+  questions: string;
+  /** 回答前は null。 */
+  answers: string | null;
+  created_at: string;
+  answered_at: string | null;
+}
+
+export interface IntakeDraftsTable {
+  id: Generated<number>;
+  intake_id: string;
+  /** Intake ごとに 1 から。 */
+  seq: number;
+  run_id: number;
+  /** 正規化した PFD の JSON。書いたら変えない。 */
+  pfd: string;
+  /** pfd の文字列の SHA-256（16 進）。 */
+  hash: string;
+  /** コメントへの返答の JSON。無ければ "[]"。 */
+  replies: string;
+  created_at: string;
+}
+
+export interface IntakeCommentsTable {
+  id: Generated<number>;
+  intake_id: string;
+  draft_id: number;
+  target_kind: IntakeCommentTarget;
+  /** whole のときだけ null（0009 の CHECK）。 */
+  target_id: string | null;
+  body: string;
+  created_at: string;
+}
+
+export interface IntakeApprovalsTable {
+  id: Generated<number>;
+  intake_id: string;
+  draft_id: number;
+  hash: string;
+  approved_at: string;
+}
+
+export interface IntakeProcessesTable {
+  intake_id: string;
+  process_id: string;
+  sub_issue_url: string | null;
+  sub_issue_node_id: string | null;
+  /** sub-issue の本文を最後に揃えた内容のハッシュ。 */
+  sub_issue_hash: string | null;
+  sub_issue_closed: Generated<number>;
+  current_task_id: string | null;
+  human_note: string | null;
+  human_done_at: string | null;
+  /** 改訂で計画から消えた時刻。行は消さない。 */
+  retired_at: string | null;
+}
+
+export interface PrObservationsTable {
+  task_id: string;
+  pr_number: number;
+  pr_url: string;
+  state: PrState;
+  base_ref: string;
+  merged_at: string | null;
+  merge_commit: string | null;
+  observed_at: string;
+}
+
 export interface Database {
   projects: ProjectsTable;
   tasks: TasksTable;
@@ -123,6 +270,14 @@ export interface Database {
   step_outputs: StepOutputsTable;
   task_sessions: TaskSessionsTable;
   rate_limit_samples: RateLimitSamplesTable;
+  intakes: IntakesTable;
+  intake_runs: IntakeRunsTable;
+  intake_question_sets: IntakeQuestionSetsTable;
+  intake_drafts: IntakeDraftsTable;
+  intake_comments: IntakeCommentsTable;
+  intake_approvals: IntakeApprovalsTable;
+  intake_processes: IntakeProcessesTable;
+  pr_observations: PrObservationsTable;
 }
 
 export type Db = Kysely<Database>;
@@ -131,3 +286,11 @@ export type ProjectRow = Selectable<ProjectsTable>;
 export type TaskRow = Selectable<TasksTable>;
 export type StepRunRow = Selectable<StepRunsTable>;
 export type RateLimitRow = Selectable<RateLimitSamplesTable>;
+export type IntakeRow = Selectable<IntakesTable>;
+export type IntakeRunRow = Selectable<IntakeRunsTable>;
+export type IntakeQuestionSetRow = Selectable<IntakeQuestionSetsTable>;
+export type IntakeDraftRow = Selectable<IntakeDraftsTable>;
+export type IntakeCommentRow = Selectable<IntakeCommentsTable>;
+export type IntakeApprovalRow = Selectable<IntakeApprovalsTable>;
+export type IntakeProcessRow = Selectable<IntakeProcessesTable>;
+export type PrObservationRow = Selectable<PrObservationsTable>;

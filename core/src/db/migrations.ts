@@ -528,6 +528,168 @@ const migrations: Record<string, Migration> = {
       }
     },
   },
+
+  /**
+   * Intake（2026-09-21-intake-core-design.md 4 章）。intakes とその回ごとの実行・質問・案・
+   * コメント・承認・プロセスの進行、見張りが見た PR の事実を持つ表を足し、tasks に
+   * Intake への紐づけの列を足す。
+   *
+   * tasks の 4 列は ALTER TABLE ADD COLUMN で足せる（0005 のような再構築は要らない）。
+   * 既定値の無い列なら REFERENCES を、列に付ける CHECK なら他の列を参照するものも許されるため。
+   * CHECK は intake_process_id に付けるので、参照先の intake_id を先に足しておく。
+   *
+   * intake_process_id には外部キーを張らない。参照先 intake_processes の主キーは
+   * (intake_id, process_id) の複合で、ADD COLUMN では複合の外部キーを足せない。
+   * intake_processes の行は消さず retired_at を入れるだけなので、参照が切れることはない。
+   *
+   * 部分 unique index の名前を idx_ で始めないのは、0005 のテストが idx_ の索引の一覧を
+   * 固定しているため。
+   */
+  "0009_intake": {
+    // deno-lint-ignore no-explicit-any
+    async up(db: Kysely<any>) {
+      await db.schema.createTable("intakes")
+        .addColumn("id", "text", (c) => c.primaryKey())
+        .addColumn("project_id", "integer", (c) => c.notNull().references("projects.id"))
+        .addColumn("issue_url", "text", (c) => c.notNull())
+        .addColumn("issue_node_id", "text", (c) => c.notNull())
+        .addColumn("issue_title", "text", (c) => c.notNull())
+        .addColumn("state", "text", (c) =>
+          c.notNull().check(
+            sql`state IN ('investigating','answering','decomposing','reviewing','active','needs_attention','completed','canceled')`,
+          ))
+        .addColumn("revising", "integer", (c) => c.notNull().defaultTo(0))
+        .addColumn("attention_reason", "text")
+        .addColumn("dispatch_paused", "integer", (c) => c.notNull().defaultTo(0))
+        .addColumn("worktree_path", "text")
+        .addColumn("claude_session_id", "text")
+        .addColumn("child_pid", "integer")
+        .addColumn("child_started_at", "text")
+        .addColumn("rate_limited_until", "text")
+        .addColumn("created_at", "text", (c) => c.notNull())
+        .addColumn("updated_at", "text", (c) => c.notNull())
+        .addColumn("ended_at", "text")
+        .execute();
+      await sql`
+        CREATE UNIQUE INDEX uq_intakes_open_issue ON intakes(issue_url)
+        WHERE state NOT IN ('completed','canceled')
+      `.execute(db);
+
+      await db.schema.createTable("intake_runs")
+        .addColumn("id", "integer", (c) => c.primaryKey().autoIncrement())
+        .addColumn("intake_id", "text", (c) => c.notNull().references("intakes.id"))
+        .addColumn(
+          "purpose",
+          "text",
+          (c) => c.notNull().check(sql`purpose IN ('investigate','decompose','revise')`),
+        )
+        .addColumn("attempt", "integer", (c) => c.notNull())
+        .addColumn("status", "text", (c) =>
+          c.notNull().check(
+            sql`status IN ('queued','running','success','failed','rate_limited','interrupted')`,
+          ))
+        .addColumn("started_at", "text")
+        .addColumn("ended_at", "text")
+        .addColumn("log_path", "text", (c) => c.notNull())
+        .addColumn("cost_usd", "real")
+        .addColumn("num_turns", "integer")
+        .addColumn("duration_ms", "integer")
+        .addColumn("output", "text")
+        .addColumn("issues", "text")
+        .addColumn("permission_denials", "text")
+        .execute();
+
+      await db.schema.createTable("intake_question_sets")
+        .addColumn("id", "integer", (c) => c.primaryKey().autoIncrement())
+        .addColumn("intake_id", "text", (c) => c.notNull().references("intakes.id"))
+        .addColumn("run_id", "integer", (c) => c.notNull().references("intake_runs.id"))
+        .addColumn("questions", "text", (c) => c.notNull())
+        .addColumn("answers", "text")
+        .addColumn("created_at", "text", (c) => c.notNull())
+        .addColumn("answered_at", "text")
+        .execute();
+
+      await db.schema.createTable("intake_drafts")
+        .addColumn("id", "integer", (c) => c.primaryKey().autoIncrement())
+        .addColumn("intake_id", "text", (c) => c.notNull().references("intakes.id"))
+        .addColumn("seq", "integer", (c) => c.notNull())
+        .addColumn("run_id", "integer", (c) => c.notNull().references("intake_runs.id"))
+        .addColumn("pfd", "text", (c) => c.notNull())
+        .addColumn("hash", "text", (c) => c.notNull())
+        .addColumn("replies", "text", (c) => c.notNull())
+        .addColumn("created_at", "text", (c) => c.notNull())
+        .addUniqueConstraint("intake_drafts_seq", ["intake_id", "seq"])
+        .execute();
+
+      await db.schema.createTable("intake_comments")
+        .addColumn("id", "integer", (c) => c.primaryKey().autoIncrement())
+        .addColumn("intake_id", "text", (c) => c.notNull().references("intakes.id"))
+        .addColumn("draft_id", "integer", (c) => c.notNull().references("intake_drafts.id"))
+        .addColumn(
+          "target_kind",
+          "text",
+          (c) => c.notNull().check(sql`target_kind IN ('artifact','process','whole')`),
+        )
+        .addColumn("target_id", "text")
+        .addColumn("body", "text", (c) => c.notNull())
+        .addColumn("created_at", "text", (c) => c.notNull())
+        .addCheckConstraint(
+          "intake_comments_target_id_whole",
+          sql`(target_kind = 'whole') = (target_id IS NULL)`,
+        )
+        .execute();
+
+      await db.schema.createTable("intake_approvals")
+        .addColumn("id", "integer", (c) => c.primaryKey().autoIncrement())
+        .addColumn("intake_id", "text", (c) => c.notNull().references("intakes.id"))
+        .addColumn("draft_id", "integer", (c) => c.notNull().references("intake_drafts.id"))
+        .addColumn("hash", "text", (c) => c.notNull())
+        .addColumn("approved_at", "text", (c) => c.notNull())
+        .execute();
+
+      await db.schema.createTable("intake_processes")
+        .addColumn("intake_id", "text", (c) => c.notNull().references("intakes.id"))
+        .addColumn("process_id", "text", (c) => c.notNull())
+        .addColumn("sub_issue_url", "text")
+        .addColumn("sub_issue_node_id", "text")
+        .addColumn("sub_issue_hash", "text")
+        .addColumn("sub_issue_closed", "integer", (c) => c.notNull().defaultTo(0))
+        .addColumn("current_task_id", "text", (c) => c.references("tasks.id"))
+        .addColumn("human_note", "text")
+        .addColumn("human_done_at", "text")
+        .addColumn("retired_at", "text")
+        .addPrimaryKeyConstraint("intake_processes_pk", ["intake_id", "process_id"])
+        .execute();
+
+      await db.schema.createTable("pr_observations")
+        .addColumn("task_id", "text", (c) => c.primaryKey().references("tasks.id"))
+        .addColumn("pr_number", "integer", (c) => c.notNull())
+        .addColumn("pr_url", "text", (c) => c.notNull())
+        .addColumn(
+          "state",
+          "text",
+          (c) => c.notNull().check(sql`state IN ('OPEN','MERGED','CLOSED')`),
+        )
+        .addColumn("base_ref", "text", (c) => c.notNull())
+        .addColumn("merged_at", "text")
+        .addColumn("merge_commit", "text")
+        .addColumn("observed_at", "text", (c) => c.notNull())
+        .execute();
+
+      await db.schema.alterTable("tasks")
+        .addColumn("intake_id", "text", (c) => c.references("intakes.id"))
+        .execute();
+      await db.schema.alterTable("tasks")
+        .addColumn(
+          "intake_process_id",
+          "text",
+          (c) => c.check(sql`(intake_id IS NULL) = (intake_process_id IS NULL)`),
+        )
+        .execute();
+      await db.schema.alterTable("tasks").addColumn("issue_url", "text").execute();
+      await db.schema.alterTable("tasks").addColumn("parent_issue_url", "text").execute();
+    },
+  },
 };
 
 /** ファイルを動的 import しない（権限も要らず、deno check で型検査される）。 */
