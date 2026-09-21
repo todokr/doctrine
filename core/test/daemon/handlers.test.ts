@@ -21,6 +21,7 @@ import type {
   ServerEvent,
   TaskGuide,
   TaskSummary,
+  WorktreeEntry,
 } from "../../../shared/protocol.ts";
 import { branchNameFor } from "../../src/domain/worktree.ts";
 import { randomUUID } from "node:crypto";
@@ -29,7 +30,12 @@ import { fakeTracker } from "../helpers/tracker.ts";
 import { noopWatcher } from "../helpers/watcher.ts";
 import { getIntake, insertIntake, listIntakeRuns, updateIntake } from "../../src/db/intakes.ts";
 import { enqueueIntakeRun } from "../../src/intake/runner.ts";
-import { createDetachedWorktree, intakeWorktreePathFor } from "../../src/domain/worktree.ts";
+import {
+  createDetachedWorktree,
+  createWorktree,
+  intakeWorktreePathFor,
+  worktreePathFor,
+} from "../../src/domain/worktree.ts";
 import { question, questionsOut } from "../intake/runnerHelper.ts";
 
 const run = promisify(execFile);
@@ -381,12 +387,107 @@ test("task.list は state でフィルタできる", async () => {
   assert.equal(queued.length, 2);
 });
 
-test("worktree.list は孤児を報告する", async () => {
+test("worktree.list はタスク・Intake・孤児の worktree を全部返す", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  const project = await h("project.add", { path: repo }, NOOP_CONN) as { id: number };
+  const t = await h("task.create", { project: repo, title: "T", prompt: "p" }, NOOP_CONN) as {
+    id: string;
+  };
+  await tick(ctx);
+  await until(() => ctx.running.size === 0);
+  const row = (await getTask(ctx.db, t.id))!;
+  assert.equal(row.state, "suspended");
+
+  await addIntake(ctx, project.id);
+  const intakeWorktree = await createDetachedWorktree({
+    repoPath: repo,
+    worktreePath: intakeWorktreePathFor(repo, "i1"),
+    baseBranch: "main",
+  });
+  await updateIntake(ctx.db, "i1", { worktree_path: intakeWorktree });
+  const intake = (await getIntake(ctx.db, "i1"))!;
+
+  const orphan = await createWorktree({
+    repoPath: repo,
+    worktreePath: worktreePathFor(repo, "orphan"),
+    branch: "doctrine/orphan",
+    baseBranch: "main",
+  });
+  const fixed = new Date("2026-01-01T00:00:00.000Z");
+  await Deno.utime(orphan, fixed, fixed);
+
+  const res = await h("worktree.list", {}, NOOP_CONN) as WorktreeEntry[];
+  assert.equal(res.length, 3);
+  assert.deepEqual(res.find((e) => e.path === row.worktree_path), {
+    project: repo,
+    path: row.worktree_path!,
+    branch: row.branch,
+    task_id: t.id,
+    task_state: "suspended",
+    intake_id: null,
+    dirty: false,
+    age_basis: row.updated_at,
+  });
+  assert.deepEqual(res.find((e) => e.path === intakeWorktree), {
+    project: repo,
+    path: intakeWorktree,
+    branch: null,
+    task_id: null,
+    task_state: null,
+    intake_id: "i1",
+    dirty: false,
+    age_basis: intake.updated_at,
+  });
+  assert.deepEqual(res.find((e) => e.path === orphan), {
+    project: repo,
+    path: orphan,
+    branch: "doctrine/orphan",
+    task_id: null,
+    task_state: null,
+    intake_id: null,
+    dirty: false,
+    age_basis: "2026-01-01T00:00:00.000Z",
+  });
+});
+
+test("worktree.list は終端状態のタスクと未コミットの変更を返す", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
   await h("project.add", { path: repo }, NOOP_CONN);
-  const res = await h("worktree.list", {}, NOOP_CONN) as { orphans: string[] }[];
-  assert.ok(Array.isArray(res));
+  const t = await h("task.create", { project: repo, title: "T", prompt: "p" }, NOOP_CONN) as {
+    id: string;
+  };
+  await tick(ctx);
+  await until(() => ctx.running.size === 0);
+  await h("task.cancel", { task_id: t.id }, NOOP_CONN);
+  const row = (await getTask(ctx.db, t.id))!;
+  assert.equal(row.state, "canceled");
+  await writeFile(join(row.worktree_path!, "dirty.txt"), "未コミット\n");
+
+  const res = await h("worktree.list", {}, NOOP_CONN) as WorktreeEntry[];
+  assert.equal(res.length, 1);
+  assert.equal(res[0].task_id, t.id);
+  assert.equal(res[0].task_state, "canceled");
+  assert.equal(res[0].dirty, true);
+  assert.equal(res[0].age_basis, row.updated_at);
+});
+
+test("worktree.list はディスクから消えた worktree を返さない", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  await h("project.add", { path: repo }, NOOP_CONN);
+  const gone = await createWorktree({
+    repoPath: repo,
+    worktreePath: worktreePathFor(repo, "gone"),
+    branch: "doctrine/gone",
+    baseBranch: "main",
+  });
+  // git の登録は残る（prunable）が、ディスクにはもう無い
+  await rm(gone, { recursive: true, force: true });
+
+  const res = await h("worktree.list", {}, NOOP_CONN) as WorktreeEntry[];
+  assert.equal(res.length, 0);
 });
 
 test("DB の worktree_path は worktree.list と同じ表記（実パス）で保存される", async () => {
@@ -404,8 +505,11 @@ test("DB の worktree_path は worktree.list と同じ表記（実パス）で�
   assert.equal(saved, await Deno.realPath(saved));
   // DB から外すと、同じ表記のまま孤児として出てくる
   await ctx.db.updateTable("tasks").set({ worktree_path: null }).where("id", "=", t.id).execute();
-  const res = await h("worktree.list", {}, NOOP_CONN) as { orphans: string[] }[];
-  assert.deepEqual(res.flatMap((r) => r.orphans), [saved]);
+  const res = await h("worktree.list", {}, NOOP_CONN) as WorktreeEntry[];
+  assert.deepEqual(
+    res.filter((e) => e.task_id === null && e.intake_id === null).map((e) => e.path),
+    [saved],
+  );
 });
 
 test("未知のメソッドはエラーになる", async () => {
@@ -2354,10 +2458,13 @@ test("worktree.list は Intake の worktree を孤児にしない", async () => 
     baseBranch: "main",
   });
 
-  const before = await h("worktree.list", {}, NOOP_CONN) as { orphans: string[] }[];
-  assert.deepEqual(before.flatMap((r) => r.orphans), [worktree]);
+  const pick = (res: WorktreeEntry[]) =>
+    res.map((e) => ({ path: e.path, task_id: e.task_id, intake_id: e.intake_id }));
+
+  const before = await h("worktree.list", {}, NOOP_CONN) as WorktreeEntry[];
+  assert.deepEqual(pick(before), [{ path: worktree, task_id: null, intake_id: null }]);
 
   await updateIntake(ctx.db, "i1", { worktree_path: worktree });
-  const after = await h("worktree.list", {}, NOOP_CONN) as { orphans: string[] }[];
-  assert.deepEqual(after.flatMap((r) => r.orphans), []);
+  const after = await h("worktree.list", {}, NOOP_CONN) as WorktreeEntry[];
+  assert.deepEqual(pick(after), [{ path: worktree, task_id: null, intake_id: "i1" }]);
 });

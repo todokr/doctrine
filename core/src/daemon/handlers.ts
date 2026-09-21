@@ -15,7 +15,7 @@ import {
 } from "../db/tasks.ts";
 import { getStepRun, lastRejectedReview, lastStepRun, listStepRuns } from "../db/stepRuns.ts";
 import { commitStepBoundary, StateConflictError } from "../db/boundary.ts";
-import type { Db } from "../db/schema.ts";
+import type { Db, IntakeRow, TaskRow } from "../db/schema.ts";
 import { recentRateLimitSamples } from "../db/rateLimits.ts";
 import { normalizeResetsAt } from "../domain/rateLimit.ts";
 import {
@@ -47,8 +47,10 @@ import type { Tracker } from "../github/tracker.ts";
 import { applyApproval, runTask } from "../domain/engine.ts";
 import {
   branchNameFor,
+  canonical,
   createWorktree,
-  findOrphans,
+  hasUncommittedChanges,
+  listWorktrees,
   removeWorktree,
   UncommittedChangesError,
   worktreePathFor,
@@ -68,6 +70,7 @@ import type {
   StepView,
   TaskGuide,
   TaskLogs,
+  WorktreeEntry,
 } from "../../../shared/protocol.ts";
 import type { WarningLog } from "./warnings.ts";
 
@@ -468,18 +471,8 @@ export function createHandler(ctx: DaemonContext): Handler {
         } satisfies TaskGuide;
       }
 
-      case "worktree.list": {
-        const out: { project: string; orphans: string[] }[] = [];
-        for (const project of await listProjects(ctx.db)) {
-          const known = [
-            ...(await listTasks(ctx.db, { projectId: project.id })).map((t) => t.worktree_path),
-            ...(await listIntakes(ctx.db, { projectId: project.id, includeClosed: true }))
-              .map((i) => i.worktree_path),
-          ].filter((p): p is string => p !== null);
-          out.push({ project: project.path, orphans: await findOrphans(project.path, known) });
-        }
-        return out;
-      }
+      case "worktree.list":
+        return await worktreeEntries(ctx.db);
       case "worktree.remove": {
         const taskId = req(params, "task_id");
         const task = await getTask(ctx.db, taskId);
@@ -713,6 +706,50 @@ export function createHandler(ctx: DaemonContext): Handler {
         throw new Error(`未知のメソッドです: ${method}`);
     }
   };
+}
+
+/** 全プロジェクトの worktree。並びはプロジェクトの id 順、その中は git worktree list の順。 */
+async function worktreeEntries(db: Db): Promise<WorktreeEntry[]> {
+  const out: WorktreeEntry[] = [];
+  for (const project of await listProjects(db)) {
+    const tasks = new Map<string, TaskRow>();
+    for (const t of await listTasks(db, { projectId: project.id })) {
+      if (t.worktree_path !== null) tasks.set(await canonical(t.worktree_path), t);
+    }
+    const intakes = new Map<string, IntakeRow>();
+    for (const i of await listIntakes(db, { projectId: project.id, includeClosed: true })) {
+      if (i.worktree_path !== null) intakes.set(await canonical(i.worktree_path), i);
+    }
+    const entries = await Promise.all(
+      (await listWorktrees(project.path)).map(async (w): Promise<WorktreeEntry | null> => {
+        let stat: Deno.FileInfo;
+        try {
+          stat = await Deno.stat(w.path);
+        } catch (e) {
+          // git は実体の無い worktree も（prunable として）列挙する
+          if (e instanceof Deno.errors.NotFound) return null;
+          throw e;
+        }
+        const key = await canonical(w.path);
+        const task = tasks.get(key);
+        const intake = task ? undefined : intakes.get(key);
+        const age = task?.updated_at ?? intake?.updated_at ??
+          (stat.mtime ?? stat.birthtime ?? new Date()).toISOString();
+        return {
+          project: project.path,
+          path: w.path,
+          branch: w.branch,
+          task_id: task?.id ?? null,
+          task_state: task?.state ?? null,
+          intake_id: intake?.id ?? null,
+          dirty: await hasUncommittedChanges(w.path),
+          age_basis: age,
+        };
+      }),
+    );
+    out.push(...entries.filter((e): e is WorktreeEntry => e !== null));
+  }
+  return out;
 }
 
 /**
