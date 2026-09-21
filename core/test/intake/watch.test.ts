@@ -288,6 +288,48 @@ test("dispatch_paused の Intake は投入しない", async () => {
   assert.equal(ft.issues.length, 4);
 });
 
+test("改訂中の Intake は PR のマージを観測するが、下流を投入しない", async () => {
+  const { db, projectId, pw, watcher } = await setup();
+  await watcher.request(projectId);
+  await finishHuman3(db);
+  await updateIntake(db, "i1", { state: "decomposing", revising: 1 });
+  await mergeOf(pw, db, "1");
+  await watcher.request(projectId);
+
+  const task1 = (await currentTask(db, "1"))!;
+  assert.equal((await getPrObservation(db, task1))?.state, "MERGED");
+  assert.equal((await listTasks(db)).length, 1);
+
+  await updateIntake(db, "i1", { state: "active", revising: 0 });
+  await watcher.request(projectId);
+  assert.equal((await listTasks(db)).filter((t) => t.intake_process_id === "2").length, 1);
+});
+
+test("終わった Intake は revising が残っていても PR を観測しない", async () => {
+  const { db, projectId, pw, watcher } = await setup();
+  await watcher.request(projectId);
+  await updateIntake(db, "i1", { state: "canceled", revising: 1 });
+  await mergeOf(pw, db, "1");
+  const before = pw.calls.length;
+  await watcher.request(projectId);
+  assert.equal(pw.calls.length, before);
+});
+
+test("改訂中の Intake の sub-issue は触らない", async () => {
+  const { db, projectId, ft, watcher } = await setup();
+  await watcher.request(projectId);
+  await updateIntake(db, "i1", { state: "decomposing", revising: 1 });
+  await updateProcess(db, "i1", "4", { retired_at: now() });
+  const before = ft.calls.length;
+
+  await watcher.request(projectId);
+
+  const sub = ft.calls.slice(before).filter((c) =>
+    c.op === "createSubIssue" || c.op === "updateIssue" || c.op === "closeIssue"
+  );
+  assert.deepEqual(sub, []);
+});
+
 test("走っている周の最中に届いた要求は、その周が終わった後にもう 1 周回す", async () => {
   const { projectId, pw, watcher } = await setup();
   await watcher.request(projectId);

@@ -116,6 +116,7 @@ function comment(id: number, body: string): IntakeCommentRow {
     target_kind: "process",
     target_id: "2",
     body,
+    run_id: null,
     created_at: "",
   };
 }

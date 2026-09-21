@@ -4,7 +4,11 @@ import {
   buildInitialPrompt,
   buildInvalidOutputMessage,
   buildNoQuestionsMessage,
+  buildRevisionPrompt,
 } from "../../src/intake/prompt.ts";
+import { frozenPart } from "../../src/intake/pfd/validate.ts";
+import { buildFeedback } from "../../../shared/intake/feedback.ts";
+import { example } from "./pfd/fixture.ts";
 
 const issue = {
   url: "https://github.com/o/r/issues/1",
@@ -36,4 +40,42 @@ test("調査の検証落ちには、質問だけを返す旨が添わる", () =>
 
 test("質問が無かったときの文面は PFD を返させる", () => {
   assert.match(buildNoQuestionsMessage(), /kind: "pfd"/);
+});
+
+test("buildRevisionPrompt: 承認済みの計画・固定された部分・決定・コメントを載せる", () => {
+  const text = buildRevisionPrompt({
+    issue,
+    approved: example(),
+    frozen: frozenPart(example(), new Set(["1"])),
+    retiredProcessIds: ["9"],
+    decisions: { q1: "選んだ選択肢: 案A（a）" },
+    feedback: buildFeedback(example(), [
+      { target_kind: "process", target_id: "4", body: "画面を分けて" },
+    ]),
+  });
+  assert.match(text, /## 承認済みの計画/);
+  assert.match(text, /## 固定された部分/);
+  assert.match(text, /マイグレーションを書く/);
+  assert.match(text, /new-table/);
+  assert.match(text, /schema/);
+  assert.match(text, /## 使えない id/);
+  assert.match(text, /- 9/);
+  assert.match(text, /q1: 選んだ選択肢: 案A（a）/);
+  assert.match(text, /画面を分けて/);
+  assert.match(text, /集計を出す/);
+  assert.match(text, /割りすぎを避ける/);
+  assert.match(text, /導けること/);
+});
+
+test("buildRevisionPrompt: 固定された部分が無ければそう書く", () => {
+  const text = buildRevisionPrompt({
+    issue,
+    approved: example(),
+    frozen: { processes: [], artifacts: [] },
+    retiredProcessIds: [],
+    decisions: {},
+    feedback: "コメント",
+  });
+  assert.match(text, /固定された部分はありません/);
+  assert.doesNotMatch(text, /## 使えない id/);
 });

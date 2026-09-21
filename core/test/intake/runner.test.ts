@@ -212,7 +212,7 @@ const rejectComments = [
 
 async function reject(): Promise<void> {
   const draft = (await latestDraft(f.db, "i1"))!;
-  await insertComments(f.db, "i1", draft.id, rejectComments);
+  await insertComments(f.db, "i1", draft.id, rejectComments, null);
   await updateIntake(f.db, "i1", { state: "decomposing" });
   await enqueueIntakeRun(f.db, "i1", "decompose", opts());
 }

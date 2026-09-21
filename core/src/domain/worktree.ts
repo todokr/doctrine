@@ -135,6 +135,11 @@ export async function createDetachedWorktree(o: {
   return await canonical(o.worktreePath);
 }
 
+/** 既存の worktree を ref の位置へ detached で進める（改訂に入るとき。spec 7 章）。 */
+export async function checkoutDetached(worktreePath: string, ref: string): Promise<void> {
+  await runCommand("git", ["-C", worktreePath, "checkout", "--detach", ref]);
+}
+
 export async function hasUncommittedChanges(worktreePath: string): Promise<boolean> {
   const { stdout } = await runCommand("git", ["-C", worktreePath, "status", "--porcelain"]);
   return stdout.trim().length > 0;

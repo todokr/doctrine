@@ -690,6 +690,25 @@ const migrations: Record<string, Migration> = {
       await db.schema.alterTable("tasks").addColumn("parent_issue_url", "text").execute();
     },
   },
+
+  /**
+   * 承認後の改訂の範囲（2026-09-21-intake-core-design.md 5・7 章）。同じ承認済みの案に
+   * 改訂の開始コメントが複数回付き、放棄した改訂の実行や案が残るので、draft_id だけでは
+   * 今の改訂の会話を選べない。intakes.revision_run_id が今の改訂の最初の実行を指し、
+   * 開始コメントだけが intake_comments.run_id で同じ実行を指す。既定値の無い列なので
+   * 0009 と同じく ADD COLUMN で REFERENCES を付けられる。
+   */
+  "0010_intake_revision": {
+    // deno-lint-ignore no-explicit-any
+    async up(db: Kysely<any>) {
+      await db.schema.alterTable("intakes")
+        .addColumn("revision_run_id", "integer", (c) => c.references("intake_runs.id"))
+        .execute();
+      await db.schema.alterTable("intake_comments")
+        .addColumn("run_id", "integer", (c) => c.references("intake_runs.id"))
+        .execute();
+    },
+  },
 };
 
 /** ファイルを動的 import しない（権限も要らず、deno check で型検査される）。 */

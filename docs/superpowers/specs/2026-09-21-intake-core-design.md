@@ -23,7 +23,7 @@ Intake の PRD は要求だけを定め、テーブル定義・RPC の形・エ�
 | --- | --- | --- |
 | 置き場所 | `core/src/intake/`（ドメイン）、`core/src/github/`（`gh`）、`shared/intake/`（アプリと共有する型と純関数） | 3 |
 | GitHub への口 | `Tracker` と `PrWatcher` の 2 つの interface に閉じる。Issue の参照は URL で持つ | 3 |
-| データ | 追記だけの表（案・質問・回答・コメント・承認）と、進行の表（`intakes`・`intake_processes`）に分ける。マイグレーションは `0009_intake` | 4 |
+| データ | 追記だけの表（案・質問・回答・コメント・承認）と、進行の表（`intakes`・`intake_processes`）に分ける。マイグレーションは `0009_intake` と、改訂の範囲の列を足す `0010_intake_revision` | 4 |
 | 同じ Issue の Intake | 終わっていないものは 1 つだけ。部分 unique index で固める | 4 |
 | 状態 | `IntakeState` 8 値と `revising` フラグ。「改訂中」は状態にしない | 5 |
 | 進行中の失敗 | sub-issue や `gh` の失敗は Intake の状態を変えない。見張りのエラーとプロセスの状態で見せる | 5・10・11 |
@@ -97,11 +97,11 @@ export type PrFact = {
 
 | テーブル | 1 行が表すもの | 主な列 |
 | --- | --- | --- |
-| `intakes` | Intake 1 件 | `id`(uuid) `project_id` `issue_url` `issue_node_id` `issue_title` `state` `revising`(0/1) `attention_reason`(null 可) `dispatch_paused`(0/1) `worktree_path` `claude_session_id` `child_pid` `child_started_at` `rate_limited_until` `created_at` `updated_at` `ended_at` |
+| `intakes` | Intake 1 件 | `id`(uuid) `project_id` `issue_url` `issue_node_id` `issue_title` `state` `revising`(0/1) `attention_reason`(null 可) `dispatch_paused`(0/1) `worktree_path` `claude_session_id` `child_pid` `child_started_at` `rate_limited_until` `revision_run_id`(今の改訂の最初の `revise` 実行。改訂中でなければ null。`0010_intake_revision`) `created_at` `updated_at` `ended_at` |
 | `intake_runs` | 分解エージェントの実行 1 回（`step_runs` に当たる） | `id` `intake_id` `purpose`(`investigate`/`decompose`/`revise`) `attempt` `status`(`queued`/`running`/`success`/`failed`/`rate_limited`/`interrupted`) `started_at` `ended_at` `log_path` `cost_usd` `num_turns` `duration_ms` `output`(検証を通った JSON) `issues`(検証に落ちた理由) `permission_denials` |
 | `intake_question_sets` | 一度に届いた質問のまとまり（Q-2・Q-6） | `id` `intake_id` `run_id` `questions`(JSON) `answers`(JSON、回答前は null) `answered_at` |
 | `intake_drafts` | PFD の案 1 回分。**書いたら変えない** | `id` `intake_id` `seq` `run_id` `pfd`(正規化した JSON 文字列) `hash` `replies`(R-7、コメントへの返答の JSON) `created_at` |
-| `intake_comments` | 差し戻し・改訂のコメント 1 件（R-4） | `id` `intake_id` `draft_id`(改訂の開始時は承認済みの案) `target_kind`(`artifact`/`process`/`whole`) `target_id`(`whole` は null) `body` `created_at` |
+| `intake_comments` | 差し戻し・改訂のコメント 1 件（R-4） | `id` `intake_id` `draft_id`(改訂の開始時は承認済みの案) `target_kind`(`artifact`/`process`/`whole`) `target_id`(`whole` は null) `body` `run_id`(改訂の開始コメントだけが、その改訂の最初の実行を指す。それ以外は null。`0010_intake_revision`) `created_at` |
 | `intake_approvals` | 承認 1 回（R-8・R-10） | `id` `intake_id` `draft_id` `hash` `approved_at` |
 | `intake_processes` | 承認済みの計画にあるプロセス 1 つの進行 | `intake_id` `process_id` `sub_issue_url` `sub_issue_node_id` `sub_issue_hash`(本文を最後に揃えた内容のハッシュ) `sub_issue_closed` `current_task_id` `human_note` `human_done_at` `retired_at`(改訂で消えた)。主キーは (`intake_id`, `process_id`) |
 | `pr_observations` | 見張りで見た PR の最新の事実 | `task_id`(主キー) `pr_number` `pr_url` `state` `base_ref` `merged_at` `merge_commit` `observed_at` |
@@ -237,6 +237,9 @@ export type Pfd = { title: string; goal: string[]; artifacts: Artifact[]; proces
 - **改訂の固定（C-3）**: 固定集合は「`current_task_id` を持つか `human_done_at` のあるプロセス」と「それらの入力と出力の成果物」である。
   新しい案は、固定集合の各要素を**正規化した JSON が同じ**形で含まなければならない（id・中身・入出力とも）。違えば `frozen_changed` で弾く。
   決定の成果物は、固定されたプロセスの入力なら固定され、そうでなければ改訂の中で問い直してよい
+  - 取りやめたプロセス（`retired_at` のある行）の id は、後の改訂で使い回せない（`retired_reused`）。
+    `validatePfd` の規則ではなく、`core/src/intake/revision.ts` が DB の履歴から検証する。
+    行を生き返らせず、閉じた sub-issue を目印で採用してしまうことも避ける
 - **D-2**: 実行の順序は案に書かせない。着手できるプロセスと並列に走れる組は、成果物の入出力から 11 章の状態計算で決まる
 - **PFD 記法の出典**（PRD 13 章）: PFD spec 10 章の「PFD の記法の出典」の未決をそのまま引き継ぐ。記法の規則は変えないので、コアの決定には影響しない。
   PFD spec 10 章のほかの未決のうち、止まったタスクの再投入と承認後の改訂は、PRD の C-6 と C-1〜C-4 が要求に採ったので、それぞれ 11 章と本章が実装する
@@ -252,7 +255,7 @@ export type Pfd = { title: string; goal: string[]; artifacts: Artifact[]; proces
 | 書き換えない保証（D-4） | 道具の制限に加え、実行の後に `git status --porcelain` を見る。変更があれば出力を捨て、worktree を `git checkout -- .` と `git clean -fd` で戻し、`needs_attention`（`wrote_repository`）にする | 道具の許可は先頭一致なので、抜け道を 2 重に塞ぐ |
 | PFD と質問の受け取り方 | `--json-schema` の構造化出力。ファイルに書かせない。形は下の `DecomposerOutput` | `core/src/domain/stepRunner.ts` の `runGuideStep` と同じ型である。ファイルを読む経路（realpath の検査など）が要らず、書き込みの道具を許さずに済む |
 | 実行の種類（`purpose`） | `investigate`: 開始時と、調査で落ちた後のやり直し。`questions` だけを許す。`decompose`: 回答の後・差し戻しの後・分解で落ちた後のやり直し。`questions` と `pfd` のどちらも許す。`revise`: 改訂に入った後。`decompose` と同じ出力を許し、prompt に承認済みの計画と固定集合を載せる | 調査で落ちたものを `decompose` で再開すると、質問を一度も出さずに分解へ入る（5 章で `needs_attention → investigating` を持つ理由） |
-| 会話 | 開始から最初の承認までは 1 つの会話（調査 → 回答 → 分解 → 差し戻し）。改訂に入るときに新しい会話を始め、承認済みの計画・固定集合・決定の記録・改訂のコメントを prompt に載せる。`intake.retry` は同じ会話を続ける（会話が作られる前に落ちたなら新しく始める）。最初の呼び出しが上限で弾かれたら、会話の記録を消して新しい id で始め直す（`engine.ts` のタスクと同じ） | R-6（差し戻しは同じ会話の続き）。改訂は数日後で baseBranch も進んでいるので、古い会話を続けない |
+| 会話 | 開始から最初の承認までは 1 つの会話（調査 → 回答 → 分解 → 差し戻し）。改訂に入るときに新しい会話を始め、承認済みの計画・固定集合・決定の記録・改訂のコメントを prompt に載せる。`intake.retry` は同じ会話を続ける（会話が作られる前に落ちたなら新しく始める）。最初の呼び出しが上限で弾かれたら、会話の記録を消して新しい id で始め直す（`engine.ts` のタスクと同じ） | R-6（差し戻しは同じ会話の続き）。改訂は数日後で baseBranch も進んでいるので、古い会話を続けない。改訂の会話の範囲は `revision_run_id` 以降の実行と案で、開始コメントは `intake_comments.run_id` で選ぶ（改訂をやめて入り直したとき、前の改訂の実行・案・コメントを持ち込まない） |
 | 検証に通らないとき | 違反の一覧を同じ会話へ返して直させる。やり直しは毎回 `adapter.resume` の新しい子プロセスなので、`intake_runs` の行が 1 回ごとに立つ。**同じ `purpose` の行を新しい順に見て、検証落ち（`status = 'failed'` かつ `issues` あり）が 3 行続いたら** `needs_attention`（`invalid_output`）にする。上限待ちの行（`rate_limited`）は数えず、連続も切らない。`attempt` は実行を新しく立てるたびに進め、上限待ちからの再開では進めない（ログのパスを実行ごとに分けるため） | Review Guide の既定（自分へ戻る・3 回）と揃える。数え方は `core/src/domain/rateLimit.ts` の `consecutiveRateLimited` が `step_runs` の連続を数えるのと同じ形である |
 | エージェント自体の失敗 | result が ok でない、または子が落ちた場合は、ただちに `needs_attention`（`agent_failed`）にする。やり直しは人が `intake.retry` で行う | PRD 8 章の「エージェントの失敗 → 要確認」 |
 | 実行枠（D-6） | **全体枠だけを取り、プロジェクト枠は取らない。** `currentUsage`（`core/src/domain/scheduler.ts`）が `intake_runs.status = 'running'` の数を全体枠に足す。受付は tick の中で、queued のタスクより先に `intake_runs.status = 'queued'` を受け付ける | 全体枠の理由（マシンの負荷と API のコスト）は分解にも当たる。プロジェクト枠の理由（同じリポジトリでのマージの困難）は、読むだけの分解には当たらない。分解は人を待たせているので先に通す。D-6 の「同じ実行枠」を、枠の理由が当てはまる分だけ同じ規則に従う、と読む |

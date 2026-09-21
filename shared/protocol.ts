@@ -403,6 +403,13 @@ export type Methods = {
     params: { intake_id: string; draft_id: number; hash: string };
     result: IntakeSummary;
   };
+  /** 進行中の Intake を改訂に入れる。comments は承認済みの案の要素か計画全体へのもの（C-1・C-2）。 */
+  "intake.revise": {
+    params: { intake_id: string; comments: NewComment[] };
+    result: IntakeSummary;
+  };
+  /** 改訂をやめ、承認済みの計画に戻る（C-5）。 */
+  "intake.abandonRevision": { params: { intake_id: string }; result: IntakeSummary };
   "intake.draft": { params: { intake_id: string; draft_id: number }; result: PfdDraft };
   /** 承認前でも呼べる。入力の決定や人の完了が無ければ、投入と同じ理由で失敗する（R-3）。 */
   "intake.processPrompt": {

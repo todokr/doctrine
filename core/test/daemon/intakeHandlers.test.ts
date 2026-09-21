@@ -19,7 +19,7 @@ import { fakePrWatcher } from "../helpers/prWatcher.ts";
 import { makeRepo, until } from "../helpers/repo.ts";
 import { fakeTracker } from "../helpers/tracker.ts";
 import { pfdOut, question, questionsOut } from "../intake/runnerHelper.ts";
-import { example } from "../intake/pfd/fixture.ts";
+import { example, revised } from "../intake/pfd/fixture.ts";
 
 const ISSUE = "https://github.com/o/r/issues/1";
 const NOOP_CONN = { follow() {}, unfollow() {}, isFollowing: () => false };
@@ -479,10 +479,10 @@ type TaskListItem = {
 const processOf = (d: IntakeDetail, id: string) => d.processes.find((p) => p.id === id)!;
 
 /** 承認して、見張りの 1 周（sub-issue の作成とプロセス 1 の投入）が終わるまで進める。 */
-async function toActive() {
+async function toActive(o: { adapter?: AgentAdapter } = {}) {
   const ft = statefulTracker();
   const pw = fakePrWatcher();
-  const s = await setup({ tracker: ft.tracker, prWatcher: pw.prWatcher });
+  const s = await setup({ tracker: ft.tracker, prWatcher: pw.prWatcher, adapter: o.adapter });
   const reviewing = await toReviewing(s.ctx, s.call);
   await s.call("intake.approve", {
     intake_id: reviewing.id,
@@ -847,5 +847,160 @@ test("intake.processPrompt は人のプロセスと案に無いプロセスを�
   await assert.rejects(
     () => call("intake.processPrompt", { ...params, process_id: "99" }),
     /案にありません/,
+  );
+});
+
+const reviseAdapter = () =>
+  createMockAdapter({
+    result: {},
+    sequence: [
+      questionsOut([question("q1")]),
+      pfdOut(example()),
+      pfdOut(revised(), [{ commentId: 1, reply: "分けました" }]),
+    ],
+  });
+
+const REVISE_COMMENTS = [{ target_kind: "process", target_id: "4", body: "画面を分けて" }];
+
+test("改訂に入ると自動 dispatch が止まり、走っているタスクは止めない", async () => {
+  const { ctx, events, call, id } = await toActive({ adapter: reviseAdapter() });
+
+  const revising = await call<IntakeSummary>("intake.revise", {
+    intake_id: id,
+    comments: REVISE_COMMENTS,
+  });
+
+  assert.equal(revising.state, "decomposing");
+  assert.equal(revising.revising, true);
+  assert.ok(
+    events.some((e) =>
+      e.event === "intake.stateChanged" && e.intake_id === id && e.from === "active" &&
+      e.to === "decomposing" && e.revising === true
+    ),
+  );
+  assert.equal((await tasksOf(call))[0].state, "queued");
+  const queued = await queuedRuns(ctx, id);
+  assert.deepEqual(queued.map((r) => r.purpose), ["revise"]);
+  const intake = (await getIntake(ctx.db, id))!;
+  assert.equal(intake.claude_session_id, null);
+  assert.equal(intake.revision_run_id, queued[0].id);
+});
+
+test("改訂中はマージを検知しても投入されない", async () => {
+  const { call, pw, id } = await toActive({ adapter: reviseAdapter() });
+  await call("intake.completeHumanProcess", { intake_id: id, process_id: "3", note: "x" });
+  const [first] = await tasksOf(call);
+  await call("intake.revise", { intake_id: id, comments: REVISE_COMMENTS });
+  pw.prs.set(first.branch, [MERGED]);
+
+  const detail = await call<IntakeDetail>("intake.refresh", { intake_id: id });
+
+  assert.equal(processOf(detail, "1").state, "merged");
+  const two = processOf(detail, "2");
+  assert.equal(two.state, "ready");
+  assert.equal((two as { blockedBy: string | null }).blockedBy, "revising");
+  assert.equal((await tasksOf(call)).length, 1);
+});
+
+test("再承認で sub-issue が整えられ、投入が再開する", async () => {
+  const { ctx, call, ft, pw, id } = await toActive({ adapter: reviseAdapter() });
+  await call("intake.completeHumanProcess", { intake_id: id, process_id: "3", note: "x" });
+  const [first] = await tasksOf(call);
+  const before = await call<IntakeDetail>("intake.get", { intake_id: id });
+  const subIssue4 = processOf(before, "4").sub_issue_url!;
+
+  await call("intake.revise", { intake_id: id, comments: REVISE_COMMENTS });
+  await tickUntil(ctx, id, "reviewing");
+  const reviewing = await call<IntakeDetail>("intake.get", { intake_id: id });
+  const approved = await call<IntakeSummary>("intake.approve", {
+    intake_id: id,
+    draft_id: reviewing.latest_draft!.id,
+    hash: reviewing.latest_draft!.hash,
+  });
+  await until(() => ctx.intakeWatcher.idle());
+
+  assert.equal(approved.state, "active");
+  assert.equal(approved.revising, false);
+  const issue4 = ft.issues.find((i) => i.ref.url === subIssue4)!;
+  assert.equal(issue4.state, "CLOSED");
+  assert.equal(issue4.closeReason, "not_planned");
+  const rows = await listProcesses(ctx.db, id);
+  assert.notEqual(rows.find((r) => r.process_id === "4")!.retired_at, null);
+  const after = await call<IntakeDetail>("intake.get", { intake_id: id });
+  assert.deepEqual(after.processes.map((p) => p.id), ["1", "2", "3", "4b"]);
+  assert.notEqual(processOf(after, "4b").sub_issue_url, null);
+
+  pw.prs.set(first.branch, [MERGED]);
+  await call("intake.refresh", { intake_id: id });
+  assert.ok((await tasksOf(call)).some((t) => t.intake_process_id === "2"));
+});
+
+test("改訂をやめると元の承認済みの計画に戻る", async () => {
+  const { ctx, call, pw, id } = await toActive({ adapter: reviseAdapter() });
+  const before = await call<IntakeDetail>("intake.get", { intake_id: id });
+  const [first] = await tasksOf(call);
+
+  await call("intake.revise", { intake_id: id, comments: REVISE_COMMENTS });
+  await tickUntil(ctx, id, "reviewing");
+  const reviewing = await call<IntakeDetail>("intake.get", { intake_id: id });
+  const abandoned = await call<IntakeSummary>("intake.abandonRevision", { intake_id: id });
+
+  assert.equal(abandoned.state, "active");
+  assert.equal(abandoned.revising, false);
+  const after = await call<IntakeDetail>("intake.get", { intake_id: id });
+  assert.equal(after.approval!.draft_id, before.approval!.draft_id);
+  assert.deepEqual(after.processes.map((p) => p.id), ["1", "2", "3", "4"]);
+  assert.equal((await queuedRuns(ctx, id)).length, 0);
+  await assert.rejects(
+    () =>
+      call("intake.approve", {
+        intake_id: id,
+        draft_id: reviewing.latest_draft!.id,
+        hash: reviewing.latest_draft!.hash,
+      }),
+    /承認できる状態ではありません/,
+  );
+
+  await call("intake.completeHumanProcess", { intake_id: id, process_id: "3", note: "x" });
+  pw.prs.set(first.branch, [MERGED]);
+  await call("intake.refresh", { intake_id: id });
+  assert.ok((await tasksOf(call)).some((t) => t.intake_process_id === "2"));
+});
+
+test("分解中に改訂をやめると、立っている実行を閉じる", async () => {
+  const { ctx, call, id } = await toActive({ adapter: reviseAdapter() });
+  await call("intake.revise", { intake_id: id, comments: REVISE_COMMENTS });
+
+  const abandoned = await call<IntakeSummary>("intake.abandonRevision", { intake_id: id });
+
+  assert.equal(abandoned.state, "active");
+  const revise = (await listIntakeRuns(ctx.db, id)).filter((r) => r.purpose === "revise");
+  assert.deepEqual(revise.map((r) => r.status), ["interrupted"]);
+});
+
+test("改訂の RPC は状態とコメントを確かめる", async () => {
+  const { ctx, call } = await setup();
+  const reviewing = await toReviewing(ctx, call);
+  await assert.rejects(
+    () => call("intake.revise", { intake_id: reviewing.id, comments: REVISE_COMMENTS }),
+    /改訂に入れる状態ではありません/,
+  );
+
+  const { call: activeCall, id } = await toActive({ adapter: reviseAdapter() });
+  await assert.rejects(
+    () => activeCall("intake.revise", { intake_id: id, comments: [] }),
+    /コメントが 1 つ以上必要です/,
+  );
+  await assert.rejects(
+    () =>
+      activeCall("intake.revise", {
+        intake_id: id,
+        comments: [{ target_kind: "process", target_id: "9", body: "x" }],
+      }),
+    /案に無い対象です/,
+  );
+  await assert.rejects(
+    () => activeCall("intake.abandonRevision", { intake_id: id }),
+    /改訂中ではありません/,
   );
 });

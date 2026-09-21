@@ -81,6 +81,23 @@ export function example(): Pfd {
   };
 }
 
+/** example() からプロセス 4 を除き、画面を 2 つに分けた 4b を足したもの（検証に通る）。 */
+export function revised(): Pfd {
+  const pfd = example();
+  pfd.processes = pfd.processes.filter((p) => p.id !== "4");
+  pfd.processes.push({
+    id: "4b",
+    name: "画面を 2 つに分けて繋ぐ",
+    actor: "agent",
+    inputs: ["endpoint"],
+    outputs: ["feature"],
+    purpose: "利用者が集計を見られるようにする",
+    steps: "GET /usage を呼び、グラフと表の 2 つの画面を足す",
+    done_when: "画面のテストが通る",
+  });
+  return pfd;
+}
+
 export const noContext: ValidateContext = { answeredQuestionIds: new Set(), frozen: null };
 
 /** example() に、質問 q1 の回答を指す成果物 policy を足し、プロセス 2 の入力に加えたもの。 */

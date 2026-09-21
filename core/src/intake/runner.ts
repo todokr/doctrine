@@ -9,7 +9,6 @@ import {
   type IntakePatch,
   type IntakeRunPatch,
   IntakeStateConflictError,
-  latestDraft,
   listComments,
   listDrafts,
   listIntakeRuns,
@@ -18,7 +17,15 @@ import {
   updateIntakeRun,
 } from "../db/intakes.ts";
 import { insertRateLimitSample, rateLimitsObservedSince } from "../db/rateLimits.ts";
-import type { Db, IntakeRow, IntakeRunPurpose, IntakeRunRow, IntakeState } from "../db/schema.ts";
+import type {
+  Db,
+  IntakeCommentRow,
+  IntakeDraftRow,
+  IntakeRow,
+  IntakeRunPurpose,
+  IntakeRunRow,
+  IntakeState,
+} from "../db/schema.ts";
 import { getProject } from "../db/tasks.ts";
 import { assertIntakeTransition } from "../domain/intakeStates.ts";
 import {
@@ -30,6 +37,7 @@ import { driveAgent, logPathFor, openLog, type RunnerDeps } from "../domain/step
 import { BUILTIN_APPEND_SYSTEM_PROMPT } from "../domain/systemPrompt.ts";
 import {
   changedPaths,
+  checkoutDetached,
   createDetachedWorktree,
   intakeWorktreePathFor,
   restoreWorktree,
@@ -41,12 +49,16 @@ import {
   decomposerJsonSchema,
   type DecomposerOutput,
 } from "../../../shared/intake/decomposer.ts";
+import { decisionTexts } from "../../../shared/intake/answerText.ts";
+import { buildFeedback } from "../../../shared/intake/feedback.ts";
+import type { IssueDetail } from "../../../shared/intake/github.ts";
 import { canonicalJson } from "../../../shared/intake/pfd.ts";
-import type { Question } from "../../../shared/intake/question.ts";
+import type { Answer, Question } from "../../../shared/intake/question.ts";
 import { consecutiveInvalid, continuationMessage, MAX_INVALID_OUTPUTS } from "./conversation.ts";
 import { checkDecomposerOutput } from "./output.ts";
 import { pfdHash } from "./pfd/hash.ts";
-import { buildInitialPrompt } from "./prompt.ts";
+import { buildInitialPrompt, buildRevisionPrompt } from "./prompt.ts";
+import { loadRevisionConstraints } from "./revision.ts";
 
 export { MAX_INVALID_OUTPUTS } from "./conversation.ts";
 
@@ -135,6 +147,13 @@ async function settle(db: Db, deps: IntakeRunnerDeps, s: Settle): Promise<boolea
         child_pid: null,
         child_started_at: null,
       }, { requireState: intake.state });
+      // 改訂をやめて入り直すと、状態は decomposing のまま別の改訂になる。前の改訂の実行は書かない。
+      if (run.purpose === "revise") {
+        const current = await getIntake(trx, intake.id);
+        if (current?.revision_run_id !== intake.revision_run_id) {
+          throw new IntakeStateConflictError(intake.id, intake.state, current?.state ?? null);
+        }
+      }
       await s.extra?.(trx);
       await updateIntakeRun(trx, run.id, closePatch);
     });
@@ -176,6 +195,85 @@ function errorMessage(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
+/** 会話の文面と検証落ちの数え方に使う行。revise のときは今の改訂の分だけ。 */
+type ConversationRows = {
+  closedRuns: IntakeRunRow[];
+  drafts: IntakeDraftRow[];
+  comments: IntakeCommentRow[];
+  /** 次の出力の replies が指すコメント（buildFeedback と同じ順）。 */
+  feedback: IntakeCommentRow[];
+};
+
+/**
+ * 改訂の会話は revision_run_id 以降の実行と案で始まり、開始コメントは run_id で選ぶ。
+ * 放棄した改訂の実行・案・コメントを次の改訂に持ち込まない。
+ */
+async function conversationRows(
+  db: Db,
+  intake: IntakeRow,
+  run: IntakeRunRow,
+): Promise<ConversationRows> {
+  const closedAll = (await listIntakeRuns(db, intake.id)).filter((r) =>
+    !NOT_OPEN.includes(r.status)
+  );
+  const draftsAll = await listDrafts(db, intake.id);
+  const commentsAll = await listComments(db, intake.id);
+  const onDraft = (draftId: number | undefined) =>
+    draftId === undefined ? [] : commentsAll.filter((c) => c.draft_id === draftId);
+
+  if (run.purpose !== "revise") {
+    return {
+      closedRuns: closedAll,
+      drafts: draftsAll,
+      comments: commentsAll,
+      feedback: onDraft(draftsAll.at(-1)?.id),
+    };
+  }
+
+  const from = intake.revision_run_id;
+  if (from === null) throw new Error("改訂の最初の実行が記録されていません");
+  const drafts = draftsAll.filter((d) => d.run_id >= from);
+  const draftIds = new Set(drafts.map((d) => d.id));
+  const comments = commentsAll.filter((c) => c.run_id === from || draftIds.has(c.draft_id));
+  const latest = drafts.at(-1);
+  return {
+    closedRuns: closedAll.filter((r) => r.id >= from),
+    drafts,
+    comments,
+    feedback: latest === undefined ? comments.filter((c) => c.run_id === from) : onDraft(latest.id),
+  };
+}
+
+/** 会話の最初に送る文面。revise は承認済みの計画と固定された部分を載せる。 */
+async function firstPromptOf(
+  db: Db,
+  intake: IntakeRow,
+  run: IntakeRunRow,
+  issue: IssueDetail,
+  rows: ConversationRows,
+): Promise<string> {
+  if (run.purpose !== "revise") return buildInitialPrompt({ issue });
+  const constraints = await loadRevisionConstraints(db, intake.id);
+  const approved = constraints.approved.pfd;
+  const decisions = decisionTexts(
+    (await listQuestionSets(db, intake.id)).map((s) => ({
+      questions: JSON.parse(s.questions) as Question[],
+      answers: s.answers === null ? null : JSON.parse(s.answers) as Answer[],
+    })),
+  );
+  return buildRevisionPrompt({
+    issue,
+    approved,
+    frozen: constraints.frozen,
+    retiredProcessIds: [...constraints.retiredProcessIds],
+    decisions,
+    feedback: buildFeedback(
+      approved,
+      rows.comments.filter((c) => c.run_id === intake.revision_run_id),
+    ),
+  });
+}
+
 /**
  * running の実行 1 行を最後まで走らせ、行を閉じ、Intake の状態を進める。
  * 検証落ちのやり直しは次の queued の行を立てて返る（次の tick が拾う）。
@@ -191,7 +289,6 @@ export async function runIntakeRun(db: Db, runId: number, deps: IntakeRunnerDeps
 
   const intake = await getIntake(db, run.intake_id);
   if (intake === undefined) return await interrupt();
-  if (run.purpose === "revise") throw new Error("改訂の実行はまだ扱えません");
   const expected: IntakeState = run.purpose === "investigate" ? "investigating" : "decomposing";
   if (intake.state !== expected) return await interrupt();
 
@@ -214,27 +311,31 @@ export async function runIntakeRun(db: Db, runId: number, deps: IntakeRunnerDeps
       await updateIntake(db, intake.id, { worktree_path: worktree });
     }
 
-    const closedRuns = (await listIntakeRuns(db, intake.id)).filter((r) =>
-      !NOT_OPEN.includes(r.status)
-    );
+    // 改訂に入った直後の会話は、承認の後に進んだ baseBranch から読ませる
+    if (run.purpose === "revise" && fresh) {
+      await checkoutDetached(worktree, project.base_branch);
+    }
+
+    const rows = await conversationRows(db, intake, run);
     const continuation = continuationMessage({
-      closedRuns,
+      closedRuns: rows.closedRuns,
       questionSets: await listQuestionSets(db, intake.id),
-      drafts: await listDrafts(db, intake.id),
-      comments: await listComments(db, intake.id),
+      drafts: rows.drafts,
+      comments: rows.comments,
     });
     const issue = continuation === null || fresh
       ? await deps.tracker.readIssue(project.path, intake.issue_url)
       : null;
+    const firstPrompt = () => firstPromptOf(db, intake, run, issue!, rows);
 
     if (fresh) {
       sessionId = crypto.randomUUID();
       await updateIntake(db, intake.id, { claude_session_id: sessionId });
-      const initial = buildInitialPrompt({ issue: issue! });
+      const initial = await firstPrompt();
       prompt = continuation === null ? initial : `${initial}\n\n${continuation}`;
     } else {
       sessionId = intake.claude_session_id!;
-      prompt = continuation ?? buildInitialPrompt({ issue: issue! });
+      prompt = continuation ?? await firstPrompt();
     }
   } catch (e) {
     return await failAgent(
@@ -315,10 +416,8 @@ export async function runIntakeRun(db: Db, runId: number, deps: IntakeRunnerDeps
     });
     let note = "";
     if (verdict.kind === "wait") {
-      const closed = (await listIntakeRuns(db, intake.id)).filter((r) =>
-        !NOT_OPEN.includes(r.status)
-      );
-      const rows = closed.map((r) => ({ step_id: r.purpose, status: r.status }));
+      const { closedRuns } = await conversationRows(db, intake, run);
+      const rows = closedRuns.map((r) => ({ step_id: r.purpose, status: r.status }));
       if (consecutiveRateLimited(rows, run.purpose) < MAX_CONSECUTIVE_RATE_LIMITS) {
         await settle(db, deps, {
           run,
@@ -353,11 +452,7 @@ async function settleOutput(
   const { run, intake, result } = s;
 
   const sets = await listQuestionSets(db, intake.id);
-  const latest = await latestDraft(db, intake.id);
-  const feedback = latest === undefined
-    ? []
-    : (await listComments(db, intake.id)).filter((c) => c.draft_id === latest.id)
-      .sort((a, b) => a.id - b.id);
+  const { closedRuns, feedback } = await conversationRows(db, intake, run);
 
   const checked = checkDecomposerOutput(result.structuredOutput, {
     purpose: run.purpose,
@@ -369,15 +464,13 @@ async function settleOutput(
         .flatMap((set) => (JSON.parse(set.questions) as Question[]).map((q) => q.id)),
     ),
     feedbackCount: feedback.length,
+    revision: run.purpose === "revise" ? await loadRevisionConstraints(db, intake.id) : null,
   });
 
   if (!checked.ok) {
     const issues = JSON.stringify(checked.issues);
-    const closed = (await listIntakeRuns(db, intake.id)).filter((r) =>
-      !NOT_OPEN.includes(r.status)
-    );
     const streak = consecutiveInvalid(
-      [...closed, { purpose: run.purpose, status: "failed", issues }],
+      [...closedRuns, { purpose: run.purpose, status: "failed", issues }],
       run.purpose,
     );
     if (streak >= MAX_INVALID_OUTPUTS) {

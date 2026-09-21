@@ -8,9 +8,11 @@ import {
   insertProcesses,
   latestDraft,
   listLiveIntakeTasks,
+  listProcesses,
   listQuestionSets,
   type NewIntakeComment,
   recordHumanDone,
+  retireProcesses,
   updateIntake,
 } from "../db/intakes.ts";
 import type { Db, IntakeRow, IntakeState } from "../db/schema.ts";
@@ -24,6 +26,7 @@ import type { Question } from "../../../shared/intake/question.ts";
 import { validateAnswers } from "../../../shared/intake/validateQuestion.ts";
 import { loadApprovedPlan } from "./dispatch.ts";
 import { computeProcessStatuses } from "./pfd/status.ts";
+import { loadRevisionConstraints, processRowChanges, revisionIssues } from "./revision.ts";
 import { enqueueIntakeRun } from "./runner.ts";
 import { closeSubIssuesOnCancel } from "./subIssueSync.ts";
 import { processProgressOf } from "./view.ts";
@@ -33,6 +36,7 @@ export type IntakeTransition = {
   intakeId: string;
   from: IntakeState;
   to: IntakeState;
+  /** 遷移の後の値。アプリはこの値で一覧の行を上書きする。 */
   revising: boolean;
 };
 
@@ -106,7 +110,10 @@ export async function answerIntake(
       throw new Error("すでに回答されています");
     }
     await updateIntake(trx, intake.id, { state: "decomposing" }, { requireState: "answering" });
-    await enqueueIntakeRun(trx, intake.id, "decompose", { logRoot: o.logRoot, resume: false });
+    await enqueueIntakeRun(trx, intake.id, revising ? "revise" : "decompose", {
+      logRoot: o.logRoot,
+      resume: false,
+    });
   });
   return { intakeId: intake.id, from: "answering", to: "decomposing", revising };
 }
@@ -163,9 +170,12 @@ export async function rejectIntake(
   const comments = checkComments(o.comments, JSON.parse(latest.pfd) as Pfd);
 
   await db.transaction().execute(async (trx) => {
-    await insertComments(trx, intake.id, latest.id, comments);
+    await insertComments(trx, intake.id, latest.id, comments, null);
     await updateIntake(trx, intake.id, { state: "decomposing" }, { requireState: "reviewing" });
-    await enqueueIntakeRun(trx, intake.id, "decompose", { logRoot: o.logRoot, resume: false });
+    await enqueueIntakeRun(trx, intake.id, revising ? "revise" : "decompose", {
+      logRoot: o.logRoot,
+      resume: false,
+    });
   });
   return { intakeId: intake.id, from: "reviewing", to: "decomposing", revising };
 }
@@ -173,28 +183,115 @@ export async function rejectIntake(
 /**
  * 承認は人だけが行う。runner にも dctl にもこの経路は無い（spec 6 章 R-9）。
  * 判定の正本は、トランザクションの中で読み直した最新の案と hash の照合である。
+ *
+ * 改訂中の再承認は、固定された部分を変えていないかをもう一度確かめ、intake_processes の行を
+ * 新しい案に揃える（増えた id を挿入し、消えた id に retired_at を入れる）。
  */
 export async function approveIntake(
   db: Db,
   o: { intakeId: string; draftId: number; hash: string },
 ): Promise<IntakeTransition> {
   const intake = await requireIntake(db, o.intakeId);
-  const revising = intake.revising === 1;
-  assertIntakeTransition(intake.state, "active", revising);
   if (intake.state !== "reviewing") {
     throw new Error(`承認できる状態ではありません: ${intake.state}`);
   }
+  assertIntakeTransition("reviewing", "active", intake.revising === 1);
 
   await db.transaction().execute(async (trx) => {
     const latest = await latestDraft(trx, intake.id);
     if (!latest || latest.id !== o.draftId) throw new Error(STALE_DRAFT);
     if (latest.hash !== o.hash) throw new Error("表示している案の内容が保存された案と異なります");
-    await updateIntake(trx, intake.id, { state: "active" }, { requireState: "reviewing" });
-    await insertApproval(trx, { intake_id: intake.id, draft_id: latest.id, hash: latest.hash });
     const pfd = JSON.parse(latest.pfd) as Pfd;
-    await insertProcesses(trx, intake.id, pfd.processes.map((p) => p.id));
+    if (intake.revising === 1) {
+      const issues = revisionIssues(pfd, await loadRevisionConstraints(trx, intake.id));
+      if (issues.length > 0) throw new Error(issues.join("\n"));
+    }
+    await updateIntake(
+      trx,
+      intake.id,
+      { state: "active", revising: 0, revision_run_id: null },
+      { requireState: "reviewing" },
+    );
+    await insertApproval(trx, { intake_id: intake.id, draft_id: latest.id, hash: latest.hash });
+    const changes = processRowChanges(await listProcesses(trx, intake.id), pfd);
+    await insertProcesses(trx, intake.id, changes.insert);
+    await retireProcesses(trx, intake.id, changes.retire, new Date().toISOString());
   });
-  return { intakeId: intake.id, from: "reviewing", to: "active", revising };
+  return { intakeId: intake.id, from: "reviewing", to: "active", revising: false };
+}
+
+/**
+ * 進行中の Intake を改訂に入れる（C-1・C-2）。走っているタスクには触らない。
+ * 投入は revising = 1 で止まる（dispatchIntake と status.ts の blockedBy）。
+ * 改訂の会話は新しく始める（claude_session_id を捨てる）。
+ */
+export async function reviseIntake(
+  db: Db,
+  o: { intakeId: string; comments: unknown; logRoot: string },
+): Promise<IntakeTransition> {
+  const intake = await requireIntake(db, o.intakeId);
+  if (intake.state !== "active") {
+    throw new Error(`改訂に入れる状態ではありません: ${intake.state}`);
+  }
+  assertIntakeTransition("active", "decomposing", false);
+  const approved = await loadApprovedPlan(db, intake.id);
+  if (!approved) throw new Error("承認された計画がありません");
+  const comments = checkComments(o.comments, approved.pfd);
+
+  await db.transaction().execute(async (trx) => {
+    // intake_comments.run_id と intakes.revision_run_id が実行の行を参照するので、実行を先に立てる
+    const runId = await enqueueIntakeRun(trx, intake.id, "revise", {
+      logRoot: o.logRoot,
+      resume: false,
+    });
+    await insertComments(trx, intake.id, approved.draftId, comments, runId);
+    await updateIntake(trx, intake.id, {
+      state: "decomposing",
+      revising: 1,
+      revision_run_id: runId,
+      claude_session_id: null,
+      attention_reason: null,
+      rate_limited_until: null,
+    }, { requireState: "active" });
+  });
+  return { intakeId: intake.id, from: "active", to: "decomposing", revising: true };
+}
+
+/**
+ * 改訂をやめて承認済みの計画に戻る（C-5）。承認と intake_processes には触らないので、
+ * 最新の承認の案がそのまま計画になる。走っている実行は cancelIntake と同じく子を止め、
+ * 実行の行は runner の settle が状態の食い違いを見て interrupted で閉じる。
+ */
+export async function abandonRevision(
+  db: Db,
+  deps: { probe: ProcessProbe },
+  o: { intakeId: string },
+): Promise<IntakeTransition> {
+  const intake = await requireIntake(db, o.intakeId);
+  if (intake.revising !== 1 || isIntakeTerminal(intake.state)) {
+    throw new Error("改訂中ではありません");
+  }
+  assertIntakeTransition(intake.state, "active", true);
+  await killStaleChild(intake, deps.probe, "SIGTERM");
+
+  await db.transaction().execute(async (trx) => {
+    await updateIntake(trx, intake.id, {
+      state: "active",
+      revising: 0,
+      revision_run_id: null,
+      claude_session_id: null,
+      attention_reason: null,
+      rate_limited_until: null,
+      child_pid: null,
+      child_started_at: null,
+    }, { requireState: intake.state });
+    await trx.updateTable("intake_runs")
+      .set({ status: "interrupted", ended_at: new Date().toISOString() })
+      .where("intake_id", "=", intake.id)
+      .where("status", "=", "queued")
+      .execute();
+  });
+  return { intakeId: intake.id, from: intake.state, to: "active", revising: false };
 }
 
 export type CancelOutcome = IntakeTransition & {
