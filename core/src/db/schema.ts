@@ -1,4 +1,9 @@
 import type { Generated, Kysely, Selectable } from "kysely";
+import type {
+  IntakeRunPurpose,
+  IntakeRunStatus,
+  IntakeState,
+} from "../../../shared/intake/state.ts";
 
 /**
  * テーブルの形の唯一の定義（TypeScript 側）。クエリはすべてこの型に対して
@@ -30,26 +35,7 @@ export type StepRunStatus =
   /** 非0で終わった（却下された）が onFailure / onReject の goto で前のステップへ戻った。 */
   | "bounced";
 
-/** Intake の状態と遷移は 2026-09-21-intake-core-design.md 5 章。 */
-export type IntakeState =
-  | "investigating"
-  | "answering"
-  | "decomposing"
-  | "reviewing"
-  | "active"
-  | "needs_attention"
-  | "completed"
-  | "canceled";
-
-export type IntakeRunPurpose = "investigate" | "decompose" | "revise";
-
-export type IntakeRunStatus =
-  | "queued"
-  | "running"
-  | "success"
-  | "failed"
-  | "rate_limited"
-  | "interrupted";
+export type { IntakeRunPurpose, IntakeRunStatus, IntakeState };
 
 export type IntakeCommentTarget = "artifact" | "process" | "whole";
 

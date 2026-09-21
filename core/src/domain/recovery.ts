@@ -99,7 +99,7 @@ export function defaultProbe(): ProcessProbe {
  * 壊し続けてしまうので SIGKILL のままにする。
  */
 export async function killStaleChild(
-  task: TaskRow,
+  task: Pick<TaskRow, "child_pid" | "child_started_at">,
   probe: ProcessProbe,
   signal: Signal = "SIGKILL",
 ): Promise<"killed" | "gone" | "mismatch" | "none"> {

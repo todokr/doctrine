@@ -1,4 +1,11 @@
 import type { Guide } from "./guide/schema.ts";
+import type { AttentionReason, CommentReply } from "./intake/decomposer.ts";
+import type { FeedbackComment } from "./intake/feedback.ts";
+import type { GhStatus, IssueSummary } from "./intake/github.ts";
+import type { Pfd } from "./intake/pfd.ts";
+import type { ProcessStatus } from "./intake/processStatus.ts";
+import type { Answer, Question } from "./intake/question.ts";
+import type { IntakeRunPurpose, IntakeRunStatus, IntakeState } from "./intake/state.ts";
 
 export type Request = { id: number; method: string; params?: Record<string, unknown> };
 
@@ -38,6 +45,13 @@ export type ServerEvent =
     utilization: number;
     /** 枠が明ける時刻（ISO 8601）。デーモンが生値を正規化してあり、読めない生値は null。 */
     resets_at: string | null;
+  }
+  | {
+    event: "intake.stateChanged";
+    intake_id: string;
+    from: IntakeState;
+    to: IntakeState;
+    revising: boolean;
   };
 
 export type TaskState =
@@ -249,6 +263,92 @@ export type TaskContext = {
   reviewFiles: ReviewFile[];
 };
 
+/** 見張りの健康状態（spec 11.6）。見張りはまだ無いので、今は常に初期値が入る。 */
+export type WatchHealth = {
+  lastSucceededAt: string | null;
+  consecutiveFailures: number;
+  lastError: string | null;
+};
+
+/** intake.reject のコメント 1 件。 */
+export type NewComment = FeedbackComment;
+
+/** intake.list の 1 行（V-2）。UI に見せてよい列だけを宣言する。 */
+export type IntakeSummary = {
+  id: string;
+  project_id: number;
+  issue_url: string;
+  issue_title: string;
+  state: IntakeState;
+  revising: boolean;
+  attention_reason: AttentionReason | null;
+  dispatch_paused: boolean;
+  rate_limited_until: string | null;
+  progress: { done: number; total: number };
+  needs_human: boolean;
+  watch: WatchHealth;
+  created_at: string;
+  updated_at: string;
+};
+
+/** 案 1 件の中身。UI spec 13 章の intake.draft の応答と同じ形。 */
+export type PfdDraft = {
+  id: number;
+  seq: number;
+  pfd: Pfd;
+  hash: string;
+  replies: CommentReply[];
+  created_at: string;
+};
+
+export type IntakeQuestionSet = {
+  id: number;
+  run_id: number;
+  questions: Question[];
+  answers: Answer[] | null;
+  created_at: string;
+  answered_at: string | null;
+};
+
+export type IntakeComment = NewComment & { id: number; draft_id: number; created_at: string };
+
+export type IntakeApproval = { id: number; draft_id: number; hash: string; approved_at: string };
+
+export type IntakeRun = {
+  id: number;
+  purpose: IntakeRunPurpose;
+  attempt: number;
+  status: IntakeRunStatus;
+  started_at: string | null;
+  ended_at: string | null;
+  cost_usd: number | null;
+  num_turns: number | null;
+  duration_ms: number | null;
+  issues: string[] | null;
+  permission_denials: StepRunDenials | null;
+};
+
+export type IntakeProcessView =
+  & { id: string }
+  & ProcessStatus
+  & { sub_issue_url: string | null; task_ids: string[] };
+
+/**
+ * intake.get の応答。drafts は全部の案の見出しだけを持つ。中身は最新の案（latest_draft）だけに
+ * 入れる（spec 13 章）。processes は承認の前は空配列になる。
+ */
+export type IntakeDetail = IntakeSummary & {
+  drafts: { id: number; seq: number; created_at: string }[];
+  latest_draft: PfdDraft | null;
+  approval: IntakeApproval | null;
+  question_sets: IntakeQuestionSet[];
+  comments: IntakeComment[];
+  processes: IntakeProcessView[];
+  runs: IntakeRun[];
+};
+
+export type GithubIssue = IssueSummary & { intake_id: string | null };
+
 /**
  * UI が呼ぶメソッドの表。増えたらここに足す。Rust の中継はこの表を知らない
  * （method を素通しするだけ）。
@@ -273,6 +373,37 @@ export type Methods = {
   };
   "daemon.warnings": { params: Record<string, never>; result: Warning[] };
   "ratelimit.recent": { params: { limit?: number }; result: RateLimitSample[] };
+  "github.status": { params: { project: string }; result: GhStatus };
+  "github.issues": {
+    params: { project: string; assignee?: "me" | "any"; search?: string };
+    result: GithubIssue[];
+  };
+  "intake.start": {
+    params: { project: string; issue_url: string };
+    result: IntakeSummary & { alreadyActive: boolean };
+  };
+  "intake.list": {
+    params: { project?: string; include_closed?: boolean };
+    result: IntakeSummary[];
+  };
+  "intake.get": { params: { intake_id: string }; result: IntakeDetail };
+  "intake.answer": {
+    params: { intake_id: string; question_set_id: number; answers: Answer[] };
+    result: IntakeSummary;
+  };
+  "intake.reject": {
+    params: { intake_id: string; draft_id: number; comments: NewComment[] };
+    result: IntakeSummary;
+  };
+  /** hash はアプリが表示していた案の intake_drafts.hash。承認は人だけが行い、dctl にこの操作は無い（spec 6 章 R-9）。 */
+  "intake.approve": {
+    params: { intake_id: string; draft_id: number; hash: string };
+    result: IntakeSummary;
+  };
+  "intake.cancel": {
+    params: { intake_id: string; mode: "leave" | "stop" };
+    result: IntakeSummary;
+  };
 };
 
 export type Method = keyof Methods;

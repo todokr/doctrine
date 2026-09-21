@@ -9,7 +9,6 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { openDb, openDbOn } from "../../src/db/migrate.ts";
 import { getTask, insertTask } from "../../src/db/tasks.ts";
-import { insertIntake } from "../../src/db/intakes.ts";
 import { listStepRuns } from "../../src/db/stepRuns.ts";
 import { captureTree, reviewRefName } from "../../src/domain/reviewTree.ts";
 import { ensureDoctrineOutExcluded } from "../../src/domain/worktree.ts";

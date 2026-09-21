@@ -34,6 +34,15 @@ import {
 } from "../domain/scheduler.ts";
 import { getIntake, listIntakes, updateIntake, updateIntakeRun } from "../db/intakes.ts";
 import { claimIntakeRun, runIntakeRun } from "../intake/runner.ts";
+import {
+  answerIntake,
+  approveIntake,
+  cancelIntake,
+  type IntakeTransition,
+  rejectIntake,
+  startIntake,
+} from "../intake/commands.ts";
+import { NO_WATCH, toIntakeDetail, toIntakeSummary } from "../intake/view.ts";
 import type { Tracker } from "../github/tracker.ts";
 import { applyApproval, runTask } from "../domain/engine.ts";
 import {
@@ -105,6 +114,35 @@ function req(params: Record<string, unknown>, key: string): string {
   const v = params[key];
   if (typeof v !== "string" || v === "") throw new Error(`${key} は必須です`);
   return v;
+}
+
+function reqNumber(params: Record<string, unknown>, key: string): number {
+  const v = params[key];
+  if (typeof v !== "number") throw new Error(`${key} は必須です`);
+  return v;
+}
+
+async function reqProject(ctx: DaemonContext, params: Record<string, unknown>) {
+  const path = req(params, "project");
+  const project = await getProjectByPath(ctx.db, path);
+  if (!project) throw new Error(`未登録のプロジェクトです: ${path}`);
+  return project;
+}
+
+function broadcastIntakeTransition(ctx: DaemonContext, t: IntakeTransition): void {
+  ctx.broadcast({
+    event: "intake.stateChanged",
+    intake_id: t.intakeId,
+    from: t.from,
+    to: t.to,
+    revising: t.revising,
+  });
+}
+
+/** 操作が返した遷移をイベントにして配り、読み直した行の要約を返す。 */
+async function settleIntakeCommand(ctx: DaemonContext, t: IntakeTransition) {
+  broadcastIntakeTransition(ctx, t);
+  return await toIntakeSummary(ctx.db, (await getIntake(ctx.db, t.intakeId))!, NO_WATCH);
 }
 
 /**
@@ -512,6 +550,99 @@ export function createHandler(ctx: DaemonContext): Handler {
         }));
       }
 
+      case "github.status": {
+        const project = await reqProject(ctx, params);
+        return await ctx.tracker.status(project.path);
+      }
+      case "github.issues": {
+        const project = await reqProject(ctx, params);
+        const assignee = params.assignee === "any" ? "any" : "me";
+        const search = typeof params.search === "string" ? params.search : undefined;
+        const issues = await ctx.tracker.listIssues(project.path, {
+          assignee,
+          ...(search === undefined ? {} : { search }),
+        }).catch(async (e) => {
+          // 理由が分かる失敗は、gh の生のエラーより先に返す。
+          const status = await ctx.tracker.status(project.path);
+          if (!status.ok) throw new Error(`gh が使えません（${status.reason}）: ${status.message}`);
+          throw e;
+        });
+        const open = new Map(
+          (await listIntakes(ctx.db, { projectId: project.id }))
+            .map((i) => [i.issue_url, i.id]),
+        );
+        return issues.map((i) => ({ ...i, intake_id: open.get(i.url) ?? null }));
+      }
+
+      case "intake.start": {
+        const project = await reqProject(ctx, params);
+        const { intake, alreadyActive } = await startIntake(ctx.db, ctx.tracker, {
+          projectId: project.id,
+          projectPath: project.path,
+          issueUrl: req(params, "issue_url"),
+          logRoot: ctx.logRoot,
+        });
+        return { ...await toIntakeSummary(ctx.db, intake, NO_WATCH), alreadyActive };
+      }
+      case "intake.list": {
+        const filter: { projectId?: number; includeClosed?: boolean } = {
+          includeClosed: params.include_closed === true,
+        };
+        if (typeof params.project === "string") {
+          const project = await getProjectByPath(ctx.db, params.project);
+          // task.list と違い、未登録のプロジェクトで全件を返さない。
+          if (!project) return [];
+          filter.projectId = project.id;
+        }
+        const rows = await listIntakes(ctx.db, filter);
+        return await Promise.all(rows.map((r) => toIntakeSummary(ctx.db, r, NO_WATCH)));
+      }
+      case "intake.get": {
+        const intake = await getIntake(ctx.db, req(params, "intake_id"));
+        if (!intake) throw new Error("Intake がありません");
+        return await toIntakeDetail(ctx.db, intake, NO_WATCH);
+      }
+      case "intake.answer":
+        return await settleIntakeCommand(
+          ctx,
+          await answerIntake(ctx.db, {
+            intakeId: req(params, "intake_id"),
+            questionSetId: reqNumber(params, "question_set_id"),
+            answers: params.answers,
+            logRoot: ctx.logRoot,
+          }),
+        );
+      case "intake.reject":
+        return await settleIntakeCommand(
+          ctx,
+          await rejectIntake(ctx.db, {
+            intakeId: req(params, "intake_id"),
+            draftId: reqNumber(params, "draft_id"),
+            comments: params.comments,
+            logRoot: ctx.logRoot,
+          }),
+        );
+      case "intake.approve":
+        return await settleIntakeCommand(
+          ctx,
+          await approveIntake(ctx.db, {
+            intakeId: req(params, "intake_id"),
+            draftId: reqNumber(params, "draft_id"),
+            hash: req(params, "hash"),
+          }),
+        );
+      case "intake.cancel": {
+        const intakeId = req(params, "intake_id");
+        // leave / stop のどちらも今は同じ動き。stop の、タスクを止めて sub-issue を閉じる部分は別の作業が足す。
+        if (params.mode !== "leave" && params.mode !== "stop") {
+          throw new Error("mode は leave か stop のどちらかです");
+        }
+        return await settleIntakeCommand(
+          ctx,
+          await cancelIntake(ctx.db, defaultProbe(), { intakeId }),
+        );
+      }
+
       default:
         throw new Error(`未知のメソッドです: ${method}`);
     }
@@ -681,6 +812,8 @@ async function startIntakeRuns(ctx: DaemonContext): Promise<void> {
       adapter: ctx.adapter,
       tracker: ctx.tracker,
       logRoot: ctx.logRoot,
+      onStateChanged: (intakeId, from, to, revising) =>
+        ctx.broadcast({ event: "intake.stateChanged", intake_id: intakeId, from, to, revising }),
     })
       .catch(async (e) => {
         // 実行の途中の例外を握りつぶすと .finally() が同じ理由で再 reject し、
@@ -703,6 +836,12 @@ async function startIntakeRuns(ctx: DaemonContext): Promise<void> {
               child_pid: null,
               child_started_at: null,
             }, { requireState: intake.state });
+            broadcastIntakeTransition(ctx, {
+              intakeId: intake.id,
+              from: intake.state,
+              to: "needs_attention",
+              revising: intake.revising === 1,
+            });
           }
           ctx.warnings.push(message);
         } catch (e2) {

@@ -28,6 +28,26 @@ test("dctl add", () => {
   );
 });
 
+test("dctl intake ls / get", () => {
+  assert.deepEqual(parseArgv(["intake", "ls"]), { method: "intake.list", params: {} });
+  assert.deepEqual(
+    parseArgv(["intake", "ls", "--project", "/r", "--include_closed"]),
+    { method: "intake.list", params: { project: "/r", include_closed: true } },
+  );
+  assert.deepEqual(
+    parseArgv(["intake", "get", "i1"]),
+    { method: "intake.get", params: { intake_id: "i1" } },
+  );
+});
+
+test("dctl に Intake の操作は無い", () => {
+  for (
+    const argv of [["intake", "approve", "i1"], ["intake", "start"], ["intake", "reject", "i1"]]
+  ) {
+    assert.throws(() => parseArgv(argv), /未知のコマンドです/);
+  }
+});
+
 test("dctl diff", () => {
   assert.deepEqual(
     parseArgv(["diff", "abc123"]),
