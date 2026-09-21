@@ -91,6 +91,7 @@ test("雛形のプロンプトと feed はテンプレート展開を通る", ()
   const empty = { last_stdout: "", last_stderr: "", exitCode: "0" };
   const ctx: TemplateContext = {
     task: { id: "t", title: "T", prompt: "P", branch: "b" },
+    issue: { url: null, parent_url: null },
     worktree: { path: "/w" },
     project: { path: "/p" },
     steps: Object.fromEntries(steps.map((s) => [s.id, empty])),

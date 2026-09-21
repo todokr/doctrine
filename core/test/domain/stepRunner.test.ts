@@ -25,6 +25,7 @@ afterEach(async () => {
 
 const ctx: TemplateContext = {
   task: { id: "t1", title: "T", prompt: "直して", branch: "doctrine/t1-t" },
+  issue: { url: null, parent_url: null },
   worktree: { path: "/wt" },
   project: { path: "/repo" },
   steps: {},
