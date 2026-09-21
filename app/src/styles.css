@@ -172,7 +172,7 @@ th{color:var(--ink-3);font-size:11px;font-weight:500;border-top:0;background:var
 .g-md h1{font-size:13px;margin:8px 0 2px}
 .g-md h2{font-size:12.5px;margin:8px 0 2px}
 .g-md ul,.g-md ol{margin:4px 0;padding-left:20px}
-.g-md p,.g-sec .g-md p,.stepcard .g-md p{margin:4px 0}
+.g-md p,.g-sec .g-md p,.flow-note .g-md p{margin:4px 0}
 .rv-body{display:grid;grid-template-columns:232px minmax(0,1fr);gap:14px;align-items:start}
 @media (max-width:1150px){.rv-body{grid-template-columns:1fr}}
 .rv-body.has-guide{grid-template-columns:220px minmax(0,1fr) 360px}
@@ -213,13 +213,47 @@ th{color:var(--ink-3);font-size:11px;font-weight:500;border-top:0;background:var
 .sd-actor{font-family:var(--mono);font-size:10px;fill:var(--ink-2)}
 .sd-life{stroke:var(--line);stroke-width:1}
 .sd-lbl{font-family:var(--sans);font-size:9.5px;fill:var(--ink-3)}
-.sd-arrow{stroke:var(--run);stroke-width:1.6;stroke-dasharray:280;stroke-dashoffset:280;animation:sd-draw .5s ease forwards;animation-delay:var(--d)}
-@keyframes sd-draw{to{stroke-dashoffset:0}}
-@media (prefers-reduced-motion:reduce){.sd-arrow{animation:none;stroke-dashoffset:0}}
+/* 図。見た目（変更の印）と動きは分ける。動きは media の中にだけ書くので、
+   再生前・reduced-motion のときも要素は最終の状態で見える */
+.sd-arrow{stroke:var(--run);stroke-width:1.6}
 .sd-arrowhead{fill:var(--run)}
 .sd-arrow.added{stroke:var(--ok)}
 .sd-arrow.changed{stroke:var(--accent)}
-.sd-arrow.removed{stroke:var(--danger)}
+/* 線には pathLength=1 を付けているので、破線の寸法も 1 を単位にする */
+.sd-arrow.removed{stroke:var(--danger);stroke-dasharray:.05 .04}
+.graphd{width:100%;height:auto;display:block;margin-top:4px}
+.gn rect{fill:var(--surface-2);stroke:var(--line);stroke-width:1.2}
+.gn text{font-family:var(--mono);font-size:10.5px;fill:var(--ink-2)}
+.gn.added rect{stroke:var(--ok);stroke-width:1.8;fill:var(--ok-bg)}
+.gn.added text{fill:var(--ok)}
+.gn.changed rect{stroke:var(--accent);stroke-width:1.8;fill:var(--accent-soft)}
+.gn.removed rect{stroke:var(--danger);stroke-width:1.4;stroke-dasharray:4 3;fill:var(--danger-bg)}
+.gn.removed text{fill:var(--danger);text-decoration:line-through}
+.ge-line{stroke:var(--ink-3);stroke-width:1.4}
+.ge.added .ge-line{stroke:var(--ok);stroke-width:1.8}
+.ge.changed .ge-line{stroke:var(--accent);stroke-width:1.8}
+.ge.removed .ge-line{stroke:var(--danger);stroke-dasharray:.05 .04}
+.gd-arrowhead{fill:var(--ink-3)}
+.gd-lbl{font-family:var(--sans);font-size:9.5px;fill:var(--ink-3);paint-order:stroke;stroke:var(--surface);stroke-width:3px}
+.ge.removed .gd-lbl{text-decoration:line-through}
+@keyframes sd-draw{from{stroke-dashoffset:1}to{stroke-dashoffset:0}}
+@keyframes dg-in{from{opacity:0}to{opacity:1}}
+@keyframes dg-fade{to{opacity:.55}}
+@media (prefers-reduced-motion:no-preference){
+  .play .sd-arrow{stroke-dasharray:1;stroke-dashoffset:1;animation:sd-draw .5s ease forwards;animation-delay:var(--d)}
+  /* 削除の線は破線のまま。引くのではなく現れる */
+  .play .sd-arrow.removed{stroke-dasharray:.05 .04;stroke-dashoffset:0;animation:dg-in .4s ease both;animation-delay:var(--d)}
+  .play .gn,.play .ge{animation:dg-in .4s ease both;animation-delay:calc(var(--step) * 280ms)}
+  .play .ge-line{stroke-dasharray:1;stroke-dashoffset:1;animation:sd-draw .5s ease forwards;animation-delay:calc(var(--step) * 280ms)}
+  .play .ge.removed .ge-line{stroke-dasharray:.05 .04;stroke-dashoffset:0;animation:none}
+  /* 削除されたものは最初から出しておき、段 3 で薄くする（先の dg-in の完了を上書きしないよう forwards だけ） */
+  .play .gn.removed,.play .ge.removed{animation:dg-in .4s ease both,dg-fade .4s ease forwards;animation-delay:calc(var(--step) * 280ms),840ms}
+}
+@media (prefers-reduced-motion:reduce){.dg-replay{display:none}}
+.dg-kind{margin-left:8px;font-size:10.5px;border:1px solid var(--line);border-radius:999px;padding:0 6px}
+.dg-foot{display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-size:11px;color:var(--ink-3)}
+.dg-legend{display:flex;gap:8px;align-items:center}
+.dg-text > summary{cursor:pointer;font-size:11px;color:var(--ink-3)}
 .diagram{margin:0;display:grid;gap:4px}
 .graphl{display:grid;gap:6px}
 .g-change{font-size:11px;font-weight:700;margin-right:4px}
@@ -248,25 +282,28 @@ th{color:var(--ink-3);font-size:11px;font-weight:500;border-top:0;background:var
 .wr-node[aria-current="step"] rect{stroke:var(--accent);stroke-width:2}
 .wr-badge rect{fill:var(--surface);stroke:var(--line)}
 .wr-badge text{font-family:var(--mono);font-size:9.5px;fill:var(--ink-2)}
-.g-start{width:100%;border:1px solid var(--accent);background:var(--accent);color:var(--accent-ink);border-radius:7px;padding:7px 10px;font-weight:700;text-align:center}
-.g-start:hover{filter:brightness(1.05)}
 
-/* ステップ表示 */
-.stepmode{display:grid;gap:14px;min-width:0}
-.step-bar{display:flex;gap:8px 12px;align-items:center;flex-wrap:wrap;position:sticky;top:0;z-index:5;background:var(--surface);padding-block:8px;border-bottom:1px solid var(--line)}
-.step-pills{display:flex;gap:4px;flex-wrap:wrap}
-.step-pill{border:1px solid var(--line);background:var(--surface);border-radius:999px;min-width:28px;height:26px;padding:0 9px;font-family:var(--mono);font-size:11.5px;font-variant-numeric:tabular-nums}
-.step-pill.done{background:var(--ok-bg);border-color:var(--ok-bg);color:var(--ok)}
-.step-pill[aria-current="step"]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);font-weight:700}
-.stepcard{border:1px solid var(--accent);border-radius:9px;background:var(--accent-soft);padding:14px 16px;display:grid;gap:8px;animation:g-in .3s ease both}
-@media (prefers-reduced-motion:reduce){.stepcard{animation:none}}
-.stepcard .eyebrow{font-size:11px;letter-spacing:.04em;color:var(--accent-text);font-family:var(--mono)}
-.stepcard h2{margin:0;font-size:16px;text-wrap:balance}
-.stepcard p{margin:0;line-height:1.8;max-width:72ch}
-.stepcard .dg{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:10px;max-width:520px}
-.stepcard .files{display:flex;gap:6px;flex-wrap:wrap}
-.step-foot{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-.step-done{border:1px dashed var(--line);border-radius:9px;padding:12px 14px;display:grid;gap:6px}
+/* ガイドの順（縦1本の流れ） */
+.flow{display:grid;gap:22px;min-width:0}
+.flow-sec{display:grid;gap:10px;min-width:0;scroll-margin-top:8px}
+.flow-head{display:grid;gap:2px}
+.flow-head .eyebrow{font-size:11px;letter-spacing:.04em;color:var(--accent-text);font-family:var(--mono)}
+.flow-head h2{margin:0;font-size:16px;text-wrap:balance}
+.flow-note{border:1px solid var(--accent);border-radius:9px;background:var(--accent-soft);padding:12px 14px;display:grid;gap:8px}
+.flow-note p{margin:0;line-height:1.8;max-width:72ch}
+.flow-note .dg{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:10px;max-width:520px}
+.flow-overview{border:1px solid var(--line);border-radius:9px;background:var(--surface);padding:12px 14px;display:grid;gap:12px}
+.flow-end{border:1px dashed var(--line);border-radius:9px;padding:12px 14px;display:grid;gap:6px}
+.flow-cont{font-size:11px;font-weight:700;color:var(--accent-text);background:var(--accent-soft);border-radius:999px;padding:0 7px}
+.flowtoc{border:1px solid var(--line);border-radius:9px;overflow:hidden;position:sticky;top:0}
+.flowtoc header{padding:7px 10px;background:var(--surface-2);border-bottom:1px solid var(--line);font-size:11.5px;color:var(--ink-2)}
+.flowtoc .fl.passed .nm{color:var(--ink-3)}
+.flowtoc .fl.passed::before{content:"✓ ";color:var(--ok);font-size:10.5px}
+.hunk-risk{background:var(--danger-bg);color:var(--ink);padding:5px 10px;font-family:var(--sans);font-size:11.5px;border-top:1px solid var(--line);display:grid;gap:4px}
+.hunk-risk b{color:var(--danger);font-size:11px}
+.hunk-risk .g-md p{margin:2px 0}
+.g-fold > summary{cursor:pointer;font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:var(--ink-3)}
+.g-fold[open] > summary{margin-bottom:6px}
 .filelist{border:1px solid var(--line);border-radius:9px;overflow:hidden;position:sticky;top:0}
 .filelist header{padding:7px 10px;background:var(--surface-2);border-bottom:1px solid var(--line);font-size:11.5px;color:var(--ink-2)}
 .fl{width:100%;border:0;border-top:1px solid var(--line);background:var(--surface);padding:6px 10px;display:block;text-align:left}

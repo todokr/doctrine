@@ -1,29 +1,48 @@
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { sendDecision } from "../decision";
+import { risksAt } from "../flow";
 import {
   ago,
+  canFlow,
   canReject,
   clock,
   contextOf,
-  currentStep,
   diffOf,
   draftOf,
   fellBackToAll,
   guideOf,
   hasSince,
   isPartial,
+  layoutOf,
   rejections,
   reviewRound,
   scopeOf,
   type DiffView,
+  type Layout,
   type Loaded,
   type Scope,
 } from "../model";
 import { useDecide, useNotYet, useStore } from "../store";
 import type { ReviewFile, Task, TaskContext } from "../types";
 import { DiffFileBlock, fileAnchor, fileStat } from "./DiffFileBlock";
-import { GuideNotice, GuidePanel, StepView } from "./Guide";
+import { GuideNotice, GuidePanel, RiskNote } from "./Guide";
+import { flowSectionAnchor, ReadingFlow } from "./ReadingFlow";
 import { Markdown } from "./text";
+
+/**
+ * 並べ方を切り替える直前に、読んでいる hunk（main の上端をまたいでいる、または最初に見えている
+ * hunk）を覚える。どちらの並びでも hunk はちょうど 1 回出るので、切り替え後の飛び先は 1 つに決まる。
+ * 返すのは切り替え後に querySelector で引ける CSS セレクタ
+ */
+function rememberPosition(): string | null {
+  const main = document.querySelector("main.main");
+  if (!main) return null;
+  const top = main.getBoundingClientRect().top + 8;
+  const anchors = [...main.querySelectorAll<HTMLElement>("[data-anchor]")];
+  const reading = anchors.filter((el) => el.getBoundingClientRect().top <= top).at(-1) ?? anchors[0];
+  const key = reading?.dataset.anchor;
+  return key ? `[data-anchor="${CSS.escape(key)}"]` : null;
+}
 
 export function Crumbs({ t }: { t: Task }) {
   const { s } = useStore();
@@ -132,10 +151,23 @@ function FileBody({ file }: { file: ReviewFile }) {
   }
 }
 
-function Diff({ t, scope, loaded }: { t: Task; scope: Scope; loaded: Loaded<DiffView> | undefined }) {
-  const { s } = useStore();
-  const step = currentStep(s, t);
+function Diff({ t, scope, loaded, jump }: {
+  t: Task;
+  scope: Scope;
+  loaded: Loaded<DiffView> | undefined;
+  /** 並べ方を切り替えた直後に scrollIntoView する先の CSS セレクタ。State ではなく DOM の位置なので ref で持つ */
+  jump: RefObject<string | null>;
+}) {
+  const { s, dispatch } = useStore();
+  const layout = layoutOf(s, t.id);
   const guideView = guideOf(s, t.id);
+
+  useLayoutEffect(() => {
+    const target = jump.current;
+    if (!target) return;
+    jump.current = null;
+    document.querySelector(target)?.scrollIntoView({ block: "start" });
+  }, [layout, jump]);
 
   if (loaded === undefined || loaded.kind === "loading") return <p className="hint">diff を読み込んでいます…</p>;
   if (loaded.kind === "error") return <LoadError what="diff（task.diff）" message={loaded.message} />;
@@ -151,27 +183,35 @@ function Diff({ t, scope, loaded }: { t: Task; scope: Scope; loaded: Loaded<Diff
       </p>
     );
   }
-  // ガイドの注意書きは、ステップモードで StepView を先に返す前に置く（後ろに置くと、
-  // ステップモードでは古いガイドの注意書きが一度も出ない）
+  // ガイドの注意書きと打ち切りの箱は、どちらの並べ方でも出す
   const notice = <GuideNotice view={guideView} />;
   const guide = guideView?.kind === "ok" && guideView.value.kind === "ok" ? guideView.value.guide : null;
-  // 前回レビュー以降を見ている間は currentStep が null を返す（ステップモードにならない）
-  if (guide && step !== null) {
-    return <>{notice}<StepView t={t} guide={guide} files={files} idx={step} /></>;
+  const truncatedBox = meta.truncated && (
+    <div className="box attn">
+      <b>diff が大きすぎるため途中で打ち切りました</b>
+      <p>
+        後ろのファイルは一覧にだけ出て、中身がありません。全部を読むには
+        worktree（<span className="mono">{t.worktree ?? "削除済み"}</span>）を直接見てください。
+      </p>
+    </div>
+  );
+
+  if (guide && layout === "flow") {
+    return <>{notice}{truncatedBox}<ReadingFlow t={t} guide={guide} view={loaded.value} /></>;
   }
+
+  const risks = guide ? risksAt(guide) : null;
+  const jumpToGroup = canFlow(s, t.id)
+    ? (i: number) => {
+      jump.current = `#${flowSectionAnchor(`g${i}`)}`;
+      dispatch({ type: "layout", layout: "flow" });
+    }
+    : undefined;
 
   return (
     <>
       {notice}
-      {meta.truncated && (
-        <div className="box attn">
-          <b>diff が大きすぎるため途中で打ち切りました</b>
-          <p>
-            後ろのファイルは一覧にだけ出て、中身がありません。全部を読むには
-            worktree（<span className="mono">{t.worktree ?? "削除済み"}</span>）を直接見てください。
-          </p>
-        </div>
-      )}
+      {truncatedBox}
       <div className={`rv-body ${guide ? "has-guide" : ""}`}>
         <nav className="filelist" aria-label="変更ファイル">
           <header>{files.length} ファイル</header>
@@ -182,8 +222,34 @@ function Diff({ t, scope, loaded }: { t: Task; scope: Scope; loaded: Loaded<Diff
             </button>
           ))}
         </nav>
-        <div className="diffs">{files.map((f) => <DiffFileBlock key={f.path} t={t} file={f} />)}</div>
-        {guide && <GuidePanel guide={guide} files={files} partial={isPartial(loaded.value, scope)} />}
+        <div className="diffs">
+          {files.map((f) => (
+            <DiffFileBlock
+              key={f.path}
+              t={t}
+              files={files}
+              file={f}
+              note={risks && (
+                <RiskNote
+                  risks={[
+                    ...(risks.byPath.get(f.path) ?? []),
+                    ...(f.status === "R" && f.old_path ? risks.byPath.get(f.old_path) ?? [] : []),
+                  ]}
+                />
+              )}
+              hunkNote={risks ? (h) => <RiskNote risks={risks.byHunk.get(h.id)} /> : undefined}
+            />
+          ))}
+        </div>
+        {guide && (
+          <GuidePanel
+            guide={guide}
+            files={files}
+            truncated={meta.truncated}
+            partial={isPartial(loaded.value, scope)}
+            onJump={jumpToGroup}
+          />
+        )}
       </div>
     </>
   );
@@ -200,6 +266,13 @@ export function ReviewView({ t }: { t: Task }) {
   // 下書きを消す（approve の dispatch）ので、失敗時はここで再度押せる
   const [approving, setApproving] = useState(false);
   const c = context?.kind === "ok" ? context.value : null;
+  const jump = useRef<string | null>(null);
+  const layout = layoutOf(s, t.id);
+  const switchLayout = (next: Layout) => {
+    if (next === layout) return;
+    jump.current = rememberPosition();
+    dispatch({ type: "layout", layout: next });
+  };
 
   return (
     <>
@@ -239,6 +312,12 @@ export function ReviewView({ t }: { t: Task }) {
             </span>
           )}
           <span className="spacer" />
+          {canFlow(s, t.id) && (
+            <span className="seg" role="group" aria-label="diff の並べ方">
+              <button aria-pressed={layout === "flow"} onClick={() => switchLayout("flow")}>ガイドの順</button>
+              <button aria-pressed={layout === "files"} onClick={() => switchLayout("files")}>ファイル順</button>
+            </span>
+          )}
           {c && hasSince(c) && (
             <span className="seg" role="group" aria-label="差分の範囲">
               <button aria-pressed={scope === "all"} onClick={() => dispatch({ type: "scope", scope: "all" })}>全体</button>
@@ -247,7 +326,7 @@ export function ReviewView({ t }: { t: Task }) {
           )}
         </div>
 
-        <Diff t={t} scope={scope} loaded={diff} />
+        <Diff t={t} scope={scope} loaded={diff} jump={jump} />
       </div>
       <footer className="decide">
         <div>

@@ -5,7 +5,7 @@ import { ReviewView } from "./components/ReviewView";
 import { Rail, Sidebar } from "./components/Sidebar";
 import { TaskView } from "./components/TaskView";
 import { sendDecision } from "./decision";
-import { composeRejection, currentStep, diffOf, draftOf, scopeOf, selectedTask } from "./model";
+import { composeRejection, diffOf, draftOf, layoutOf, scopeOf, selectedTask } from "./model";
 import { useDecide, useStore } from "./store";
 
 function RejectModal() {
@@ -58,7 +58,25 @@ function RejectModal() {
   );
 }
 
-/** j / k: サイドバー、n / p: diff のファイル、[ / ]: ガイドのステップ。承認と差し戻しにはキーを割り当てない（spec 5章） */
+/**
+ * main の上端に最も近い selector の要素から delta だけ離れた要素へスクロールする。
+ * 上端をまたいでいる要素（今読んでいるもの）を基準にする
+ */
+function moveBy(selector: string, delta: 1 | -1) {
+  const main = document.querySelector("main.main");
+  if (!main) return;
+  const els = [...main.querySelectorAll<HTMLElement>(selector)];
+  if (!els.length) return;
+  const top = main.getBoundingClientRect().top + 8;
+  // DOM の順は上から下なので、上端より上にある要素の数がそのまま今の位置になる
+  const at = Math.max(0, els.filter((el) => el.getBoundingClientRect().top <= top).length - 1);
+  els[Math.max(0, Math.min(els.length - 1, at + delta))].scrollIntoView({ block: "start", behavior: "smooth" });
+}
+
+/**
+ * j / k: サイドバー、n / p: diff のファイル（ガイドの順では hunk）、[ / ]: ガイドの順でのグループ。
+ * 承認と差し戻しにはキーを割り当てない（spec 5章）
+ */
 function useKeys() {
   const { s, dispatch } = useStore();
   const latest = useRef(s);
@@ -75,8 +93,15 @@ function useKeys() {
       if (!t || t.state !== "suspended") return;
       const loaded = diffOf(s, t.id, scopeOf(s, t.id));
       if (loaded?.kind !== "ok") return;
-      const step = currentStep(s, t);
-      if ((e.key === "[" || e.key === "]") && step !== null) return dispatch({ type: "step", idx: step + (e.key === "]" ? 1 : -1) });
+      const flowing = layoutOf(s, t.id) === "flow";
+      if (e.key === "[" || e.key === "]") {
+        if (flowing) moveBy(".flow-sec", e.key === "]" ? 1 : -1);
+        return;
+      }
+      if ((e.key === "n" || e.key === "p") && flowing) {
+        // 流れにはファイルの id が無いので、DOM の順に並ぶ hunk（と hunk の無いファイル）の前後へ動く
+        return moveBy("[data-anchor]", e.key === "n" ? 1 : -1);
+      }
       if (e.key === "n" || e.key === "p") {
         const files = loaded.value.files;
         if (!files.length) return;

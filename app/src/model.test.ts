@@ -9,10 +9,10 @@ import {
 } from "./fixtures";
 import {
   bounceNotice,
+  canFlow,
   canReject,
   composeRejection,
   countReview,
-  currentStep,
   denialLines,
   diffLines,
   diffOf,
@@ -22,6 +22,7 @@ import {
   hasSince,
   isPartial,
   isTerminal,
+  layoutOf,
   LIMIT_DANGER_UTILIZATION,
   LIMIT_WARN_UTILIZATION,
   LOG_LINES_KEPT,
@@ -40,7 +41,6 @@ import {
   toProject,
   toRateLimitWindow,
   toTask,
-  unguidedFiles,
   type DiffView,
   type Loaded,
   type State,
@@ -67,7 +67,7 @@ const base = (overrides: Partial<State> = {}): State => ({
   project: "all",
   sel: "t-2b91",
   scope: {},
-  step: {},
+  layout: {},
   diffs: {},
   contexts: {},
   guides: {},
@@ -200,14 +200,6 @@ describe("diff", () => {
       ["a", null, 21, 21],
       ["", 12, 22, 22],
     ]);
-  });
-  test("ガイドが触れていないファイルを拾う（readingOrder と risks の箇所を見る）", () => {
-    const guide = {
-      readingOrder: [{ locations: [{ path: "src/keep.ts" }] }],
-      risks: [{ locations: [{ path: "src/added.ts", hunk: "h1" }] }],
-    } as unknown as Guide;
-    expect(unguidedFiles(buildDiff(SAMPLE_DIFF), guide).map((f) => f.path))
-      .toEqual(["logo.png", "src/gone.ts", "src/renamed.ts"]);
   });
   test("前回レビューの記録が無いまま since を頼んだ応答は「前回以降」と名乗らない", () => {
     const view: DiffView = { meta: SAMPLE_DIFF, files: [] };
@@ -364,13 +356,9 @@ describe("reduce", () => {
     expect(groupOf(task(s, s.sel!))).toBe("done");
   });
 
-  test("ガイドのステップは範囲外へ動かない", () => {
-    const guide = { readingOrder: [{}, {}, {}, {}], risks: [] } as unknown as Guide;
-    const view: GuideView = { kind: "ok", guide, createdAt: "2026-09-21T00:00:00Z", stale: false };
-    const s = base({ sel: "t-9f21", guides: { "t-9f21": { kind: "ok", value: view } } });
-    expect(reduce(s, { type: "step", idx: 4 })).toBe(s);
-    expect(reduce(s, { type: "step", idx: 3 }).step["t-9f21"]).toBe(3);
-    expect(reduce(s, { type: "step", idx: null }).step["t-9f21"]).toBeNull();
+  test("並べ方はガイドを読めないタスクでは切り替わらない", () => {
+    const s = base();
+    expect(reduce(s, { type: "layout", layout: "flow" })).toBe(s);
   });
 
   test("ログの取得結果はタスクごとに持つ", () => {
@@ -792,18 +780,50 @@ describe("取ってきたガイド", () => {
     expect(guideOf(after, "s-1103")).toEqual(loaded(okView));
   });
 
-  test("ガイドが無ければステップモードに入らない", () => {
-    const s = withGuide({ kind: "none" });
-    expect(currentStep(s, task(s, "t-2b91"))).toBeNull();
-    expect(reduce(s, { type: "step", idx: 0 })).toBe(s);
+  test("消えたタスクの並べ方は sync で落ちる", () => {
+    const s = { ...withGuide(okView), layout: { "t-2b91": "files" as const } };
+    const a = t1({ id: "a", state: "suspended" });
+    const after = reduce(s, { type: "sync", tasks: [a], projects: [], now: 2 });
+    expect(after.layout).toEqual({});
   });
 
-  test("壊れている・まだ無い・取得前のガイドはステップモードにしない", () => {
-    for (const view of [{ kind: "broken", issues: ["x"] }, { kind: "missing" }] as GuideView[]) {
+  test("ガイドが無い・まだ無い・大きすぎる・壊れている・取得前はファイル順で、切り替えもできない", () => {
+    const views: GuideView[] = [
+      { kind: "none" },
+      { kind: "missing" },
+      { kind: "too_large", size: 300000 },
+      { kind: "broken", issues: ["x"] },
+    ];
+    for (const view of views) {
       const s = withGuide(view);
-      expect(currentStep(s, task(s, "t-2b91"))).toBeNull();
+      expect(layoutOf(s, "t-2b91")).toBe("files");
+      expect(canFlow(s, "t-2b91")).toBe(false);
+      expect(reduce(s, { type: "layout", layout: "flow" })).toBe(s);
     }
-    expect(currentStep(base(), task(base(), "t-2b91"))).toBeNull();
+    expect(layoutOf(base(), "t-2b91")).toBe("files");
+    expect(canFlow(base(), "t-2b91")).toBe(false);
+  });
+
+  test("新しいガイドは既定で読む順", () => {
+    expect(layoutOf(withGuide(okView), "t-2b91")).toBe("flow");
+  });
+
+  test("古いガイドは既定でファイル順、選べば読む順", () => {
+    const s = withGuide({ ...okView, stale: true });
+    expect(layoutOf(s, "t-2b91")).toBe("files");
+    expect(layoutOf(reduce(s, { type: "layout", layout: "flow" }), "t-2b91")).toBe("flow");
+  });
+
+  test("並べ方を切り替えても、書きかけのコメントと下書きは残る", () => {
+    const s = {
+      ...withGuide(okView),
+      editing: { task: "t-2b91", path: "a.ts", line: 3, quote: "x", text: "書きかけ" },
+      drafts: { "t-2b91": { comments: [{ path: "a.ts", line: 1, quote: "y", text: "保存済み" }], overall: "全体" } },
+    };
+    const next = reduce(s, { type: "layout", layout: "files" });
+    expect(layoutOf(next, "t-2b91")).toBe("files");
+    expect(next.editing).toEqual(s.editing);
+    expect(next.drafts).toEqual(s.drafts);
   });
 
   describe("前回レビュー以降を見ている間", () => {
@@ -816,20 +836,22 @@ describe("取ってきたガイド", () => {
       });
     };
 
-    test("ステップモードにせず、[ ] や step でも位置を動かさない", () => {
+    test("ファイル順で、切り替えもできない", () => {
       const s = since(7);
-      expect(currentStep(s, task(s, "t-2b91"))).toBeNull();
-      expect(reduce(s, { type: "step", idx: 1 })).toBe(s);
+      expect(layoutOf(s, "t-2b91")).toBe("files");
+      expect(canFlow(s, "t-2b91")).toBe(false);
+      expect(reduce(s, { type: "layout", layout: "flow" })).toBe(s);
     });
 
-    test("取得前もステップモードにしない", () => {
+    test("取得前も同じ", () => {
       const s = { ...since(7), diffs: {} };
-      expect(currentStep(s, task(s, "t-2b91"))).toBeNull();
+      expect(layoutOf(s, "t-2b91")).toBe("files");
+      expect(reduce(s, { type: "layout", layout: "flow" })).toBe(s);
     });
 
-    test("前回が無くて全体が返ってきたときは、全体を見ているのでステップモードのまま", () => {
+    test("前回が無くて全体が返ってきたときは、全体を見ているので読む順", () => {
       const s = since(null);
-      expect(currentStep(s, task(s, "t-2b91"))).toBe(0);
+      expect(layoutOf(s, "t-2b91")).toBe("flow");
     });
 
     test("isPartial は since で前回が基準になっているときだけ true", () => {
@@ -838,14 +860,6 @@ describe("取ってきたガイド", () => {
       expect(isPartial(view(null), "since")).toBe(false);
       expect(isPartial(view(7), "all")).toBe(false);
     });
-  });
-
-  test("ガイドがあればステップを進められる", () => {
-    const s = withGuide(okView);
-    expect(currentStep(s, task(s, "t-2b91"))).toBe(0);
-    const next = reduce(s, { type: "step", idx: 1 });
-    expect(currentStep(next, task(next, "t-2b91"))).toBe(1);
-    expect(reduce(s, { type: "step", idx: 2 })).toBe(s);
   });
 });
 

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
-import { SAMPLE_DIFF, SAMPLE_MOVE_DIFF } from "./fixtures";
+import { listHunks } from "../../shared/guide/hunkId.ts";
+import { EXAMPLE_DIFF, SAMPLE_DIFF, SAMPLE_MOVE_DIFF } from "./fixtures";
 import { buildDiff, parsePatch } from "./patch";
 import type { TaskDiff } from "./types";
 
@@ -68,6 +69,14 @@ describe("buildDiff", () => {
       from: { path: "src/a.ts", startLine: 2, endLine: 6 },
       to: { path: "src/b.ts", startLine: 1, endLine: 5 },
     });
+  });
+
+  test("hunk の id は listHunks と同じ値が同じ順で付く", () => {
+    for (const td of [SAMPLE_DIFF, EXAMPLE_DIFF, SAMPLE_MOVE_DIFF]) {
+      const ids = buildDiff(td).flatMap((f) => f.hunks.map((h) => h.id));
+      expect(ids).toEqual(listHunks(td.patch).map((h) => h.id));
+    }
+    expect(buildDiff(EXAMPLE_DIFF).flatMap((f) => f.hunks)).toHaveLength(24);
   });
 
   test("移動が無い diff では moves が空", () => {

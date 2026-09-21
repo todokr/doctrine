@@ -1,11 +1,15 @@
 // task.diff の応答（ファイルの一覧 + 1本の patch 文字列）を、画面が描ける
 // ファイル単位の形に組み立てる。副作用を持たない（テストは patch.test.ts）
 import { detectMoves } from "../../shared/diff/moves.ts";
+import { listHunks } from "../../shared/guide/hunkId.ts";
 import type { TaskDiff } from "../../shared/protocol.ts";
 import type { DiffFile, DiffHunk, MovedBlock } from "./types";
 
+/** parsePatch が切り出した hunk。id は buildDiff が listHunks から足す */
+type RawHunk = Omit<DiffHunk, "id">;
+
 /** patch を `diff --git` ごとに切った1区画。パスは読まない（parsePatch の注を参照） */
-type PatchSection = { header: string; hunks: DiffHunk[] };
+type PatchSection = { header: string; hunks: RawHunk[] };
 
 const FILE_HEAD = /^diff --git /;
 const HUNK_HEAD = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/;
@@ -21,7 +25,7 @@ const HUNK_HEAD = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/;
 export function parsePatch(patch: string): PatchSection[] {
   const sections: PatchSection[] = [];
   let section: PatchSection | null = null;
-  let hunk: DiffHunk | null = null;
+  let hunk: RawHunk | null = null;
   const body: string[] = [];
 
   const closeHunk = () => {
@@ -94,13 +98,26 @@ export function buildDiff(td: TaskDiff): DiffFile[] {
       `patch のファイル数（${sections.length}）が files（${td.files.length}）より多い`,
     );
   }
+  // hunk の id は patch 全体の出現順で決まる。parsePatch と listHunks は同じ規則で
+  // hunk を切るので、区画を先頭から見て hunk を先頭から割り当てれば 1 対 1 で合う。
+  // 件数がずれるのは読み方が 2 つに分かれたときだけで、黙ってずらすと別の hunk を指す
+  const ids = listHunks(td.patch).map((h) => h.id);
+  const total = sections.reduce((n, sec) => n + sec.hunks.length, 0);
+  if (total !== ids.length) {
+    throw new Error(`patch の hunk 数（${total}）が id の数（${ids.length}）と合わない`);
+  }
+  let next = 0;
+  const withIds = sections.map((sec) => ({
+    ...sec,
+    hunks: sec.hunks.map((h): DiffHunk => ({ id: ids[next++], ...h })),
+  }));
   const movesByPath = new Map<string, MovedBlock[]>(td.files.map((f) => [f.path, []]));
   for (const m of detectMoves(td.patch)) {
     movesByPath.get(m.from.path)?.push(m);
     if (m.to.path !== m.from.path) movesByPath.get(m.to.path)?.push(m);
   }
   return td.files.map((f, i) => {
-    const section = sections[i];
+    const section = withIds[i];
     return {
       ...f,
       hunks: section?.hunks ?? [],
