@@ -353,6 +353,7 @@ export function toTask(
     // 引き継がない。イベントを取りこぼすと取り直しだけで終端になることがあり、
     // 引き継ぐと完了・失敗したタスクに差し戻し中の通知が残る
     bounce: isTerminal(state) ? undefined : previous?.bounce,
+    intake: null,
   };
 }
 

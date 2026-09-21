@@ -16,7 +16,7 @@ export const PROJECTS: Project[] = [
 
 // 状態は doctrine の7状態。refused はフラグ。
 // worktree は seedTasks が state から決めるので、dctl gc で消した後の姿は gced で指定する
-type Seed = Omit<Task, "project" | "prompt" | "branch" | "worktree"> & { gced?: true };
+type Seed = Omit<Task, "project" | "prompt" | "branch" | "worktree" | "intake"> & { gced?: true };
 
 const SEEDS: Seed[] = [
   { id: "t-9f21", wf: "doctrine/guided", title: "ステップの再開をロール単位のセッションに切り替える", state: "suspended", step: "human-review", attempt: 1, prio: 1, since: NOW - 8 * MIN },
@@ -56,6 +56,7 @@ export function seedTasks(): Task[] {
       prompt: `${t.title}。詳細は issue を参照してください。`,
       branch: `doctrine/${t.id}-${t.title.length}`,
       worktree: keepWorktree ? `~/.local/state/doctrine/worktrees/${project}/${t.id}` : null,
+      intake: null,
     };
   });
 }
@@ -405,6 +406,21 @@ export const INTAKE_REVIEWING: IntakeDetail = {
   }],
   processes: [],
   runs: [],
+};
+
+/** 進行中。承認済みの案は 12（latest_draft と同じ）。PFD_STATUSES_B の状態で、あなたの番と要確認を 1 つずつ持つ */
+export const INTAKE_ACTIVE: IntakeDetail = {
+  ...INTAKE_REVIEWING,
+  state: "active",
+  needs_human: true,
+  progress: { done: 0, total: 5 },
+  approval: { id: 1, draft_id: 12, hash: "hash-of-draft-12", approved_at: at(50) },
+  processes: Object.entries(PFD_STATUSES_B).map(([id, status], i) => ({
+    id,
+    ...status,
+    sub_issue_url: `https://github.com/o/r/issues/10${i}`,
+    task_ids: id === "design" ? ["t-old", "t1"] : [],
+  })),
 };
 
 /** 回答待ち。回答済みの質問のまとまり 1 件と、未回答のまとまり 1 件 */

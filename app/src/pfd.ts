@@ -3,6 +3,7 @@ import { decisionTexts } from "../../shared/intake/answerText.ts";
 import type { Artifact, Pfd, Process } from "../../shared/intake/pfd.ts";
 import type { ProcessStatus } from "../../shared/intake/processStatus.ts";
 import type { Answer, Question } from "../../shared/intake/question.ts";
+import type { IntakeProcessView } from "../../shared/protocol.ts";
 import { layoutGraph, type Change } from "./diagram";
 
 export type PfdNodeKind = "artifact" | "process";
@@ -88,6 +89,18 @@ export function processStages(pfd: Pfd): string[][] {
     stages[s].push(p.id);
   }
   return stages;
+}
+
+/** 改訂で変えられない要素のキー（pfdKey）。task_ids が空でないか状態が done のプロセスと、その入出力の成果物 */
+export function frozenIds(pfd: Pfd, processes: readonly IntakeProcessView[]): Set<string> {
+  const started = new Set(processes.filter((p) => p.task_ids.length > 0 || p.state === "done").map((p) => p.id));
+  const frozen = new Set<string>();
+  for (const p of pfd.processes) {
+    if (!started.has(p.id)) continue;
+    frozen.add(pfdKey("process", p.id));
+    for (const a of [...p.inputs, ...p.outputs]) frozen.add(pfdKey("artifact", a));
+  }
+  return frozen;
 }
 
 export const LOOK: Record<PfdLook, { word: string; mark: string; cls: string }> = {

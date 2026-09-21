@@ -1,8 +1,9 @@
 import { describe, expect, test } from "vitest";
 import type { Pfd } from "../../shared/intake/pfd.ts";
 import type { ProcessStatus } from "../../shared/intake/processStatus.ts";
-import { ANSWERS, PFD_SAMPLE, PFD_STATUSES_A, PFD_STATUSES_B, QUESTIONS } from "./fixtures";
-import { buildPfdView, LOOK, parsePfdKey, pfdElement, pfdKey, processStages, type PfdView } from "./pfd";
+import type { IntakeProcessView } from "../../shared/protocol.ts";
+import { ANSWERS, INTAKE_ACTIVE, PFD_SAMPLE, PFD_STATUSES_A, PFD_STATUSES_B, QUESTIONS } from "./fixtures";
+import { buildPfdView, frozenIds, LOOK, parsePfdKey, pfdElement, pfdKey, processStages, type PfdView } from "./pfd";
 
 /** 成果物 id の配列と、[id, 入力, 出力] の配列から PFD を作る。given は goal に無く、どのプロセスの出力でもない成果物 */
 const pfd = (artifacts: string[], processes: [string, string[], string[]][], goal: string[]): Pfd => {
@@ -246,5 +247,38 @@ describe("pfdElement", () => {
   test("案に無いキーは null", () => {
     expect(pfdElement(PFD_SAMPLE, "p:nope")).toBeNull();
     expect(pfdElement(PFD_SAMPLE, "x")).toBeNull();
+  });
+});
+
+describe("frozenIds", () => {
+  const view = (id: string, extra: Partial<IntakeProcessView>): IntakeProcessView =>
+    ({ id, state: "waiting", missing: [], sub_issue_url: null, task_ids: [], ...extra }) as IntakeProcessView;
+  const waiting = (ids: string[]) => ids.map((id) => view(id, {}));
+
+  test("投入済みのプロセスと入出力", () => {
+    const processes = [
+      view("design", { state: "running", taskId: "t1", task_ids: ["t1"] } as Partial<IntakeProcessView>),
+      ...waiting(["build-api", "build-ui", "approve", "ship"]),
+    ];
+    expect(frozenIds(PFD_SAMPLE, processes)).toEqual(new Set(["p:design", "a:issue", "a:policy", "a:schema"]));
+  });
+
+  test("完了を記録した人のプロセスも固定に入る", () => {
+    const processes = [
+      view("approve", { state: "done", note: "n", at: "2026-09-15T14:00:00+09:00" } as Partial<IntakeProcessView>),
+      ...waiting(["design", "build-api", "build-ui", "ship"]),
+    ];
+    expect(frozenIds(PFD_SAMPLE, processes)).toEqual(new Set(["p:approve", "a:api", "a:ui", "a:review"]));
+  });
+
+  test("案に無いプロセスは無視する", () => {
+    expect(frozenIds(PFD_SAMPLE, [view("gone", { task_ids: ["x"] })])).toEqual(new Set());
+  });
+
+  test("buildPfdView に渡すと固定の印が付く", () => {
+    const frozen = frozenIds(PFD_SAMPLE, INTAKE_ACTIVE.processes);
+    const v = buildPfdView(PFD_SAMPLE, { frozen });
+    expect(node(v, "p:design").frozen).toBe(true);
+    expect(node(v, "p:ship").frozen).toBe(false);
   });
 });

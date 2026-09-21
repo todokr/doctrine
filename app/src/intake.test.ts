@@ -3,11 +3,35 @@ import { validateAnswers, validateQuestions } from "../../shared/intake/validate
 import type { IntakeState } from "../../shared/intake/state.ts";
 import { buildFeedback } from "../../shared/intake/feedback.ts";
 import type { IntakeComment, IntakeDetail, NewComment } from "../../shared/protocol.ts";
-import { ANSWERS, INTAKE_ANSWERING, INTAKE_REVIEWING, INTAKES, PFD_SAMPLE, PROJECTS, QUESTIONS } from "./fixtures";
-import { buildPfdView } from "./pfd";
+import type { ProcessStatus } from "../../shared/intake/processStatus.ts";
+import type { IntakeProcessView } from "../../shared/protocol.ts";
 import {
+  ANSWERS,
+  INTAKE_ACTIVE,
+  INTAKE_ANSWERING,
+  INTAKE_REVIEWING,
+  INTAKES,
+  PFD_SAMPLE,
+  PFD_STATUSES_A,
+  PFD_STATUSES_B,
+  PROJECTS,
+  QUESTIONS,
+} from "./fixtures";
+import { buildPfdView, LOOK } from "./pfd";
+import {
+  actionNeeded,
   answerIssues,
+  canCompleteHuman,
   canRejectIntake,
+  processStatuses,
+  processTrail,
+  progressOps,
+  statusNote,
+  statusText,
+  summaryOf,
+  taskIntakeLabel,
+  taskIntakeMark,
+  watchAlert,
   commentCounts,
   commentReplies,
   commentsOn,
@@ -154,6 +178,138 @@ describe("countIntakeAttention", () => {
 
   test("1 件もなければ 0", () => {
     expect(countIntakeAttention([])).toBe(0);
+  });
+
+  test("あなたの番と要確認は needs_human で数える", () => {
+    const active = summaryOf(INTAKE_ACTIVE);
+    const idle = INTAKES.find((i) => !i.needs_human)!;
+    expect(countIntakeAttention([active, idle])).toBe(1);
+    expect(intakeSection(active)).toBe("attention");
+  });
+});
+
+const view = (id: string, s: ProcessStatus, o: Partial<IntakeProcessView> = {}): IntakeProcessView =>
+  ({ id, ...s, sub_issue_url: null, task_ids: [], ...o }) as IntakeProcessView;
+
+describe("processStatuses", () => {
+  test("id をキーにして buildPfdView の塗りに渡せる", () => {
+    const statuses = processStatuses(INTAKE_ACTIVE.processes);
+    const v = buildPfdView(PFD_SAMPLE, { statuses });
+    for (const n of v.nodes.filter((x) => x.kind === "process")) {
+      expect(n.look).toBe(PFD_STATUSES_B[n.id].state);
+    }
+  });
+});
+
+describe("statusNote / statusText", () => {
+  test("ready は止めている理由を添える", () => {
+    const note = (blockedBy: "revising" | "paused" | "no_sub_issue" | null) => statusNote({ state: "ready", blockedBy });
+    expect(note("revising")).toBe("改訂中");
+    expect(note("paused")).toBe("一時停止中");
+    expect(note("no_sub_issue")).toBe("sub-issue 待ち");
+    expect(note(null)).toBeNull();
+    expect(statusText({ state: "ready", blockedBy: "paused" })).toBe("着手可能（一時停止中）");
+    expect(statusText({ state: "ready", blockedBy: null })).toBe("着手可能");
+  });
+
+  test("要確認は理由を添える", () => {
+    const note = (reason: "task_stopped" | "no_pr" | "pr_closed") =>
+      statusNote({ state: "needs_attention", taskId: "t", reason });
+    expect(note("task_stopped")).toBe("タスクが止まった");
+    expect(note("no_pr")).toBe("PR が無い");
+    expect(note("pr_closed")).toBe("PR が閉じられた");
+    expect(statusText({ state: "needs_attention", taskId: "t", reason: "no_pr" })).toBe("要確認（PR が無い）");
+  });
+
+  test("ほかの状態は LOOK の語だけ", () => {
+    for (const s of Object.values(PFD_STATUSES_A)) {
+      expect(statusNote(s)).toBeNull();
+      expect(statusText(s)).toBe(LOOK[s.state].word);
+    }
+  });
+});
+
+describe("actionNeeded", () => {
+  test("あなたの番と要確認を案の順に分ける", () => {
+    const r = actionNeeded(INTAKE_ACTIVE, PFD_SAMPLE);
+    expect(r.yourTurn.map((x) => x.process.id)).toEqual(["approve"]);
+    expect(r.needsAttention.map((x) => x.process.id)).toEqual(["design"]);
+  });
+
+  test("どちらも無ければ空", () => {
+    const processes = Object.entries(PFD_STATUSES_A).map(([id, s]) => view(id, s));
+    const r = actionNeeded({ ...INTAKE_ACTIVE, processes }, PFD_SAMPLE);
+    expect(r.yourTurn).toEqual([]);
+    expect(r.needsAttention).toEqual([]);
+  });
+});
+
+describe("processTrail", () => {
+  test("今のタスクを先頭にし、PR は pr_open と merged だけ", () => {
+    const stopped = view("design", PFD_STATUSES_B.design, { task_ids: ["t-old", "t1"] });
+    expect(processTrail(stopped).taskIds).toEqual(["t1", "t-old"]);
+    expect(processTrail(stopped).pr).toBeNull();
+    const open = view("build-api", PFD_STATUSES_A["build-api"], { task_ids: ["t2"] });
+    expect(processTrail(open).pr?.number).toBe(42);
+  });
+});
+
+describe("canCompleteHuman", () => {
+  test("空白だけは記録できない", () => {
+    expect(canCompleteHuman("")).toBe(false);
+    expect(canCompleteHuman("  \n")).toBe(false);
+    expect(canCompleteHuman(" 決めた ")).toBe(true);
+  });
+});
+
+describe("progressOps", () => {
+  const ops = (state: IntakeState, revising = false) => progressOps({ ...summaryOf(INTAKE_ACTIVE), state, revising });
+
+  test("active は確認・一時停止・改訂", () => {
+    expect(ops("active")).toEqual({ refresh: true, pause: true, revise: true, closeIssue: false });
+  });
+
+  test("completed は Issue を閉じるだけ", () => {
+    expect(ops("completed")).toEqual({ refresh: false, pause: false, revise: false, closeIssue: true });
+  });
+
+  test("canceled は操作なし", () => {
+    expect(ops("canceled")).toEqual({ refresh: false, pause: false, revise: false, closeIssue: false });
+  });
+});
+
+describe("watchAlert", () => {
+  test("失敗が続いていれば件数を出す", () => {
+    const watch = { lastSucceededAt: null, lastError: null };
+    expect(watchAlert({ ...watch, consecutiveFailures: 3 })).toBe("GitHub の確認に 3 回続けて失敗しています");
+    expect(watchAlert({ ...watch, consecutiveFailures: 0 })).toBeNull();
+  });
+});
+
+describe("summaryOf", () => {
+  test("一覧の列だけを取り出す", () => {
+    const s = summaryOf(INTAKE_ACTIVE);
+    expect(new Set(Object.keys(s))).toEqual(new Set(Object.keys(INTAKES[0])));
+    expect(s.needs_human).toBe(true);
+  });
+});
+
+describe("taskIntakeMark / taskIntakeLabel", () => {
+  const intake = {
+    id: "i2",
+    processId: "build-api",
+    issueUrl: "https://github.com/o/r/issues/102",
+    parentIssueUrl: "https://github.com/o/r/issues/2",
+  };
+
+  test("親 Issue の番号とタイトル", () => {
+    expect(taskIntakeMark(intake)).toBe("Intake #2");
+    expect(taskIntakeLabel(intake, INTAKES)).toBe("Intake: Issue 2 のタイトル / build-api");
+  });
+
+  test("一覧に無い Intake は番号だけ", () => {
+    expect(taskIntakeLabel(intake, [])).toBe("Intake: #2 / build-api");
+    expect(taskIntakeMark({ ...intake, parentIssueUrl: null })).toBe("Intake");
   });
 });
 

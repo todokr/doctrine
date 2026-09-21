@@ -66,6 +66,8 @@ export type Task = {
    * 試行回数＝差し戻しが何回目か。
    */
   bounce?: { step: string; goto: string; attempt: number };
+  /** Intake から投入されたタスクだけが持つ（spec 10 章） */
+  intake: { id: string; processId: string; issueUrl: string | null; parentIssueUrl: string | null } | null;
 };
 
 /** 枠1つぶんの最新の標本。window はデーモンの生のキー（five_hour / seven_day / 未知の値）。 */
