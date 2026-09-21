@@ -1,13 +1,33 @@
 import { test } from "@std/testing/bdd";
 import assert from "node:assert/strict";
 import type { PrFact } from "../../../shared/intake/github.ts";
-import { getPrObservation, updateProcess } from "../../src/db/intakes.ts";
+import type { Pfd } from "../../../shared/intake/pfd.ts";
+import {
+  getIntake,
+  getPrObservation,
+  listProcesses,
+  updateIntake,
+  updateProcess,
+} from "../../src/db/intakes.ts";
 import type { Db } from "../../src/db/schema.ts";
-import { getProject, listTasks } from "../../src/db/tasks.ts";
+import { getProject, getTask, listTasks } from "../../src/db/tasks.ts";
+import { ghPrWatcher } from "../../src/github/ghPrWatcher.ts";
+import { ghTracker } from "../../src/github/ghTracker.ts";
+import type { IntakeTransition } from "../../src/intake/commands.ts";
 import { dispatchIntake } from "../../src/intake/dispatch.ts";
-import { choosePr, observePullRequests } from "../../src/intake/watch.ts";
+import {
+  choosePr,
+  createIntakeWatcher,
+  INITIAL_WATCH_HEALTH,
+  observePullRequests,
+} from "../../src/intake/watch.ts";
+import { toIntakeDetail } from "../../src/intake/view.ts";
+import { fakeGh, parseGraphqlArgs } from "../helpers/gh.ts";
+import { fakeTracker } from "../helpers/fakeTracker.ts";
 import { fakePrWatcher } from "../helpers/prWatcher.ts";
-import { seedActive } from "./watchFixture.ts";
+import { until } from "../helpers/repo.ts";
+import { example } from "./pfd/fixture.ts";
+import { PARENT_URL, seedActive } from "./watchFixture.ts";
 
 function pr(number: number, state: PrFact["state"], baseRef = "main"): PrFact {
   return {
@@ -79,4 +99,271 @@ test("observePullRequests: pullRequests の失敗は投げる", async () => {
   const pw = fakePrWatcher();
   pw.failing.on = true;
   await assert.rejects(observePullRequests(db, pw.prWatcher, (await getProject(db, projectId))!));
+});
+
+const now = () => new Date().toISOString();
+
+async function setup(pfd: Pfd = example()) {
+  const seeded = await seedActive(pfd);
+  const ft = fakeTracker();
+  const pw = fakePrWatcher();
+  const updated: string[] = [];
+  const transitions: IntakeTransition[] = [];
+  const watcher = createIntakeWatcher({
+    db: seeded.db,
+    tracker: ft.tracker,
+    prWatcher: pw.prWatcher,
+    onStateChanged: (t) => transitions.push(t),
+    onUpdated: (id) => updated.push(id),
+  });
+  return { ...seeded, ft, pw, watcher, updated, transitions };
+}
+
+/** そのプロセスの current_task_id のタスクのブランチに、MERGED の PR を 1 件置く。 */
+async function mergeOf(
+  pw: ReturnType<typeof fakePrWatcher>,
+  db: Db,
+  processId: string,
+  baseRef = "main",
+): Promise<void> {
+  const row = (await listProcesses(db, "i1")).find((r) => r.process_id === processId)!;
+  const task = (await getTask(db, row.current_task_id!))!;
+  pw.prs.set(task.branch, [pr(10 + Number(processId), "MERGED", baseRef)]);
+}
+
+async function finishHuman3(db: Db): Promise<void> {
+  await updateProcess(db, "i1", "3", {
+    human_note: "ログイン 1 回を 1 利用と数える",
+    human_done_at: now(),
+  });
+}
+
+async function currentTask(db: Db, processId: string): Promise<string | null> {
+  return (await listProcesses(db, "i1")).find((r) => r.process_id === processId)!.current_task_id;
+}
+
+test("承認直後の 1 周で、sub-issue を作り、プロセス 1 だけをタスクにする", async () => {
+  const { db, projectId, ft, watcher, updated } = await setup();
+  await watcher.request(projectId);
+  const tasks = await listTasks(db);
+  assert.equal(tasks.length, 1);
+  assert.equal(tasks[0].intake_process_id, "1");
+  assert.equal(await currentTask(db, "1"), tasks[0].id);
+  for (const id of ["2", "3", "4"]) assert.equal(await currentTask(db, id), null);
+  assert.equal(ft.issues.length, 4);
+  assert.ok(updated.includes("i1"));
+});
+
+test("投入したタスクはプロセス名・既定のワークフロー・紐づけの項目を持つ", async () => {
+  const { db, projectId, watcher } = await setup();
+  await watcher.request(projectId);
+  const [task] = await listTasks(db);
+  const subIssueUrl = (await listProcesses(db, "i1")).find((r) => r.process_id === "1")!
+    .sub_issue_url;
+  assert.equal(task.title, "マイグレーションを書く");
+  assert.equal(task.workflow_name, "feature");
+  assert.equal(task.priority, 2);
+  assert.equal(task.state, "queued");
+  assert.ok(task.branch.startsWith(`doctrine/${task.id}-`));
+  assert.equal(task.intake_id, "i1");
+  assert.equal(task.issue_url, subIssueUrl);
+  assert.equal(task.parent_issue_url, PARENT_URL);
+  const lines = task.prompt.split("\n");
+  assert.equal(lines[0], `${PARENT_URL} 親`);
+  assert.equal(lines[1], `この作業の sub-issue: ${subIssueUrl}`);
+});
+
+test("同じ周をもう一度回しても、同じプロセスのタスクは増えない", async () => {
+  const { db, projectId, watcher } = await setup();
+  await watcher.request(projectId);
+  await watcher.request(projectId);
+  assert.equal((await listTasks(db)).length, 1);
+});
+
+test("sub-issue が作れなかったプロセスは投入せず、失敗を健康状態に出し、治れば次の周で投入する", async () => {
+  const { db, projectId, ft, watcher } = await setup();
+  ft.failWhen((c) => c.op === "createSubIssue");
+  await watcher.request(projectId);
+  assert.equal((await listTasks(db)).length, 0);
+  assert.equal(watcher.health(projectId).consecutiveFailures, 1);
+  assert.match(watcher.health(projectId).lastError!, /sub-issue/);
+  assert.equal((await getIntake(db, "i1"))!.state, "active");
+
+  ft.heal();
+  await watcher.request(projectId);
+  assert.equal((await listTasks(db)).length, 1);
+  assert.equal(watcher.health(projectId).consecutiveFailures, 0);
+  assert.notEqual(watcher.health(projectId).lastSucceededAt, null);
+});
+
+test("PR の見張りが失敗しても Intake は止まらず、連続失敗の回数が増える", async () => {
+  const { db, projectId, pw, watcher } = await setup();
+  await watcher.request(projectId);
+  pw.failing.on = true;
+  await watcher.request(projectId);
+  await watcher.request(projectId);
+  assert.equal(watcher.health(projectId).consecutiveFailures, 2);
+  assert.equal((await getIntake(db, "i1"))!.state, "active");
+
+  pw.failing.on = false;
+  await mergeOf(pw, db, "1");
+  await watcher.request(projectId);
+  assert.equal(watcher.health(projectId).consecutiveFailures, 0);
+  const observed = await getPrObservation(db, (await currentTask(db, "1"))!);
+  assert.equal(observed?.state, "MERGED");
+});
+
+test("baseBranch へのマージを検知すると下流を投入する", async () => {
+  const { db, projectId, pw, watcher } = await setup();
+  await watcher.request(projectId);
+  await finishHuman3(db);
+  await mergeOf(pw, db, "1");
+  await watcher.request(projectId);
+  const tasks = await listTasks(db);
+  const task2 = tasks.filter((t) => t.intake_process_id === "2");
+  assert.equal(task2.length, 1);
+  assert.match(task2[0].prompt, /人が決めたこと:/);
+  assert.match(task2[0].prompt, /ログイン 1 回を 1 利用と数える/);
+  assert.equal(tasks.some((t) => t.intake_process_id === "4"), false);
+});
+
+test("マージされても、人のプロセスが終わっていなければ下流は投入しない", async () => {
+  const { db, projectId, pw, watcher } = await setup();
+  await watcher.request(projectId);
+  await mergeOf(pw, db, "1");
+  await watcher.request(projectId);
+  assert.equal((await listTasks(db)).length, 1);
+});
+
+test("baseBranch 以外へのマージでは下流を投入しない", async () => {
+  const { db, projectId, pw, watcher } = await setup();
+  await watcher.request(projectId);
+  await finishHuman3(db);
+  await mergeOf(pw, db, "1", "release");
+  await watcher.request(projectId);
+  assert.equal((await listTasks(db)).length, 1);
+  const row = (await getIntake(db, "i1"))!;
+  const detail = await toIntakeDetail(db, row, watcher.health(projectId));
+  const p1 = detail.processes.find((p) => p.id === "1")!;
+  assert.equal(p1.state, "needs_attention");
+  assert.equal("reason" in p1 && p1.reason, "pr_closed");
+});
+
+test("末端の成果物が揃うと完了にし、親 Issue は閉じない", async () => {
+  const { db, projectId, ft, pw, watcher, transitions } = await setup();
+  await watcher.request(projectId);
+  await finishHuman3(db);
+  for (const id of ["1", "2", "4"]) {
+    await mergeOf(pw, db, id);
+    await watcher.request(projectId);
+  }
+  const row = (await getIntake(db, "i1"))!;
+  assert.equal(row.state, "completed");
+  assert.notEqual(row.ended_at, null);
+  assert.deepEqual(
+    transitions.map((t) => [t.from, t.to]),
+    [["active", "completed"]],
+  );
+  assert.equal(ft.calls.some((c) => c.op === "closeIssue" && c.url === PARENT_URL), false);
+
+  const before = pw.calls.length;
+  await watcher.request(projectId);
+  assert.equal(pw.calls.length, before);
+});
+
+test("active な Intake が無いプロジェクトでは gh を呼ばない", async () => {
+  const { db, projectId, ft, pw, watcher } = await setup();
+  await updateIntake(db, "i1", { state: "canceled" });
+  await watcher.request(projectId);
+  assert.equal(ft.calls.length, 0);
+  assert.equal(pw.calls.length, 0);
+  assert.deepEqual(watcher.health(projectId), INITIAL_WATCH_HEALTH);
+});
+
+test("dispatch_paused の Intake は投入しない", async () => {
+  const { db, projectId, ft, watcher } = await setup();
+  await updateIntake(db, "i1", { dispatch_paused: 1 });
+  await watcher.request(projectId);
+  assert.equal((await listTasks(db)).length, 0);
+  assert.equal(ft.issues.length, 4);
+});
+
+test("走っている周の最中に届いた要求は、その周が終わった後にもう 1 周回す", async () => {
+  const { projectId, pw, watcher } = await setup();
+  await watcher.request(projectId);
+  assert.equal(pw.calls.length, 0);
+
+  let release: () => void = () => {};
+  const gate = new Promise<void>((resolve) => release = resolve);
+  const inner = pw.prWatcher.pullRequests;
+  pw.prWatcher.pullRequests = async (path, branches) => {
+    const result = await inner(path, branches);
+    await gate;
+    return result;
+  };
+
+  const first = watcher.request(projectId);
+  await until(() => pw.calls.length === 1);
+  const second = watcher.request(projectId);
+  release();
+  await Promise.all([first, second]);
+  assert.equal(pw.calls.length, 2);
+});
+
+test("偽の gh: ghTracker と ghPrWatcher を通して、承認直後の投入とマージの後の下流の投入が起きる", async () => {
+  const { db, projectId } = await seedActive();
+  const nodes: { id: string; url: string; state: string; body: string }[] = [];
+  let n = 100;
+  let mergedBranch = false;
+  const gh = fakeGh((a) => {
+    if (a[0] === "repo" && a[1] === "view") return JSON.stringify({ id: "R_1" });
+    if (a[0] !== "api" || a[1] !== "graphql") return undefined;
+    const g = parseGraphqlArgs(a);
+    if (/pullRequests/.test(g.query)) {
+      const found = mergedBranch
+        ? [{
+          number: 7,
+          url: "https://github.com/o/r/pull/7",
+          state: "MERGED",
+          baseRefName: "main",
+          mergedAt: "2026-09-21T00:00:00Z",
+          mergeCommit: { oid: "abc" },
+        }]
+        : [];
+      return JSON.stringify({ data: { repository: { b0: { nodes: found } } } });
+    }
+    if (/createIssue/.test(g.query)) {
+      n++;
+      const node = {
+        id: `I_${n}`,
+        url: `https://github.com/o/r/issues/${n}`,
+        state: "OPEN",
+        body: g.raw.body,
+      };
+      nodes.push(node);
+      return JSON.stringify({ data: { createIssue: { issue: { id: node.id, url: node.url } } } });
+    }
+    if (/subIssues/.test(g.query)) {
+      return JSON.stringify({ data: { node: { subIssues: { nodes } } } });
+    }
+    return undefined;
+  });
+  const watcher = createIntakeWatcher({
+    db,
+    tracker: ghTracker(gh.run),
+    prWatcher: ghPrWatcher(gh.run),
+    onStateChanged: () => {},
+    onUpdated: () => {},
+  });
+
+  await watcher.request(projectId);
+  const creates = gh.calls.filter((c) => /createIssue/.test(parseGraphqlArgs(c.args).query));
+  assert.equal(creates.length, 4);
+  assert.equal((await listTasks(db)).length, 1);
+
+  await finishHuman3(db);
+  mergedBranch = true;
+  await watcher.request(projectId);
+  const tasks = await listTasks(db);
+  assert.deepEqual(tasks.map((t) => t.intake_process_id).toSorted(), ["1", "2"]);
 });
