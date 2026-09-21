@@ -433,6 +433,8 @@ kbd{font-family:var(--mono);font-size:10.5px;border:1px solid var(--line);border
 .headrow h1 .num{font-family:var(--mono);color:var(--ink-3);margin-right:8px}
 .band{display:flex;gap:10px;align-items:center;flex-wrap:wrap;background:var(--run-bg);color:var(--run);border-bottom:1px solid var(--run);padding:7px 22px;font-size:12.5px;font-weight:500}
 .band .spacer{flex:1}
+.need{display:grid;gap:8px;padding-top:8px;border-top:1px solid var(--line)}
+.need:first-of-type{padding-top:0;border-top:0}
 .picker{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.1fr);gap:14px;align-items:start}
 .issues{border:1px solid var(--line);border-radius:9px;overflow:hidden}
 .issue-row{width:100%;border:0;border-top:1px solid var(--line);background:var(--surface);padding:8px 12px;display:grid;grid-template-columns:48px minmax(0,1fr) auto;gap:2px 8px;text-align:left}

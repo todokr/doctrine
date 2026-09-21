@@ -12,7 +12,7 @@ import {
   wholeComment,
 } from "../intake";
 import { ago, intakeDraftOf, type Loaded } from "../model";
-import { buildPfdView, pfdElement } from "../pfd";
+import { buildPfdView, frozenIds, pfdElement } from "../pfd";
 import { useIntakeRpc, useStore } from "../store";
 import { IntakeHistory } from "./IntakeHistory";
 import { PfdDiagram } from "./PfdDiagram";
@@ -80,14 +80,22 @@ export function PlanReview({ detail, heading }: { detail: IntakeDetail; heading:
   const draft = detail.latest_draft;
   const local = intakeDraftOf(s, detail.id);
   const view = useMemo(
-    () => (draft ? buildPfdView(draft.pfd, { comments: commentCounts(local.comments) }) : null),
-    [draft, local.comments],
+    () =>
+      draft
+        ? buildPfdView(draft.pfd, {
+          comments: commentCounts(local.comments),
+          // 改訂中の案にも、固定のプロセスとその入出力は同じ id で残っている（コアが案を受け取るときに確かめる）
+          frozen: detail.revising ? frozenIds(draft.pfd, detail.processes) : undefined,
+        })
+        : null,
+    [draft, local.comments, detail.revising, detail.processes],
   );
   if (!draft || !view) return <div className="pad">{heading}<p className="hint">案を読み込み中</p></div>;
 
   const { pfd } = draft;
   const info = selected === null ? null : pfdElement(pfd, selected, detail.question_sets);
   const processId = info?.kind === "process" ? info.process.id : null;
+  const isFrozen = selected !== null && (view.nodes.find((n) => n.key === selected)?.frozen ?? false);
 
   const openPrompt = () => {
     if (processId === null || prompts[processId]) return;
@@ -152,10 +160,13 @@ export function PlanReview({ detail, heading }: { detail: IntakeDetail; heading:
             onSelect={setSelected}
             prompt={processId === null ? undefined : prompts[processId]}
             onOpenPrompt={openPrompt}
+            frozen={isFrozen}
             comments={selected === null ? [] : commentsOn(local.comments, selected)}
             previous={previousHere}
-            onAddComment={(body) => selected !== null && dispatch({ type: "intake.comment.add", id: detail.id, key: selected, body })}
-            onDeleteComment={(index) => dispatch({ type: "intake.comment.delete", id: detail.id, index })}
+            onAddComment={isFrozen
+              ? null
+              : (body) => selected !== null && dispatch({ type: "intake.comment.add", id: detail.id, key: selected, body })}
+            onDeleteComment={isFrozen ? null : (index) => dispatch({ type: "intake.comment.delete", id: detail.id, index })}
           />
         </div>
         {draft.seq > 1 && (

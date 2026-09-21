@@ -7,6 +7,7 @@ import {
   intakeProgress,
   intakeSection,
   issueNumber,
+  taskIntakeMark,
 } from "../intake";
 import { GROUPS, ago, countReview, groupOf, hm, sidebarOrder, timeLabel, visibleTasks } from "../model";
 import { useNotYet, useStore } from "../store";
@@ -77,6 +78,7 @@ function Item({ t }: { t: Task }) {
           <span className="pjdot" style={{ background: p?.color ?? "#666" }} />
           {p?.id ?? t.project}
         </span>
+        {t.intake && <span className="tag">{taskIntakeMark(t.intake)}</span>}
         <span className="tm">{timeLabel(t, s.now)}</span>
       </span>
     </button>

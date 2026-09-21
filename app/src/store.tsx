@@ -20,7 +20,7 @@ import { receiveGuide } from "./guide";
 import { buildDiff } from "./patch";
 import type { GhStatus, IssueDetail } from "../../shared/intake/github.ts";
 import type { Answer } from "../../shared/intake/question.ts";
-import type { GithubIssue, IntakeSummary, NewComment, PfdDraft } from "../../shared/protocol.ts";
+import type { GithubIssue, IntakeDetail, IntakeSummary, NewComment, PfdDraft } from "../../shared/protocol.ts";
 import {
   contextOf,
   diffOf,
@@ -67,6 +67,7 @@ function initialState(): State {
     showClosedIntakes: false,
     intakeDetails: {},
     intakeGen: {},
+    intakeRevise: null,
     drafts: {},
     intakeDrafts: {},
     draftsLoaded: false,
@@ -173,7 +174,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             }
             dispatch({ type: "daemon", ev, now: Date.now() });
             // needs_human と progress はイベントに載らないので、一覧を取り直す
-            if (ev.event === "intake.stateChanged") void refresh();
+            // intake_id を持つイベントは stateChanged と updated だけ。あなたの番が生じた・完了を記録したのは updated で届く
+            void refresh();
             return;
           }
           dispatch({ type: "daemon", ev, now: Date.now() });
@@ -399,6 +401,20 @@ export function useIntakeRpc() {
         draft_id: draftId,
         process_id: processId,
       })).prompt,
+    revise: (intakeId: string, comments: NewComment[]): Promise<IntakeSummary> =>
+      rpc("intake.revise", { intake_id: intakeId, comments }),
+    abandonRevision: (intakeId: string): Promise<IntakeSummary> =>
+      rpc("intake.abandonRevision", { intake_id: intakeId }),
+    cancel: (intakeId: string, mode: "leave" | "stop"): Promise<IntakeSummary> =>
+      rpc("intake.cancel", { intake_id: intakeId, mode }),
+    completeHumanProcess: (intakeId: string, processId: string, note: string): Promise<IntakeDetail> =>
+      rpc("intake.completeHumanProcess", { intake_id: intakeId, process_id: processId, note }),
+    redispatch: (intakeId: string, processId: string): Promise<IntakeDetail> =>
+      rpc("intake.redispatch", { intake_id: intakeId, process_id: processId }),
+    refresh: (intakeId: string): Promise<IntakeDetail> => rpc("intake.refresh", { intake_id: intakeId }),
+    setDispatchPaused: (intakeId: string, paused: boolean): Promise<IntakeSummary> =>
+      rpc("intake.setDispatchPaused", { intake_id: intakeId, paused }),
+    closeIssue: (intakeId: string): Promise<IntakeSummary> => rpc("intake.closeIssue", { intake_id: intakeId }),
   };
 }
 

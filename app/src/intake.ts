@@ -1,19 +1,22 @@
 import type { CommentReply } from "../../shared/intake/decomposer.ts";
 import { buildFeedback } from "../../shared/intake/feedback.ts";
 import type { GhStatus } from "../../shared/intake/github.ts";
-import type { Pfd } from "../../shared/intake/pfd.ts";
+import type { Pfd, Process } from "../../shared/intake/pfd.ts";
+import type { PrFact, ProcessStatus } from "../../shared/intake/processStatus.ts";
 import type { Answer, Question } from "../../shared/intake/question.ts";
 import type { IntakeState } from "../../shared/intake/state.ts";
 import { answerChoiceIssue } from "../../shared/intake/validateQuestion.ts";
 import type {
   IntakeComment,
   IntakeDetail,
+  IntakeProcessView,
   IntakeQuestionSet,
   IntakeSummary,
   NewComment,
+  WatchHealth,
 } from "../../shared/protocol.ts";
-import { parsePfdKey, pfdKey } from "./pfd";
-import type { Project } from "./types";
+import { LOOK, parsePfdKey, pfdKey } from "./pfd";
+import type { Project, Task } from "./types";
 
 export type AnswerIssue = { questionId: string; message: string };
 
@@ -173,7 +176,7 @@ export type IntakeDraft = {
   comments: NewComment[];
   /** 回答中の答え。questionSetId が今の未回答のまとまりと違えば使わない */
   answers: { questionSetId: number; answers: Answer[] } | null;
-  /** 人のプロセスの「決めた内容」。この作業では使わない */
+  /** 人のプロセスの「決めた内容」。キーは process_id */
   notes: Record<string, string>;
 };
 
@@ -348,4 +351,125 @@ export type IssueTarget = { kind: "open"; intakeId: string } | { kind: "start"; 
 export function issueTarget(url: string, intakes: IntakeSummary[]): IssueTarget {
   const open = intakes.find((i) => i.issue_url === url && !isClosedIntake(i.state));
   return open ? { kind: "open", intakeId: open.id } : { kind: "start", url };
+}
+
+/** buildPfdView の statuses に渡す形。キーはプロセスの id */
+export function processStatuses(processes: readonly IntakeProcessView[]): Record<string, ProcessStatus> {
+  return Object.fromEntries(processes.map((p) => [p.id, p]));
+}
+
+export const BLOCKED_BY = {
+  revising: "改訂中",
+  paused: "一時停止中",
+  no_sub_issue: "sub-issue 待ち",
+} as const;
+
+export const ATTENTION_REASON = {
+  task_stopped: "タスクが止まった",
+  no_pr: "PR が無い",
+  pr_closed: "PR が閉じられた",
+} as const;
+
+/** LOOK の語に添える語（spec 6.6）。ready の blockedBy と needs_attention の reason だけ。ほかは null */
+export function statusNote(status: ProcessStatus): string | null {
+  if (status.state === "ready") return status.blockedBy === null ? null : BLOCKED_BY[status.blockedBy];
+  if (status.state === "needs_attention") return ATTENTION_REASON[status.reason];
+  return null;
+}
+
+/** 状態の語と添える語をまとめた 1 行（「着手可能（一時停止中）」） */
+export function statusText(status: ProcessStatus): string {
+  const note = statusNote(status);
+  return note === null ? LOOK[status.state].word : `${LOOK[status.state].word}（${note}）`;
+}
+
+/** 「操作が必要」に並べるプロセス。pfd.processes の順 */
+export function actionNeeded(detail: IntakeDetail, pfd: Pfd): {
+  yourTurn: { process: Process; view: IntakeProcessView }[];
+  needsAttention: { process: Process; view: IntakeProcessView & { state: "needs_attention" } }[];
+} {
+  const yourTurn: { process: Process; view: IntakeProcessView }[] = [];
+  const needsAttention: { process: Process; view: IntakeProcessView & { state: "needs_attention" } }[] = [];
+  for (const process of pfd.processes) {
+    const view = detail.processes.find((p) => p.id === process.id);
+    if (!view) continue;
+    if (view.state === "your_turn") yourTurn.push({ process, view });
+    else if (view.state === "needs_attention") needsAttention.push({ process, view });
+  }
+  return { yourTurn, needsAttention };
+}
+
+/** プロセスの欄の sub-issue・タスク・PR */
+export function processTrail(view: IntakeProcessView): {
+  subIssueUrl: string | null;
+  /** 今のタスクが先頭、古いものが続く */
+  taskIds: string[];
+  pr: PrFact | null;
+} {
+  return {
+    subIssueUrl: view.sub_issue_url,
+    taskIds: [...view.task_ids].reverse(),
+    pr: view.state === "pr_open" || view.state === "merged" ? view.pr : null,
+  };
+}
+
+export const PR_STATE: Record<PrFact["state"], string> = {
+  OPEN: "レビュー中",
+  MERGED: "マージ済み",
+  CLOSED: "閉じられた",
+};
+
+/** 完了を記録できるか。空白だけは不可（コアと同じ規則） */
+export function canCompleteHuman(note: string): boolean {
+  return note.trim() !== "";
+}
+
+/** 進行中の面で出す操作。中止は見出しが持つのでここに入れない */
+export type ProgressOps = { refresh: boolean; pause: boolean; revise: boolean; closeIssue: boolean };
+
+export function progressOps(detail: Pick<IntakeSummary, "state" | "revising">): ProgressOps {
+  const none = { refresh: false, pause: false, revise: false, closeIssue: false };
+  if (detail.state === "completed") return { ...none, closeIssue: true };
+  if (detail.state === "active" && !detail.revising) return { ...none, refresh: true, pause: true, revise: true };
+  return none;
+}
+
+/** 見張りの失敗の箱の文言。失敗が続いていなければ null */
+export function watchAlert(watch: WatchHealth): string | null {
+  return watch.consecutiveFailures > 0 ? `GitHub の確認に ${watch.consecutiveFailures} 回続けて失敗しています` : null;
+}
+
+/** 詳細から一覧の行を作る。取り直した詳細で一覧の needs_human と進み具合を先に直すため */
+export function summaryOf(d: IntakeDetail): IntakeSummary {
+  return {
+    id: d.id,
+    project_id: d.project_id,
+    issue_url: d.issue_url,
+    issue_title: d.issue_title,
+    state: d.state,
+    revising: d.revising,
+    attention_reason: d.attention_reason,
+    dispatch_paused: d.dispatch_paused,
+    rate_limited_until: d.rate_limited_until,
+    progress: d.progress,
+    needs_human: d.needs_human,
+    watch: d.watch,
+    created_at: d.created_at,
+    updated_at: d.updated_at,
+  };
+}
+
+type TaskIntake = NonNullable<Task["intake"]>;
+
+/** タスクの行の印「Intake #N」。親 Issue の URL から番号が取れなければ「Intake」 */
+export function taskIntakeMark(intake: TaskIntake): string {
+  const n = intake.parentIssueUrl === null ? null : issueNumber(intake.parentIssueUrl);
+  return n === null ? "Intake" : `Intake #${n}`;
+}
+
+/** 見出しのリンクの文言「Intake: <Issue のタイトル> / <プロセス id>」。一覧に無ければ「Intake: #N / <プロセス id>」 */
+export function taskIntakeLabel(intake: TaskIntake, intakes: readonly IntakeSummary[]): string {
+  const title = intakes.find((i) => i.id === intake.id)?.issue_title;
+  const n = intake.parentIssueUrl === null ? null : issueNumber(intake.parentIssueUrl);
+  return `Intake: ${title ?? (n === null ? intake.id : `#${n}`)} / ${intake.processId}`;
 }
