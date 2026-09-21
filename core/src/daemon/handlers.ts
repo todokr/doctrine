@@ -42,7 +42,8 @@ import {
   rejectIntake,
   startIntake,
 } from "../intake/commands.ts";
-import { NO_WATCH, toIntakeDetail, toIntakeSummary } from "../intake/view.ts";
+import { toIntakeDetail, toIntakeSummary } from "../intake/view.ts";
+import type { IntakeWatcher } from "../intake/watch.ts";
 import type { Tracker } from "../github/tracker.ts";
 import { applyApproval, runTask } from "../domain/engine.ts";
 import {
@@ -85,6 +86,8 @@ export type DaemonContext = {
   tracker: Tracker;
   /** 走らせている Intake の実行（intake_runs.id）。tick の再入ガード。running とは別に持つ。 */
   runningIntakeRuns: Set<number>;
+  /** 投入とマージの見張り（spec 11 章）。 */
+  intakeWatcher: IntakeWatcher;
   /** 後始末を拒否したときなど、人に見せる必要のある警告 */
   warnings: WarningLog;
 };
@@ -142,7 +145,8 @@ function broadcastIntakeTransition(ctx: DaemonContext, t: IntakeTransition): voi
 /** 操作が返した遷移をイベントにして配り、読み直した行の要約を返す。 */
 async function settleIntakeCommand(ctx: DaemonContext, t: IntakeTransition) {
   broadcastIntakeTransition(ctx, t);
-  return await toIntakeSummary(ctx.db, (await getIntake(ctx.db, t.intakeId))!, NO_WATCH);
+  const row = (await getIntake(ctx.db, t.intakeId))!;
+  return await toIntakeSummary(ctx.db, row, ctx.intakeWatcher.health(row.project_id));
 }
 
 /**
@@ -582,7 +586,12 @@ export function createHandler(ctx: DaemonContext): Handler {
           issueUrl: req(params, "issue_url"),
           logRoot: ctx.logRoot,
         });
-        return { ...await toIntakeSummary(ctx.db, intake, NO_WATCH), alreadyActive };
+        const summary = await toIntakeSummary(
+          ctx.db,
+          intake,
+          ctx.intakeWatcher.health(intake.project_id),
+        );
+        return { ...summary, alreadyActive };
       }
       case "intake.list": {
         const filter: { projectId?: number; includeClosed?: boolean } = {
@@ -595,12 +604,14 @@ export function createHandler(ctx: DaemonContext): Handler {
           filter.projectId = project.id;
         }
         const rows = await listIntakes(ctx.db, filter);
-        return await Promise.all(rows.map((r) => toIntakeSummary(ctx.db, r, NO_WATCH)));
+        return await Promise.all(
+          rows.map((r) => toIntakeSummary(ctx.db, r, ctx.intakeWatcher.health(r.project_id))),
+        );
       }
       case "intake.get": {
         const intake = await getIntake(ctx.db, req(params, "intake_id"));
         if (!intake) throw new Error("Intake がありません");
-        return await toIntakeDetail(ctx.db, intake, NO_WATCH);
+        return await toIntakeDetail(ctx.db, intake, ctx.intakeWatcher.health(intake.project_id));
       }
       case "intake.answer":
         return await settleIntakeCommand(
@@ -622,8 +633,8 @@ export function createHandler(ctx: DaemonContext): Handler {
             logRoot: ctx.logRoot,
           }),
         );
-      case "intake.approve":
-        return await settleIntakeCommand(
+      case "intake.approve": {
+        const summary = await settleIntakeCommand(
           ctx,
           await approveIntake(ctx.db, {
             intakeId: req(params, "intake_id"),
@@ -631,6 +642,10 @@ export function createHandler(ctx: DaemonContext): Handler {
             hash: req(params, "hash"),
           }),
         );
+        // 承認は commit 済み。最初の投入は待たず、その失敗で承認を失敗させない（request は reject しない）
+        void ctx.intakeWatcher.request(summary.project_id);
+        return summary;
+      }
       case "intake.cancel": {
         const intakeId = req(params, "intake_id");
         // leave / stop のどちらも今は同じ動き。stop の、タスクを止めて sub-issue を閉じる部分は別の作業が足す。

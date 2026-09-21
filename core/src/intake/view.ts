@@ -25,13 +25,6 @@ import type {
 } from "../../../shared/protocol.ts";
 import { computeProcessStatuses, type ProcessProgress } from "./pfd/status.ts";
 
-/** 見張りはまだ無い。ハンドラは watch に常にこれを渡す。 */
-export const NO_WATCH: WatchHealth = {
-  lastSucceededAt: null,
-  consecutiveFailures: 0,
-  lastError: null,
-};
-
 /** 人の手が要る状態か（spec 5 章）。active は、あなたの番か要確認のプロセスがあるときだけ。 */
 export function needsHuman(state: IntakeState, statuses: readonly ProcessStatus[]): boolean {
   if (state === "answering" || state === "reviewing" || state === "needs_attention") return true;

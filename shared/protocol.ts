@@ -52,7 +52,9 @@ export type ServerEvent =
     from: IntakeState;
     to: IntakeState;
     revising: boolean;
-  };
+  }
+  /** 状態以外（プロセスの状態・sub-issue・観測した PR・見張りの失敗）が変わった。アプリは intake.get を取り直す。 */
+  | { event: "intake.updated"; intake_id: string };
 
 export type TaskState =
   | "queued"
@@ -263,7 +265,7 @@ export type TaskContext = {
   reviewFiles: ReviewFile[];
 };
 
-/** 見張りの健康状態（spec 11.6）。見張りはまだ無いので、今は常に初期値が入る。 */
+/** 見張りの健康状態（spec 11.6）。プロジェクトごとにメモリに持ち、再起動で消える。 */
 export type WatchHealth = {
   lastSucceededAt: string | null;
   consecutiveFailures: number;

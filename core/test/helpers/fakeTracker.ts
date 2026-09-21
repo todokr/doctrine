@@ -33,7 +33,7 @@ export type FakeTracker = {
   heal(): void;
 };
 
-/** Tracker を直接実装した、状態を持つ偽物。status / listIssues / readIssue は使わない。 */
+/** Tracker を直接実装した、状態を持つ偽物。listIssues は使わない。 */
 export function fakeTracker(): FakeTracker {
   const issues: FakeIssue[] = [];
   const calls: TrackerCall[] = [];
@@ -73,9 +73,11 @@ export function fakeTracker(): FakeTracker {
   const settle = <T>(f: () => T): Promise<T> => new Promise((resolve) => resolve(f()));
 
   const tracker: Tracker = {
-    status: unexpected("status"),
+    // calls に積まない。積むと subIssueSync.test.ts の calls の検査が崩れる
+    status: () => Promise.resolve({ ok: true, repo: { id: "R_1", nameWithOwner: "o/r" } }),
     listIssues: unexpected("listIssues"),
-    readIssue: unexpected("readIssue"),
+    readIssue: (_projectPath, url) =>
+      Promise.resolve({ url, nodeId: "I_1", title: "T", body: "B", comments: [] }),
     createSubIssue: (_projectPath, parent, o) =>
       settle(() => {
         const call: CreateCall = {

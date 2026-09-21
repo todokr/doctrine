@@ -11,6 +11,10 @@ import type { AgentAdapter } from "../../src/adapter/types.ts";
 import { createWarningLog } from "../../src/daemon/warnings.ts";
 import type { IntakeDetail, IntakeSummary, ServerEvent } from "../../../shared/protocol.ts";
 import type { IntakeState } from "../../../shared/intake/state.ts";
+import type { PrWatcher, Tracker } from "../../src/github/tracker.ts";
+import { createIntakeWatcher } from "../../src/intake/watch.ts";
+import { fakeTracker as statefulTracker } from "../helpers/fakeTracker.ts";
+import { fakePrWatcher } from "../helpers/prWatcher.ts";
 import { makeRepo, until } from "../helpers/repo.ts";
 import { fakeTracker } from "../helpers/tracker.ts";
 import { pfdOut, question, questionsOut } from "../intake/runnerHelper.ts";
@@ -34,7 +38,11 @@ beforeEach(async () => {
   process.env.DOCTRINE_STATE_DIR = join(root, "state");
 });
 afterEach(async () => {
-  await until(() => contexts.every((c) => c.running.size === 0 && c.runningIntakeRuns.size === 0));
+  await until(() =>
+    contexts.every((c) =>
+      c.running.size === 0 && c.runningIntakeRuns.size === 0 && c.intakeWatcher.idle()
+    )
+  );
   contexts.length = 0;
   await rm(root, { recursive: true, force: true });
   delete process.env.DOCTRINE_STATE_DIR;
@@ -51,11 +59,11 @@ function standardAdapter(): AgentAdapter {
   });
 }
 
-async function context(
-  events: ServerEvent[] = [],
-  o: { adapter?: AgentAdapter; tracker?: ReturnType<typeof fakeTracker> } = {},
-): Promise<DaemonContext> {
+type Options = { adapter?: AgentAdapter; tracker?: Tracker; prWatcher?: PrWatcher };
+
+async function context(events: ServerEvent[] = [], o: Options = {}): Promise<DaemonContext> {
   const db = await openDb(":memory:");
+  const tracker = o.tracker ?? fakeTracker();
   const ctx: DaemonContext = {
     db,
     adapter: o.adapter ?? standardAdapter(),
@@ -65,8 +73,22 @@ async function context(
     warnings: createWarningLog({ broadcast: (ev) => events.push(ev), write: () => {} }),
     loadWorkflow: () => Promise.reject(new Error("この試験では使わない")),
     running: new Set(),
-    tracker: o.tracker ?? fakeTracker(),
+    tracker,
     runningIntakeRuns: new Set(),
+    intakeWatcher: createIntakeWatcher({
+      db,
+      tracker,
+      prWatcher: o.prWatcher ?? fakePrWatcher().prWatcher,
+      onStateChanged: (t) =>
+        events.push({
+          event: "intake.stateChanged",
+          intake_id: t.intakeId,
+          from: t.from,
+          to: t.to,
+          revising: t.revising,
+        }),
+      onUpdated: (intake_id) => events.push({ event: "intake.updated", intake_id }),
+    }),
   };
   contexts.push(ctx);
   return ctx;
@@ -74,9 +96,7 @@ async function context(
 
 type Call = <T = unknown>(method: string, params?: Record<string, unknown>) => Promise<T>;
 
-async function setup(
-  o: { adapter?: AgentAdapter; tracker?: ReturnType<typeof fakeTracker> } = {},
-) {
+async function setup(o: Options = {}) {
   const events: ServerEvent[] = [];
   const ctx = await context(events, o);
   const h = createHandler(ctx);
@@ -276,6 +296,40 @@ test("表示と異なる PFD への承認は拒まれる", async () => {
   assert.equal((await getIntake(ctx.db, first.id))!.state, "reviewing");
   assert.equal(await count(ctx, "intake_approvals"), 0);
   assert.equal(await count(ctx, "intake_processes"), 0);
+});
+
+test("承認するとデーモンの見張りが走り、プロセス 1 だけがタスクになる", async () => {
+  const { ctx, events, call } = await setup({ tracker: statefulTracker().tracker });
+  const reviewing = await toReviewing(ctx, call);
+  await call("intake.approve", {
+    intake_id: reviewing.id,
+    draft_id: reviewing.latest_draft!.id,
+    hash: reviewing.latest_draft!.hash,
+  });
+  await until(() => ctx.intakeWatcher.idle());
+
+  const tasks = await call<{ intake_process_id: string | null }[]>("task.list");
+  assert.deepEqual(tasks.map((t) => t.intake_process_id), ["1"]);
+  assert.ok(events.some((e) => e.event === "intake.updated" && e.intake_id === reviewing.id));
+  const detail = await call<IntakeDetail>("intake.get", { intake_id: reviewing.id });
+  assert.equal(detail.processes.find((p) => p.id === "1")!.state, "running");
+});
+
+test("sub-issue が作れないとき、承認は成功し、失敗が intake.get の watch に出る", async () => {
+  const { ctx, call } = await setup();
+  const reviewing = await toReviewing(ctx, call);
+  const approved = await call<IntakeSummary>("intake.approve", {
+    intake_id: reviewing.id,
+    draft_id: reviewing.latest_draft!.id,
+    hash: reviewing.latest_draft!.hash,
+  });
+  assert.equal(approved.state, "active");
+  await until(() => ctx.intakeWatcher.idle());
+
+  const detail = await call<IntakeDetail>("intake.get", { intake_id: reviewing.id });
+  assert.equal(detail.watch.consecutiveFailures, 1);
+  assert.notEqual(detail.watch.lastError, null);
+  assert.deepEqual(await call("task.list"), []);
 });
 
 test("reviewing でない Intake は承認できない", async () => {

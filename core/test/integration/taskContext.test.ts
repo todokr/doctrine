@@ -16,6 +16,7 @@ import { createMockAdapter } from "../../src/adapter/mock.ts";
 import type { ServerEvent } from "../../../shared/protocol.ts";
 import { makeRepo, tickWhenIdle, until } from "../helpers/repo.ts";
 import { fakeTracker } from "../helpers/tracker.ts";
+import { noopWatcher } from "../helpers/watcher.ts";
 import type { ReviewFile } from "../../src/domain/reviewFiles.ts";
 import type { CommandResult, ReviewEntry } from "../../src/domain/taskContext.ts";
 
@@ -80,6 +81,7 @@ async function context() {
     running: new Set(),
     tracker: fakeTracker(),
     runningIntakeRuns: new Set(),
+    intakeWatcher: noopWatcher(),
     warnings: createWarningLog({ broadcast: () => {}, write: () => {} }),
   };
   contexts.push(ctx);

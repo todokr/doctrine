@@ -11,6 +11,7 @@ import { openDbOn } from "../../src/db/migrate.ts";
 import { createMockAdapter } from "../../src/adapter/mock.ts";
 import type { DaemonContext } from "../../src/daemon/handlers.ts";
 import { fakeTracker } from "../helpers/tracker.ts";
+import { noopWatcher } from "../helpers/watcher.ts";
 
 let root: string;
 const daemons: { stop(): Promise<void> }[] = [];
@@ -166,6 +167,7 @@ test("スケジューリングの1周が失敗してもデーモンは落ちず�
     running: new Set(),
     tracker: fakeTracker(),
     runningIntakeRuns: new Set(),
+    intakeWatcher: noopWatcher(),
     warnings: createWarningLog({ broadcast: () => {}, write: (l) => logged.push(l) }),
   };
 

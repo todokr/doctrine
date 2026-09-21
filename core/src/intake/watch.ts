@@ -312,16 +312,22 @@ export function createIntakeWatcher(deps: {
     return started;
   }
 
+  // listProjects を待つ間は inFlight が空なので、cycle 自身も idle の判定に数える
+  let cycling = 0;
+
   return {
     async cycle() {
+      cycling++;
       try {
         for (const p of await listProjects(deps.db)) await request(p.id);
       } catch (e) {
         console.error("intake watch cycle failed:", e);
+      } finally {
+        cycling--;
       }
     },
     request,
     health: healthOf,
-    idle: () => inFlight.size === 0,
+    idle: () => inFlight.size === 0 && cycling === 0,
   };
 }
