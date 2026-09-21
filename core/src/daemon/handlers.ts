@@ -28,6 +28,7 @@ import {
 import { getIntake, listIntakes, updateIntake, updateIntakeRun } from "../db/intakes.ts";
 import { claimIntakeRun, runIntakeRun } from "../intake/runner.ts";
 import {
+  abandonRevision,
   answerIntake,
   approveIntake,
   cancelIntake,
@@ -35,6 +36,7 @@ import {
   completeHumanProcess,
   type IntakeTransition,
   rejectIntake,
+  reviseIntake,
   setDispatchPaused,
   startIntake,
 } from "../intake/commands.ts";
@@ -604,6 +606,26 @@ export function createHandler(ctx: DaemonContext): Handler {
           }),
         );
         // 承認は commit 済み。最初の投入は待たず、その失敗で承認を失敗させない（request は reject しない）
+        void ctx.intakeWatcher.request(summary.project_id);
+        return summary;
+      }
+      case "intake.revise":
+        return await settleIntakeCommand(
+          ctx,
+          await reviseIntake(ctx.db, {
+            intakeId: req(params, "intake_id"),
+            comments: params.comments,
+            logRoot: ctx.logRoot,
+          }),
+        );
+      case "intake.abandonRevision": {
+        const summary = await settleIntakeCommand(
+          ctx,
+          await abandonRevision(ctx.db, { probe: defaultProbe() }, {
+            intakeId: req(params, "intake_id"),
+          }),
+        );
+        // 元の計画に戻った。止めていた投入は待たずに再開する（request は reject しない）
         void ctx.intakeWatcher.request(summary.project_id);
         return summary;
       }

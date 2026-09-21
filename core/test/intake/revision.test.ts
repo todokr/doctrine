@@ -1,7 +1,17 @@
 import { test } from "@std/testing/bdd";
 import assert from "node:assert/strict";
-import { listProcesses, updateProcess } from "../../src/db/intakes.ts";
+import {
+  getIntake,
+  insertDraft,
+  latestApproval,
+  listProcesses,
+  updateIntake,
+  updateProcess,
+} from "../../src/db/intakes.ts";
+import { approveIntake } from "../../src/intake/commands.ts";
 import { dispatchIntake } from "../../src/intake/dispatch.ts";
+import { pfdHash } from "../../src/intake/pfd/hash.ts";
+import { canonicalJson } from "../../../shared/intake/pfd.ts";
 import {
   frozenProcessIds,
   loadRevisionConstraints,
@@ -56,6 +66,60 @@ test("loadRevisionConstraints: 承認が無ければ投げる", async () => {
   const { db } = await seedActive();
   await db.deleteFrom("intake_approvals").execute();
   await assert.rejects(() => loadRevisionConstraints(db, "i1"), /承認/);
+});
+
+test("approveIntake: 改訂中は、固定された部分を変えた案の承認を拒む", async () => {
+  const { db, runId } = await seedActive();
+  await freeze(db);
+  await updateIntake(db, "i1", { state: "reviewing", revising: 1 });
+  const changed = example();
+  changed.processes[0].steps = "別の手順にする";
+  const draft = await insertDraft(db, {
+    intake_id: "i1",
+    run_id: runId,
+    pfd: canonicalJson(changed),
+    hash: await pfdHash(changed),
+    replies: "[]",
+  });
+
+  await assert.rejects(
+    () => approveIntake(db, { intakeId: "i1", draftId: draft.id, hash: draft.hash }),
+    /frozen_changed 1/,
+  );
+  const approvals = await db.selectFrom("intake_approvals").selectAll().execute();
+  assert.equal(approvals.length, 1);
+  assert.equal((await getIntake(db, "i1"))!.state, "reviewing");
+});
+
+test("approveIntake: 再承認で行を揃え、状態を active に戻す", async () => {
+  const { db, runId } = await seedActive();
+  await freeze(db);
+  await updateIntake(db, "i1", { state: "reviewing", revising: 1, revision_run_id: runId });
+  const pfd = revised();
+  const draft = await insertDraft(db, {
+    intake_id: "i1",
+    run_id: runId,
+    pfd: canonicalJson(pfd),
+    hash: await pfdHash(pfd),
+    replies: "[]",
+  });
+
+  const t = await approveIntake(db, { intakeId: "i1", draftId: draft.id, hash: draft.hash });
+
+  assert.deepEqual(t, { intakeId: "i1", from: "reviewing", to: "active", revising: false });
+  const intake = (await getIntake(db, "i1"))!;
+  assert.equal(intake.state, "active");
+  assert.equal(intake.revising, 0);
+  assert.equal(intake.revision_run_id, null);
+  const rows = await listProcesses(db, "i1");
+  assert.deepEqual(rows.map((r) => [r.process_id, r.retired_at !== null]), [
+    ["1", false],
+    ["2", false],
+    ["3", false],
+    ["4", true],
+    ["4b", false],
+  ]);
+  assert.equal((await latestApproval(db, "i1"))!.draft_id, draft.id);
 });
 
 test("processRowChanges: 増えた id を挿入し、消えた生きた id を取りやめる", async () => {

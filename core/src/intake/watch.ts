@@ -35,7 +35,7 @@ export function choosePr(facts: readonly PrFact[], baseBranch: string): PrFact |
 export type ObserveReport = { changedIntakeIds: Set<string> };
 
 /**
- * プロジェクトの active な Intake について、current_task_id のタスクのうち、
+ * プロジェクトの active な Intake と、終わっていない改訂中の Intake について、current_task_id のタスクのうち、
  * baseBranch へのマージがまだ観測されていないものの PR を、pullRequests の 1 回の呼び出しで引く。
  * 選んだ PR が前回の観測と違えば upsertPrObservation する。PR が無いタスクは書かない
  * （status.ts がタスクの状態から no_pr を出す）。対象が無ければ gh を呼ばない。
@@ -53,7 +53,12 @@ export async function observePullRequests(
     .innerJoin("tasks as t", "t.id", "p.current_task_id")
     .leftJoin("pr_observations as o", "o.task_id", "t.id")
     .select(["i.id as intake_id", "t.id as task_id", "t.branch as branch"])
-    .where("i.state", "=", "active")
+    .where((eb) =>
+      eb.or([
+        eb("i.state", "=", "active"),
+        eb.and([eb("i.revising", "=", 1), eb("i.state", "not in", ["completed", "canceled"])]),
+      ])
+    )
     .where("i.project_id", "=", project.id)
     .where("p.retired_at", "is", null)
     .where((eb) =>
@@ -109,7 +114,7 @@ export async function completeIntake(db: Db, intakeId: string): Promise<IntakeTr
 }
 
 export type ProjectWatchReport = {
-  /** この周で見た active な Intake の id。空なら、gh を呼ばずに終えた。 */
+  /** この周で見た active な Intake と改訂中の Intake の id。空なら、gh を呼ばずに終えた。 */
   watched: string[];
   /** gh の失敗・承認の食い違い・prompt を組めなかったことなど。空なら成功の周。 */
   errors: string[];
@@ -133,9 +138,13 @@ export async function watchProject(
   try {
     const project = await getProject(db, projectId);
     if (!project) return report;
-    const intakes = (await listIntakes(db, { projectId })).filter((i) => i.state === "active");
-    if (intakes.length === 0) return report;
-    report.watched = intakes.map((i) => i.id);
+    // 改訂中の Intake は PR の観測だけ続ける。計画が変わりうるので、sub-issue の同期・投入・完了の判定は
+    // active のものだけが行う（投入は dispatchIntake の revising の検査でも止まる）
+    const watched = (await listIntakes(db, { projectId }))
+      .filter((i) => i.state === "active" || i.revising === 1);
+    if (watched.length === 0) return report;
+    report.watched = watched.map((i) => i.id);
+    const intakes = watched.filter((i) => i.state === "active");
 
     for (const intake of intakes) {
       try {
