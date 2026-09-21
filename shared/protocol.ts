@@ -1,3 +1,5 @@
+import type { Guide } from "./guide/schema.ts";
+
 export type Request = { id: number; method: string; params?: Record<string, unknown> };
 
 export type Response =
@@ -181,6 +183,33 @@ export type ReviewFile =
   | { path: string; status: "outside_worktree" }
   | { path: string; status: "binary"; size: number };
 
+/**
+ * task.guide の応答。
+ *
+ * none はワークフローにガイドを作るステップが無いこと（このタスクにガイドは出ない）。
+ * missing はファイルが無いこと。ワークフロー定義が読めないときも missing に倒す
+ * （定義の不備を根拠に「ガイドは無いもの」と断言しない）。
+ * broken の issues は shared/guide/validate.ts の issues と同じ形で、画面はガイドを
+ * 出さずに「壊れている」と示す。
+ * guide は TaskState と同じでコンパイル時の注釈にすぎない（版のずれで形が違う
+ * ことがありうる）。だから画面はもう一度 validateGuide を通す。
+ * stale は「ガイドが説明しているツリー（tree）と、この応答を作った時点の
+ * worktree のツリー（worktreeTree）が違う」という意味。どちらのハッシュも載せる。
+ */
+export type TaskGuide =
+  | { status: "none" }
+  | { status: "missing" }
+  | { status: "too_large"; size: number }
+  | { status: "broken"; issues: string[] }
+  | {
+    status: "ok";
+    guide: Guide;
+    createdAt: string;
+    tree: string;
+    worktreeTree: string;
+    stale: boolean;
+  };
+
 type ReviewBase = {
   stepRunId: number;
   stepId: string;
@@ -222,6 +251,7 @@ export type Methods = {
   "project.list": { params: Record<string, never>; result: ProjectSummary[] };
   "task.diff": { params: { task_id: string; since?: "last_review" }; result: TaskDiff };
   "task.context": { params: { task_id: string }; result: TaskContext };
+  "task.guide": { params: { task_id: string }; result: TaskGuide };
   "task.approve": { params: { task_id: string }; result: TaskSummary };
   "task.reject": { params: { task_id: string; comment: string }; result: TaskSummary };
   "task.cancel": { params: { task_id: string }; result: TaskSummary };

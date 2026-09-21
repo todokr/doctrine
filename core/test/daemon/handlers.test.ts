@@ -10,12 +10,18 @@ import { DatabaseSync } from "node:sqlite";
 import { openDb, openDbOn } from "../../src/db/migrate.ts";
 import { getTask, insertTask } from "../../src/db/tasks.ts";
 import { listStepRuns } from "../../src/db/stepRuns.ts";
-import { reviewRefName } from "../../src/domain/reviewTree.ts";
+import { captureTree, reviewRefName } from "../../src/domain/reviewTree.ts";
+import { ensureDoctrineOutExcluded } from "../../src/domain/worktree.ts";
 import { createHandler, type DaemonContext, tick } from "../../src/daemon/handlers.ts";
 import { createMockAdapter } from "../../src/adapter/mock.ts";
 import { createWarningLog } from "../../src/daemon/warnings.ts";
 import { parseWorkflow } from "../../src/workflow/schema.ts";
-import type { ProjectSummary, ServerEvent, TaskSummary } from "../../../shared/protocol.ts";
+import type {
+  ProjectSummary,
+  ServerEvent,
+  TaskGuide,
+  TaskSummary,
+} from "../../../shared/protocol.ts";
 import { branchNameFor } from "../../src/domain/worktree.ts";
 import { randomUUID } from "node:crypto";
 import { makeRepo, tickWhenIdle, until } from "../helpers/repo.ts";
@@ -2058,4 +2064,140 @@ test("task.resume は上限待ちのタスクを待たずに queued へ戻す", 
   };
   assert.equal(after.state, "queued");
   assert.equal(after.rate_limited_until, null, "消さないと次の tick がもう一度解放しにくる");
+});
+
+const GUIDE_WORKFLOW =
+  "name: feature\nsteps:\n  - id: write-guide\n    type: guide\n    session: guide\n" +
+  "  - id: review\n    type: approval\n    title: 見て\n";
+
+// worktree が用意された承認待ちのタスクを作る。.doctrine-out/ の exclude は worktree 作成時に済んでいる
+// （済んでいないと guide.json 自身がツリーに混ざり、何をしても stale に見える）。
+async function guidableTask(
+  ctx: DaemonContext,
+  h: ReturnType<typeof createHandler>,
+): Promise<{ id: string; wt: string }> {
+  const id = await suspendedTask(ctx, h);
+  return { id, wt: (await getTask(ctx.db, id))!.worktree_path! };
+}
+
+async function exampleGuide(): Promise<unknown> {
+  return JSON.parse(
+    await readFile(
+      new URL("../../../shared/guide/examples/step-artifacts.guide.json", import.meta.url),
+      "utf8",
+    ),
+  );
+}
+
+async function writeEnvelope(wt: string, tree: string): Promise<void> {
+  await mkdir(join(wt, ".doctrine-out"), { recursive: true });
+  await writeFile(
+    join(wt, ".doctrine-out", "guide.json"),
+    JSON.stringify({ tree, createdAt: "2026-09-21T00:00:00Z", guide: await exampleGuide() }),
+  );
+}
+
+test("task.guide はガイドステップの無いワークフローで none を返す", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  const { id } = await guidableTask(ctx, h);
+  assert.deepEqual(await h("task.guide", { task_id: id }, NOOP_CONN), { status: "none" });
+});
+
+test("task.guide はガイドステップがあるのにファイルが無ければ missing", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  const { id } = await guidableTask(ctx, h);
+  await writeFile(join(repo, ".doctrine", "workflows", "feature.yaml"), GUIDE_WORKFLOW);
+  assert.deepEqual(await h("task.guide", { task_id: id }, NOOP_CONN), { status: "missing" });
+});
+
+test("task.guide はワークフローが読めなくても、ファイルが無ければ none とは言わず missing を返す", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  const { id } = await guidableTask(ctx, h);
+  await writeFile(join(repo, ".doctrine", "workflows", "feature.yaml"), "steps: [");
+  assert.deepEqual(await h("task.guide", { task_id: id }, NOOP_CONN), { status: "missing" });
+});
+
+test("task.guide は書かれたガイドをそのまま返す", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  const { id, wt } = await guidableTask(ctx, h);
+  await ensureDoctrineOutExcluded(repo);
+  const tree = await captureTree(wt);
+  await writeEnvelope(wt, tree);
+
+  const res = await h("task.guide", { task_id: id }, NOOP_CONN) as TaskGuide;
+  assert.equal(res.status, "ok");
+  if (res.status !== "ok") throw new Error("unreachable");
+  assert.equal(res.stale, false);
+  assert.equal(res.tree, tree);
+  assert.equal(res.worktreeTree, tree);
+  assert.equal(res.createdAt, "2026-09-21T00:00:00Z");
+  assert.equal(res.guide.why, ((await exampleGuide()) as { why: string }).why);
+});
+
+test("ガイドの作成後に worktree を変えると古いと分かる", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  const { id, wt } = await guidableTask(ctx, h);
+  await ensureDoctrineOutExcluded(repo);
+  const tree = await captureTree(wt);
+  await writeEnvelope(wt, tree);
+  await writeFile(join(wt, "README.md"), "changed\n");
+
+  const res = await h("task.guide", { task_id: id }, NOOP_CONN) as TaskGuide;
+  assert.equal(res.status, "ok");
+  if (res.status !== "ok") throw new Error("unreachable");
+  assert.equal(res.stale, true);
+  assert.notEqual(res.tree, res.worktreeTree);
+  assert.equal(res.tree, tree, "ガイドが説明している時点のツリーはそのまま返す");
+});
+
+test("壊れた guide.json でも task.guide は broken を返し、task.diff は成功する", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  const { id, wt } = await guidableTask(ctx, h);
+  await mkdir(join(wt, ".doctrine-out"), { recursive: true });
+  await writeFile(join(wt, ".doctrine-out", "guide.json"), "{");
+  await writeFile(join(wt, "README.md"), "y\n");
+
+  const res = await h("task.guide", { task_id: id }, NOOP_CONN) as TaskGuide;
+  assert.equal(res.status, "broken");
+  const d = await h("task.diff", { task_id: id }, NOOP_CONN) as { files: { path: string }[] };
+  assert.ok(d.files.some((f) => f.path === "README.md"), "diff は読める");
+});
+
+test("上限を超えた guide.json は too_large を返す", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  const { id, wt } = await guidableTask(ctx, h);
+  await mkdir(join(wt, ".doctrine-out"), { recursive: true });
+  await writeFile(join(wt, ".doctrine-out", "guide.json"), "x".repeat(300 * 1024));
+
+  const res = await h("task.guide", { task_id: id }, NOOP_CONN) as TaskGuide;
+  assert.equal(res.status, "too_large");
+});
+
+test("worktree の無いタスクの task.guide は失敗する", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  await h("project.add", { path: repo }, NOOP_CONN);
+  const t = await h("task.create", { project: repo, title: "T", prompt: "直して" }, NOOP_CONN) as {
+    id: string;
+  };
+  await assert.rejects(
+    () => h("task.guide", { task_id: t.id }, NOOP_CONN),
+    /worktree がありません/,
+  );
+});
+
+test("task.guide は無いタスクを名指しで断る", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  await assert.rejects(
+    () => h("task.guide", { task_id: "nope" }, NOOP_CONN),
+    /タスクがありません/,
+  );
 });
