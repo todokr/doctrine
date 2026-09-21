@@ -221,14 +221,14 @@ test("result 行から成否・テキスト・コストを取る", () => {
     terminal_reason: "completed",
   }, 0);
   assert.equal(r.ok, true);
-  assert.equal(r.degraded, false);
+  assert.deepEqual(r.permissionDenials, []);
   assert.equal(r.text, "できました");
   assert.equal(r.costUsd, 0.42);
   assert.equal(r.numTurns, 7);
   assert.equal(r.durationMs, 12000);
 });
 
-test("permission_denials が空でなければ degraded", () => {
+test("権限で拒否されても成功は成功で、拒否の中身だけが残る", () => {
   const r = resultFrom({
     type: "result",
     subtype: "success",
@@ -237,7 +237,7 @@ test("permission_denials が空でなければ degraded", () => {
     permission_denials: [{ tool_name: "Bash" }],
   }, 0);
   assert.equal(r.ok, true, "ワークフローは止めない");
-  assert.equal(r.degraded, true, "成功に見えるが何もできていない実行を区別する");
+  assert.equal(r.permissionDenials.length, 1, "何が拒否されたかは残す");
 });
 
 test("permission_denials の中身を構造化して返す", () => {
@@ -251,7 +251,6 @@ test("permission_denials の中身を構造化して返す", () => {
   assert.deepEqual(r.permissionDenials, [
     { tool_name: "Bash", tool_use_id: "tu_1", input: { command: "git push" } },
   ]);
-  assert.equal(r.degraded, true);
 });
 
 test("形の崩れた permission_denials でも件数は減らない", () => {
@@ -264,7 +263,6 @@ test("形の崩れた permission_denials でも件数は減らない", () => {
   assert.deepEqual(r.permissionDenials.map((d) => d.tool_name), ["Bash", "", ""]);
   assert.deepEqual(r.permissionDenials.map((d) => d.input), [{}, {}, {}]);
   assert.deepEqual(r.permissionDenials.map((d) => d.tool_use_id), [null, null, null]);
-  assert.equal(r.degraded, true, "degraded は生配列の長さで決まり、件数と食い違わない");
 });
 
 test("result 行が来なければ失敗とみなす", () => {

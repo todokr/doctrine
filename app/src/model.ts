@@ -19,7 +19,7 @@ import type {
   StepRun,
   StepRunDenials,
   TaskDetail,
-  TaskListEntry,
+  TaskSummary,
 } from "../../shared/protocol.ts";
 import { toolInputParts } from "../../shared/toolInput.ts";
 import type { ConnectionStatus } from "./daemon/client";
@@ -71,7 +71,7 @@ export function groupOf(t: Task): Group {
   // failed を要確認に置くのは worktree が残っている間だけ（レビューアプリ設計spec 5章）。
   // 削除拒否の completed は refused の定義そのものが同じ規則になっている
   const failedWithEvidence = t.state === "failed" && t.worktree !== null;
-  if (failedWithEvidence || t.state === "unknown" || t.refused || (t.degraded && !isTerminal(t.state))) return "check";
+  if (failedWithEvidence || t.state === "unknown" || t.refused) return "check";
   if (t.state === "running") return "running";
   if (t.state === "queued") return "queued";
   if (t.state === "paused") return "paused";
@@ -180,12 +180,11 @@ export function queuePosition(tasks: Task[], t: Task): number {
 export type StopReason =
   | { kind: "failed"; step: string | null }
   | { kind: "refused" }
-  | { kind: "degraded"; steps: string[] }
   | { kind: "queued"; position: number };
 
 /**
  * ステップ名は task.get の stepRuns から取る。task.list の current_step_id は
- * 失敗した後も動き得るし、has_degraded はどのステップかを教えてくれない。
+ * 失敗した後も動き得る。
  */
 export function stopReasons(tasks: Task[], t: Task, detail?: TaskDetail): StopReason[] {
   const runs = detail?.stepRuns ?? [];
@@ -195,10 +194,6 @@ export function stopReasons(tasks: Task[], t: Task, detail?: TaskDetail): StopRe
     out.push({ kind: "failed", step: failed?.step_id ?? t.step });
   }
   if (t.refused) out.push({ kind: "refused" });
-  const degraded = [...new Set(runs.filter((r) => r.status === "degraded").map((r) => r.step_id))];
-  // 履歴をまだ取れていないときは task.list の has_degraded 由来の名前で代える
-  if (degraded.length === 0 && t.degraded) degraded.push(t.degraded);
-  if (degraded.length > 0) out.push({ kind: "degraded", steps: degraded });
   if (t.state === "queued") out.push({ kind: "queued", position: queuePosition(tasks, t) });
   return out;
 }
@@ -273,12 +268,6 @@ function toKnownState(x: string, where: string): TaskState {
 
 // ---------------------------------------------------------------- デーモンの形 → 画面の形
 
-/**
- * task.list の has_degraded はどのステップかを教えてくれない。
- * stepRun.finished を受け取れば具体的なステップ名に置き換わる。
- */
-export const DEGRADED_UNKNOWN = "(ステップ不明)";
-
 /** 読めない時刻は捨てる。NaN を持ち回ると「Invalid Date」が画面に出る */
 function parseTime(iso: string | null): number | null {
   if (!iso) return null;
@@ -317,10 +306,10 @@ export function toProject(p: ProjectSummary): Project {
 /**
  * diff と経緯は task.list に乗らない。別の口（task.diff / task.context）で
  * 取って State の diffs / contexts に置くので、ここでは作らない。
- * previous を渡すと、イベントで足した欄（degraded など）を引き継ぐ。
+ * previous を渡すと、イベントで足した欄（bounce）を引き継ぐ。
  */
 export function toTask(
-  row: TaskListEntry,
+  row: TaskSummary,
   projects: ProjectSummary[],
   previous?: Task,
 ): Task {
@@ -346,9 +335,6 @@ export function toTask(
     resumeAt: parseTime(row.rate_limited_until),
     // 完了したのに worktree が残っているのは、後始末が削除を拒否したということ
     refused: row.state === "completed" && row.worktree_path !== null,
-    // groupOf は `t.degraded &&` で見るので、空文字にすると要確認から落ちる。
-    // has_degraded だけではどのステップか分からないので、分からないと書く
-    degraded: row.has_degraded ? (previous?.degraded ?? DEGRADED_UNKNOWN) : undefined,
     // 差し戻しは task.list に載らない（進行中の一時的な出来事なので印を足さない）ので、
     // イベントで立てた値を引き継がないと 15 秒で消える。ただし終端状態のタスクには
     // 引き継がない。イベントを取りこぼすと取り直しだけで終端になることがあり、
@@ -747,11 +733,7 @@ export function reduce(s: State, a: Action): State {
       if (ev.event === "stepRun.finished") {
         const target = s.tasks.find((x) => x.id === ev.task_id);
         if (!target) return s;
-        // degraded を立てることと bounce を立てる・落とすことは、同じ1つのイベントに
-        // 対する独立したパッチとして両方あてる（片方で打ち切ると、一度差し戻された
-        // ステップが degraded で終わったときに差し戻しの通知が残ったままになる）
         const patch: Partial<Task> = {};
-        if (ev.status === "degraded") patch.degraded = ev.step_id;
         if (ev.status === "bounced" && ev.goto_step_id !== null) {
           // 持つのは最新の1件だけ。経緯の一覧は dctl get の領分
           patch.bounce = { step: ev.step_id, goto: ev.goto_step_id, attempt: ev.attempt };

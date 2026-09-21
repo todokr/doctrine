@@ -70,10 +70,10 @@ export async function buildTaskContext(
 
   // 定義が引けないときは、今止まっているステップの行だけをレビューとみなす。ただし
   // engine.ts は command/agent ステップでも current_step_id を同じ値で書き換えるので、
-  // step_id が一致するだけでは approval 以外の running/degraded 行まで拾ってしまい、
+  // step_id が一致するだけでは approval 以外の running 行まで拾ってしまい、
   // toReview の想定外 status 例外（本来は approval 行が壊れているときだけに使う）を
   // 正常系で踏んでしまう。status を awaiting/success/bounced/failed/interrupted の5つに
-  // 絞れば running と degraded は除外できる。success/bounced/failed は command の
+  // 絞れば running は除外できる。success/bounced/failed は command の
   // 正常終了/差し戻し/異常終了とも一致し、interrupted は recovery.ts の closeDanglingStepRun がクラッシュした
   // command/agent 行にも書き込むため、定義が無い以上そこまでの紛れは残るが、
   // 経緯を返せなくするよりはよい。

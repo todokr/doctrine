@@ -22,7 +22,7 @@ const saturated = (o: Partial<RateLimitObservation> = {}): RateLimitObservation 
 });
 
 function classify(o: {
-  status?: "success" | "failed" | "degraded" | "suspended";
+  status?: "success" | "failed" | "suspended";
   observed?: RateLimitObservation[];
   samples?: RateLimitObservation[];
   now?: Date;
@@ -47,8 +47,8 @@ test("utilization が閾値未満なら上限ではない", () => {
   assert.deepEqual(classify({ observed: [saturated({ utilization: 0.99 })] }), { kind: "none" });
 });
 
-test("成功・degraded・suspended の実行は上限扱いしない", () => {
-  for (const status of ["success", "degraded", "suspended"] as const) {
+test("成功・suspended の実行は上限扱いしない", () => {
+  for (const status of ["success", "suspended"] as const) {
     assert.deepEqual(classify({ status, observed: [saturated()] }), { kind: "none" }, status);
   }
 });

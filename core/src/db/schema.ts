@@ -24,7 +24,6 @@ export type StepRunStatus =
   | "awaiting"
   | "success"
   | "failed"
-  | "degraded"
   | "interrupted"
   /** 利用上限で打ち切られた実行。同じ会話で再開されるので失敗ではない。 */
   | "rate_limited"
@@ -92,7 +91,7 @@ export interface StepRunsTable {
   goto_step_id: string | null;
   /**
    * 権限で拒否された操作（JSON 文字列の { total, denials }）。拒否が無かった実行は NULL。
-   * degraded の行だけとは限らない（失敗・上限打ち切りの実行にも入り得る）。
+   * success / failed / rate_limited のどの行にも入り得る。
    */
   permission_denials: string | null;
 }

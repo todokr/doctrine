@@ -19,7 +19,6 @@ export type AgentEvent =
 
 export type AgentResult = {
   ok: boolean;
-  degraded: boolean;
   text: string;
   costUsd: number | null;
   numTurns: number | null;

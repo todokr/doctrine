@@ -8,7 +8,6 @@ const STATUS_CLASS: Record<RailStatus, string> = {
   awaiting: "wr-attn",
   success: "wr-ok",
   failed: "wr-danger",
-  degraded: "wr-deg",
   interrupted: "wr-muted",
   bounced: "wr-muted",
   rate_limited: "wr-muted",

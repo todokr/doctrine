@@ -38,7 +38,7 @@ export function Rail() {
 export function StateIcon({ t }: { t: Task }) {
   switch (groupOf(t)) {
     case "review": return <span className="diamond" />;
-    case "check": return t.degraded && !t.refused && t.state !== "failed" ? <span className="bang deg">!</span> : <span className="bang">!</span>;
+    case "check": return <span className="bang">!</span>;
     case "running": return <span className="spin" />;
     case "limited": return <span className="hourglass" />;
     case "queued": return <span className="ring" />;

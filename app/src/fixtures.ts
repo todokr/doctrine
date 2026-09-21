@@ -58,7 +58,7 @@ const GUIDE_9F21: Guide = {
 };
 
 
-// 状態は doctrine の7状態。degraded / refused はフラグ。
+// 状態は doctrine の7状態。refused はフラグ。
 // worktree は seedTasks が state から決めるので、dctl gc で消した後の姿は gced で指定する
 type Seed = Omit<Task, "project" | "prompt" | "branch" | "worktree"> & { gced?: true };
 
@@ -71,7 +71,7 @@ const SEEDS: Seed[] = [
   { id: "t-e812", wf: "doctrine/feature", title: "daemon.warning イベントを追加する", state: "failed", step: "test", attempt: 3, prio: 2, since: NOW - 60 * 26 * MIN, dirty: true },
   { id: "t-6ba3", wf: "doctrine/feature", title: "ratelimit のサンプルを日次で丸める", state: "failed", step: "test", attempt: 1, prio: 2, since: NOW - 60 * 24 * 12 * MIN, gced: true },
   { id: "t-3cd2", wf: "doctrine/feature", title: "gc の確認文言を直す", state: "completed", step: "open-pr", attempt: 1, prio: 2, since: NOW - 95 * MIN, refused: true, dirty: true },
-  { id: "s-1202", wf: "shop-api/hotfix", title: "注文日時のタイムゾーンずれ", state: "running", step: "test", attempt: 1, prio: 0, since: NOW - 23 * MIN, degraded: "fix" },
+  { id: "s-1202", wf: "shop-api/hotfix", title: "注文日時のタイムゾーンずれ", state: "running", step: "test", attempt: 1, prio: 0, since: NOW - 23 * MIN },
 
   { id: "t-7f3a", wf: "doctrine/feature", title: "task.cleanedUp イベントを追加する", state: "running", step: "implement", attempt: 1, prio: 1, since: NOW - 11 * MIN },
   // test が1回差し戻した結果、implement が2周目に入っている

@@ -24,7 +24,7 @@ import { buildGuidePrompt } from "./guidePrompt.ts";
 import type { CommandResult } from "./taskContext.ts";
 
 export type StepOutcome = {
-  status: "success" | "failed" | "degraded" | "suspended";
+  status: "success" | "failed" | "suspended";
   exitCode: number | null;
   stdout: string;
   stderr: string;
@@ -274,15 +274,9 @@ export async function runAgentStep(
   try {
     const { run, result, rateLimits } = await driveAgent(o, prompt, opts, log);
 
-    // ワークフローは止めない。判断材料を出すところまでがステップ実行器の責務。
-    // degraded（権限で止められたが is_error: false で「成功」に見える）は
-    // success に丸めてはいけない — 次のタスクが step_runs.status に記録し、
-    // 人間が見分けられるようにする。
-    const status: StepOutcome["status"] = !result.ok
-      ? "failed"
-      : result.degraded
-      ? "degraded"
-      : "success";
+    // 権限で拒否された操作があっても成功は成功。拒否の中身は permissionDenials
+    // として step_runs に残るので、status には出さない。
+    const status: StepOutcome["status"] = result.ok ? "success" : "failed";
     return {
       status,
       exitCode: result.exitCode,
@@ -400,11 +394,7 @@ export async function runGuideStep(
   try {
     const { run, result, rateLimits } = await driveAgent(o, prompt, opts, log);
 
-    let status: StepOutcome["status"] = !result.ok
-      ? "failed"
-      : result.degraded
-      ? "degraded"
-      : "success";
+    let status: StepOutcome["status"] = result.ok ? "success" : "failed";
     let stderr = result.stderrTail;
 
     if (result.ok) {
@@ -417,7 +407,7 @@ export async function runGuideStep(
           guide: checked.guide,
         });
       } else {
-        // 検証に落ちたら failed が degraded に勝つ。exitCode は CLI 自体のものをそのまま写す。
+        // exitCode は CLI 自体のものをそのまま写す。
         status = "failed";
         stderr = checked.issues.join("\n");
       }

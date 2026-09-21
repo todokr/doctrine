@@ -22,7 +22,6 @@ export type MockAdapter = AgentAdapter & {
 
 const DEFAULT: AgentResult = {
   ok: true,
-  degraded: false,
   text: "",
   costUsd: 0,
   numTurns: 1,

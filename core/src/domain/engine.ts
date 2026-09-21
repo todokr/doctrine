@@ -50,7 +50,6 @@ export type Decision =
 
 /**
  * ワークフローの意味論。I/Oを持たないので、ここだけを読めば進行規則が分かる。
- * degraded は success と同じ扱い（判断材料は step_runs に残るが、流れは止めない）。
  */
 export function decide(o: {
   workflow: Workflow;
@@ -64,7 +63,7 @@ export function decide(o: {
 
   if (o.outcome === "suspended") return { kind: "suspend" };
 
-  if (o.outcome === "success" || o.outcome === "degraded") {
+  if (o.outcome === "success") {
     const next = o.workflow.steps[index + 1];
     return next ? { kind: "next", stepId: next.id } : { kind: "complete" };
   }

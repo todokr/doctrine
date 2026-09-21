@@ -224,7 +224,7 @@ test("外から閉じられた回は interrupted", async () => {
 
 test("approval の行に想定外の status があれば例外にする", async () => {
   const db = await fixture();
-  await run(db, { stepId: "review", status: "degraded" });
+  await run(db, { stepId: "review", status: "rate_limited" });
   await assert.rejects(
     async () => buildTaskContext(db, (await getTask(db, "t1"))!, WORKFLOW),
     /想定外/,

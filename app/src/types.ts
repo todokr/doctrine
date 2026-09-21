@@ -62,7 +62,6 @@ export type Task = {
   guide?: Guide;
   dirty?: boolean;
   refused?: boolean;
-  degraded?: string;
   /**
    * 直近の差し戻し（step が非0で終わり、onFailure / onReject の goto で goto へ
    * 戻った）。ワークフローは続いているので失敗ではない。attempt は差し戻した側の

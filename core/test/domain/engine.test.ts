@@ -60,13 +60,6 @@ test("最後のステップが成功したら completed", () => {
   );
 });
 
-test("degraded でもワークフローは止まらない", () => {
-  assert.deepEqual(
-    decide({ workflow: wf, currentStepId: "implement", outcome: "degraded", attempts: 1 }),
-    { kind: "next", stepId: "test" },
-  );
-});
-
 test("失敗したら onFailure.goto へ戻り、feed を渡す", () => {
   const d = decide({ workflow: wf, currentStepId: "test", outcome: "failed", attempts: 1 });
   assert.equal(d.kind, "goto");

@@ -338,10 +338,10 @@ test("権限拒否を含む実行は task.get から中身が読める", async (
     input: { command: "git push origin main" },
   };
   const runs = await runSolo(createMockAdapter({
-    result: { ok: true, degraded: true, text: "やれませんでした", permissionDenials: [denial] },
+    result: { ok: true, text: "やれませんでした", permissionDenials: [denial] },
   }));
   const work = runs.find((r) => r.step_id === "work")!;
-  assert.equal(work.status, "degraded");
+  assert.equal(work.status, "success", "拒否があっても成功は成功");
   assert.deepEqual(work.permission_denials, { total: 1, denials: [denial] });
 });
 
