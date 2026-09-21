@@ -1,14 +1,12 @@
 #!/usr/bin/env -S deno run --allow-all
 import { socketPath } from "../daemon/server.ts";
-import type { Response, ServerEvent } from "../../../shared/protocol.ts";
+import type { Response, ServerEvent, TaskLogs } from "../../../shared/protocol.ts";
 
 const NUMERIC = new Set(["priority", "limit", "tail", "step_run_id"]);
 const BOOLEAN = new Set(["force", "follow", "include_closed"]);
 
-/** リクエストが応答を待つ最大時間。`--follow` で接続を張りっぱなしにする
- * ストリーミングモードを将来追加するときは、この一律タイムアウトは使えない
- * （待ち続けること自体が正しい動作になるため）。その場合は follow 専用の
- * 経路を別に用意すること。 */
+/** 最初の応答を待つ最大時間。`followLogs` は末尾の応答を受け取った後は
+ * タイムアウトしない（log.line を待ち続けること自体が正しい動作のため）。 */
 const REQUEST_TIMEOUT_MS = 30_000;
 
 /**
@@ -59,7 +57,7 @@ export const USAGE = `使い方: dctl <コマンド> [引数]
   approve <task-id>
   reject <task-id> --comment <text>
   pause | resume | cancel <task-id>
-  logs <task-id> [--tail <n>] [--step_run_id <n>]
+  logs <task-id> [--tail <n>] [--step_run_id <n>] [--follow]
   diff <task-id> [--since last_review]
 
 プロジェクト
@@ -247,10 +245,99 @@ export async function call(
   }
 }
 
+function closeQuietly(conn: Deno.UnixConn): void {
+  try {
+    conn.close();
+  } catch { /* 既に閉じている */ }
+}
+
+/**
+ * task.logs を follow: true で送り、返ってきた末尾を 1 行ずつ out に渡した後、
+ * 同じ接続に届く、このタスクの log.line を 1 行ずつ out に渡し続ける。
+ * signal が中断されたら接続を閉じて resolve する。デーモンが接続を閉じたら reject する。
+ */
+export async function followLogs(
+  path: string,
+  params: Record<string, unknown>,
+  out: (line: string) => void,
+  signal: AbortSignal,
+  timeoutMs = REQUEST_TIMEOUT_MS,
+): Promise<void> {
+  if (signal.aborted) return;
+  const requestId = 1;
+  const conn = await connect(path);
+  const onAbort = () => closeQuietly(conn);
+  signal.addEventListener("abort", onAbort);
+  // 接続を待つ間に中断されていたら、リスナーを付ける前の abort は拾えない。
+  if (signal.aborted) onAbort();
+
+  let timedOut = false;
+  // 最初の応答を待つ間だけ張る。応答が来たら追従に入るので解除する。
+  let timer: ReturnType<typeof setTimeout> | undefined = setTimeout(() => {
+    timedOut = true;
+    closeQuietly(conn);
+  }, timeoutMs);
+  const timeoutError = () =>
+    new Error(`デーモンからの応答がありません（${timeoutMs}ミリ秒待ちました）`);
+
+  let answered = false;
+  try {
+    if (signal.aborted) return;
+    await send(conn, requestId, "task.logs", params);
+    for await (const msg of readMessages(conn)) {
+      if (signal.aborted) return;
+      if (answered) {
+        if (isEvent(msg) && msg.event === "log.line" && msg.task_id === params.task_id) {
+          out(msg.line);
+        }
+        continue;
+      }
+      // 応答より前の log.line は捨てる（末尾と重なるため）
+      if (isEvent(msg)) continue;
+      if (msg.id === null) throw new Error(msg.ok ? "不明なプロトコルエラーです" : msg.error);
+      if (msg.id !== requestId) continue;
+      clearTimeout(timer);
+      timer = undefined;
+      if (!msg.ok) throw new Error(msg.error);
+      answered = true;
+      const lines = (msg.result as TaskLogs).lines;
+      // ファイルが改行で終わると split で末尾に空要素が 1 つ付く
+      const tail = lines.at(-1) === "" ? lines.slice(0, -1) : lines;
+      for (const line of tail) out(line);
+    }
+    if (signal.aborted) return;
+    if (timedOut) throw timeoutError();
+    throw new Error(
+      answered ? "デーモンが接続を閉じました" : "デーモンが応答を返す前に接続を閉じました",
+    );
+  } catch (err) {
+    // 外から接続を閉じると保留中の read が reject する
+    if (signal.aborted) return;
+    if (timedOut) throw timeoutError();
+    throw err;
+  } finally {
+    clearTimeout(timer);
+    signal.removeEventListener("abort", onAbort);
+    closeQuietly(conn);
+  }
+}
+
 export async function main(argv: string[]): Promise<number> {
   try {
     const { method, params } = parseArgv(argv);
-    const result = await call(Deno.env.get("DOCTRINE_SOCKET") ?? socketPath(), method, params);
+    const path = Deno.env.get("DOCTRINE_SOCKET") ?? socketPath();
+    if (method === "task.logs" && params.follow === true) {
+      const controller = new AbortController();
+      const onSigint = () => controller.abort();
+      Deno.addSignalListener("SIGINT", onSigint);
+      try {
+        await followLogs(path, params, (line) => console.log(line), controller.signal);
+      } finally {
+        Deno.removeSignalListener("SIGINT", onSigint);
+      }
+      return 0;
+    }
+    const result = await call(path, method, params);
     console.log(JSON.stringify(result, null, 2));
     return 0;
   } catch (e) {
