@@ -263,6 +263,32 @@ th{color:var(--ink-3);font-size:11px;font-weight:500;border-top:0;background:var
 .g-order-item{border:1px solid var(--line);border-radius:7px;padding:6px 8px;display:grid;gap:1px}
 .g-order-item::before{content:counter(go) ". ";color:var(--accent-text);font-weight:700}
 .wr-scroll{overflow-x:auto}
+.pfd-scroll{overflow-x:auto}
+.pfd{display:block}
+.pfd-edge{fill:none;stroke:var(--ink-3);stroke-width:1.2}
+.pfd-arrowhead{fill:var(--ink-3)}
+.pfd-node{cursor:pointer}
+.pfd-node:focus{outline:none}
+.pfd-node rect{fill:var(--surface);stroke:var(--ink-3);stroke-width:1.2}
+.pfd-node.given rect{fill:var(--surface-2)}
+.pfd-node.goal rect{stroke-width:2}
+.pfd-node.available rect{fill:var(--ok-bg)}
+.pfd-waiting rect{stroke:var(--line);stroke-dasharray:4 3}
+.pfd-ready rect{stroke:var(--ink-3)}
+.pfd-running rect{fill:var(--run-bg);stroke:var(--run)}
+.pfd-pr_open rect{fill:var(--run-bg);stroke:var(--run);stroke-width:2.2}
+.pfd-merged rect,.pfd-done rect{fill:var(--ok-bg);stroke:var(--ok)}
+.pfd-your_turn rect{fill:var(--accent-soft);stroke:var(--accent);stroke-width:2.2}
+.pfd-needs_attention rect{fill:var(--danger-bg);stroke:var(--danger)}
+.pfd-node.frozen rect{fill:var(--surface-2);opacity:.75}
+.pfd-node rect.pfd-inner{fill:none}
+.pfd-label{font-family:var(--mono);font-size:10.5px;fill:var(--ink-2)}
+.pfd-mark{fill:var(--ink-3);font-size:9.5px}
+.pfd-stage{font-family:var(--mono);font-size:10px;font-weight:700;fill:var(--ink-3)}
+.pfd-comments circle{fill:var(--accent)}
+.pfd-comments text{fill:var(--accent-ink);font-size:9px;font-weight:700}
+/* 選択は状態の枠より後に書き、選んだ要素の枠が状態の枠に負けないようにする */
+.pfd-node:focus-visible rect,.pfd-node.selected rect{stroke:var(--accent);stroke-width:2.5}
 .wr{display:block}
 .wr-edge{stroke:var(--line);stroke-width:1.4}
 .wr-back{fill:none;stroke:var(--ink-3);stroke-width:1.2}
