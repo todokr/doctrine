@@ -1,9 +1,22 @@
-import { GROUPS, countReview, groupOf, sidebarOrder, timeLabel, visibleTasks } from "../model";
+import type { IntakeSummary } from "../../../shared/protocol.ts";
+import {
+  INTAKE_SECTIONS,
+  INTAKE_STATE,
+  countIntakeAttention,
+  intakeOrder,
+  intakeProgress,
+  intakeSection,
+  issueNumber,
+} from "../intake";
+import { GROUPS, ago, countReview, groupOf, hm, sidebarOrder, timeLabel, visibleTasks } from "../model";
 import { useNotYet, useStore } from "../store";
 import type { Task } from "../types";
 import { RateLimit } from "./RateLimit";
 
 const icons = {
+  intake: (
+    <svg viewBox="0 0 24 24"><rect x="3" y="4" width="6" height="5" rx="1" /><rect x="15" y="15" width="6" height="5" rx="1" /><rect x="15" y="4" width="6" height="5" rx="2.5" /><path d="M9 6.5h6M18 9v6M6 9v8.5h9" /></svg>
+  ),
   inbox: (
     <svg viewBox="0 0 24 24"><path d="M3 13h5l1.5 3h5L16 13h5" /><path d="M5 5h14l2 8v6H3v-6z" /></svg>
   ),
@@ -18,8 +31,13 @@ const icons = {
 export function Rail() {
   const { s, dispatch } = useStore();
   const notYet = useNotYet();
+  const attention = countIntakeAttention(s.intakes);
   return (
     <nav className="rail" aria-label="ビュー">
+      <button className="ib" title={attention > 0 ? `Intake（対応が要るもの ${attention} 件）` : "Intake"} aria-pressed={s.view === "intake"} onClick={() => dispatch({ type: "view", view: "intake" })}>
+        {icons.intake}
+        {attention > 0 && <span className="pip" />}
+      </button>
       <button className="ib" title="タスク" aria-pressed={s.view === "tasks"} onClick={() => dispatch({ type: "view", view: "tasks" })}>
         {icons.inbox}
         {countReview(s.tasks) > 0 && <span className="pip" />}
@@ -65,9 +83,82 @@ function Item({ t }: { t: Task }) {
   );
 }
 
+function IntakeIcon({ i }: { i: IntakeSummary }) {
+  switch (intakeSection(i)) {
+    case "attention": return i.state === "needs_attention" ? <span className="bang">!</span> : <span className="diamond" />;
+    case "working": return i.rate_limited_until ? <span className="hourglass" /> : <span className="spin" />;
+    case "active": return <span className="ring" />;
+    case "closed": return i.state === "completed" ? <span className="check" /> : <span className="xmark" />;
+  }
+}
+
+function IntakeItem({ i }: { i: IntakeSummary }) {
+  const { s, dispatch } = useStore();
+  const p = s.projects.find((x) => x.daemonId === i.project_id);
+  const num = issueNumber(i.issue_url);
+  const state = INTAKE_STATE[i.state];
+  const progress = intakeProgress(i);
+  return (
+    <button className="it" aria-current={s.intakeSel === i.id} onClick={() => dispatch({ type: "intake.select", id: i.id })}>
+      <span className="ico"><IntakeIcon i={i} /></span>
+      <span className="t">
+        {num !== null && <span className="num">{`#${num}`}</span>}
+        {i.issue_title}
+      </span>
+      <span className="m">
+        <span className="pjdot" style={{ background: p?.color ?? "#666" }} />
+        <span className={`pill ${state.cls}`} style={{ lineHeight: "16px", fontSize: "10.5px" }}>{state.word}</span>
+        {progress && <span className="prog">{progress}</span>}
+        {i.revising && <span className="tag rev">改訂中</span>}
+        {i.rate_limited_until && <span>{`${hm(Date.parse(i.rate_limited_until))} 再開`}</span>}
+        <span className="tm">{ago(Date.parse(i.updated_at), s.now)}</span>
+      </span>
+    </button>
+  );
+}
+
+function IntakeSidebar() {
+  const { s, dispatch } = useStore();
+  const rows = intakeOrder(s.intakes, s.projects, s.project, s.showClosedIntakes);
+  return (
+    <aside className="side">
+      <div className="side-head">
+        <select aria-label="プロジェクトで絞り込む" value={s.project} onChange={(e) => dispatch({ type: "project", project: e.target.value })}>
+          <option value="all">すべてのプロジェクト</option>
+          {s.projects.map((p) => <option key={p.id} value={p.id}>{p.id}</option>)}
+        </select>
+        <span className="count">{rows.length}</span>
+        <span className="grow" />
+        <button className="plus" title="Issue を選んで Intake を始める" aria-label="Issue を選んで Intake を始める" aria-pressed={s.intakeSel === "new"} onClick={() => dispatch({ type: "intake.select", id: "new" })}>＋</button>
+      </div>
+      <div className="side-head">
+        <div className="seg">
+          <button aria-pressed={!s.showClosedIntakes} onClick={() => dispatch({ type: "intake.showClosed", show: false })}>進行中</button>
+          <button aria-pressed={s.showClosedIntakes} onClick={() => dispatch({ type: "intake.showClosed", show: true })}>すべて</button>
+        </div>
+      </div>
+      <div className="side-scroll">
+        {INTAKE_SECTIONS.map((sec) => {
+          const list = rows.filter((i) => intakeSection(i) === sec.key);
+          if (!list.length) return null;
+          return (
+            <section className="grp" key={sec.key}>
+              <h3>{sec.name} <span className="count">{list.length}</span></h3>
+              {list.map((i) => <IntakeItem key={i.id} i={i} />)}
+            </section>
+          );
+        })}
+        {rows.length === 0 && <p className="hint" style={{ padding: 8 }}>ありません</p>}
+      </div>
+      <RateLimit />
+    </aside>
+  );
+}
+
 export function Sidebar() {
   const { s, dispatch } = useStore();
   const notYet = useNotYet();
+  if (s.view === "intake") return <IntakeSidebar />;
   const ts = visibleTasks(s.tasks, s.project);
   const isDone = s.view === "done";
   const count = ts.filter((t) => (groupOf(t) === "done") === isDone).length;

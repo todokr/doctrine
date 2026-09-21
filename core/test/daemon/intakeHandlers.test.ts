@@ -465,6 +465,27 @@ test("github.status は tracker の結果を返す", async () => {
   });
 });
 
+test("github.issue は tracker から本文を読む", async () => {
+  const tracker = fakeTracker({ title: "T1", body: "本文" });
+  const { call } = await setup({ tracker });
+  const detail = await call<{ url: string; title: string; body: string }>("github.issue", {
+    project: repo,
+    url: ISSUE,
+  });
+  assert.equal(detail.title, "T1");
+  assert.equal(detail.body, "本文");
+  assert.equal(detail.url, ISSUE);
+  assert.deepEqual(tracker.reads, [ISSUE]);
+});
+
+test("github.issue は未登録のプロジェクトを拒む", async () => {
+  const { call } = await setup();
+  await assert.rejects(
+    () => call("github.issue", { project: "/not-registered", url: ISSUE }),
+    /未登録のプロジェクトです/,
+  );
+});
+
 test("intake.list は project で絞る", async () => {
   const { call } = await setup();
   const otherRoot = await mkdtemp(join(tmpdir(), "doctrine-intake-rpc-other-"));

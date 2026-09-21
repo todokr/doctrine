@@ -20,7 +20,7 @@ export type { CommandResult, Diagram, Guide, GuideLocation, MovedBlock, Risk, Re
 export type TaskState = "queued" | "running" | "suspended" | "paused" | "rate_limited"
   | "completed" | "failed" | "canceled" | "unknown";
 
-export type Project = { id: string; color: string; path: string; def: string };
+export type Project = { id: string; daemonId: number; color: string; path: string; def: string };
 
 export type DiffHunk = {
   /** ガイドが指す hunk の id（shared/guide/hunkId.ts の listHunks と同じ値） */

@@ -1,7 +1,7 @@
 import type { Guide } from "./guide/schema.ts";
 import type { AttentionReason, CommentReply } from "./intake/decomposer.ts";
 import type { FeedbackComment } from "./intake/feedback.ts";
-import type { GhStatus, IssueSummary } from "./intake/github.ts";
+import type { GhStatus, IssueDetail, IssueSummary } from "./intake/github.ts";
 import type { Pfd } from "./intake/pfd.ts";
 import type { ProcessStatus } from "./intake/processStatus.ts";
 import type { Answer, Question } from "./intake/question.ts";
@@ -380,6 +380,7 @@ export type Methods = {
     params: { project: string; assignee?: "me" | "any"; search?: string };
     result: GithubIssue[];
   };
+  "github.issue": { params: { project: string; url: string }; result: IssueDetail };
   "intake.start": {
     params: { project: string; issue_url: string };
     result: IntakeSummary & { alreadyActive: boolean };
