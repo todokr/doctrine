@@ -99,14 +99,14 @@ function History({ c, now }: { c: TaskContext; now: number }) {
           </pre>
         </details>
       )}
-      {c.lastAgentMessage && (
-        <div>
-          <b>エージェントの最後の発言</b>
-          <pre className="block" style={{ marginTop: 6, whiteSpace: "pre-wrap" }}>{c.lastAgentMessage}</pre>
-        </div>
-      )}
     </>
   );
+}
+
+/** 計画は差分を見る前に毎回読み直すものではないので畳んで出す。
+    パスはワークフローが決めるので、末尾のファイル名だけで見る */
+function foldedByDefault(path: string) {
+  return path.split("/").pop() === "plan.md";
 }
 
 function FileBody({ file }: { file: ReviewFile }) {
@@ -210,10 +210,10 @@ export function ReviewView({ t }: { t: Task }) {
             定義を引く口（workflow.list）は #58 で、それまではデーモンが解決した
             この配列だけが根拠になる */}
         {(c?.reviewFiles ?? []).map((file) => (
-          <section className="rv-files-md" key={file.path}>
-            <header><span className="mono">{file.path}</span><span className="hint">このステップが見せるファイル（review.files）</span></header>
+          <details className="rv-files-md" key={file.path} open={!foldedByDefault(file.path)}>
+            <summary><span className="mono">{file.path}</span><span className="hint">このステップが見せるファイル（review.files）</span></summary>
             <FileBody file={file} />
-          </section>
+          </details>
         ))}
 
         <div className="headrow">
