@@ -144,6 +144,60 @@ function isEvent(msg: Response | ServerEvent): msg is ServerEvent {
   return "event" in msg;
 }
 
+/** ソケットに繋ぐ。無ければデーモン未起動のメッセージで投げる。 */
+async function connect(path: string): Promise<Deno.UnixConn> {
+  try {
+    return await Deno.connect({ transport: "unix", path });
+  } catch (err) {
+    if (err instanceof Deno.errors.NotFound) {
+      throw new Error(`デーモンが起動していないようです（ソケットが見つかりません: ${path}）`);
+    }
+    throw err;
+  }
+}
+
+/** リクエストを 1 行 JSON で書き切る。 */
+async function send(
+  conn: Deno.UnixConn,
+  id: number,
+  method: string,
+  params: Record<string, unknown>,
+): Promise<void> {
+  const request = new TextEncoder().encode(JSON.stringify({ id, method, params }) + "\n");
+  let offset = 0;
+  while (offset < request.length) offset += await conn.write(request.subarray(offset));
+}
+
+/**
+ * 受信バイト列を改行で切って JSON.parse し、1 件ずつ返す。
+ * 相手が閉じたら（read が null）終わる。JSON として読めない行は抜粋付きで投げる。
+ */
+async function* readMessages(conn: Deno.UnixConn): AsyncGenerator<Response | ServerEvent> {
+  const decoder = new TextDecoder();
+  const bytes = new Uint8Array(64 * 1024);
+  let buf = "";
+  while (true) {
+    const n = await conn.read(bytes);
+    if (n === null) return;
+    buf += decoder.decode(bytes.subarray(0, n), { stream: true });
+    let i: number;
+    while ((i = buf.indexOf("\n")) !== -1) {
+      const line = buf.slice(0, i);
+      buf = buf.slice(i + 1);
+      if (line.trim() === "") continue;
+
+      let msg: Response | ServerEvent;
+      try {
+        msg = JSON.parse(line) as Response | ServerEvent;
+      } catch {
+        const excerpt = line.length > 200 ? `${line.slice(0, 200)}…` : line;
+        throw new Error(`デーモンからの応答がJSONとして読めません: ${excerpt}`);
+      }
+      yield msg;
+    }
+  }
+}
+
 export async function call(
   path: string,
   method: string,
@@ -162,54 +216,23 @@ export async function call(
   });
 
   const exchange = (async (): Promise<unknown> => {
-    try {
-      state.conn = await Deno.connect({ transport: "unix", path });
-    } catch (err) {
-      if (err instanceof Deno.errors.NotFound) {
-        throw new Error(`デーモンが起動していないようです（ソケットが見つかりません: ${path}）`);
-      }
-      throw err;
-    }
+    state.conn = await connect(path);
     const conn = state.conn;
-    const request = new TextEncoder().encode(
-      JSON.stringify({ id: requestId, method, params }) + "\n",
-    );
-    let offset = 0;
-    while (offset < request.length) offset += await conn.write(request.subarray(offset));
+    await send(conn, requestId, method, params);
 
-    const decoder = new TextDecoder();
-    const bytes = new Uint8Array(64 * 1024);
-    let buf = "";
-    while (true) {
-      const n = await conn.read(bytes);
-      if (n === null) throw new Error("デーモンが応答を返す前に接続を閉じました");
-      buf += decoder.decode(bytes.subarray(0, n), { stream: true });
-      let i: number;
-      while ((i = buf.indexOf("\n")) !== -1) {
-        const line = buf.slice(0, i);
-        buf = buf.slice(i + 1);
-        if (line.trim() === "") continue;
-
-        let msg: Response | ServerEvent;
-        try {
-          msg = JSON.parse(line) as Response | ServerEvent;
-        } catch {
-          const excerpt = line.length > 200 ? `${line.slice(0, 200)}…` : line;
-          throw new Error(`デーモンからの応答がJSONとして読めません: ${excerpt}`);
-        }
-
-        if (isEvent(msg)) continue; // このコマンドはイベント購読をしないので無視
-        if (msg.id === null) {
-          // id が null ということは、デーモンがリクエスト自体を JSON として
-          // 読めなかったということ。この接続でこれ以上まともな応答は来ないので、
-          // 無視して待ち続けるのではなく、ここで確定的に失敗させる。
-          throw new Error(msg.ok ? "不明なプロトコルエラーです" : msg.error);
-        }
-        if (msg.id !== requestId) continue;
-        if (msg.ok) return msg.result;
-        throw new Error(msg.error);
+    for await (const msg of readMessages(conn)) {
+      if (isEvent(msg)) continue; // このコマンドはイベント購読をしないので無視
+      if (msg.id === null) {
+        // id が null ということは、デーモンがリクエスト自体を JSON として
+        // 読めなかったということ。この接続でこれ以上まともな応答は来ないので、
+        // 無視して待ち続けるのではなく、ここで確定的に失敗させる。
+        throw new Error(msg.ok ? "不明なプロトコルエラーです" : msg.error);
       }
+      if (msg.id !== requestId) continue;
+      if (msg.ok) return msg.result;
+      throw new Error(msg.error);
     }
+    throw new Error("デーモンが応答を返す前に接続を閉じました");
   })();
   // タイムアウトが先に確定した後、閉じた接続の読み取りが reject しても未処理にしない。
   exchange.catch(() => {});
