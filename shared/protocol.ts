@@ -407,6 +407,21 @@ export type Methods = {
     params: { intake_id: string; mode: "leave" | "stop" };
     result: IntakeSummary;
   };
+  /** 人のプロセスの完了の記録。note は必須。人だけが行い、dctl にこの操作は無い（spec 11.6 H-4）。 */
+  "intake.completeHumanProcess": {
+    params: { intake_id: string; process_id: string; note: string };
+    result: IntakeDetail;
+  };
+  /** 要確認のプロセスに新しいタスクを作る。古いタスクは経緯として残る（C-6）。 */
+  "intake.redispatch": { params: { intake_id: string; process_id: string }; result: IntakeDetail };
+  /** 見張りの周期を待たずに 1 周回す（W-4）。 */
+  "intake.refresh": { params: { intake_id: string }; result: IntakeDetail };
+  "intake.setDispatchPaused": {
+    params: { intake_id: string; paused: boolean };
+    result: IntakeSummary;
+  };
+  /** completed の Intake の親 Issue を閉じる（W-11）。 */
+  "intake.closeIssue": { params: { intake_id: string }; result: IntakeSummary };
 };
 
 export type Method = keyof Methods;

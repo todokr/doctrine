@@ -23,6 +23,8 @@ export type SubIssueSyncResult = {
   adopted: string[];
   updated: string[];
   closed: string[];
+  /** 完了を記録した人のプロセスの sub-issue を completed で閉じたもの。 */
+  completed: string[];
   failures: {
     processId: string;
     op: "find" | "create" | "update" | "close" | "record";
@@ -61,7 +63,8 @@ function topologicalOrder(pfd: Pfd): Process[] {
 
 /**
  * 承認済みの案と intake_processes の行から、プロセスごとの sub-issue を作り・採用し・更新し・
- * 取りやめとして閉じる。初回・やり直し・改訂のすべてをこの 1 回の呼び出しで扱う。
+ * 取りやめとして閉じ、完了を記録した人のプロセスを completed で閉じる。
+ * 初回・やり直し・改訂のすべてをこの 1 回の呼び出しで扱う。
  *
  * 行の読み出しに失敗したときだけ投げる。gh の呼び出しと行ごとの書き込みの失敗は
  * failures に入れ、残りのプロセスを続ける。intake_processes の行の追加と retired_at は承認の作業が持つ。
@@ -78,6 +81,7 @@ export async function syncSubIssues(
     adopted: [],
     updated: [],
     closed: [],
+    completed: [],
     failures: [],
   };
 
@@ -230,6 +234,18 @@ export async function syncSubIssues(
       links.set(p.id, { ...link, hash });
       result.updated.push(p.id);
     }
+  }
+
+  // 6. 人のプロセスの完了。閉じられなければ sub_issue_closed = 0 のまま残り、次の回がやり直す
+  for (const r of liveRows.values()) {
+    if (r.human_done_at === null || r.sub_issue_closed !== 0) continue;
+    const link = links.get(r.process_id);
+    if (!link) continue;
+    const closed = await attempt(r.process_id, "close", async () => {
+      await tracker.closeIssue(projectPath, { url: link.url, nodeId: link.nodeId }, "completed");
+      await updateProcess(db, intake.id, r.process_id, { sub_issue_closed: 1 });
+    });
+    if (closed.ok) result.completed.push(r.process_id);
   }
 
   return result;
