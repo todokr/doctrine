@@ -59,13 +59,21 @@ describe("IssuePreview", () => {
 describe("IssueList", () => {
   test("一覧の行に Intake ありの印を付ける", () => {
     const html = renderToStaticMarkup(
-      <IssueList issues={GITHUB_ISSUES} selected={null} onSelect={noop} />,
+      <IssueList issues={GITHUB_ISSUES} intakes={INTAKES} selected={null} onSelect={noop} />,
+    );
+    expect(html.split("Intake あり").length - 1).toBe(1);
+  });
+
+  test("印は intake_id ではなく、手元の進行中の Intake で決める", () => {
+    const issues = GITHUB_ISSUES.map((i) => ({ ...i, intake_id: i.intake_id ? null : "stale" }));
+    const html = renderToStaticMarkup(
+      <IssueList issues={issues} intakes={INTAKES} selected={null} onSelect={noop} />,
     );
     expect(html.split("Intake あり").length - 1).toBe(1);
   });
 
   test("0 件なら「ありません」", () => {
-    expect(renderToStaticMarkup(<IssueList issues={[]} selected={null} onSelect={noop} />))
+    expect(renderToStaticMarkup(<IssueList issues={[]} intakes={[]} selected={null} onSelect={noop} />))
       .toContain("ありません");
   });
 });
