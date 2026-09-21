@@ -18,11 +18,15 @@ import {
 } from "./daemon/client";
 import { receiveGuide } from "./guide";
 import { buildDiff } from "./patch";
+import type { GhStatus, IssueDetail } from "../../shared/intake/github.ts";
+import type { GithubIssue, IntakeSummary } from "../../shared/protocol.ts";
 import {
   contextOf,
   diffOf,
   genOf,
   guideOf,
+  intakeDetailOf,
+  intakeGenOf,
   reduce,
   scopeOf,
   selectedTask,
@@ -82,6 +86,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   // 新しい応答の後に届くと、画面が一度古い状態に巻き戻る。
   // 最後に始めた1本だけが反映してよい（ロジック自体は refreshGate.ts でテスト済み）
   const [refreshGate] = useState(() => createRefreshGate());
+  // 購読の effect の中で作る refresh を、外の effect からも呼べるようにする
+  const refreshRef = useRef<(() => Promise<void>) | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -93,12 +99,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     async function refresh() {
       const token = refreshGate.begin();
       try {
-        const [projects, tasks, samples] = await Promise.all([
+        const [projects, tasks, samples, intakes] = await Promise.all([
           rpc("project.list", {}),
           rpc("task.list", {}),
           // ratelimit.sample は agent ステップが走っている間しか飛ばない。開いた直後に
           // 空欄にしないために DB の直近の行で埋める。これが落ちても一覧は出す
           rpc("ratelimit.recent", {}).catch(() => []),
+          // 「すべて」で出した終了分を取り直しで消さないよう、今の切り替えを渡す。
+          // これが落ちてもタスクの一覧は出す
+          rpc("intake.list", { include_closed: latest.current.showClosedIntakes }).catch(
+            (): IntakeSummary[] => [],
+          ),
         ]);
         if (!alive || !refreshGate.isLatest(token)) return;
         refreshFailing = false;
@@ -115,6 +126,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           tasks: tasks.map((row) => toTask(row, projects, known.find((t) => t.id === row.id))),
           now: Date.now(),
         });
+        dispatch({ type: "intakes.sync", intakes });
       } catch (e) {
         // 切断中は失敗して当然。理由はバナーが出している。
         // ただし接続中に失敗するのは、ソケットは開いているが dctld が固まっている
@@ -150,6 +162,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             void refresh();
             return;
           }
+          if ("intake_id" in ev) {
+            // dctl から始めた Intake は、まだ一覧に無い
+            if (!latest.current.intakes.some((i) => i.id === ev.intake_id)) {
+              void refresh();
+              return;
+            }
+            dispatch({ type: "daemon", ev, now: Date.now() });
+            // needs_human と progress はイベントに載らないので、一覧を取り直す
+            if (ev.event === "intake.stateChanged") void refresh();
+            return;
+          }
           dispatch({ type: "daemon", ev, now: Date.now() });
         }),
       ]);
@@ -179,11 +202,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       void refresh();
     }
 
+    refreshRef.current = refresh;
     void subscribe();
     const timer = setInterval(() => void refresh(), REFRESH_MS);
 
     return () => {
       alive = false;
+      refreshRef.current = null;
       clearInterval(timer);
       for (const off of unlisteners) off();
     };
@@ -270,6 +295,34 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       );
   }, [reviewing, needGuide, gen]);
 
+  // 「すべて」の切り替えは、次の 15 秒を待たずに取り直す
+  useEffect(() => {
+    void refreshRef.current?.();
+  }, [s.showClosedIntakes]);
+
+  // 開いている Intake の詳細。選ばれていて、まだ取っていないものだけ
+  const intakeId = s.view === "intake" && s.intakeSel !== "new" ? s.intakeSel : null;
+  const needIntake = intakeId !== null && intakeDetailOf(s, intakeId) === undefined;
+  const intakeGen = intakeId ? intakeGenOf(s, intakeId) : 0;
+
+  useEffect(() => {
+    if (!intakeId || !needIntake) return;
+    const id = intakeId;
+    dispatch({ type: "intake.detail", id, gen: intakeGen, loaded: { kind: "loading" } });
+    void rpc("intake.get", { intake_id: id })
+      .then((value) =>
+        dispatch({ type: "intake.detail", id, gen: intakeGen, loaded: { kind: "ok", value } })
+      )
+      .catch((e) =>
+        dispatch({
+          type: "intake.detail",
+          id,
+          gen: intakeGen,
+          loaded: { kind: "error", message: errorMessage(e) },
+        })
+      );
+  }, [intakeId, needIntake, intakeGen]);
+
   useEffect(() => {
     if (!s.toast) return;
     const h = setTimeout(() => dispatch({ type: "toast", message: null }), 2600);
@@ -300,6 +353,33 @@ export function useDecide() {
     approve: (taskId: string) => rpc("task.approve", { task_id: taskId }),
     reject: (taskId: string, comment: string) => rpc("task.reject", { task_id: taskId, comment }),
     cancel: (taskId: string) => rpc("task.cancel", { task_id: taskId }),
+  };
+}
+
+/**
+ * Issue の選択で使う RPC。useDecide と同じく、ここでは catch しない。
+ * projectPath は Project.path（表示名ではない）
+ */
+export function useIntakeRpc() {
+  return {
+    ghStatus: (projectPath: string): Promise<GhStatus> =>
+      rpc("github.status", { project: projectPath }),
+    issues: (
+      projectPath: string,
+      o: { assignee: "me" | "any"; search?: string },
+    ): Promise<GithubIssue[]> =>
+      rpc("github.issues", {
+        project: projectPath,
+        assignee: o.assignee,
+        ...(o.search ? { search: o.search } : {}),
+      }),
+    issue: (projectPath: string, url: string): Promise<IssueDetail> =>
+      rpc("github.issue", { project: projectPath, url }),
+    start: (
+      projectPath: string,
+      issueUrl: string,
+    ): Promise<IntakeSummary & { alreadyActive: boolean }> =>
+      rpc("intake.start", { project: projectPath, issue_url: issueUrl }),
   };
 }
 
