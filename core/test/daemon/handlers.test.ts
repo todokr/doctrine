@@ -13,7 +13,7 @@ import { listStepRuns } from "../../src/db/stepRuns.ts";
 import { captureTree, reviewRefName } from "../../src/domain/reviewTree.ts";
 import { ensureDoctrineOutExcluded } from "../../src/domain/worktree.ts";
 import { createHandler, type DaemonContext, tick } from "../../src/daemon/handlers.ts";
-import { createMockAdapter } from "../../src/adapter/mock.ts";
+import { createMockAdapter, type MockAdapter } from "../../src/adapter/mock.ts";
 import { createWarningLog } from "../../src/daemon/warnings.ts";
 import { parseWorkflow } from "../../src/workflow/schema.ts";
 import type {
@@ -735,15 +735,25 @@ test("worktree 作成に失敗したタスクは failed になり、他プロジ
 const TWO_AGENTS = 'name: twoagents\nsteps:\n  - id: a\n    type: agent\n    prompt: "p1"\n' +
   '  - id: b\n    type: agent\n    prompt: "p2"\n';
 
-/** agent ステップ a の実行中（まだ結果が返らない状態）まで進めたタスクを作る。 */
-async function midFlight(ctx: DaemonContext, h: ReturnType<typeof createHandler>) {
-  const adapter = createMockAdapter({ result: { ok: true, text: "done" }, delayMs: 300 });
+/**
+ * agent ステップ a の実行中（まだ結果が返らない状態）まで進めたタスクを作る。
+ * アダプタとワークフローは省略すると、成功で返る mock と TWO_AGENTS になる。
+ */
+async function midFlight(
+  ctx: DaemonContext,
+  h: ReturnType<typeof createHandler>,
+  o: { adapter?: MockAdapter; workflow?: string } = {},
+) {
+  const adapter = o.adapter ??
+    createMockAdapter({ result: { ok: true, text: "done" }, delayMs: 300 });
   ctx.adapter = adapter;
-  await writeFile(join(repo, ".doctrine", "workflows", "twoagents.yaml"), TWO_AGENTS);
+  const workflow = o.workflow ?? TWO_AGENTS;
+  const name = parseWorkflow(workflow).workflow.name;
+  await writeFile(join(repo, ".doctrine", "workflows", `${name}.yaml`), workflow);
   await h("project.add", { path: repo }, NOOP_CONN);
   const t = await h(
     "task.create",
-    { project: repo, title: "T", prompt: "p", workflow: "twoagents" },
+    { project: repo, title: "T", prompt: "p", workflow: name },
     NOOP_CONN,
   ) as { id: string };
   await tick(ctx);
@@ -795,6 +805,76 @@ test("実行中に pause されたら runTask は current_step_id を進めな�
     "a",
     "中断されたステップより先に進むと resume が1ステップ飛ばしてしまう",
   );
+});
+
+/** SIGTERM で止められた子（143 で終わる）。mock の pid は kill できないので結果で表す。 */
+function terminatedAdapter(): MockAdapter {
+  return createMockAdapter({ result: { ok: false, exitCode: 143, text: "" }, delayMs: 300 });
+}
+
+function finishedOf(events: ServerEvent[]) {
+  return events.flatMap((e) => e.event === "stepRun.finished" ? [e] : []);
+}
+
+function warningsOf(events: ServerEvent[]) {
+  return events.filter((e) => e.event === "daemon.warning");
+}
+
+test("running のタスクに task.pause を送ると、走っていた実行は interrupted で閉じ、タスクは paused になる", async () => {
+  const events: ServerEvent[] = [];
+  const ctx = await context(events);
+  const h = createHandler(ctx);
+  const { taskId } = await midFlight(ctx, h, { adapter: terminatedAdapter() });
+
+  await h("task.pause", { task_id: taskId }, NOOP_CONN);
+  await until(() => ctx.running.size === 0, 5000, "runTask の終了");
+
+  const runs = await listStepRuns(ctx.db, taskId);
+  assert.equal(runs.length, 1);
+  assert.equal(runs[0].status, "interrupted");
+  assert.notEqual(runs[0].ended_at, null);
+  assert.equal((await getTask(ctx.db, taskId))?.state, "paused");
+
+  const finished = finishedOf(events).filter((e) => e.step_run_id === runs[0].id);
+  assert.equal(finished.length, 1);
+  assert.equal(finished[0].status, "interrupted");
+  assert.deepEqual(warningsOf(events), [], "止めただけで警告を出してはいけない");
+});
+
+test("onFailure のあるステップを task.pause で止めても差し戻しとは記録しない", async () => {
+  const events: ServerEvent[] = [];
+  const ctx = await context(events);
+  const h = createHandler(ctx);
+  const adapter = terminatedAdapter();
+  const { taskId } = await midFlight(ctx, h, {
+    adapter,
+    workflow: 'name: retry\nsteps:\n  - id: a\n    type: agent\n    prompt: "p1"\n' +
+      "    onFailure:\n      goto: a\n      maxAttempts: 3\n",
+  });
+
+  await h("task.pause", { task_id: taskId }, NOOP_CONN);
+  await until(() => ctx.running.size === 0, 5000, "runTask の終了");
+
+  const runs = await listStepRuns(ctx.db, taskId);
+  assert.equal(runs.length, 1);
+  assert.equal(runs[0].status, "interrupted");
+  assert.equal(runs[0].goto_step_id, null);
+  assert.deepEqual(finishedOf(events).map((e) => e.status), ["interrupted"]);
+  assert.equal(adapter.calls.length, 1);
+});
+
+test("running のタスクに task.cancel を送ると、走っていた実行は interrupted で閉じ、タスクは canceled になる", async () => {
+  const events: ServerEvent[] = [];
+  const ctx = await context(events);
+  const h = createHandler(ctx);
+  const { taskId } = await midFlight(ctx, h, { adapter: terminatedAdapter() });
+
+  await h("task.cancel", { task_id: taskId }, NOOP_CONN);
+  await until(() => ctx.running.size === 0, 5000, "runTask の終了");
+
+  assert.deepEqual((await listStepRuns(ctx.db, taskId)).map((r) => r.status), ["interrupted"]);
+  assert.equal((await getTask(ctx.db, taskId))?.state, "canceled");
+  assert.deepEqual(warningsOf(events), []);
 });
 
 // --- 最終ステップが approval のワークフローの後始末 -----------------------
