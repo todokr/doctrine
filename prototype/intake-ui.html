@@ -1,0 +1,1133 @@
+<title>doctrine Intake 画面</title>
+<!-- PROTOTYPE (使い捨て): docs/superpowers/specs/2026-09-21-intake-ui-design.md の画面を、例のデータで動かしたもの。
+     デーモンにはつながっていない。操作はメモリ上のスタブ。§ の印は spec の章番号。 -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+JP:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  color-scheme:light;
+  --ground:#E7EAEE; --surface:#FFFFFF; --side:#F1F3F6; --surface-2:#E9ECF0; --sunken:#E1E5EA;
+  --ink:#181B20; --ink-2:#4B5560; --ink-3:#828C97; --line:#D3D9DF;
+  --accent:#AD7625; --accent-soft:#F1E3C9; --accent-text:#20140A; --run:#2E6CA4; --run-bg:#DEEAF5;
+  --danger:#AA3A2C; --danger-bg:#F7E2DD; --ok:#296B49; --ok-bg:#DEEFE4;
+  --ann:#6C4A9C; --ann-bg:#EEE7F7;
+  --shadow:0 12px 32px rgba(20,26,34,.18);
+  --sans:"IBM Plex Sans JP","Hiragino Sans","Noto Sans JP",system-ui,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,"SFMono-Regular",Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    color-scheme:dark;
+    --ground:#12151A; --surface:#1A1E24; --side:#20242B; --surface-2:#262B33; --sunken:#0F1215;
+    --ink:#E7EAEE; --ink-2:#A7B0BB; --ink-3:#707A85; --line:#2E343D;
+    --accent:#E0A857; --accent-soft:#3A2E15; --accent-text:#E0A857; --run:#7FB2E0; --run-bg:#1D2E3E;
+    --danger:#E38B7B; --danger-bg:#3B211C; --ok:#7FCB9E; --ok-bg:#16301F;
+    --ann:#B79CE8; --ann-bg:#2B2140;
+    --shadow:0 12px 32px rgba(0,0,0,.55);
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --ground:#12151A; --surface:#1A1E24; --side:#20242B; --surface-2:#262B33; --sunken:#0F1215;
+  --ink:#E7EAEE; --ink-2:#A7B0BB; --ink-3:#707A85; --line:#2E343D;
+  --accent:#E0A857; --accent-soft:#3A2E15; --accent-text:#E0A857; --run:#7FB2E0; --run-bg:#1D2E3E;
+  --danger:#E38B7B; --danger-bg:#3B211C; --ok:#7FCB9E; --ok-bg:#16301F;
+  --ann:#B79CE8; --ann-bg:#2B2140;
+  --shadow:0 12px 32px rgba(0,0,0,.55);
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{background:var(--ground);color:var(--ink);font-family:var(--sans);font-size:13px;line-height:1.5;margin:0;overflow:hidden}
+button,input,textarea,select{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.mono{font-family:var(--mono);font-size:11.5px}
+.hint{color:var(--ink-3);font-size:11.5px}
+a{color:var(--accent-text)}
+
+.app{display:grid;grid-template-columns:52px 300px minmax(0,1fr);height:100%;background:var(--surface);overflow:hidden}
+.rail{background:var(--side);border-right:1px solid var(--line);display:flex;flex-direction:column;align-items:center;gap:6px;padding-block:10px}
+.rail .grow{flex:1}
+.ib{position:relative;width:36px;height:36px;border-radius:9px;border:0;background:transparent;color:var(--ink-2);display:grid;place-items:center}
+.ib:hover{background:var(--surface-2)}
+.ib[aria-pressed="true"]{background:var(--accent-soft);color:var(--accent-text)}
+.ib svg{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.ib .pip{position:absolute;top:6px;right:6px;width:7px;height:7px;border-radius:50%;background:var(--accent);border:2px solid var(--side)}
+.ib.ann-toggle{font-family:var(--mono);font-weight:700;font-size:14px}
+.ib.ann-toggle[aria-pressed="true"]{background:var(--ann-bg);color:var(--ann)}
+
+.side{background:var(--side);border-right:1px solid var(--line);display:flex;flex-direction:column;min-height:0}
+.side-head{display:flex;align-items:center;gap:8px;padding:10px 10px 8px 12px;border-bottom:1px solid var(--line)}
+.side-head select{border:0;background:var(--side);font-weight:700;font-size:14px;padding:2px 0;max-width:150px}
+.side-head .grow{flex:1}
+.plus{width:28px;height:28px;border-radius:7px;border:1px solid var(--line);background:var(--surface);font-size:16px;line-height:1}
+.plus:hover{border-color:var(--ink-3)}
+.plus[aria-pressed="true"]{background:var(--accent-soft);border-color:var(--accent)}
+.side-scroll{overflow-y:auto;flex:1;padding:6px 6px 10px}
+.side-foot{border-top:1px solid var(--line);padding:9px 12px 11px;font-size:11.5px;color:var(--ink-3);line-height:1.6}
+.grp{margin-top:8px}
+.grp h3{margin:0;padding:4px 8px;font-size:11.5px;font-weight:700;color:var(--ink-2);display:flex;gap:6px;align-items:center;letter-spacing:.02em}
+.grp h3 .count{color:var(--ink-3);font-weight:400;font-variant-numeric:tabular-nums}
+.it{width:100%;border:0;background:transparent;border-radius:8px;padding:6px 8px 6px 6px;display:grid;grid-template-columns:18px minmax(0,1fr);gap:2px 6px;text-align:left}
+.it:hover{background:var(--surface-2)}
+.it[aria-current="true"]{background:var(--accent-soft);box-shadow:inset 3px 0 0 var(--accent)}
+.it .ico{grid-row:span 2;display:grid;place-items:center;height:20px}
+.it .t{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:500}
+.it .t .num{color:var(--ink-3);font-family:var(--mono);font-size:11.5px;margin-right:4px}
+.it .m{display:flex;gap:6px;align-items:center;color:var(--ink-3);font-size:11.5px;min-width:0;flex-wrap:wrap}
+.it .m .tm{margin-left:auto;font-variant-numeric:tabular-nums;white-space:nowrap}
+.pjdot{width:7px;height:7px;border-radius:50%;flex:none;display:inline-block}
+.diamond{width:9px;height:9px;background:var(--accent);transform:rotate(45deg);border-radius:1.5px}
+.bang{width:12px;height:12px;border-radius:50%;background:var(--danger);color:var(--surface);font-size:9px;font-weight:700;display:grid;place-items:center;line-height:1}
+.spin{width:12px;height:12px;border-radius:50%;border:2px dotted var(--run);animation:spin 2.4s linear infinite}
+.ring{width:10px;height:10px;border-radius:50%;border:1.5px solid var(--ink-3)}
+.hourglass{width:10px;height:10px;border-top:3px solid var(--run);border-bottom:3px solid var(--run)}
+.check{width:12px;height:12px;border-radius:50%;background:var(--ok)}
+.xmark{width:12px;height:12px;border-radius:50%;background:var(--ink-3)}
+.prog{font-family:var(--mono);font-size:11px;color:var(--ink-2)}
+.tag{font-size:10.5px;font-weight:700;padding:0 5px;border-radius:3px;line-height:16px;white-space:nowrap}
+.tag.rev{background:var(--run-bg);color:var(--run)}
+.tag.intake{background:var(--surface-2);color:var(--ink-2);border:1px solid var(--line)}
+@keyframes spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.spin{animation:none}}
+
+.main{overflow-y:auto;min-height:0;display:flex;flex-direction:column}
+.pad{padding:18px 22px;display:grid;gap:14px;align-content:start}
+.crumbs{display:flex;gap:8px;flex-wrap:wrap;align-items:center;color:var(--ink-3);font-size:11.5px}
+.crumbs button{border:0;background:transparent;padding:0;color:var(--accent-text);text-decoration:underline;font-size:11.5px}
+h1{margin:0;font-size:19px;line-height:1.35;text-wrap:balance}
+h1 .num{color:var(--ink-3);font-weight:500;font-family:var(--mono);font-size:15px;margin-right:6px}
+.headrow{display:flex;gap:8px 12px;flex-wrap:wrap;align-items:center}
+.pill{font-size:11px;font-weight:700;padding:0 7px;border-radius:4px;line-height:19px;white-space:nowrap;display:inline-flex;gap:5px;align-items:center}
+.p-attn{background:var(--accent-soft);color:var(--accent-text)}
+.p-danger{background:var(--danger-bg);color:var(--danger)}
+.p-run{background:var(--run-bg);color:var(--run)}
+.p-muted{background:var(--surface-2);color:var(--ink-2)}
+.p-ok{background:var(--ok-bg);color:var(--ok)}
+.btn{border:1px solid var(--line);background:var(--surface);border-radius:7px;padding:5px 12px;white-space:nowrap}
+.btn:hover{border-color:var(--ink-3)}
+.btn.sm{padding:3px 9px;font-size:12px}
+.btn.primary{background:var(--ok);border-color:var(--ok);color:var(--surface);font-weight:700}
+.btn.danger{color:var(--danger);border-color:var(--danger)}
+.btn.link{border:0;background:transparent;padding:0;color:var(--accent-text);text-decoration:underline}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.spacer{flex:1}
+.box{border:1px solid var(--line);border-radius:9px;padding:12px 14px;display:grid;gap:8px}
+.box h2{margin:0;font-size:13px}
+.box p{margin:0}
+.box.attn{background:var(--accent-soft);border-color:var(--accent)}
+.box.danger{background:var(--danger-bg);border-color:var(--danger)}
+.box.quiet{background:var(--surface-2);border-color:var(--surface-2)}
+pre.block{margin:0;background:var(--sunken);border-radius:7px;padding:10px 12px;font-family:var(--mono);font-size:11.5px;line-height:1.6;overflow-x:auto;white-space:pre-wrap;max-height:320px;overflow-y:auto}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:7px;overflow:hidden;background:var(--surface)}
+.seg button{border:0;background:transparent;padding:3px 10px;font-size:12px;border-left:1px solid var(--line)}
+.seg button:first-child{border-left:0}
+.seg button[aria-pressed="true"]{background:var(--ink);color:var(--surface)}
+.actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+details.ctx{border:1px solid var(--line);border-radius:9px;padding:8px 12px;background:var(--surface)}
+details.ctx summary{cursor:pointer;color:var(--ink-2);font-size:12px;font-weight:700;list-style:none}
+details.ctx summary::-webkit-details-marker{display:none}
+details.ctx summary::before{content:"▸ ";color:var(--ink-3)}
+details.ctx[open] summary::before{content:"▾ "}
+details.ctx[open] summary{margin-bottom:8px}
+table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}
+th,td{padding:6px 10px;border-top:1px solid var(--line);text-align:left;vertical-align:top}
+th{color:var(--ink-3);font-size:11px;font-weight:500;border-top:0;background:var(--surface-2)}
+.table-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:9px}
+textarea{width:100%;border:1px solid var(--line);background:var(--surface);border-radius:7px;padding:7px 9px;resize:vertical;min-height:54px}
+input[type=text]{width:100%;border:1px solid var(--line);background:var(--surface);border-radius:7px;padding:7px 9px}
+.decide{position:sticky;bottom:0;margin-top:auto;background:var(--surface);border-top:1px solid var(--line);padding:10px 22px;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:end;box-shadow:0 -8px 20px rgba(0,0,0,.05)}
+.decide .meta{display:flex;gap:12px;flex-wrap:wrap;color:var(--ink-2);font-size:12px;margin-bottom:6px}
+.decide textarea{min-height:40px}
+.scrim{position:fixed;inset:0;background:rgba(10,14,20,.4);z-index:30}
+.modal{position:fixed;z-index:31;left:50%;top:56px;transform:translateX(-50%);width:min(640px,calc(100% - 32px));max-height:calc(100% - 110px);overflow-y:auto;background:var(--surface);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);padding:18px;display:grid;gap:12px}
+.modal h2{margin:0;font-size:16px}
+.choice{display:flex;gap:8px;align-items:flex-start;border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+.choice input{margin-top:3px}
+.toast{position:fixed;left:50%;top:16px;transform:translateX(-50%);z-index:60;background:var(--ink);color:var(--surface);padding:7px 14px;border-radius:8px;font-size:12.5px;max-width:calc(100% - 24px);text-align:center}
+
+/* spec の章番号 */
+.ann{display:none;font-family:var(--mono);font-size:10.5px;font-weight:500;color:var(--ann);background:var(--ann-bg);border-radius:3px;padding:0 5px;line-height:17px;white-space:nowrap;vertical-align:middle}
+body.show-ann .ann{display:inline-block}
+.ann-note{display:none;border-left:3px solid var(--ann);background:var(--ann-bg);color:var(--ink);padding:6px 10px;border-radius:0 6px 6px 0;font-size:12px;line-height:1.65}
+.ann-note b{color:var(--ann);font-family:var(--mono);font-weight:500;margin-right:6px}
+body.show-ann .ann-note{display:block}
+
+/* 帯 */
+.band{display:flex;gap:10px;align-items:center;flex-wrap:wrap;background:var(--run-bg);color:var(--run);border-bottom:1px solid var(--run);padding:7px 22px;font-size:12.5px;font-weight:500}
+.band .spacer{flex:1}
+
+/* Issue の選択 */
+.picker{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.1fr);gap:14px;align-items:start}
+.issues{border:1px solid var(--line);border-radius:9px;overflow:hidden}
+.issue-row{width:100%;border:0;border-top:1px solid var(--line);background:var(--surface);padding:8px 12px;display:grid;grid-template-columns:48px minmax(0,1fr) auto;gap:2px 8px;text-align:left}
+.issue-row:first-child{border-top:0}
+.issue-row:hover{background:var(--surface-2)}
+.issue-row[aria-current="true"]{background:var(--accent-soft)}
+.issue-row .n{font-family:var(--mono);font-size:11.5px;color:var(--ink-3)}
+.issue-row .sub{grid-column:2 / 4;color:var(--ink-3);font-size:11.5px}
+.issue-body{border:1px solid var(--line);border-radius:9px;padding:14px 16px;display:grid;gap:10px}
+.issue-body h2{margin:0;font-size:15px}
+.md{line-height:1.75}
+.md h3{font-size:12.5px;margin:10px 0 2px}
+.md p{margin:4px 0}
+.md ul{margin:4px 0;padding-left:20px}
+.cmt{border-top:1px dashed var(--line);padding-top:8px;font-size:12.5px}
+.cmt .who{font-size:11px;color:var(--ink-3)}
+
+/* 質問 */
+.qcard{border:1px solid var(--line);border-radius:10px;padding:14px 16px;display:grid;gap:10px}
+.qcard.missing{border-color:var(--danger);box-shadow:inset 3px 0 0 var(--danger)}
+.qhead{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}
+.qno{font-family:var(--mono);font-size:12px;color:var(--ink-3)}
+.qhead h2{margin:0;font-size:14px;flex:1;min-width:240px;text-wrap:balance}
+.qkind{font-size:11px;color:var(--ink-3);border:1px solid var(--line);border-radius:999px;padding:0 7px}
+.material{background:var(--surface-2);border-radius:8px;padding:10px 12px;display:grid;gap:6px}
+.material .cap{font-size:11px;color:var(--ink-3);letter-spacing:.02em}
+.material table{background:var(--surface);border-radius:6px;overflow:hidden}
+.material th,.material td{font-size:12px;padding:5px 8px}
+.material pre{margin:0;font-family:var(--mono);font-size:11.5px;background:var(--sunken);border-radius:6px;padding:8px 10px;overflow-x:auto}
+.opts{display:grid;gap:6px}
+.opt{display:grid;grid-template-columns:20px minmax(0,1fr);gap:0 6px;border:1px solid var(--line);border-radius:8px;padding:8px 10px;cursor:pointer}
+.opt:hover{border-color:var(--ink-3)}
+.opt.on{border-color:var(--accent);background:var(--accent-soft)}
+.opt input{margin:3px 0 0}
+.opt .lb{font-weight:700;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.opt .ds{grid-column:2;color:var(--ink-2);font-size:12px}
+.rec{font-size:10.5px;font-weight:700;color:var(--ok);border:1px solid var(--ok);border-radius:3px;padding:0 5px;line-height:16px}
+.opt .recwhy{color:var(--ok)}
+.qextra{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.qextra label{display:grid;gap:3px;font-size:11.5px;color:var(--ink-3)}
+.qextra textarea{min-height:40px}
+.qmissing{color:var(--danger);font-size:12px;margin:0}
+
+/* PFD */
+.review-body{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:14px;align-items:start}
+@media (max-width:1750px){.review-body{grid-template-columns:1fr}.review-body .panel{position:static;max-height:none}}
+.pfd-box{border:1px solid var(--line);border-radius:10px;padding:10px 12px;display:grid;gap:8px;min-width:0}
+.pfd-scroll{overflow-x:auto}
+.pfd{display:block}
+.pn{cursor:pointer}
+.pn .body{stroke:var(--line);stroke-width:1.3;fill:var(--surface)}
+.pn.proc .body{fill:var(--surface)}
+.pn.given .body{fill:var(--surface-2)}
+.pn.goal .body{stroke-width:2.2;stroke:var(--ink-2)}
+.pn .inner{fill:none;stroke:var(--ink-3);stroke-width:1}
+.pn text{font-family:var(--sans);font-size:10.5px;fill:var(--ink)}
+.pn text.id{font-family:var(--mono);font-size:9.5px;fill:var(--ink-3)}
+.pn text.mk{font-size:9.5px;font-weight:700;fill:var(--ink-2)}
+.pn text.stage{font-family:var(--mono);font-size:9.5px;font-weight:700;fill:var(--ink-3)}
+.pn:hover .body{stroke:var(--ink-3)}
+.pn.sel .body{stroke:var(--accent);stroke-width:2.6}
+.pn.l-waiting .body{stroke-dasharray:4 3}
+.pn.l-ready .body{stroke:var(--ink-3);stroke-width:1.5}
+.pn.l-running .body{fill:var(--run-bg);stroke:var(--run)}
+.pn.l-pr_open .body{fill:var(--run-bg);stroke:var(--run);stroke-width:2.4}
+.pn.l-merged .body,.pn.l-done .body{fill:var(--ok-bg);stroke:var(--ok)}
+.pn.l-your_turn .body{fill:var(--accent-soft);stroke:var(--accent);stroke-width:2.6}
+.pn.l-needs_attention .body{fill:var(--danger-bg);stroke:var(--danger)}
+.pn.avail .body{fill:var(--ok-bg)}
+.pn.ch-added .body{stroke:var(--ok);stroke-width:2.2}
+.pn.ch-changed .body{stroke:var(--accent);stroke-width:2.2}
+.pn text.ch-added{fill:var(--ok)}
+.pn text.ch-changed{fill:var(--accent)}
+.pn.frozen .body{opacity:.72}
+.pn .badge circle{fill:var(--accent)}
+.pn .badge text{fill:var(--surface);font-size:9.5px;font-weight:700;font-family:var(--mono)}
+.pn .lock{fill:none;stroke:var(--ink-2);stroke-width:1.2}
+.pn .lockbody{fill:var(--ink-2)}
+.pe{fill:none;stroke:var(--ink-3);stroke-width:1.2}
+.pe-head{fill:var(--ink-3)}
+.pfd-foot{display:flex;gap:6px 14px;flex-wrap:wrap;font-size:11px;color:var(--ink-3);align-items:center}
+.lg{display:inline-flex;gap:5px;align-items:center}
+.sw{display:inline-block;width:14px;height:10px;border-radius:3px;border:1.3px solid var(--line);background:var(--surface)}
+.stages{display:grid;gap:4px;font-size:12px}
+.stages div{display:flex;gap:8px;align-items:baseline}
+.stages b{font-family:var(--mono);font-size:11px;color:var(--ink-3);min-width:36px}
+.removed{font-size:12px;color:var(--danger)}
+.panel{border:1px solid var(--line);border-radius:10px;padding:12px 14px;display:grid;gap:10px;position:sticky;top:0;max-height:calc(100vh - 140px);overflow-y:auto;align-content:start}
+.panel h2{margin:0;font-size:14px}
+.kv{display:grid;gap:2px}
+.kv > span{font-size:11px;color:var(--ink-3);letter-spacing:.02em}
+.kv > div{line-height:1.7;white-space:pre-wrap}
+.linkrow{display:flex;gap:6px;flex-wrap:wrap}
+.chip{border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:0 8px;font-size:11.5px;line-height:20px}
+.chip:hover{border-color:var(--ink-3)}
+.prevc{border-left:2px solid var(--line);padding-left:8px;display:grid;gap:3px;font-size:12px}
+.prevc .reply{color:var(--ink-2)}
+.prevc .reply::before{content:"↳ エージェント: ";color:var(--ink-3)}
+.mycmt{background:var(--accent-soft);border-radius:7px;padding:6px 9px;font-size:12px;display:flex;gap:8px;align-items:flex-start}
+.mycmt span{flex:1;white-space:pre-wrap}
+.turn{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:10px}
+.task-list{display:grid;gap:4px}
+.task-list button{text-align:left}
+
+/* 経緯 */
+.tl{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.tl li{display:grid;grid-template-columns:44px 12px minmax(0,1fr);gap:8px;align-items:baseline;font-size:12.5px}
+.tl .when{font-family:var(--mono);font-size:11px;color:var(--ink-3);text-align:right}
+.tl .dot{width:8px;height:8px;border-radius:50%;background:var(--ink-3);display:inline-block}
+.tl .dot.h{background:var(--accent)}
+.tl .dot.a{background:var(--run)}
+.tl .dot.ok{background:var(--ok)}
+
+@media (max-width:1150px){.review-body,.picker{grid-template-columns:1fr}.panel{position:static;max-height:none}}
+@media (max-width:760px){
+  body{overflow:auto}
+  .app{grid-template-columns:1fr;height:auto}
+  .rail{flex-direction:row;justify-content:flex-start;padding-inline:10px}
+  .side{max-height:320px}
+  .qextra{grid-template-columns:1fr}
+  .pad{padding:16px}
+}
+</style>
+
+<div class="app">
+  <nav class="rail" id="rail" aria-label="ビュー"></nav>
+  <aside class="side" id="side"></aside>
+  <main class="main" id="main"></main>
+</div>
+<div id="overlay"></div>
+
+<script>
+/* ---------- 例のデータ ---------- */
+const PJ = { doctrine: { name: "doctrine", color: "#AD7625" }, billing: { name: "billing", color: "#2E6CA4" } };
+
+const PFD_88 = {
+  title: "利用状況の集計を画面に出す", goal: ["screen"],
+  artifacts: [
+    { id: "schema", name: "既存スキーマ", given: true, description: "users・events テーブル" },
+    { id: "metric", name: "1 回の利用の数え方", given: true, decision: true, description: "回答: ログインではなく、記録の作成・更新を 1 回と数える", question: "Q1. 何を「1 回の利用」と数えますか?" },
+    { id: "table", name: "集計テーブル", description: "日次の利用回数を持つテーブルとマイグレーション", verify: "マイグレーションが適用でき、テーブル定義のテストが通る" },
+    { id: "job", name: "日次の集計ジョブ", description: "events から前日分を数えて集計テーブルに書くジョブ。まだ誰も呼ばない", verify: "ジョブのテストが、固定の events から期待する行を書く" },
+    { id: "api", name: "集計 API", description: "期間を受けて日次の利用回数を返す API", verify: "API のテストが通る。空の期間で空配列を返す" },
+    { id: "period", name: "表示期間の既定", description: "画面を開いたときに出す期間", verify: "人が決めた内容が記録されている" },
+    { id: "screen", name: "集計画面", description: "管理画面に置く利用状況のグラフ。goal の成果物", verify: "画面のテストが通り、ステージングで目視できる" },
+  ],
+  processes: [
+    { id: "1", name: "マイグレーションを書く", inputs: ["schema"], outputs: ["table"], purpose: "集計の置き場所を作る。まだ誰も使わないのでマージしても壊れない", steps: "1. db/schema にテーブル定義を足す\n2. マイグレーションを書く\n3. 定義のテストを足す", done_when: "マイグレーションが適用でき、テストが通る" },
+    { id: "2", name: "集計ジョブを書く", inputs: ["table", "metric"], outputs: ["job"], purpose: "決めた数え方で日次の集計を作る", steps: "1. ジョブを書く（数え方は前提のとおり）\n2. 固定の events でテストする", done_when: "ジョブのテストが通る" },
+    { id: "3", name: "集計 API を実装する", inputs: ["table"], outputs: ["api"], purpose: "集計テーブルを読んで返す口を作る", steps: "1. ハンドラを足す\n2. 期間の検証を足す\n3. テストを書く", done_when: "API のテストが通る" },
+    { id: "5", name: "表示期間の既定を決める", actor: "human", inputs: ["schema"], outputs: ["period"], purpose: "画面を開いたときの期間（直近 7 日か 30 日か）を決める。営業と相談が要る", done_when: "決めた期間が記録されている" },
+    { id: "4", name: "画面を繋ぐ", inputs: ["api", "job", "period"], outputs: ["screen"], purpose: "集計を画面に出す", steps: "1. グラフの部品を置く\n2. 既定の期間で API を呼ぶ", done_when: "画面のテストが通る" },
+  ],
+};
+/* 1 回目の案: 2・3 がまだ 1 つ（集計 API とジョブ）だった */
+const PFD_88_PREV = JSON.parse(JSON.stringify(PFD_88));
+PFD_88_PREV.artifacts = PFD_88_PREV.artifacts.filter((a) => !["job", "api"].includes(a.id));
+PFD_88_PREV.artifacts.splice(3, 0, { id: "apijob", name: "集計 API とジョブ", description: "日次で集計するジョブと、それを返す API", verify: "API のテストが通る" });
+PFD_88_PREV.processes = PFD_88_PREV.processes.filter((p) => p.id !== "2");
+Object.assign(PFD_88_PREV.processes.find((p) => p.id === "3"), { name: "集計 API とジョブを書く", inputs: ["table", "metric"], outputs: ["apijob"] });
+PFD_88_PREV.processes.find((p) => p.id === "4").inputs = ["apijob", "period"];
+const PFD_91 = {
+  title: "請求書を PDF で出力する", goal: ["pdf-dl"],
+  artifacts: [
+    { id: "invoice", name: "既存の請求書モデル", given: true, description: "invoices・invoice_lines" },
+    { id: "engine", name: "PDF の生成方式", given: true, decision: true, description: "回答: ヘッドレスブラウザで HTML から作る", question: "Q1. PDF をどう作りますか?" },
+    { id: "tpl", name: "請求書の HTML テンプレート", description: "1 件の請求書を印刷用 HTML にする関数", verify: "スナップショットのテストが通る" },
+    { id: "render", name: "PDF 化の部品", description: "HTML を PDF にする部品。まだ誰も呼ばない", verify: "固定の HTML から 1 ページの PDF ができる" },
+    { id: "pdf-dl", name: "PDF のダウンロード", description: "請求書の画面から PDF を落とせる", verify: "E2E のテストで PDF が落ちる" },
+  ],
+  processes: [
+    { id: "1", name: "テンプレートを書く", inputs: ["invoice"], outputs: ["tpl"], purpose: "請求書を印刷用 HTML にする", steps: "1. テンプレートを書く\n2. スナップショットを取る", done_when: "テストが通る" },
+    { id: "2", name: "PDF 化の部品を作る", inputs: ["engine"], outputs: ["render"], purpose: "決めた方式で HTML を PDF にする", steps: "1. 部品を書く\n2. 1 ページの PDF を確かめる", done_when: "テストが通る" },
+    { id: "3", name: "ダウンロードを繋ぐ", inputs: ["tpl", "render"], outputs: ["pdf-dl"], purpose: "画面から PDF を落とせるようにする", steps: "1. ボタンを置く\n2. E2E を書く", done_when: "E2E が通る" },
+  ],
+};
+const PFD_76 = {
+  title: "通知設定を刷新する", goal: ["ui", "migrated", "sender"],
+  artifacts: [
+    { id: "now", name: "既存の通知設定", given: true, description: "users.notify_email の真偽値 1 列" },
+    { id: "channels", name: "通知の経路", given: true, decision: true, description: "回答: メールと Slack の 2 経路。種類ごとに選べる", question: "Q2. どの経路を最初の版に入れますか?" },
+    { id: "prefs", name: "通知設定テーブル", description: "利用者 × 通知の種類 × 経路の設定", verify: "マイグレーションのテストが通る" },
+    { id: "api", name: "設定の API", description: "設定を読み書きする API", verify: "API のテストが通る" },
+    { id: "copy", name: "通知の文言", description: "種類ごとの件名と本文", verify: "人が決めた内容が記録されている" },
+    { id: "migrated", name: "移し替えた既存設定", description: "notify_email を新しいテーブルへ移したもの", verify: "移し替えのテストが通る" },
+    { id: "sender", name: "新しい設定で送る送信処理", description: "送信が新しいテーブルを読む", verify: "送信のテストが通る" },
+    { id: "ui", name: "設定画面", description: "種類ごとに経路を選ぶ画面", verify: "画面のテストが通る" },
+  ],
+  processes: [
+    { id: "1", name: "設定テーブルを足す", inputs: ["now"], outputs: ["prefs"], purpose: "設定の置き場所を作る", steps: "1. テーブルを足す", done_when: "テストが通る" },
+    { id: "2", name: "設定の API を書く", inputs: ["prefs", "channels"], outputs: ["api"], purpose: "画面から設定を変えられるようにする", steps: "1. API を書く", done_when: "テストが通る" },
+    { id: "3", name: "既存設定を移し替える", inputs: ["prefs"], outputs: ["migrated"], purpose: "既存の利用者の設定を失わない", steps: "1. 移し替えのスクリプトを書く", done_when: "テストが通る" },
+    { id: "6", name: "送信を新しい設定に切り替える", inputs: ["prefs"], outputs: ["sender"], purpose: "送信が新しい設定を読む", steps: "1. 送信処理を書き換える", done_when: "テストが通る" },
+    { id: "4", name: "通知の文言を決める", actor: "human", inputs: ["now"], outputs: ["copy"], purpose: "種類ごとの件名と本文を決める。サポートの確認が要る", done_when: "文言が記録されている" },
+    { id: "5", name: "設定画面を作る", inputs: ["api", "copy"], outputs: ["ui"], purpose: "種類ごとに経路を選べる画面を作る", steps: "1. 画面を作る", done_when: "テストが通る" },
+  ],
+};
+/* 改訂後の案（#76）: 5 を 5 と 7 に割る */
+const PFD_76_REV = JSON.parse(JSON.stringify(PFD_76));
+PFD_76_REV.artifacts.push({ id: "ui-slack", name: "Slack 連携の設定欄", description: "Slack のワークスペースをつなぐ欄", verify: "画面のテストが通る" });
+PFD_76_REV.goal.push("ui-slack");
+PFD_76_REV.processes.find((p) => p.id === "5").name = "設定画面を作る（メールだけ）";
+PFD_76_REV.processes.push({ id: "7", name: "Slack 連携の欄を足す", inputs: ["ui"], outputs: ["ui-slack"], purpose: "Slack の接続を画面から行う", steps: "1. 欄を足す", done_when: "テストが通る" });
+
+const INTAKES = [
+  { id: "i88", num: 88, title: "利用状況の集計を画面に出す", pj: "doctrine", state: "reviewing", seq: 2, pfd: PFD_88, prev: PFD_88_PREV, ago: "12 分前",
+    prevComments: [
+      { target: "p:3", label: "プロセス 3「集計 API とジョブを書く」", body: "API とジョブは別々にレビューしたい。1 つの PR には大きい", reply: "ジョブを 2「集計ジョブを書く」に分け、3 は API だけにしました" },
+      { target: "whole", label: "全体", body: "表示期間の既定は営業と決めるので、人のプロセスのままでよい", reply: "5 は人のプロセスのままにしました。4 の入力に 5 の出力を足しています" },
+    ],
+    history: [
+      ["09:02", "h", "Intake を開始した"], ["09:08", "a", "調査: 質問 2 件を出した"], ["09:21", "h", "質問に答えた（2 件）"],
+      ["09:34", "a", "1 回目の案を出した（プロセス 4）"], ["09:51", "h", "差し戻した（コメント 2 件）"], ["10:03", "a", "2 回目の案を出した（プロセス 5）"],
+    ] },
+  { id: "i91", num: 91, title: "請求書を PDF で出力する", pj: "billing", state: "answering", ago: "4 分前",
+    history: [["10:10", "h", "Intake を開始した"], ["10:14", "a", "調査: 質問 3 件を出した"]] },
+  { id: "i76", num: 76, title: "通知設定を刷新する", pj: "doctrine", state: "active", pfd: PFD_76, ago: "1 時間前", watchFail: 2,
+    statuses: { "1": "merged", "2": "pr_open", "3": "needs_attention", "6": "running", "4": "your_turn", "5": "waiting" },
+    attnWhy: { "3": "task_stopped" },
+    tasks: { "1": [{ id: "7b1e…", st: "completed" }], "2": [{ id: "c02a…", st: "completed" }], "3": [{ id: "5f9d…", st: "failed" }], "6": [{ id: "e41c…", st: "running" }] },
+    subs: { "1": 201, "2": 202, "3": 203, "4": 204, "5": 205, "6": 206 },
+    prs: { "1": [311, "マージ済み"], "2": [318, "レビュー中"] },
+    history: [["月 09:00", "h", "Intake を開始した"], ["月 09:40", "h", "質問に答えた（2 件）"], ["月 10:30", "h", "承認した（2 回目の案）"],
+      ["月 10:31", "a", "sub-issue を 6 件作り、1・4 を投入した"], ["火 15:02", "ok", "#311 のマージを検知し、2・3・6 を投入した"], ["水 11:20", "a", "3 のタスクが failed で止まった"]] },
+  { id: "i70", num: 70, title: "権限ロールを整理する", pj: "doctrine", state: "needs_attention", ago: "35 分前",
+    history: [["09:30", "h", "Intake を開始した"], ["09:41", "a", "調査: 質問なし。分解へ進んだ"], ["10:05", "a", "分解: 検証に 3 回落ちて要確認になった"]] },
+  { id: "i95", num: 95, title: "監査ログの保存期間を決めて実装する", pj: "doctrine", state: "investigating", limited: "16:40", ago: "2 分前",
+    history: [["10:28", "h", "Intake を開始した"], ["10:33", "a", "調査の途中で利用上限に当たった"]] },
+  { id: "i52", num: 52, title: "CSV の取り込みを速くする", pj: "billing", state: "completed", pfd: PFD_91, ago: "3 日前", closed: true,
+    statuses: { "1": "merged", "2": "merged", "3": "merged" },
+    history: [["金 09:00", "h", "Intake を開始した"], ["金 10:10", "h", "承認した"], ["月 16:22", "ok", "末端の成果物がそろい、完了した"]] },
+];
+
+const QUESTIONS_91 = [
+  { id: "q1", kind: "single", prompt: "PDF をどう作りますか?", material: { kind: "table", caption: "方式の比較（調べた事実）", head: ["方式", "見た目の再現", "依存", "1 件の時間"], rows: [["ヘッドレスブラウザで HTML から", "画面と同じ", "Chromium（約 150MB）", "約 1.2 秒"], ["PDF ライブラリで直に描く", "レイアウトを書き直す", "ライブラリ 1 つ", "約 0.1 秒"], ["外部の帳票サービス", "テンプレート次第", "契約と API キー", "約 2 秒"]] },
+    options: [{ id: "browser", label: "ヘッドレスブラウザで HTML から作る", desc: "既存の請求書画面の HTML を流用できる" }, { id: "lib", label: "PDF ライブラリで直に描く", desc: "速いが、レイアウトを二重に持つ" }, { id: "saas", label: "外部の帳票サービスを使う", desc: "契約が要る" }],
+    rec: { option: "browser", reason: "請求書の見た目を画面と 1 か所で持てる。件数は月 2,000 件ほどで、時間は問題にならない" } },
+  { id: "q2", kind: "multiple", prompt: "最初の版で PDF を出せる場所はどこですか?", material: { kind: "code", caption: "いまの請求書の出口", path: "app/routes/invoices.ts", code: "router.get(\"/invoices/:id\", showInvoice);      // 画面\nrouter.post(\"/invoices/:id/send\", sendInvoice); // メール送付" },
+    options: [{ id: "screen", label: "請求書の画面からダウンロード", desc: "" }, { id: "mail", label: "メール送付に添付", desc: "送付の処理にも手が入る" }, { id: "bulk", label: "月末の一括出力", desc: "件数が多く、ジョブが要る" }],
+    rec: { option: "screen", reason: "画面だけなら送付処理に触れずに済み、PR が 1 つ減る" } },
+  { id: "q3", kind: "free", prompt: "PDF のファイル名の規則を決めてください", material: { kind: "text", body: "経理が保存時にファイル名で並べ替えている、と Issue のコメントにあります。" },
+    rec: { text: "invoice-<請求番号>-<発行日 YYYYMMDD>.pdf", reason: "請求番号と日付で一意になり、並べ替えにも向く" } },
+];
+
+const ISSUES = [
+  { num: 99, title: "エクスポートの形式に JSON を足す", who: "自分", upd: "2 時間前" },
+  { num: 97, title: "通知の既読を一括で付ける", who: "自分", upd: "昨日" },
+  { num: 95, title: "監査ログの保存期間を決めて実装する", who: "自分", upd: "今日", intake: "i95" },
+  { num: 88, title: "利用状況の集計を画面に出す", who: "自分", upd: "今日", intake: "i88" },
+  { num: 84, title: "招待メールの再送", who: "他の人", upd: "3 日前" },
+];
+
+const TASKS = [
+  { id: "c02a", title: "設定の API を書く", st: "review", intake: "i76", pid: "2" },
+  { id: "e41c", title: "送信を新しい設定に切り替える", st: "running", intake: "i76", pid: "6" },
+  { id: "5f9d", title: "既存設定を移し替える", st: "check", intake: "i76", pid: "3" },
+  { id: "a118", title: "README の誤字を直す", st: "running", intake: null },
+  { id: "b73e", title: "ログの出力先を変える", st: "queued", intake: null },
+];
+
+/* ---------- 画面の状態 ---------- */
+const S = {
+  view: "intake", sel: "i88", showClosed: false, ann: true, taskSel: "c02a",
+  picked: 99, assignee: "me", ghDown: false,
+  node: {}, drafts: {}, answers: {}, notes: {}, revMode: {}, paused: {},
+  modal: null, toast: null,
+};
+const byId = (id) => INTAKES.find((i) => i.id === id);
+
+/* ---------- 純関数（spec 6・5 章） ---------- */
+const LOOK = {
+  waiting: { word: "入力待ち", mark: "" }, ready: { word: "着手可能", mark: "▷" }, running: { word: "実行中", mark: "⟳" },
+  pr_open: { word: "PR レビュー中", mark: "PR" }, merged: { word: "マージ済み", mark: "✓" }, your_turn: { word: "あなたの番", mark: "◆" },
+  done: { word: "完了（人）", mark: "✓" }, needs_attention: { word: "要確認", mark: "!" },
+};
+const ATTN = { task_stopped: "タスクが failed で止まった", no_pr: "タスクは completed だが PR が無い", pr_closed: "PR がマージされずに閉じられた" };
+const STATE = {
+  investigating: ["調査中", "p-run"], decomposing: ["分解中", "p-run"], answering: ["回答待ち", "p-attn"], reviewing: ["レビュー待ち", "p-attn"],
+  needs_attention: ["要確認", "p-danger"], active: ["進行中", "p-muted"], completed: ["完了", "p-ok"], canceled: ["中止", "p-muted"],
+};
+function needsHuman(it) {
+  if (["answering", "reviewing", "needs_attention"].includes(it.state)) return true;
+  if (it.state === "active") return Object.values(it.statuses || {}).some((s) => s === "your_turn" || s === "needs_attention");
+  return false;
+}
+function progress(it) {
+  if (!it.statuses) return null;
+  const v = Object.values(it.statuses);
+  return `${v.filter((s) => s === "merged" || s === "done").length}/${v.length}`;
+}
+function processStages(pfd) {
+  const col = {};
+  pfd.artifacts.forEach((a) => { if (a.given) col["a:" + a.id] = 0; });
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const p of pfd.processes) {
+      if (col["p:" + p.id] !== undefined) continue;
+      if (!p.inputs.every((i) => col["a:" + i] !== undefined)) continue;
+      const c = Math.max(...p.inputs.map((i) => col["a:" + i])) + 1;
+      col["p:" + p.id] = c;
+      p.outputs.forEach((o) => { col["a:" + o] = c + 1; });
+      changed = true;
+    }
+  }
+  return col;
+}
+function diff(cur, prev) {
+  if (!prev) return { ch: {}, removed: [] };
+  const ch = {}, removed = [];
+  const idx = (pfd) => { const m = {}; pfd.artifacts.forEach((a) => m["a:" + a.id] = a); pfd.processes.forEach((p) => m["p:" + p.id] = p); return m; };
+  const c = idx(cur), p = idx(prev);
+  for (const k in c) { if (!p[k]) ch[k] = "added"; else if (JSON.stringify(c[k]) !== JSON.stringify(p[k])) ch[k] = "changed"; }
+  for (const k in p) if (!c[k]) removed.push({ key: k, name: p[k].name });
+  return { ch, removed };
+}
+function available(pfd, statuses) {
+  const av = new Set(pfd.artifacts.filter((a) => a.given).map((a) => a.id));
+  for (const p of pfd.processes) if (["merged", "done"].includes(statuses?.[p.id])) p.outputs.forEach((o) => av.add(o));
+  return av;
+}
+function frozenIds(pfd, it) {
+  const f = new Set();
+  for (const p of pfd.processes) {
+    const s = it.statuses?.[p.id];
+    if ((it.tasks?.[p.id]?.length) || s === "done") { f.add("p:" + p.id); p.inputs.concat(p.outputs).forEach((a) => f.add("a:" + a)); }
+  }
+  return f;
+}
+function commentCounts(it) {
+  const m = {};
+  (S.drafts[it.id] || []).forEach((c) => { m[c.target] = (m[c.target] || 0) + 1; });
+  return m;
+}
+function nodeLabel(pfd, key) {
+  const [k, id] = key.split(":");
+  if (k === "a") return `成果物「${pfd.artifacts.find((a) => a.id === id)?.name}」`;
+  if (k === "p") return `プロセス ${id}「${pfd.processes.find((p) => p.id === id)?.name}」`;
+  return "全体";
+}
+function buildFeedback(pfd, comments) {
+  const whole = comments.filter((c) => c.target === "whole");
+  const rest = comments.filter((c) => c.target !== "whole");
+  const out = ["人が PFD の案にコメントして差し戻した。コメントに沿って案を直し、各コメントへの返答を添えること。", ""];
+  if (whole.length) { out.push("## 全体"); whole.forEach((c) => out.push(c.body)); out.push(""); }
+  rest.forEach((c) => { out.push(`## ${nodeLabel(pfd, c.target)} (${c.target})`); out.push(c.body); out.push(""); });
+  return out.join("\n").trim();
+}
+function buildAnswerText(qs, ans) {
+  return qs.map((q, i) => {
+    const a = ans[q.id] || {};
+    let v;
+    if (q.kind === "free") v = a.text || "（未回答）";
+    else {
+      const labels = (a.sel || []).map((id) => q.options.find((o) => o.id === id).label);
+      if (a.other) labels.push(`その他: ${a.other}`);
+      v = labels.join(" / ") || "（未回答）";
+    }
+    return `Q${i + 1}. ${q.prompt}\n回答: ${v}${a.note ? `\n補足: ${a.note}` : ""}`;
+  }).join("\n\n");
+}
+function answerIssues(qs, ans) {
+  const out = [];
+  for (const q of qs) {
+    const a = ans[q.id] || {};
+    if (q.kind === "free") { if (!(a.text || "").trim()) out.push(q.id); continue; }
+    const n = (a.sel || []).length + (a.other?.trim() ? 1 : 0);
+    if (n === 0 || (q.kind === "single" && n > 1)) out.push(q.id);
+  }
+  return out;
+}
+
+/* ---------- 描画の小物 ---------- */
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const ann = (s) => `<span class="ann">§${s}</span>`;
+const note = (s, t) => `<div class="ann-note"><b>§${s}</b>${t}</div>`;
+const icons = {
+  inbox: '<svg viewBox="0 0 24 24"><path d="M3 13h5l1.5 3h5L16 13h5" /><path d="M5 5h14l2 8v6H3v-6z" /></svg>',
+  done: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><path d="m8 12 3 3 5-6" /></svg>',
+  intake: '<svg viewBox="0 0 24 24"><rect x="3" y="4" width="6" height="5" rx="1" /><rect x="15" y="15" width="6" height="5" rx="1" /><rect x="15" y="4" width="6" height="5" rx="2.5" /><path d="M9 6.5h6M18 9v6M6 9v8.5h9" /></svg>',
+};
+function stateIcon(it) {
+  if (it.limited) return '<span class="hourglass"></span>';
+  if (it.state === "needs_attention") return '<span class="bang">!</span>';
+  if (needsHuman(it)) return '<span class="diamond"></span>';
+  if (["investigating", "decomposing"].includes(it.state)) return '<span class="spin"></span>';
+  if (it.state === "completed") return '<span class="check"></span>';
+  if (it.state === "canceled") return '<span class="xmark"></span>';
+  return '<span class="ring"></span>';
+}
+function statePill(it) {
+  const [w, c] = STATE[it.state];
+  return `<span class="pill ${c}">${w}</span>`;
+}
+
+/* ---------- レール ---------- */
+function renderRail() {
+  const attn = INTAKES.filter(needsHuman).length;
+  const review = TASKS.some((t) => t.st === "review");
+  document.getElementById("rail").innerHTML = `
+    <button class="ib" title="Intake（対応が要るもの ${attn} 件）" aria-pressed="${S.view === "intake"}" data-view="intake">${icons.intake}${attn ? '<span class="pip"></span>' : ""}</button>
+    <button class="ib" title="タスク" aria-pressed="${S.view === "tasks"}" data-view="tasks">${icons.inbox}${review ? '<span class="pip"></span>' : ""}</button>
+    <button class="ib" title="終了したタスク" aria-pressed="false" data-toast="終了したタスク（このプロトタイプでは省略）">${icons.done}</button>
+    <span class="grow"></span>
+    <button class="ib ann-toggle" title="spec の章番号を出す" aria-pressed="${S.ann}" data-act="ann">§</button>`;
+}
+
+/* ---------- サイドバー ---------- */
+function renderSide() {
+  const el = document.getElementById("side");
+  if (S.view === "tasks") {
+    const groups = [["レビュー待ち", "review"], ["要確認", "check"], ["実行中", "running"], ["待ち", "queued"]];
+    const ico = { review: '<span class="diamond"></span>', check: '<span class="bang">!</span>', running: '<span class="spin"></span>', queued: '<span class="ring"></span>' };
+    el.innerHTML = `<div class="side-head"><select aria-label="プロジェクト"><option>全タスク</option></select><span class="grow"></span></div>
+      <div class="side-scroll">${groups.map(([h, k]) => {
+        const ts = TASKS.filter((t) => t.st === k);
+        if (!ts.length) return "";
+        return `<div class="grp"><h3>${h} <span class="count">${ts.length}</span></h3>${ts.map((t) => {
+          const it = t.intake && byId(t.intake);
+          return `<button class="it" aria-current="${S.taskSel === t.id}" data-task="${t.id}"><span class="ico">${ico[k]}</span><span class="t">${esc(t.title)}</span>
+            <span class="m"><span class="pjdot" style="background:${PJ.doctrine.color}"></span>doctrine${it ? `<span class="tag intake">Intake #${it.num}</span>${ann("10")}` : ""}<span class="tm">${t.id}</span></span></button>`;
+        }).join("")}</div>`;
+      }).join("")}</div>`;
+    return;
+  }
+  const open = INTAKES.filter((i) => !["completed", "canceled"].includes(i.state));
+  const groups = [
+    ["対応が要る", open.filter(needsHuman)],
+    ["調査・分解中", open.filter((i) => ["investigating", "decomposing"].includes(i.state) && !needsHuman(i))],
+    ["進行中", open.filter((i) => i.state === "active" && !needsHuman(i))],
+  ];
+  if (S.showClosed) groups.push(["終了", INTAKES.filter((i) => ["completed", "canceled"].includes(i.state))]);
+  el.innerHTML = `<div class="side-head"><select aria-label="プロジェクト"><option>すべてのプロジェクト</option><option>doctrine</option><option>billing</option></select>
+      <span class="grow"></span><button class="plus" title="Issue を選んで Intake を始める" aria-pressed="${S.sel === "new"}" data-sel="new">＋</button></div>
+    <div style="padding:8px 12px 0;display:flex;gap:8px;align-items:center"><div class="seg"><button aria-pressed="${!S.showClosed}" data-closed="0">進行中</button><button aria-pressed="${S.showClosed}" data-closed="1">すべて</button></div>${ann("3.2")}</div>
+    <div class="side-scroll">${groups.map(([h, list]) => list.length ? `<div class="grp"><h3>${h} <span class="count">${list.length}</span></h3>${list.map(itemHtml).join("")}</div>` : "").join("")}</div>`;
+}
+function itemHtml(it) {
+  const p = progress(it);
+  const [w, c] = STATE[it.state];
+  return `<button class="it" aria-current="${S.sel === it.id}" data-sel="${it.id}"><span class="ico">${stateIcon(it)}</span>
+    <span class="t"><span class="num">#${it.num}</span>${esc(it.title)}</span>
+    <span class="m"><span class="pjdot" style="background:${PJ[it.pj].color}"></span><span class="pill ${c}" style="line-height:16px;font-size:10.5px">${w}</span>
+      ${p ? `<span class="prog">${p}</span>` : ""}${it.revising ? '<span class="tag rev">改訂中</span>' : ""}${it.limited ? `<span>${it.limited} 再開</span>` : ""}<span class="tm">${it.ago}</span></span></button>`;
+}
+
+/* ---------- 共通の見出し（3.4） ---------- */
+function header(it, extra = "") {
+  return `<div class="crumbs"><span>Intake</span><span>/</span><span class="pjdot" style="background:${PJ[it.pj].color}"></span><span>${PJ[it.pj].name}</span>${ann("3.4 共通の見出し")}</div>
+  <div class="headrow"><h1><span class="num">#${it.num}</span>${esc(it.title)}</h1>${statePill(it)}${extra}<span class="spacer"></span>
+    <a class="hint" href="#" data-toast="GitHub の Issue を開く（例）">GitHub で開く ↗</a>
+    ${["completed", "canceled"].includes(it.state) ? "" : `<button class="btn sm danger" data-act="cancel">中止…</button>`}</div>`;
+}
+function band(it) {
+  if (!it.revising) return "";
+  return `<div class="band">改訂中 ${ann("8.5")}<span class="spacer"></span><button class="btn sm" data-act="abandon">改訂をやめる</button></div>`;
+}
+
+/* ---------- PFD の図（6 章） ---------- */
+function wrapText(s, n) {
+  const out = []; let cur = "";
+  for (const ch of s) { if (cur.length >= n) { out.push(cur); cur = ""; } cur += ch; }
+  if (cur) out.push(cur);
+  if (out.length > 2) { out.length = 2; out[1] = out[1].slice(0, n - 1) + "…"; }
+  return out;
+}
+function pfdSvg(it, pfd, o) {
+  const col = processStages(pfd);
+  const cols = {};
+  const nodes = [];
+  pfd.artifacts.forEach((a) => nodes.push({ key: "a:" + a.id, kind: "a", d: a }));
+  pfd.processes.forEach((p) => nodes.push({ key: "p:" + p.id, kind: "p", d: p }));
+  nodes.forEach((n) => { const c = col[n.key] ?? 0; (cols[c] = cols[c] || []).push(n); });
+  const maxC = Math.max(...Object.keys(cols).map(Number));
+  const W = { a: 112, p: 130 }, H = { a: 42, p: 46 }, GAP = 26, ROW = 66;
+  const colX = []; let x = 16;
+  for (let c = 0; c <= maxC; c++) { colX[c] = x; x += (c % 2 ? W.p : W.a) + GAP; }
+  const maxRows = Math.max(...Object.values(cols).map((l) => l.length));
+  const height = maxRows * ROW + 24;
+  const pos = {};
+  for (const c in cols) {
+    const l = cols[c]; const off = (maxRows - l.length) * ROW / 2 + 16;
+    l.forEach((n, i) => { const w = W[n.kind], h = H[n.kind]; pos[n.key] = { x: colX[c] + (c % 2 ? 0 : (W.p - W.a) / 2 * 0), y: off + i * ROW, w, h, n }; });
+  }
+  const width = x - GAP + 24;
+  const av = o.statuses ? available(pfd, o.statuses) : null;
+  let edges = "";
+  for (const p of pfd.processes) {
+    const P = pos["p:" + p.id];
+    const line = (A, B) => {
+      const x1 = A.x + A.w, y1 = A.y + A.h / 2, x2 = B.x - 6, y2 = B.y + B.h / 2, m = (x1 + x2) / 2;
+      return `<path class="pe" d="M${x1} ${y1} C${m} ${y1} ${m} ${y2} ${x2} ${y2}" marker-end="url(#ah)" />`;
+    };
+    p.inputs.forEach((a) => { if (pos["a:" + a]) edges += line(pos["a:" + a], P); });
+    p.outputs.forEach((a) => { if (pos["a:" + a]) edges += line(P, pos["a:" + a]); });
+  }
+  const cc = o.comments || {};
+  const stageOf = (key) => (col[key] + 1) / 2;
+  let body = "";
+  for (const key in pos) {
+    const { x, y, w, h, n } = pos[key];
+    const d = n.d, cls = ["pn", n.kind === "p" ? "proc" : "art"];
+    const human = n.kind === "p" && d.actor === "human";
+    const goal = n.kind === "a" && pfd.goal.includes(d.id);
+    if (n.kind === "a" && d.given) cls.push("given");
+    if (goal) cls.push("goal");
+    let look = null;
+    if (n.kind === "p" && o.statuses) { look = o.statuses[d.id]; cls.push("l-" + look); }
+    if (n.kind === "a" && av && av.has(d.id) && !d.given) cls.push("avail");
+    const ch = o.changes?.[key]; if (ch) cls.push("ch-" + ch);
+    const frozen = o.frozen?.has(key); if (frozen) cls.push("frozen");
+    if (o.selected === key) cls.push("sel");
+    const rx = n.kind === "p" ? h / 2 : 4;
+    const lines = wrapText(d.name, n.kind === "p" ? 10 : 8);
+    const ty = y + h / 2 + (lines.length === 1 ? 4 : -2);
+    const marks = [];
+    if (n.kind === "a" && d.given && !d.decision) marks.push("既存");
+    if (n.kind === "a" && d.decision) marks.push("決定");
+    if (human) marks.push("人");
+    if (goal) marks.push("◎");
+    if (look && LOOK[look].mark) marks.push(LOOK[look].mark);
+    body += `<g class="${cls.join(" ")}" role="button" tabindex="0" data-node="${key}" aria-label="${esc(d.name)}">
+      <rect class="body" x="${x}" y="${y}" width="${w}" height="${h}" rx="${rx}" />
+      ${human ? `<rect class="inner" x="${x + 3}" y="${y + 3}" width="${w - 6}" height="${h - 6}" rx="${rx - 3}" />` : ""}
+      ${lines.map((l, i) => `<text x="${x + w / 2}" y="${ty + i * 13}" text-anchor="middle">${esc(l)}</text>`).join("")}
+      ${n.kind === "p" ? `<text class="stage" x="${x + 14}" y="${y - 4}">段${stageOf(key)}</text><text class="id" x="${x + w - 14}" y="${y - 4}" text-anchor="end">${d.id}</text>` : ""}
+      ${marks.length ? `<text class="mk" x="${x + (n.kind === "p" ? 16 : 6)}" y="${y + h + 12}">${esc(marks.join(" · "))}</text>` : ""}
+      ${ch ? `<text class="mk ch-${ch}" x="${x + w - 4}" y="${y + h + 12}" text-anchor="end">${ch === "added" ? "＋ 追加" : "～ 変更"}</text>` : ""}
+      ${frozen ? `<g transform="translate(${x + w - 16},${y + 5})"><path class="lock" d="M2 5V3.5a3 3 0 0 1 6 0V5" /><rect class="lockbody" x="0.5" y="5" width="9" height="7" rx="1.5" /></g>` : ""}
+      ${cc[key] ? `<g class="badge"><circle cx="${x + w - 2}" cy="${y + 2}" r="8" /><text x="${x + w - 2}" y="${y + 5.5}" text-anchor="middle">${cc[key]}</text></g>` : ""}
+    </g>`;
+  }
+  return `<svg class="pfd" width="${width}" height="${height + 12}" viewBox="0 0 ${width} ${height + 12}" role="img" aria-label="PFD の図">
+    <defs><marker id="ah" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path class="pe-head" d="M0 0L8 4L0 8z" /></marker></defs>
+    ${edges}${body}</svg>`;
+}
+function pfdBlock(it, pfd, o) {
+  const col = processStages(pfd);
+  const stages = {};
+  pfd.processes.forEach((p) => { const s = (col["p:" + p.id] + 1) / 2; (stages[s] = stages[s] || []).push(p); });
+  const legendStates = o.statuses ? Object.entries(LOOK).map(([k, v]) => `<span class="lg"><span class="sw" style="${swStyle(k)}"></span>${v.mark} ${v.word}</span>`).join("") : "";
+  const textVersion = Object.keys(stages).sort().map((s) => stages[s].map((p) =>
+    `・段${s}: ${p.inputs.map((a) => pfd.artifacts.find((x) => x.id === a).name).join("・")} → （${p.id} ${p.name}／${p.actor === "human" ? "人" : "エージェント"}${o.statuses ? "／" + LOOK[o.statuses[p.id]].word : ""}）→ ${p.outputs.map((a) => pfd.artifacts.find((x) => x.id === a).name).join("・")}`).join("\n")).join("\n");
+  return `<div class="pfd-box">
+    <div class="headrow"><b>${esc(pfd.title)}</b>${ann("6 PFD の図")}${o.statuses ? ann("6.6 状態の塗り分け") : ann("6.6 承認前は塗らない")}${o.changes ? ann("6.7 前の案からの変化") : ""}${o.frozen ? ann("6.8 固定の印") : ""}</div>
+    <div class="pfd-scroll">${pfdSvg(it, pfd, o)}</div>
+    <div class="pfd-foot">
+      <span class="lg"><span class="sw" style="border-radius:3px"></span>成果物</span>
+      <span class="lg"><span class="sw" style="border-radius:6px"></span>プロセス</span>
+      <span class="lg"><span class="sw" style="border-radius:6px;box-shadow:inset 0 0 0 2px var(--surface),inset 0 0 0 3px var(--ink-3)"></span>人が行う</span>
+      <span class="lg"><span class="sw" style="background:var(--surface-2)"></span>既存・決定</span>
+      <span class="lg"><span class="sw" style="border-width:2.2px;border-color:var(--ink-2)"></span>◎ 末端（goal）</span>
+      ${o.changes ? '<span class="lg"><span class="sw" style="border-color:var(--ok);border-width:2px"></span>＋ 追加</span><span class="lg"><span class="sw" style="border-color:var(--accent);border-width:2px"></span>～ 変更</span>' : ""}
+      <span class="lg"><svg width="16" height="16"><circle cx="8" cy="8" r="7" fill="var(--accent)" /><text x="8" y="11.5" font-size="9" fill="var(--surface)" text-anchor="middle" font-family="var(--mono)" font-weight="700">2</text></svg>コメントの数</span>
+    </div>
+    ${legendStates ? `<div class="pfd-foot">${legendStates}</div>` : ""}
+    ${o.removed?.length ? `<div class="removed">前の案から消えた要素: ${o.removed.map((r) => esc(r.name)).join("、")} ${ann("6.7")}</div>` : ""}
+  </div>`;
+}
+function swStyle(k) {
+  return {
+    waiting: "border-style:dashed", ready: "border-color:var(--ink-3)", running: "background:var(--run-bg);border-color:var(--run)",
+    pr_open: "background:var(--run-bg);border-color:var(--run);border-width:2.4px", merged: "background:var(--ok-bg);border-color:var(--ok)",
+    your_turn: "background:var(--accent-soft);border-color:var(--accent);border-width:2.4px", done: "background:var(--ok-bg);border-color:var(--ok)",
+    needs_attention: "background:var(--danger-bg);border-color:var(--danger)",
+  }[k];
+}
+
+/* ---------- 要素の欄（7.2） ---------- */
+function elementPanel(it, pfd, key, o) {
+  if (!key) {
+    return `<aside class="panel"><h2>計画の要旨 ${ann("7.1")}</h2>
+      <div class="kv"><span>題名</span><div>${esc(pfd.title)}</div></div>
+      <div class="kv"><span>末端の成果物（これがそろえば完了）</span><div>${pfd.goal.map((g) => esc(pfd.artifacts.find((a) => a.id === g).name)).join("、")}</div></div>
+      <div class="kv"><span>プロセス</span><div>${pfd.processes.length} 件（うち人 ${pfd.processes.filter((p) => p.actor === "human").length} 件）</div></div>
+      ${o.extra || ""}</aside>`;
+  }
+  const [k, id] = key.split(":");
+  const frozen = o.frozen?.has(key);
+  const mine = (S.drafts[it.id] || []).filter((c) => c.target === key);
+  const prevs = (it.prevComments || []).filter((c) => c.target === key);
+  let head, rows;
+  if (k === "a") {
+    const a = pfd.artifacts.find((x) => x.id === id);
+    const makers = pfd.processes.filter((p) => p.outputs.includes(id));
+    const users = pfd.processes.filter((p) => p.inputs.includes(id));
+    head = `<h2>${esc(a.name)}</h2><div class="headrow"><span class="pill p-muted">成果物</span><span class="mono hint">${a.id}</span>${a.decision ? '<span class="pill p-attn">決定</span>' : a.given ? '<span class="pill p-muted">既存</span>' : ""}${pfd.goal.includes(a.id) ? '<span class="pill p-ok">◎ 末端</span>' : ""}</div>`;
+    rows = `${a.decision ? `<div class="kv"><span>もとになった質問と回答 ${ann("7.2")}</span><div>${esc(a.question || "")}\n${esc(a.description)}</div></div>` : `<div class="kv"><span>何であるか</span><div>${esc(a.description || "")}</div></div>`}
+      ${a.verify ? `<div class="kv"><span>確かめ方</span><div>${esc(a.verify)}</div></div>` : ""}
+      <div class="kv"><span>前段</span><div class="linkrow">${makers.map((p) => `<button class="chip" data-node="p:${p.id}">${p.id} ${esc(p.name)}</button>`).join("") || '<span class="hint">なし</span>'}</div></div>
+      <div class="kv"><span>後続</span><div class="linkrow">${users.map((p) => `<button class="chip" data-node="p:${p.id}">${p.id} ${esc(p.name)}</button>`).join("") || '<span class="hint">なし</span>'}</div></div>`;
+  } else {
+    const p = pfd.processes.find((x) => x.id === id);
+    const col = processStages(pfd);
+    const st = o.statuses?.[id];
+    head = `<h2>${esc(p.name)}</h2><div class="headrow"><span class="pill p-muted">プロセス</span><span class="mono hint">${p.id}</span><span class="pill ${p.actor === "human" ? "p-attn" : "p-muted"}">${p.actor === "human" ? "人が行う" : "エージェント"}</span><span class="hint">段 ${(col["p:" + id] + 1) / 2}</span>
+      ${st ? `<span class="pill ${{ merged: "p-ok", done: "p-ok", running: "p-run", pr_open: "p-run", your_turn: "p-attn", needs_attention: "p-danger" }[st] || "p-muted"}">${LOOK[st].mark} ${LOOK[st].word}</span>` : ""}</div>`;
+    const link = (arr) => arr.map((a) => `<button class="chip" data-node="a:${a}">${esc(pfd.artifacts.find((x) => x.id === a).name)}</button>`).join("");
+    rows = `<div class="kv"><span>目的</span><div>${esc(p.purpose)}</div></div>
+      ${p.steps ? `<div class="kv"><span>手順</span><div>${esc(p.steps)}</div></div>` : ""}
+      <div class="kv"><span>完了条件</span><div>${esc(p.done_when)}</div></div>
+      <div class="kv"><span>入力</span><div class="linkrow">${link(p.inputs)}</div></div>
+      <div class="kv"><span>出力</span><div class="linkrow">${link(p.outputs)}</div></div>
+      ${o.statuses ? progressLinks(it, id) : ""}
+      ${p.actor !== "human" ? `<details class="ctx"><summary>タスクのプロンプト ${ann("7.2 intake.processPrompt")}</summary><pre class="block">${esc(promptFor(pfd, p))}</pre></details>` : ""}`;
+  }
+  const commentArea = o.readOnly ? "" : frozen
+    ? `<div class="box quiet"><p>投入済みのため変えられません ${ann("6.8")}</p></div>`
+    : `<div class="kv"><span>この要素へのコメント ${ann("7.3")}</span>
+        ${mine.map((c, i) => `<div class="mycmt"><span>${esc(c.body)}</span><button class="btn link" data-del="${key}|${i}">消す</button></div>`).join("")}
+        <textarea id="cmt-${key}" placeholder="例: この成果物は単独で確かめられない"></textarea>
+        <div class="actions"><button class="btn sm" data-addcmt="${key}">コメントを付ける</button></div></div>`;
+  return `<aside class="panel">${head}${rows}
+    ${prevs.length ? `<div class="kv"><span>前の回のコメントと返答 ${ann("7.6")}</span>${prevs.map((c) => `<div class="prevc"><span>${esc(c.body)}</span><span class="reply">${esc(c.reply)}</span></div>`).join("")}</div>` : ""}
+    ${commentArea}
+    <button class="btn link" data-node="">選択を外す</button></aside>`;
+}
+function progressLinks(it, id) {
+  const tasks = it.tasks?.[id] || [];
+  const pr = it.prs?.[id];
+  const none = '<span class="hint">なし</span>';
+  return `<div class="kv"><span>sub-issue ${ann("8.2")}</span><div>${it.subs?.[id] ? `<a href="#" data-toast="sub-issue #${it.subs[id]} を開く（例）">#${it.subs[id]}</a>` : none}</div></div>
+    <div class="kv"><span>タスク</span><div class="task-list">${tasks.map((t, i) => `<button class="btn link" data-gotask="${t.id.replace("…", "")}">${t.id}（${t.st}）${i ? "・以前" : ""}</button>`).join("") || none}</div></div>
+    <div class="kv"><span>PR</span><div>${pr ? `<a href="#" data-toast="PR #${pr[0]} を開く（例）">#${pr[0]}（${pr[1]}）</a>` : none}</div></div>`;
+}
+function promptFor(pfd, p) {
+  const nm = (id) => pfd.artifacts.find((a) => a.id === id);
+  const given = p.inputs.map(nm).filter((a) => !a.decision);
+  const dec = p.inputs.map(nm).filter((a) => a.decision);
+  return `https://github.com/example/app/issues/88 ${pfd.title}
+sub-issue: （承認のときに作られる）
+
+この作業は、上の Issue を分解したうちの 1 つである。
+
+## 目的
+${p.purpose}
+
+## 前提
+すでに baseBranch にあるもの:
+${given.map((a) => `- ${a.name}: ${a.description || ""}`).join("\n") || "- なし"}
+${dec.length ? `\n人が決めたこと:\n${dec.map((a) => `- ${a.name}: ${a.description}`).join("\n")}\n` : ""}
+## 作るもの
+${p.outputs.map(nm).map((a) => `- ${a.name}: ${a.description}\n  確かめ方: ${a.verify}`).join("\n")}
+
+## 手順
+${p.steps}
+
+## 完了条件
+${p.done_when}`;
+}
+
+/* ---------- 各面 ---------- */
+function renderMain() {
+  const m = document.getElementById("main");
+  if (S.view === "tasks") { m.innerHTML = taskFace(); return; }
+  if (S.sel === "new") { m.innerHTML = pickerFace(); return; }
+  const it = byId(S.sel);
+  const faces = { investigating: progressRunFace, decomposing: progressRunFace, answering: questionFace, reviewing: reviewFace, needs_attention: attentionFace, active: activeFace, completed: activeFace, canceled: activeFace };
+  m.innerHTML = band(it) + faces[it.state](it);
+}
+
+function pickerFace() {
+  const list = ISSUES.filter((i) => S.assignee === "any" || i.who === "自分");
+  const sel = ISSUES.find((i) => i.num === S.picked) || list[0];
+  const gh = S.ghDown
+    ? `<div class="box attn"><h2>gh にログインしていません ${ann("4.2 ghGuidance")}</h2>
+        <p>端末で <span class="mono">gh auth login</span> を実行してください。</p>
+        <pre class="block">You are not logged into any GitHub hosts. To log in, run: gh auth login</pre>
+        <div class="actions"><button class="btn sm" data-act="gh-retry">もう一度確かめる</button></div></div>`
+    : `<div class="picker">
+        <div style="display:grid;gap:10px">
+          <div class="actions"><div class="seg"><button aria-pressed="${S.assignee === "me"}" data-assignee="me">自分が担当</button><button aria-pressed="${S.assignee === "any"}" data-assignee="any">すべて</button></div>
+            <input type="text" id="issue-search" placeholder="タイトルで探す（Enter で検索）" style="flex:1;min-width:160px" /></div>
+          <div class="issues">${list.map((i) => `<button class="issue-row" aria-current="${sel && sel.num === i.num}" data-pick="${i.num}"><span class="n">#${i.num}</span><span>${esc(i.title)}</span>
+            ${i.intake ? `<span class="pill p-muted">Intake あり</span>` : "<span></span>"}<span class="sub">担当: ${i.who}・更新 ${i.upd}</span></button>`).join("")}</div>
+          <div style="display:grid;gap:4px"><label class="hint" for="issue-direct">番号か URL を直接入れる ${ann("4.3 parseIssueInput")}</label>
+            <div class="actions"><input type="text" id="issue-direct" placeholder="#123 / 123 / https://github.com/…/issues/123" style="flex:1" /><button class="btn sm" data-act="direct">選ぶ</button></div></div>
+        </div>
+        ${sel ? `<div class="issue-body"><div class="headrow"><h2>#${sel.num} ${esc(sel.title)}</h2></div>
+          <div class="md"><h3>目的</h3><p>利用者がデータを持ち出せる形式に JSON を足す。いまは CSV だけ。</p><h3>やること</h3><ul><li>エクスポートの API に形式の引数を足す</li><li>画面で形式を選べるようにする</li><li>大きなデータでの時間を測る</li></ul></div>
+          <div class="cmt"><div class="who">他の人・昨日</div>ネストした項目はどう出す? 平らにするか、そのままか。</div>
+          <div class="actions">${sel.intake ? `<button class="btn" data-sel="${sel.intake}">進行中の Intake を開く</button>${ann("S-3")}`
+            : `<button class="btn primary" data-act="start">Intake を開始</button>`}</div></div>` : ""}
+      </div>`;
+  return `<div class="pad">
+    <div class="crumbs"><span>Intake</span><span>/</span><span>Issue を選ぶ</span>${ann("4 Issue の選択")}</div>
+    <div class="headrow"><h1>Issue を選んで Intake を始める</h1><span class="spacer"></span>
+      <label class="hint">プロジェクト <select><option>doctrine</option><option>billing</option></select></label>
+      <label class="hint" style="display:flex;gap:4px;align-items:center"><input type="checkbox" data-act="ghdown" ${S.ghDown ? "checked" : ""} />gh が使えないときを見る</label></div>
+    ${gh}</div>`;
+}
+
+function progressRunFace(it) {
+  const limited = it.limited;
+  return `<div class="pad">${header(it)}
+    <div class="box ${limited ? "quiet" : ""}"><h2>${it.state === "investigating" ? "調査" : "分解"}${limited ? "が利用上限で止まっています" : "を進めています"}</h2>
+      ${limited ? `<p>${limited} に再開</p>` : `<p>経過 3 分</p>`}</div>
+    <div class="box"><div class="headrow"><h2>ログの末尾</h2><span class="spacer"></span><button class="btn sm" data-toast="intake.logs を取り直した（例）">読み込み直す</button></div>
+      <pre class="block">[10:29:02] gh issue view 95 --comments
+[10:29:40] Read docs/overview.md
+[10:31:12] Grep "audit" core/src
+[10:33:05] 利用上限に当たりました。16:40 に再開します</pre></div>
+    </div>`;
+}
+
+function questionFace(it) {
+  const ans = S.answers[it.id] || (S.answers[it.id] = {});
+  const missing = S.tried ? answerIssues(QUESTIONS_91, ans) : [];
+  const cards = QUESTIONS_91.map((q, i) => {
+    const a = ans[q.id] || {};
+    const mat = q.material.kind === "table"
+      ? `<span class="cap">${esc(q.material.caption)}</span><div style="overflow-x:auto"><table><tr>${q.material.head.map((h) => `<th>${h}</th>`).join("")}</tr>${q.material.rows.map((r) => `<tr>${r.map((c) => `<td>${esc(c)}</td>`).join("")}</tr>`).join("")}</table></div>`
+      : q.material.kind === "code" ? `<span class="cap">${esc(q.material.caption)}・<span class="mono">${q.material.path}</span></span><pre>${esc(q.material.code)}</pre>`
+      : `<span class="cap">背景</span><div>${esc(q.material.body)}</div>`;
+    const opts = q.kind === "free"
+      ? `<textarea data-free="${q.id}" placeholder="答えを書く">${esc(a.text || "")}</textarea>`
+      : `<div class="opts">${q.options.map((o) => {
+          const on = (a.sel || []).includes(o.id);
+          return `<label class="opt ${on ? "on" : ""}"><input type="${q.kind === "single" ? "radio" : "checkbox"}" name="${q.id}" data-opt="${q.id}|${o.id}" ${on ? "checked" : ""} />
+            <span class="lb">${esc(o.label)}${q.rec?.option === o.id ? '<span class="rec">推奨</span>' : ""}</span>${o.desc ? `<span class="ds">${esc(o.desc)}</span>` : ""}${q.rec?.option === o.id ? `<span class="ds recwhy">${esc(q.rec.reason)}</span>` : ""}</label>`;
+        }).join("")}</div>`;
+    const rec = q.kind === "free" && q.rec ? `<div class="opt" style="cursor:default"><span></span><span class="lb">${esc(q.rec.text)}<span class="rec">推奨</span></span><span class="ds recwhy">${esc(q.rec.reason)}</span></div>` : "";
+    return `<section class="qcard ${missing.includes(q.id) ? "missing" : ""}">
+      <div class="qhead"><span class="qno">Q${i + 1}</span><h2>${esc(q.prompt)}</h2><span class="qkind">${{ single: "単一選択", multiple: "複数選択", free: "自由記述" }[q.kind]}</span></div>
+      <div class="material">${mat}</div>${i === 0 ? ann("5.1 判断材料は選択肢より先") : ""}
+      ${opts}${rec}${i === 0 ? ann("5.2 推奨は初めから選ばない") : ""}
+      ${q.kind === "free" ? "" : `<div class="qextra"><label>その他（選択肢以外の答え）<textarea data-other="${q.id}">${esc(a.other || "")}</textarea></label><label>補足<textarea data-note="${q.id}">${esc(a.note || "")}</textarea></label></div>`}
+      ${missing.includes(q.id) ? '<p class="qmissing">まだ答えていません（single は 1 つだけ選べます）</p>' : ""}</section>`;
+  }).join("");
+  const n = answerIssues(QUESTIONS_91, ans).length;
+  return `<div class="pad">${header(it, `<span class="hint">1 回目の質問・3 件</span>`)}
+    ${cards}</div>
+    <div class="decide"><div><div class="meta"><span>未回答 ${n} 件</span>${ann("5.3 answerIssues")}</div></div>
+      <div class="actions"><button class="btn primary" data-act="answer-open">回答を送る…</button></div></div>`;
+}
+
+function reviewFace(it) {
+  const pfd = it.pfd;
+  const { ch, removed } = diff(pfd, it.prev);
+  const key = S.node[it.id] || null;
+  const frozen = it.revising ? frozenIds(pfd, it) : null;
+  const cmts = S.drafts[it.id] || [];
+  const whole = cmts.filter((c) => c.target === "whole").length;
+  const prevList = (it.prevComments || []).map((c) => `<div class="prevc"><span><b>${esc(c.label)}</b>: ${esc(c.body)}</span><span class="reply">${esc(c.reply)}</span></div>`).join("");
+  return `<div class="pad">${header(it, `<span class="hint">${it.seq} 回目の案・${it.ago}</span>`)}
+    <div class="review-body">
+      ${pfdBlock(it, pfd, { changes: it.prev ? ch : null, removed, selected: key, comments: commentCounts(it), frozen })}
+      ${elementPanel(it, pfd, key, { frozen, extra: prevList ? `<div class="kv"><span>前の回のコメントと返答 ${ann("7.6")}</span>${prevList}</div>` : "" })}
+    </div>
+    </div>
+    <div class="decide"><div><div class="meta"><span>要素へのコメント ${cmts.length - whole} 件</span><span>全体へのコメント ${whole} 件</span>${ann("7.3")}</div>
+      <textarea id="whole" placeholder="全体へのコメント（例: 割りすぎ。1 と 3 は 1 つの PR でよい）"></textarea></div>
+      <div class="actions" style="flex-direction:column;align-items:stretch">
+        <button class="btn sm" data-addcmt="whole">全体にコメントを付ける</button>
+        <button class="btn danger" data-act="reject-open" ${cmts.length ? "" : "disabled"} title="${cmts.length ? "" : "コメントが 1 つ以上あるときだけ差し戻せる"}">差し戻す…</button>
+        <button class="btn primary" data-act="approve">この案を承認する</button>
+</div></div>`;
+}
+
+function attentionFace(it) {
+  return `<div class="pad">${header(it)}
+    <div class="box danger"><h2>分解の出力が検証に 3 回続けて落ちました</h2>
+      
+      <ul style="margin:0;padding-left:20px;line-height:1.8"><li>成果物 <span class="mono">role-map</span> を出力するプロセスが 2 つある（3, 4）</li><li>プロセス <span class="mono">5</span> に <span class="mono">done_when</span> が無い</li><li>成果物 <span class="mono">audit-view</span> がどのプロセスの入力にもなっていない（goal でもない）</li></ul>
+      <div class="actions"><button class="btn" data-act="retry">やり直す</button></div></div>
+    <details class="ctx" open><summary>ログの末尾</summary><pre class="block">[10:04:51] 検証: 違反 3 件（3 回目）
+[10:04:51] 要確認にしました（invalid_output）</pre></details>
+    </div>`;
+}
+
+function activeFace(it) {
+  const pfd = it.revising && it.revPfd ? it.revPfd : it.pfd;
+  const key = S.node[it.id] || null;
+  const revMode = S.revMode[it.id];
+  const frozen = revMode || it.revising ? frozenIds(it.pfd, it) : null;
+  const done = it.state === "completed";
+  const turns = it.pfd.processes.filter((p) => ["your_turn", "needs_attention"].includes(it.statuses[p.id]));
+  const turnHtml = !done && turns.length ? `<section style="display:grid;gap:8px"><div class="headrow"><h2 style="margin:0;font-size:14px">操作が必要</h2>${ann("8.1")}</div><div class="turn">${turns.map((p) => {
+      if (it.statuses[p.id] === "your_turn") {
+        return `<div class="box attn"><div class="headrow"><span class="diamond"></span><h2>${p.id} ${esc(p.name)}</h2><span class="pill p-attn">あなたの番</span></div>
+          <p>${esc(p.purpose)}</p><p class="hint">完了条件: ${esc(p.done_when)}</p>
+          <label class="hint" for="note-${p.id}">決めた内容</label>
+          <textarea id="note-${p.id}" data-hnote="${it.id}|${p.id}" placeholder="例: 件名は「【○○】通知設定が変わりました」…">${esc(S.notes[it.id + p.id] || "")}</textarea>
+          <div class="actions"><button class="btn primary" data-human="${p.id}" ${(S.notes[it.id + p.id] || "").trim() ? "" : "disabled"}>完了を記録する</button></div></div>`;
+      }
+      return `<div class="box danger"><div class="headrow"><span class="bang">!</span><h2>${p.id} ${esc(p.name)}</h2><span class="pill p-danger">要確認</span></div>
+        <p>${ATTN[it.attnWhy[p.id]]}。</p><div class="actions"><button class="btn link" data-gotask="5f9d">タスク 5f9d を開く</button><span class="spacer"></span><button class="btn" data-redispatch="${p.id}">再投入する</button></div>
+</div>`;
+    }).join("")}</div></section>` : "";
+  const watch = it.watchFail && !done ? `<div class="box quiet"><div class="headrow"><h2>GitHub の確認に ${it.watchFail} 回続けて失敗しています</h2>${ann("8.3 見張りの健全さ")}</div>
+      <p class="mono">gh: HTTP 502 Bad Gateway（11:42）</p><p class="hint">最後に成功: 11:38</p></div>` : "";
+  const ops = done
+    ? `<div class="box attn"><h2>完了しました ${ann("8.7")}</h2>
+        <div class="actions"><button class="btn primary" data-toast="Issue を閉じた（例）">Issue を閉じる</button></div></div>`
+    : revMode
+      ? `<div class="box attn"><h2>改訂 ${ann("8.5")}</h2>
+          <div class="actions"><button class="btn primary" data-act="rev-start" ${(S.drafts[it.id] || []).length ? "" : "disabled"}>改訂を始める</button><button class="btn" data-act="rev-cancel">やめる</button></div></div>`
+      : `<div class="actions">${ann("8.4 操作")}<button class="btn sm" data-toast="intake.refresh: いま確認した（例）">いま確認する</button>
+          <button class="btn sm" data-act="pause">${S.paused[it.id] ? "自動投入を再開" : "自動投入を一時停止"}</button>
+          <button class="btn sm" data-act="rev-mode" ${it.revising ? "disabled" : ""}>改訂に入る…</button>
+          ${S.paused[it.id] ? '<span class="pill p-muted">自動投入は一時停止中</span>' : ""}</div>`;
+  return `<div class="pad">${header(it, `<span class="prog">${progress(it)} 完了</span>`)}
+    ${turnHtml}${watch}${ops}
+    <div class="review-body">
+      ${pfdBlock(it, it.pfd, { statuses: it.statuses, selected: key, comments: commentCounts(it), frozen })}
+      ${elementPanel(it, it.pfd, key, { statuses: it.statuses, frozen, readOnly: !revMode })}
+    </div>
+    </div>`;
+}
+
+function taskFace() {
+  const t = TASKS.find((x) => x.id === S.taskSel) || TASKS[0];
+  const it = t.intake && byId(t.intake);
+  return `<div class="pad">
+    <div class="crumbs"><span>doctrine</span><span>/</span><span class="mono">${t.id}</span>
+      ${it ? `<span>/</span><button data-back="${it.id}">Intake: ${esc(it.title)} / ${t.pid}</button>${ann("10 Intake へ戻るリンク")}` : ""}</div>
+    <div class="headrow"><h1>${esc(t.title)}</h1><span class="pill ${{ review: "p-attn", check: "p-danger", running: "p-run", queued: "p-muted" }[t.st]}">${{ review: "レビュー待ち", check: "要確認", running: "実行中", queued: "待ち" }[t.st]}</span></div>
+    <div class="box quiet"><p>既存のタスク画面・レビュー画面（このプロトタイプでは省略）</p></div></div>`;
+}
+
+/* ---------- モーダル ---------- */
+function renderOverlay() {
+  const o = document.getElementById("overlay");
+  const t = S.toast ? `<div class="toast" role="status">${esc(S.toast)}</div>` : "";
+  if (!S.modal) { o.innerHTML = t; return; }
+  const it = byId(S.sel);
+  let inner = "";
+  if (S.modal === "answer") {
+    inner = `<h2>この文面で回答を送ります ${ann("5.3 buildAnswerText")}</h2>
+      <pre class="block">${esc(buildAnswerText(QUESTIONS_91, S.answers[it.id] || {}))}</pre>
+      <div class="actions"><span class="spacer"></span><button class="btn" data-act="close">戻る</button><button class="btn primary" data-act="answer-send">送る</button></div>`;
+  } else if (S.modal === "reject") {
+    inner = `<h2>この文面で差し戻します ${ann("7.4 buildFeedback")}</h2>
+      <pre class="block">${esc(buildFeedback(it.pfd, S.drafts[it.id] || []))}</pre>
+      <div class="actions"><span class="spacer"></span><button class="btn" data-act="close">戻る</button><button class="btn danger" data-act="reject-send">差し戻す</button></div>`;
+  } else if (S.modal === "cancel") {
+    const active = it.state === "active";
+    inner = `<h2>#${it.num} の Intake を中止しますか ${ann("8.6")}</h2>
+      ${active ? `<label class="choice"><input type="radio" name="cx" checked /><span><b>そのままにする</b></span></label>
+        <label class="choice"><input type="radio" name="cx" /><span><b>タスクを止め、sub-issue を取りやめとして閉じる</b></span></label>`
+        : ``}
+      <div class="actions"><span class="spacer"></span><button class="btn" data-act="close">戻る</button><button class="btn danger" data-act="cancel-send">中止する</button></div>`;
+  }
+  o.innerHTML = `<div class="scrim" data-act="close"></div><div class="modal" role="dialog" aria-modal="true">${inner}</div>${t}`;
+}
+
+/* ---------- 全体 ---------- */
+function render() {
+  document.body.classList.toggle("show-ann", S.ann);
+  renderRail(); renderSide(); renderMain(); renderOverlay();
+}
+let toastTimer;
+function toast(msg) { S.toast = msg; renderOverlay(); clearTimeout(toastTimer); toastTimer = setTimeout(() => { S.toast = null; renderOverlay(); }, 2600); }
+function later(fn, ms = 1400) { setTimeout(() => { fn(); render(); }, ms); }
+
+document.addEventListener("click", (e) => {
+  const t = e.target.closest("[data-view],[data-sel],[data-closed],[data-node],[data-act],[data-toast],[data-pick],[data-assignee],[data-addcmt],[data-del],[data-rec],[data-human],[data-redispatch],[data-gotask],[data-task],[data-back]");
+  if (!t) return;
+  const d = t.dataset;
+  const it = byId(S.sel);
+  if (d.toast) { e.preventDefault(); toast(d.toast); return; }
+  if (d.view) { S.view = d.view; }
+  else if (d.sel !== undefined && !t.closest(".panel")) { S.sel = d.sel; S.view = "intake"; }
+  else if (d.closed !== undefined) { S.showClosed = d.closed === "1"; }
+  else if (d.node !== undefined) { S.node[S.sel] = d.node || null; }
+  else if (d.pick) { S.picked = Number(d.pick); }
+  else if (d.assignee) { S.assignee = d.assignee; }
+  else if (d.task) { S.taskSel = d.task; }
+  else if (d.gotask) { S.view = "tasks"; S.taskSel = d.gotask; toast("タスクのビューへ移った"); }
+  else if (d.back) { S.view = "intake"; S.sel = d.back; }
+  else if (d.addcmt) {
+    const box = document.getElementById(d.addcmt === "whole" ? "whole" : "cmt-" + d.addcmt);
+    const body = box?.value.trim();
+    if (!body) { toast("コメントを書いてから付けてください"); return; }
+    (S.drafts[S.sel] = S.drafts[S.sel] || []).push({ target: d.addcmt, body });
+  }
+  else if (d.del) { const [k, i] = d.del.split("|"); const list = S.drafts[S.sel]; const mine = list.filter((c) => c.target === k); list.splice(list.indexOf(mine[Number(i)]), 1); }
+  else if (d.rec) {
+    const q = QUESTIONS_91.find((x) => x.id === d.rec); const a = (S.answers[S.sel][q.id] = S.answers[S.sel][q.id] || {});
+    if (q.kind === "free") a.text = q.rec.text; else a.sel = [q.rec.option];
+  }
+  else if (d.human) {
+    const v = (S.notes[S.sel + d.human] || "").trim();
+    if (!v) { toast("決めた内容を書いてください（空白だけは記録できません）"); return; }
+    it.statuses[d.human] = "done"; toast("完了を記録した。sub-issue #" + it.subs[d.human] + " を閉じ、下流の判定を走らせた（例）");
+  }
+  else if (d.redispatch) { it.statuses[d.redispatch] = "running"; it.tasks[d.redispatch].unshift({ id: "9a0b…", st: "running" }); toast("再投入した。新しいタスク 9a0b が同じ sub-issue に紐づいた（例）"); }
+  else if (d.act) {
+    const a = d.act;
+    if (a === "ann") S.ann = !S.ann;
+    else if (a === "close") S.modal = null;
+    else if (a === "cancel") S.modal = "cancel";
+    else if (a === "cancel-send") { S.modal = null; it.state = "canceled"; it.revising = false; toast("中止した（例）"); }
+    else if (a === "ghdown") S.ghDown = !S.ghDown;
+    else if (a === "gh-retry") toast("github.status を取り直した（例）");
+    else if (a === "direct") { toast("#99 として選んだ（例）"); S.picked = 99; }
+    else if (a === "start") {
+      const n = { id: "i99", num: 99, title: "エクスポートの形式に JSON を足す", pj: "doctrine", state: "investigating", ago: "たった今", history: [["今", "h", "Intake を開始した"]] };
+      INTAKES.unshift(n); ISSUES.find((i) => i.num === 99).intake = "i99"; S.sel = "i99"; toast("Intake を開始した（例）");
+    }
+    else if (a === "answer-open") {
+      S.tried = true;
+      if (answerIssues(QUESTIONS_91, S.answers[S.sel] || {}).length) { toast("まだ答えていない質問があります"); render(); return; }
+      S.modal = "answer";
+    }
+    else if (a === "answer-send") {
+      S.modal = null; it.state = "decomposing"; it.history.push(["今", "h", "質問に答えた（3 件）"]); toast("回答を送った。分解が始まる（例）");
+      later(() => { it.state = "reviewing"; it.seq = 1; it.pfd = PFD_91; it.ago = "たった今"; it.history.push(["今", "a", "1 回目の案を出した（プロセス 3）"]); });
+    }
+    else if (a === "reject-open") S.modal = "reject";
+    else if (a === "reject-send") {
+      S.modal = null; const n = (S.drafts[S.sel] || []).length; S.drafts[S.sel] = []; it.state = "decomposing"; it.history.push(["今", "h", `差し戻した（コメント ${n} 件）`]); toast("差し戻した。同じ会話の続きとして届く（例）");
+      later(() => { it.state = "reviewing"; it.seq = (it.seq || 1) + 1; it.ago = "たった今"; it.history.push(["今", "a", `${it.seq} 回目の案を出した`]); });
+    }
+    else if (a === "approve") {
+      const n = (S.drafts[S.sel] || []).length; S.drafts[S.sel] = [];
+      if (it.revising) {
+        it.revising = false; it.pfd = it.revPfd; it.statuses["7"] = "waiting"; it.state = "active"; it.history.push(["今", "h", "改訂を承認した。sub-issue を整え、投入を再開した"]);
+      } else {
+        const av = new Set(it.pfd.artifacts.filter((x) => x.given).map((x) => x.id));
+        it.statuses = {}; it.tasks = {}; it.subs = {}; let s = 400;
+        for (const p of it.pfd.processes) {
+          it.subs[p.id] = s++;
+          const ready = p.inputs.every((i) => av.has(i));
+          it.statuses[p.id] = ready ? (p.actor === "human" ? "your_turn" : "running") : "waiting";
+          if (ready && p.actor !== "human") it.tasks[p.id] = [{ id: "n" + p.id + "…", st: "running" }];
+        }
+        it.state = "active"; it.prev = null; it.history.push(["今", "h", `承認した（${it.seq} 回目の案）`], ["今", "a", "sub-issue を作り、着手できるプロセスを投入した"]);
+      }
+      toast(n ? `承認した。送っていないコメント ${n} 件は捨てた（例）` : "承認した（例）");
+    }
+    else if (a === "retry") { it.state = "decomposing"; toast("やり直した（例）"); }
+    else if (a === "pause") S.paused[S.sel] = !S.paused[S.sel];
+    else if (a === "rev-mode") { S.revMode[S.sel] = true; S.node[S.sel] = null; }
+    else if (a === "rev-cancel") { S.revMode[S.sel] = false; S.drafts[S.sel] = []; }
+    else if (a === "rev-start") {
+      S.revMode[S.sel] = false; S.drafts[S.sel] = []; it.revising = true; it.state = "decomposing"; it.history.push(["今", "h", "改訂を始めた"]); toast("改訂を始めた。自動投入は止まる（例）");
+      later(() => {
+        it.state = "reviewing"; it.seq = 3; it.revPfd = PFD_76_REV; it.prevPfd = it.pfd; it.ago = "たった今";
+        it._saved = { pfd: it.pfd }; it.pfd = PFD_76_REV; it.prev = PFD_76; it.prevComments = [{ target: "p:5", label: "プロセス 5", body: "Slack の欄は後回しにして、メールだけで先に出したい", reply: "5 をメールだけにし、Slack の欄を 7 に分けました" }];
+        it.history.push(["今", "a", "改訂の案を出した"]);
+      });
+    }
+    else if (a === "abandon") {
+      it.revising = false; it.state = "active"; if (it._saved) { it.pfd = it._saved.pfd; } it.prev = null; it.prevComments = null; toast("改訂をやめ、元の承認済みの計画に戻った（例）");
+    }
+  }
+  render();
+});
+document.addEventListener("keydown", (e) => {
+  const g = e.target.closest?.("[data-node]");
+  if (g && g instanceof SVGElement && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); g.dispatchEvent(new MouseEvent("click", { bubbles: true })); }
+  if (e.key === "Escape" && S.modal) { S.modal = null; render(); }
+});
+document.addEventListener("input", (e) => {
+  const d = e.target.dataset; const ans = S.answers[S.sel];
+  if (d.free) (ans[d.free] = ans[d.free] || {}).text = e.target.value;
+  if (d.other) (ans[d.other] = ans[d.other] || {}).other = e.target.value;
+  if (d.note) (ans[d.note] = ans[d.note] || {}).note = e.target.value;
+  if (d.hnote) { const [i, p] = d.hnote.split("|"); S.notes[i + p] = e.target.value; const b = document.querySelector(`[data-human="${p}"]`); if (b) b.disabled = !e.target.value.trim(); }
+});
+document.addEventListener("change", (e) => {
+  const d = e.target.dataset;
+  if (d.opt) {
+    const [qid, oid] = d.opt.split("|"); const q = QUESTIONS_91.find((x) => x.id === qid); const a = (S.answers[S.sel][qid] = S.answers[S.sel][qid] || {});
+    if (q.kind === "single") a.sel = [oid];
+    else { const s = new Set(a.sel || []); e.target.checked ? s.add(oid) : s.delete(oid); a.sel = [...s]; }
+    render();
+  }
+  if (e.target.id === "issue-search") toast("検索した（例）");
+});
+render();
+</script>

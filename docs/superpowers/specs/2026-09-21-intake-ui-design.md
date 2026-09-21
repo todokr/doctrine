@@ -4,6 +4,7 @@
 - 状態: 承認待ち
 - issue: [#60](https://github.com/todokr/doctrine/issues/60)
 - 前提: [overview](../../overview.md)、[Intake の PRD](../../prd/intake.md)、[Intake コア設計](2026-09-21-intake-core-design.md)、[レビューアプリ設計](2026-09-13-review-app-design.md)
+- プロトタイプ: [`prototype/intake-ui.html`](../../../prototype/intake-ui.html)（例のデータで各面を辿れる。ブラウザで直接開く）
 
 ## 1. 位置づけ
 
