@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ConnectionBanner } from "./components/ConnectionBanner";
 import { fileAnchor } from "./components/DiffFileBlock";
+import { IntakeView } from "./components/IntakeView";
 import { ReviewView } from "./components/ReviewView";
 import { Rail, Sidebar } from "./components/Sidebar";
 import { TaskView } from "./components/TaskView";
@@ -124,7 +125,7 @@ export default function App() {
 
   useEffect(() => {
     mainRef.current?.scrollTo({ top: 0 });
-  }, [s.sel]);
+  }, [s.sel, s.intakeSel]);
 
   return (
     <>
@@ -133,7 +134,9 @@ export default function App() {
         <Rail />
         <Sidebar />
         <main className="main" ref={mainRef}>
-          {!t ? (
+          {s.view === "intake" ? (
+            <IntakeView />
+          ) : !t ? (
             <div className="pad"><p className="hint">左からタスクを選んでください</p></div>
           ) : t.state === "suspended" ? (
             <ReviewView key={t.id} t={t} />
