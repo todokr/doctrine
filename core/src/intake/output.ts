@@ -6,6 +6,7 @@ import {
 } from "../../../shared/intake/decomposer.ts";
 import { validateQuestions } from "../../../shared/intake/validateQuestion.ts";
 import { validatePfd } from "./pfd/validate.ts";
+import { type RevisionConstraints, revisionIssues } from "./revision.ts";
 
 export type OutputCheck =
   | { ok: true; output: DecomposerOutput }
@@ -32,6 +33,8 @@ export function checkDecomposerOutput(
      * 差し戻し → 質問 → 回答 → PFD のどちらでも、エージェントが付けてくる replies を弾かないため。
      */
     feedbackCount: number;
+    /** purpose が revise のときだけ runner が入れる。それ以外は null。 */
+    revision: RevisionConstraints | null;
   },
 ): OutputCheck {
   if (raw === null) {
@@ -80,6 +83,7 @@ export function checkDecomposerOutput(
   ) {
     issues.push(`${v.rule} ${v.id}: ${v.message}`);
   }
+  if (ctx.revision) issues.push(...revisionIssues(out.pfd, ctx.revision));
   const seen = new Set<number>();
   out.replies.forEach((r, i) => {
     if (!Number.isInteger(r.commentId) || r.commentId < 1 || r.commentId > ctx.feedbackCount) {

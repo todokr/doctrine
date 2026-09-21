@@ -369,6 +369,7 @@ async function settleOutput(
         .flatMap((set) => (JSON.parse(set.questions) as Question[]).map((q) => q.id)),
     ),
     feedbackCount: feedback.length,
+    revision: null,
   });
 
   if (!checked.ok) {

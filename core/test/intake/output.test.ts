@@ -2,6 +2,7 @@ import { test } from "@std/testing/bdd";
 import assert from "node:assert/strict";
 import { checkDecomposerOutput } from "../../src/intake/output.ts";
 import type { Question } from "../../../shared/intake/question.ts";
+import { frozenPart } from "../../src/intake/pfd/validate.ts";
 import { example, withDecision } from "./pfd/fixture.ts";
 
 const q = (id: string): Question => ({
@@ -22,6 +23,7 @@ const ctx = (o: Partial<Ctx> = {}): Ctx => ({
   askedQuestionIds: new Set(),
   answeredQuestionIds: new Set(),
   feedbackCount: 0,
+  revision: null,
   ...o,
 });
 
@@ -138,4 +140,51 @@ test("replies の番号が範囲内なら通る", () => {
     ctx({ feedbackCount: 1 }),
   );
   assert.equal(r.ok, true);
+});
+
+const revising = {
+  frozen: frozenPart(example(), new Set(["1"])),
+  retiredProcessIds: new Set<string>(),
+};
+const reviseCtx = (o: Partial<Ctx> = {}) => ctx({ purpose: "revise", revision: revising, ...o });
+
+test("改訂では、投入済みのプロセスを変えた案を frozen_changed で弾く", () => {
+  const pfd = example();
+  pfd.processes[0].steps = "別の手順にする";
+  const issues = issuesOf(checkDecomposerOutput(pfdOut(pfd), reviseCtx()));
+  assert.ok(issues.some((i) => /^frozen_changed 1:/.test(i)), issues.join("\n"));
+});
+
+test("改訂では、投入済みのプロセスの出力の成果物を変えた案を弾く", () => {
+  const pfd = example();
+  pfd.artifacts.find((a) => a.id === "new-table")!.verify = "別の確かめ方";
+  const issues = issuesOf(checkDecomposerOutput(pfdOut(pfd), reviseCtx()));
+  assert.ok(issues.some((i) => /^frozen_changed new-table:/.test(i)), issues.join("\n"));
+});
+
+test("改訂では、投入済みのプロセスの入力の成果物を変えた案を弾く", () => {
+  const pfd = example();
+  pfd.artifacts.find((a) => a.id === "schema")!.name = "別の名前";
+  const issues = issuesOf(checkDecomposerOutput(pfdOut(pfd), reviseCtx()));
+  assert.ok(issues.some((i) => /^frozen_changed schema:/.test(i)), issues.join("\n"));
+});
+
+test("改訂では、固定されていないプロセスを変えた案は通る", () => {
+  const pfd = example();
+  pfd.processes[3].steps = "別の手順にする";
+  assert.equal(checkDecomposerOutput(pfdOut(pfd), reviseCtx()).ok, true);
+});
+
+test("改訂では、取りやめたプロセスの id を使った案を弾く", () => {
+  const issues = issuesOf(checkDecomposerOutput(
+    pfdOut(example()),
+    reviseCtx({ revision: { ...revising, retiredProcessIds: new Set(["4"]) } }),
+  ));
+  assert.ok(issues.some((i) => /^retired_reused 4:/.test(i)), issues.join("\n"));
+});
+
+test("改訂でなければ固定を見ない", () => {
+  const pfd = example();
+  pfd.processes[0].steps = "別の手順にする";
+  assert.equal(checkDecomposerOutput(pfdOut(pfd), ctx({ revision: null })).ok, true);
 });
