@@ -152,7 +152,8 @@ export async function watchProject(
           );
         }
         if (
-          [synced.created, synced.adopted, synced.updated, synced.closed].some((l) => l.length > 0)
+          [synced.created, synced.adopted, synced.updated, synced.closed, synced.completed]
+            .some((l) => l.length > 0)
         ) report.updated.add(intake.id);
       } catch (e) {
         report.errors.push(`${intake.issue_url} の sub-issue の同期: ${describe(e)}`);

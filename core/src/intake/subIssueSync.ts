@@ -10,6 +10,7 @@ import { type IntakeRow, listProcesses, updateProcess } from "../db/intakes.ts";
 import type { Db } from "../db/schema.ts";
 import type { SubIssue, Tracker } from "../github/tracker.ts";
 import { sha256Hex } from "./pfd/hash.ts";
+import { processProgressOf } from "./view.ts";
 
 export type SubIssueSyncInput = {
   projectPath: string;
@@ -23,6 +24,8 @@ export type SubIssueSyncResult = {
   adopted: string[];
   updated: string[];
   closed: string[];
+  /** 完了を記録した人のプロセスの sub-issue を completed で閉じたもの。 */
+  completed: string[];
   failures: {
     processId: string;
     op: "find" | "create" | "update" | "close" | "record";
@@ -61,7 +64,8 @@ function topologicalOrder(pfd: Pfd): Process[] {
 
 /**
  * 承認済みの案と intake_processes の行から、プロセスごとの sub-issue を作り・採用し・更新し・
- * 取りやめとして閉じる。初回・やり直し・改訂のすべてをこの 1 回の呼び出しで扱う。
+ * 取りやめとして閉じ、完了を記録した人のプロセスを completed で閉じる。
+ * 初回・やり直し・改訂のすべてをこの 1 回の呼び出しで扱う。
  *
  * 行の読み出しに失敗したときだけ投げる。gh の呼び出しと行ごとの書き込みの失敗は
  * failures に入れ、残りのプロセスを続ける。intake_processes の行の追加と retired_at は承認の作業が持つ。
@@ -78,6 +82,7 @@ export async function syncSubIssues(
     adopted: [],
     updated: [],
     closed: [],
+    completed: [],
     failures: [],
   };
 
@@ -232,5 +237,56 @@ export async function syncSubIssues(
     }
   }
 
+  // 6. 人のプロセスの完了。閉じられなければ sub_issue_closed = 0 のまま残り、次の回がやり直す
+  for (const r of liveRows.values()) {
+    if (r.human_done_at === null || r.sub_issue_closed !== 0) continue;
+    const link = links.get(r.process_id);
+    if (!link) continue;
+    const closed = await attempt(r.process_id, "close", async () => {
+      await tracker.closeIssue(projectPath, { url: link.url, nodeId: link.nodeId }, "completed");
+      await updateProcess(db, intake.id, r.process_id, { sub_issue_closed: 1 });
+    });
+    if (closed.ok) result.completed.push(r.process_id);
+  }
+
   return result;
+}
+
+/**
+ * 中止（stop）の後始末。sub_issue_closed = 0 の sub-issue を閉じる。完了を記録した人のプロセスは completed、
+ * マージ済みのプロセスは PR の Closes で閉じるので触らない、それ以外は not_planned。
+ */
+export async function closeSubIssuesOnCancel(
+  db: Db,
+  tracker: Pick<Tracker, "closeIssue">,
+  o: { projectPath: string; intakeId: string; baseBranch: string },
+): Promise<{ closed: string[]; failures: { processId: string; message: string }[] }> {
+  const out: { closed: string[]; failures: { processId: string; message: string }[] } = {
+    closed: [],
+    failures: [],
+  };
+  const progress = await processProgressOf(db, o.intakeId);
+  for (const r of await listProcesses(db, o.intakeId)) {
+    if (r.retired_at !== null || r.sub_issue_url === null || r.sub_issue_closed !== 0) continue;
+    const facts = progress.get(r.process_id);
+    let reason: "completed" | "not_planned";
+    if (facts?.humanDone) reason = "completed";
+    else if (facts?.pr?.state === "MERGED" && facts.pr.baseRef === o.baseBranch) continue;
+    else reason = "not_planned";
+    try {
+      await tracker.closeIssue(
+        o.projectPath,
+        { url: r.sub_issue_url, nodeId: r.sub_issue_node_id! },
+        reason,
+      );
+      await updateProcess(db, o.intakeId, r.process_id, { sub_issue_closed: 1 });
+      out.closed.push(r.process_id);
+    } catch (e) {
+      out.failures.push({
+        processId: r.process_id,
+        message: e instanceof Error ? e.message : String(e),
+      });
+    }
+  }
+  return out;
 }

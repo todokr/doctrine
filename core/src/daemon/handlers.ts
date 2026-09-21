@@ -13,15 +13,8 @@ import {
   listTasks,
   type TaskState,
 } from "../db/tasks.ts";
-import {
-  getAwaitingStepRun,
-  getStepRun,
-  lastRejectedReview,
-  lastStepRun,
-  listStepRuns,
-} from "../db/stepRuns.ts";
-import { commitStepBoundary, StateConflictError, type StepBoundary } from "../db/boundary.ts";
-import type { TaskRow } from "../db/tasks.ts";
+import { getStepRun, lastRejectedReview, lastStepRun, listStepRuns } from "../db/stepRuns.ts";
+import { commitStepBoundary, StateConflictError } from "../db/boundary.ts";
 import type { Db } from "../db/schema.ts";
 import { recentRateLimitSamples } from "../db/rateLimits.ts";
 import { normalizeResetsAt } from "../domain/rateLimit.ts";
@@ -38,10 +31,14 @@ import {
   answerIntake,
   approveIntake,
   cancelIntake,
+  closeParentIssue,
+  completeHumanProcess,
   type IntakeTransition,
   rejectIntake,
+  setDispatchPaused,
   startIntake,
 } from "../intake/commands.ts";
+import { redispatchProcess } from "../intake/dispatch.ts";
 import { toIntakeDetail, toIntakeSummary } from "../intake/view.ts";
 import type { IntakeWatcher } from "../intake/watch.ts";
 import type { Tracker } from "../github/tracker.ts";
@@ -54,6 +51,7 @@ import {
   UncommittedChangesError,
   worktreePathFor,
 } from "../domain/worktree.ts";
+import { cancelTask, closeAwaitingStepRun } from "../domain/cancelTask.ts";
 import { defaultProbe, killStaleChild } from "../domain/recovery.ts";
 import { buildTaskContext } from "../domain/taskContext.ts";
 import { readGuideFile } from "../domain/guideFile.ts";
@@ -142,40 +140,17 @@ function broadcastIntakeTransition(ctx: DaemonContext, t: IntakeTransition): voi
   });
 }
 
+/** 行を読み直して IntakeDetail にする。 */
+async function intakeDetailOf(ctx: DaemonContext, intakeId: string) {
+  const row = (await getIntake(ctx.db, intakeId))!;
+  return await toIntakeDetail(ctx.db, row, ctx.intakeWatcher.health(row.project_id));
+}
+
 /** 操作が返した遷移をイベントにして配り、読み直した行の要約を返す。 */
 async function settleIntakeCommand(ctx: DaemonContext, t: IntakeTransition) {
   broadcastIntakeTransition(ctx, t);
   const row = (await getIntake(ctx.db, t.intakeId))!;
   return await toIntakeSummary(ctx.db, row, ctx.intakeWatcher.health(row.project_id));
-}
-
-/**
- * `suspended` から、人の決定を待たずに外へ出るとき（task.cancel / task.resume）に、
- * 開いている `awaiting` 行を閉じるための `stepRunUpdate` を作る。
- *
- * `interrupted` の意味は「人の決定を待たずに外から閉じられた」。閉じずに放置すると、
- * 中止されたタスクや再開されたタスクの記録が「この人はまだレビューを待っている」と
- * 言い続ける（`running` のまま放置された行と同じ嘘になる）。
- *
- * 返り値は状態を書くのと**同じ** `commitStepBoundary` に渡すこと。別トランザクションに
- * すると、片方だけ書かれた記録が作れてしまう。
- *
- * 閉じるべき行が無ければ undefined を返す（`paused` からの resume、`queued` /
- * `running` からの cancel、`current_step_id` が null のタスクなど）。
- */
-async function closeAwaitingStepRun(
-  db: Db,
-  task: TaskRow,
-): Promise<StepBoundary["stepRunUpdate"]> {
-  if (task.state !== "suspended" || !task.current_step_id) return undefined;
-  const awaiting = await getAwaitingStepRun(db, task.id, task.current_step_id);
-  if (!awaiting) return undefined;
-  return {
-    id: awaiting.id,
-    status: "interrupted",
-    exit_code: null,
-    ended_at: new Date().toISOString(),
-  };
 }
 
 export async function loadWorkflowFromDisk(
@@ -396,26 +371,8 @@ export function createHandler(ctx: DaemonContext): Handler {
         const taskId = req(params, "task_id");
         const task = await getTask(ctx.db, taskId);
         if (!task) throw new Error("タスクがありません");
-        // 終端状態（completed/failed/canceled）から二度 cancel されて記録を
-        // 上書きしないよう、書き込み前に遷移表で検査する。
-        assertTransition(task.state, "canceled");
-        // デーモンが生きたまま協調的に止める経路。pause と同じく SIGTERM。
-        await killStaleChild(task, defaultProbe(), "SIGTERM");
-        // worktree は残す。失敗・中止した実行こそ中を見たい。
-        // suspended からの cancel なら、開いていた awaiting 行も同じトランザクションで
-        // 閉じる（放置すると、中止されたタスクの記録が永久に「レビュー待ち」と言い続ける）。
-        await commitStepBoundary(ctx.db, {
-          taskId,
-          requireState: task.state,
-          taskPatch: { state: "canceled", child_pid: null, child_started_at: null },
-          stepRunUpdate: await closeAwaitingStepRun(ctx.db, task),
-        });
-        ctx.broadcast({
-          event: "task.stateChanged",
-          task_id: taskId,
-          from: task.state,
-          to: "canceled",
-        });
+        const { from } = await cancelTask(ctx.db, task, defaultProbe());
+        ctx.broadcast({ event: "task.stateChanged", task_id: taskId, from, to: "canceled" });
         return await getTask(ctx.db, taskId);
       }
       case "task.logs": {
@@ -652,14 +609,72 @@ export function createHandler(ctx: DaemonContext): Handler {
       }
       case "intake.cancel": {
         const intakeId = req(params, "intake_id");
-        // leave / stop のどちらも今は同じ動き。stop の、タスクを止めて sub-issue を閉じる部分は別の作業が足す。
         if (params.mode !== "leave" && params.mode !== "stop") {
           throw new Error("mode は leave か stop のどちらかです");
         }
-        return await settleIntakeCommand(
-          ctx,
-          await cancelIntake(ctx.db, defaultProbe(), { intakeId }),
+        const intake = await getIntake(ctx.db, intakeId);
+        if (!intake) throw new Error("Intake がありません");
+        const project = (await getProject(ctx.db, intake.project_id))!;
+        const outcome = await cancelIntake(
+          ctx.db,
+          { probe: defaultProbe(), tracker: ctx.tracker },
+          { intakeId, mode: params.mode, projectPath: project.path },
         );
+        for (const t of outcome.stoppedTasks) {
+          ctx.broadcast({
+            event: "task.stateChanged",
+            task_id: t.taskId,
+            from: t.from,
+            to: "canceled",
+          });
+        }
+        for (const message of outcome.problems) ctx.warnings.push(message);
+        return await settleIntakeCommand(ctx, outcome);
+      }
+      case "intake.completeHumanProcess": {
+        const intakeId = req(params, "intake_id");
+        // note は req で取らない。空白だけの判定と文言を completeHumanProcess に寄せる
+        await completeHumanProcess(ctx.db, {
+          intakeId,
+          processId: req(params, "process_id"),
+          note: params.note,
+        });
+        ctx.broadcast({ event: "intake.updated", intake_id: intakeId });
+        const row = (await getIntake(ctx.db, intakeId))!;
+        // sub-issue を閉じ、下流を投入し、goal が揃えば completed へ移す
+        await ctx.intakeWatcher.request(row.project_id);
+        return await intakeDetailOf(ctx, intakeId);
+      }
+      case "intake.redispatch": {
+        const intakeId = req(params, "intake_id");
+        await redispatchProcess(ctx.db, { intakeId, processId: req(params, "process_id") });
+        ctx.broadcast({ event: "intake.updated", intake_id: intakeId });
+        return await intakeDetailOf(ctx, intakeId);
+      }
+      case "intake.refresh": {
+        const intakeId = req(params, "intake_id");
+        const intake = await getIntake(ctx.db, intakeId);
+        if (!intake) throw new Error("Intake がありません");
+        await ctx.intakeWatcher.request(intake.project_id);
+        return await intakeDetailOf(ctx, intakeId);
+      }
+      case "intake.setDispatchPaused": {
+        const intakeId = req(params, "intake_id");
+        if (typeof params.paused !== "boolean") throw new Error("paused は必須です");
+        const row = await setDispatchPaused(ctx.db, { intakeId, paused: params.paused });
+        ctx.broadcast({ event: "intake.updated", intake_id: intakeId });
+        if (!params.paused) void ctx.intakeWatcher.request(row.project_id);
+        return await toIntakeSummary(ctx.db, row, ctx.intakeWatcher.health(row.project_id));
+      }
+      case "intake.closeIssue": {
+        const intake = await getIntake(ctx.db, req(params, "intake_id"));
+        if (!intake) throw new Error("Intake がありません");
+        const project = (await getProject(ctx.db, intake.project_id))!;
+        const row = await closeParentIssue(ctx.db, ctx.tracker, {
+          intakeId: intake.id,
+          projectPath: project.path,
+        });
+        return await toIntakeSummary(ctx.db, row, ctx.intakeWatcher.health(row.project_id));
       }
 
       default:
