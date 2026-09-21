@@ -111,9 +111,58 @@ export async function createWorktree(o: {
   return await canonical(o.worktreePath);
 }
 
+/** Intake の worktree の置き場。worktreePathFor と同じ置き場の intake-<id>（spec 7 章）。 */
+export function intakeWorktreePathFor(projectPath: string, intakeId: string): string {
+  return worktreePathFor(projectPath, `intake-${intakeId}`);
+}
+
+/** ブランチを作らずに baseBranch から detached で作る。戻り値は実パス（createWorktree と同じ）。 */
+export async function createDetachedWorktree(o: {
+  repoPath: string;
+  worktreePath: string;
+  baseBranch: string;
+}): Promise<string> {
+  await runCommand("git", [
+    "-C",
+    o.repoPath,
+    "worktree",
+    "add",
+    "--detach",
+    o.worktreePath,
+    o.baseBranch,
+  ]);
+  await ensureDoctrineOutExcluded(o.repoPath);
+  return await canonical(o.worktreePath);
+}
+
 export async function hasUncommittedChanges(worktreePath: string): Promise<boolean> {
   const { stdout } = await runCommand("git", ["-C", worktreePath, "status", "--porcelain"]);
   return stdout.trim().length > 0;
+}
+
+/** git status --porcelain に出るパス。変更が無ければ空配列。名前の変更は変更後の名前。 */
+export async function changedPaths(worktreePath: string): Promise<string[]> {
+  const { stdout } = await runCommand("git", [
+    "-C",
+    worktreePath,
+    "status",
+    "--porcelain",
+    "--untracked-files=all",
+  ]);
+  return stdout
+    .split("\n")
+    .filter((line) => line.length > 3)
+    .map((line) => {
+      const path = line.slice(3);
+      const arrow = path.indexOf(" -> ");
+      return arrow >= 0 ? path.slice(arrow + " -> ".length) : path;
+    });
+}
+
+/** 追跡中のファイルの変更を捨て、未追跡のファイルを消す（git checkout -- . と git clean -fd）。 */
+export async function restoreWorktree(worktreePath: string): Promise<void> {
+  await runCommand("git", ["-C", worktreePath, "checkout", "--", "."]);
+  await runCommand("git", ["-C", worktreePath, "clean", "-fd"]);
 }
 
 /**
