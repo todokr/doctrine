@@ -53,6 +53,19 @@ function settledState(
   return { id, state: "running", taskId };
 }
 
+// マージ済みのプロセスと完了した人のプロセスの出力だけが、given に加わる（PRD W-2）
+function availableArtifacts(
+  pfd: Pfd,
+  stateOf: (processId: string) => ProcessStatusEntry["state"] | undefined,
+): Set<string> {
+  const available = new Set(pfd.artifacts.filter((a) => a.given).map((a) => a.id));
+  for (const p of pfd.processes) {
+    const state = stateOf(p.id);
+    if (state === "merged" || state === "done") p.outputs.forEach((o) => available.add(o));
+  }
+  return available;
+}
+
 /** 外への問い合わせをしない。プロセスごとの状態を pfd.processes の順に返す。 */
 export function computeProcessStatuses(input: StatusInput): ProcessStatusEntry[] {
   const { pfd } = input;
@@ -62,12 +75,7 @@ export function computeProcessStatuses(input: StatusInput): ProcessStatusEntry[]
     pfd.processes.map((p) => [p.id, settledState(p, progressOf(p.id), input.baseBranch)]),
   );
 
-  // マージ済みのプロセスと完了した人のプロセスの出力だけが、given に加わる（PRD W-2）
-  const available = new Set(pfd.artifacts.filter((a) => a.given).map((a) => a.id));
-  for (const p of pfd.processes) {
-    const state = settled.get(p.id)?.state;
-    if (state === "merged" || state === "done") p.outputs.forEach((o) => available.add(o));
-  }
+  const available = availableArtifacts(pfd, (id) => settled.get(id)?.state);
 
   return pfd.processes.map((p) => {
     const decided = settled.get(p.id);
@@ -84,4 +92,11 @@ export function computeProcessStatuses(input: StatusInput): ProcessStatusEntry[]
       : null;
     return { id: p.id, state: "ready", blockedBy };
   });
+}
+
+/** goal の成果物がすべて、given か、マージ済み・完了したプロセスの出力に含まれるか（W-11）。 */
+export function goalReached(pfd: Pfd, statuses: readonly ProcessStatusEntry[]): boolean {
+  const stateById = new Map(statuses.map((s) => [s.id, s.state]));
+  const available = availableArtifacts(pfd, (id) => stateById.get(id));
+  return pfd.goal.every((id) => available.has(id));
 }

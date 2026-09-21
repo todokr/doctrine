@@ -6,7 +6,9 @@ import { defaultProbe, recoverOnStartup, type WorkflowLookup } from "../domain/r
 import { findOrphans } from "../domain/worktree.ts";
 import { getProject, listProjects, listTasks, type TaskRow } from "../db/tasks.ts";
 import { listIntakes } from "../db/intakes.ts";
+import { ghPrWatcher } from "../github/ghPrWatcher.ts";
 import { ghTracker } from "../github/ghTracker.ts";
+import { createIntakeWatcher, WATCH_INTERVAL_MS } from "../intake/watch.ts";
 import type { Db } from "../db/schema.ts";
 import { DEFAULT_GLOBAL_LIMIT } from "../domain/scheduler.ts";
 import { parseWorkflow } from "../workflow/schema.ts";
@@ -113,6 +115,7 @@ export async function startDaemon(o: {
   logRoot?: string;
   globalLimit?: number;
   tickMs?: number;
+  watchMs?: number;
 } = {}): Promise<{ stop(): Promise<void> }> {
   const resolvedSocketPath = o.socketPath ?? socketPath();
   await assertSocketNotLive(resolvedSocketPath);
@@ -123,6 +126,7 @@ export async function startDaemon(o: {
   await Deno.mkdir(dirname(dbPath), { recursive: true, mode: 0o700 });
   const db = await openDb(dbPath);
 
+  const tracker = ghTracker();
   const ctx: DaemonContext = {
     db,
     adapter: createClaudeAdapter(),
@@ -131,8 +135,23 @@ export async function startDaemon(o: {
     broadcast: () => {},
     loadWorkflow: loadWorkflowFromDisk,
     running: new Set(),
-    tracker: ghTracker(),
+    tracker,
     runningIntakeRuns: new Set(),
+    // broadcast は後で差し替わるので、間接に呼ぶ
+    intakeWatcher: createIntakeWatcher({
+      db,
+      tracker,
+      prWatcher: ghPrWatcher(),
+      onStateChanged: (t) =>
+        ctx.broadcast({
+          event: "intake.stateChanged",
+          intake_id: t.intakeId,
+          from: t.from,
+          to: t.to,
+          revising: t.revising,
+        }),
+      onUpdated: (intake_id) => ctx.broadcast({ event: "intake.updated", intake_id }),
+    }),
     // broadcast は server を作った後に差し替わる。警告は間接に呼ぶ。
     warnings: createWarningLog({ broadcast: (ev) => ctx.broadcast(ev) }),
   };
@@ -166,15 +185,26 @@ export async function startDaemon(o: {
     }
   }
 
+  // 進行中の Intake の見張りを再開する。cycle は reject しない
+  void ctx.intakeWatcher.cycle();
+
   const timer = setInterval(() => {
     void tickCycle(ctx);
   }, o.tickMs ?? 1000);
   Deno.unrefTimer(timer);
 
+  const watchTimer = setInterval(() => {
+    void ctx.intakeWatcher.cycle();
+  }, o.watchMs ?? WATCH_INTERVAL_MS);
+  Deno.unrefTimer(watchTimer);
+
   return {
     async stop() {
       clearInterval(timer);
+      clearInterval(watchTimer);
       await server.close();
+      // 走っている周の最中に DB を閉じると、閉じた DB への問い合わせのエラーが console.error に出る
+      while (!ctx.intakeWatcher.idle()) await new Promise((r) => setTimeout(r, 10));
       await db.destroy();
     },
   };

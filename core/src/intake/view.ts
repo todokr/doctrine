@@ -25,13 +25,6 @@ import type {
 } from "../../../shared/protocol.ts";
 import { computeProcessStatuses, type ProcessProgress } from "./pfd/status.ts";
 
-/** 見張りはまだ無い。ハンドラは watch に常にこれを渡す。 */
-export const NO_WATCH: WatchHealth = {
-  lastSucceededAt: null,
-  consecutiveFailures: 0,
-  lastError: null,
-};
-
 /** 人の手が要る状態か（spec 5 章）。active は、あなたの番か要確認のプロセスがあるときだけ。 */
 export function needsHuman(state: IntakeState, statuses: readonly ProcessStatus[]): boolean {
   if (state === "answering" || state === "reviewing" || state === "needs_attention") return true;
@@ -41,15 +34,13 @@ export function needsHuman(state: IntakeState, statuses: readonly ProcessStatus[
 
 type ProcessFacts = { id: string; status: ProcessStatus; subIssueUrl: string | null };
 
-/** 承認の前は空配列。承認後は、承認された案と DB の進み具合から組む。 */
-async function processStatusesOf(db: Db, row: IntakeRow): Promise<ProcessFacts[]> {
-  const approval = await latestApproval(db, row.id);
-  if (!approval) return [];
-  const pfd = JSON.parse((await getDraft(db, approval.draft_id))!.pfd) as Pfd;
-  const project = (await getProject(db, row.project_id))!;
-
+/** intake_processes の生きた行（retired を除く）から、現在のタスク・観測した PR・sub-issue・人の完了を集める。 */
+export async function processProgressOf(
+  db: Db,
+  intakeId: string,
+): Promise<Map<string, ProcessProgress>> {
   const progress = new Map<string, ProcessProgress>();
-  for (const p of await listProcesses(db, row.id)) {
+  for (const p of await listProcesses(db, intakeId)) {
     if (p.retired_at !== null) continue;
     const task = p.current_task_id === null ? undefined : await getTask(db, p.current_task_id);
     const obs = p.current_task_id === null
@@ -74,6 +65,16 @@ async function processStatusesOf(db: Db, row: IntakeRow): Promise<ProcessFacts[]
         : { note: p.human_note ?? "", at: p.human_done_at },
     });
   }
+  return progress;
+}
+
+/** 承認の前は空配列。承認後は、承認された案と DB の進み具合から組む。 */
+async function processStatusesOf(db: Db, row: IntakeRow): Promise<ProcessFacts[]> {
+  const approval = await latestApproval(db, row.id);
+  if (!approval) return [];
+  const pfd = JSON.parse((await getDraft(db, approval.draft_id))!.pfd) as Pfd;
+  const project = (await getProject(db, row.project_id))!;
+  const progress = await processProgressOf(db, row.id);
 
   return computeProcessStatuses({
     pfd,

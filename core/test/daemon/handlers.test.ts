@@ -26,6 +26,7 @@ import { branchNameFor } from "../../src/domain/worktree.ts";
 import { randomUUID } from "node:crypto";
 import { makeRepo, tickWhenIdle, until } from "../helpers/repo.ts";
 import { fakeTracker } from "../helpers/tracker.ts";
+import { noopWatcher } from "../helpers/watcher.ts";
 import { getIntake, insertIntake, listIntakeRuns, updateIntake } from "../../src/db/intakes.ts";
 import { enqueueIntakeRun } from "../../src/intake/runner.ts";
 import { createDetachedWorktree, intakeWorktreePathFor } from "../../src/domain/worktree.ts";
@@ -58,7 +59,11 @@ beforeEach(async () => {
   process.env.DOCTRINE_STATE_DIR = join(root, "state");
 });
 afterEach(async () => {
-  await until(() => contexts.every((c) => c.running.size === 0 && c.runningIntakeRuns.size === 0));
+  await until(() =>
+    contexts.every((c) =>
+      c.running.size === 0 && c.runningIntakeRuns.size === 0 && c.intakeWatcher.idle()
+    )
+  );
   contexts.length = 0;
   await rm(root, { recursive: true, force: true });
   delete process.env.DOCTRINE_STATE_DIR;
@@ -84,6 +89,7 @@ async function context(events: ServerEvent[] = []): Promise<DaemonContext> {
     running: new Set(),
     tracker: fakeTracker(),
     runningIntakeRuns: new Set(),
+    intakeWatcher: noopWatcher(),
   };
   contexts.push(ctx);
   return ctx;
