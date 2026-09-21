@@ -1,6 +1,8 @@
 // テスト用の標本。画面はこれを使わない（画面のデータはデーモンから来る）
 import type { Project, Task, TaskDiff } from "./types";
 import type { ServerEvent } from "../../shared/protocol.ts";
+import type { Pfd } from "../../shared/intake/pfd.ts";
+import type { PrFact, ProcessStatus } from "../../shared/intake/processStatus.ts";
 import examplePatch from "../../shared/guide/examples/step-artifacts.patch?raw";
 
 export const NOW = Date.parse("2026-09-15T15:00:00+09:00");
@@ -192,4 +194,52 @@ index 0000000..fa49b07
 +}
 `,
   truncated: false,
+};
+
+/** PFD の図の標本。成果物 7・プロセス 5。given・goal・決定・人のプロセス・並列の段を含む */
+export const PFD_SAMPLE: Pfd = {
+  title: "注文の CSV 出力",
+  goal: ["release"],
+  artifacts: [
+    { id: "issue", name: "Issue", given: true, verify: "Issue の本文が読める" },
+    { id: "policy", name: "出力方針", given: true, decision: "q1", verify: "方針が回答に残っている" },
+    { id: "schema", name: "CSV スキーマ", given: false, verify: "列の一覧が docs にある" },
+    { id: "api", name: "出力 API", given: false, verify: "API のテストが通る" },
+    { id: "ui", name: "出力ボタン", given: false, verify: "ボタンを押すと CSV が落ちる" },
+    { id: "review", name: "受け入れ確認", given: false, verify: "確認のメモが残っている" },
+    { id: "release", name: "リリース", given: false, verify: "本番で CSV が落ちる" },
+  ],
+  processes: [
+    { id: "design", name: "スキーマを設計する", actor: "agent", inputs: ["issue", "policy"], outputs: ["schema"], purpose: "CSV の列を決める" },
+    { id: "build-api", name: "API を作る", actor: "agent", inputs: ["schema"], outputs: ["api"], purpose: "CSV を返す API を作る" },
+    { id: "build-ui", name: "ボタンを作る", actor: "agent", inputs: ["schema"], outputs: ["ui"], purpose: "画面にボタンを置く" },
+    { id: "approve", name: "受け入れる", actor: "human", inputs: ["api", "ui"], outputs: ["review"] },
+    { id: "ship", name: "リリースする", actor: "agent", inputs: ["review"], outputs: ["release"], purpose: "本番に出す" },
+  ],
+};
+
+const PFD_PR: PrFact = {
+  number: 42,
+  url: "https://github.com/todokr/doctrine/pull/42",
+  state: "OPEN",
+  baseRef: "develop",
+  mergedAt: null,
+  mergeCommit: null,
+};
+
+/** 状態の標本 2 組。A と B を合わせて 8 状態がすべて出る。見た目を確かめるための組で、実際に起きる遷移の組ではない */
+export const PFD_STATUSES_A: Record<string, ProcessStatus> = {
+  design: { state: "merged", taskId: "t1", pr: { ...PFD_PR, number: 41, state: "MERGED", mergedAt: "2026-09-15T10:00:00+09:00", mergeCommit: "abc1234" } },
+  "build-api": { state: "pr_open", taskId: "t2", pr: PFD_PR },
+  "build-ui": { state: "running", taskId: "t3" },
+  approve: { state: "done", note: "確認した", at: "2026-09-15T14:00:00+09:00" },
+  ship: { state: "waiting", missing: ["review"] },
+};
+
+export const PFD_STATUSES_B: Record<string, ProcessStatus> = {
+  design: { state: "needs_attention", taskId: "t1", reason: "task_stopped" },
+  "build-api": { state: "ready", blockedBy: null },
+  "build-ui": { state: "waiting", missing: ["schema"] },
+  approve: { state: "your_turn" },
+  ship: { state: "waiting", missing: ["review"] },
 };
