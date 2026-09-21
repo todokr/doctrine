@@ -1,4 +1,5 @@
 import type { Pfd } from "../../../../shared/intake/pfd.ts";
+import type { ValidateContext } from "../../../src/intake/pfd/validate.ts";
 
 /** PFD spec 6.1 の例を、検証に通る形で埋めたもの。呼ぶたびに新しいオブジェクトを返す。 */
 export function example(): Pfd {
@@ -79,6 +80,8 @@ export function example(): Pfd {
     ],
   };
 }
+
+export const noContext: ValidateContext = { answeredQuestionIds: new Set(), frozen: null };
 
 /** example() に、質問 q1 の回答を指す成果物 policy を足し、プロセス 2 の入力に加えたもの。 */
 export function withDecision(): Pfd {
