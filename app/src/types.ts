@@ -1,4 +1,5 @@
 // 画面が扱う形。デーモンにつなぐときに shared/protocol.ts の型へ寄せる
+import type { MovedBlock } from "../../shared/diff/moves.ts";
 import type {
   CommandResult,
   DiffFileMeta,
@@ -10,7 +11,7 @@ import type {
 } from "../../shared/protocol.ts";
 import type { Diagram, Guide } from "../../shared/guide/schema.ts";
 
-export type { CommandResult, Diagram, Guide, ReviewEntry, ReviewFile, TaskContext, TaskDiff, TaskGuide };
+export type { CommandResult, Diagram, Guide, MovedBlock, ReviewEntry, ReviewFile, TaskContext, TaskDiff, TaskGuide };
 
 /**
  * デーモンが知らない状態を返したとき用。版のずれ（新しい dctld ＋ 古い画面）で起こりうる。
@@ -32,6 +33,8 @@ export type DiffFile = DiffFileMeta & {
   hunks: DiffHunk[];
   /** patch が打ち切られて、このファイルの中身までは届かなかった */
   cutOff: boolean;
+  /** このファイルが移動元（from）か移動先（to）に出るブロック。patch のテキストから検出したもの */
+  moves: MovedBlock[];
 };
 
 export type Task = {

@@ -1,11 +1,12 @@
 import { runCommand } from "../util/exec.ts";
 
 /**
- * リネームだけが「前のパス」を持つ。他の状態で old_path を読めないようにし、
- * 「R なのに old_path が無い／R でないのに old_path がある」という不正な状態を
+ * リネームとコピーだけが「前のパス」を持つ。他の状態で old_path を読めないようにし、
+ * 「R / C なのに old_path が無い／それ以外なのに old_path がある」という不正な状態を
  * 型で作れなくする。
  */
 type Renamed = { status: "R"; old_path: string };
+type Copied = { status: "C"; old_path: string };
 type NotRenamed = { status: "A" | "M" | "D" };
 
 /**
@@ -16,7 +17,7 @@ type NotRenamed = { status: "A" | "M" | "D" };
 type Counted = { binary: false; additions: number; deletions: number };
 type NotCounted = { binary: true };
 
-export type DiffFile = { path: string } & (Renamed | NotRenamed) & (Counted | NotCounted);
+export type DiffFile = { path: string } & (Renamed | Copied | NotRenamed) & (Counted | NotCounted);
 
 export type DiffResult = { files: DiffFile[]; patch: string; truncated: boolean };
 
@@ -112,16 +113,16 @@ function splitZ(s: string): string[] {
 /**
  * `M\0b.bin\0R075\0old.txt\0new.txt\0A\0new.txt\0` を読む。
  * R / C だけ類似度スコアが付き、パスが旧・新の2つ来る。
- * C（コピー）は `-C` を渡さない限り出ないが、来ても R として扱う
- * — レビューする人にとって「別の場所から来た」以上の区別に意味が無い。
+ * C（コピー）は R と別の状態のまま返す。コピーは元のファイルが残るので、
+ * 「移動」と表示すると元が消えたように読めて事実に反する。
  */
-function parseNameStatus(out: string): Map<string, Renamed | NotRenamed> {
+function parseNameStatus(out: string): Map<string, Renamed | Copied | NotRenamed> {
   const parts = splitZ(out);
-  const result = new Map<string, Renamed | NotRenamed>();
+  const result = new Map<string, Renamed | Copied | NotRenamed>();
   for (let i = 0; i < parts.length;) {
     const letter = parts[i][0];
     if (letter === "R" || letter === "C") {
-      result.set(parts[i + 2], { status: "R", old_path: parts[i + 1] });
+      result.set(parts[i + 2], { status: letter, old_path: parts[i + 1] });
       i += 3;
     } else {
       // T（型の変更）・U（未マージ）は M として見せる。どちらも「中身が変わった」。
@@ -188,9 +189,9 @@ export async function computeDiff(o: {
   patchLimitBytes?: number;
 }): Promise<DiffResult> {
   const [nameStatus, numstat, rawPatch] = await Promise.all([
-    gitDiff(o.worktreePath, ["--name-status", "-z", "-M"], o.fromRef, o.toRef),
-    gitDiff(o.worktreePath, ["--numstat", "-z", "-M"], o.fromRef, o.toRef),
-    gitDiff(o.worktreePath, ["-M"], o.fromRef, o.toRef),
+    gitDiff(o.worktreePath, ["--name-status", "-z", "-M", "-C"], o.fromRef, o.toRef),
+    gitDiff(o.worktreePath, ["--numstat", "-z", "-M", "-C"], o.fromRef, o.toRef),
+    gitDiff(o.worktreePath, ["-M", "-C"], o.fromRef, o.toRef),
   ]);
 
   const statuses = parseNameStatus(nameStatus);
@@ -208,8 +209,8 @@ export async function computeDiff(o: {
       throw new Error(`numstat に ${path} の行数情報が無い（name-status とずれている）`);
     }
     files.push(
-      s.status === "R"
-        ? { path, status: "R", old_path: s.old_path, ...c }
+      s.status === "R" || s.status === "C"
+        ? { path, status: s.status, old_path: s.old_path, ...c }
         : { path, status: s.status, ...c },
     );
   }

@@ -1593,7 +1593,8 @@ test("task.diff は worktree の未コミット・未追跡の変更を返す", 
     "approval で止まるまで",
   );
   const wt = (await getTask(ctx.db, t.id))!.worktree_path!;
-  await writeFile(join(wt, "added.txt"), "x\n");
+  // 旧 README.md（"x\n"）と同じ中身にすると、-C が README.md からのコピーとして拾う
+  await writeFile(join(wt, "added.txt"), "brand new file\n");
   await writeFile(join(wt, "README.md"), "y\n");
 
   const d = await h("task.diff", { task_id: t.id }, NOOP_CONN) as {

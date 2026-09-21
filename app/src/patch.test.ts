@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { SAMPLE_DIFF } from "./fixtures";
+import { SAMPLE_DIFF, SAMPLE_MOVE_DIFF } from "./fixtures";
 import { buildDiff, parsePatch } from "./patch";
 import type { TaskDiff } from "./types";
 
@@ -56,6 +56,34 @@ describe("buildDiff", () => {
   test("patch のファイル数が files を超えていたら、突き合わせの前提が崩れているので落とす", () => {
     const broken: TaskDiff = { ...SAMPLE_DIFF, files: SAMPLE_DIFF.files.slice(0, 1) };
     expect(() => buildDiff(broken)).toThrow(/patch のファイル数/);
+  });
+
+  test("関数を別ファイルへ移した diff で、移動元と移動先の両方に同じ MovedBlock が付く", () => {
+    const files = buildDiff(SAMPLE_MOVE_DIFF);
+    const [a, b] = files;
+    expect(a.moves).toHaveLength(1);
+    expect(b.moves).toHaveLength(1);
+    expect(a.moves[0].id).toBe(b.moves[0].id);
+    expect(a.moves[0]).toMatchObject({
+      from: { path: "src/a.ts", startLine: 2, endLine: 6 },
+      to: { path: "src/b.ts", startLine: 1, endLine: 5 },
+    });
+  });
+
+  test("移動が無い diff では moves が空", () => {
+    for (const f of buildDiff(SAMPLE_DIFF)) expect(f.moves).toEqual([]);
+  });
+
+  test("files[] に無いパスの move は throw せず落とし、相手側には付いたままにする", () => {
+    // patch のヘッダは src/b.ts のまま、files[] だけ src/c.ts にする。区画の数は合っている
+    const renamed: TaskDiff = {
+      ...SAMPLE_MOVE_DIFF,
+      files: [SAMPLE_MOVE_DIFF.files[0], { ...SAMPLE_MOVE_DIFF.files[1], path: "src/c.ts" }],
+    };
+    const [a, c] = buildDiff(renamed);
+    expect(c.path).toBe("src/c.ts");
+    expect(c.moves).toEqual([]);
+    expect(a.moves).toHaveLength(1);
   });
 });
 

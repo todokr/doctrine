@@ -86,6 +86,24 @@ test("削除とリネームを status と old_path で返す", async () => {
   assert.ok(!("old_path" in readme), "R 以外は old_path を持たない");
 });
 
+test("コピーされたファイルは status C と old_path を返す", async () => {
+  await writeFile(join(repo, "keep.txt"), "1\n2\n3\n4\n5\n6\n7\n8\n");
+  await run("git", ["-C", repo, "add", "."]);
+  await run("git", ["-C", repo, "commit", "-m", "add keep"]);
+  await writeFile(join(repo, "copied.txt"), "1\n2\n3\n4\n5\n6\n7\n8\n");
+  // -C は同じ diff の中で変更されたファイルからのコピーしか拾わないので、元も1行変える
+  await writeFile(join(repo, "keep.txt"), "1\n2\n3\n4\n5\n6\n7\nchanged\n");
+  const d = await diffNow();
+  const byPath = new Map(d.files.map((f) => [f.path, f]));
+  const copied = byPath.get("copied.txt")!;
+  assert.equal(copied.status, "C");
+  if (copied.status === "C") {
+    assert.equal(copied.old_path, "keep.txt");
+  }
+  assert.equal(byPath.get("keep.txt")!.status, "M");
+  assert.ok(!("old_path" in byPath.get("keep.txt")!), "C 以外は old_path を持たない");
+});
+
 test("バイナリは binary: true にして行数を数えない", async () => {
   await writeFile(join(repo, "b.bin"), Buffer.from([0, 1, 2, 0, 3]));
   const d = await diffNow();
