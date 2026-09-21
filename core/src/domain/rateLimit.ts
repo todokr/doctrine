@@ -1,5 +1,4 @@
 import type { RateLimitObservation } from "../adapter/types.ts";
-import type { StepRunStatus } from "../db/schema.ts";
 import type { StepOutcome } from "./stepRunner.ts";
 
 /**
@@ -89,7 +88,7 @@ export function classifyRateLimit(o: {
  * step_runs から数える（デーモンの再起動をまたいでも同じ数になる）。
  */
 export function consecutiveRateLimited(
-  runs: readonly { step_id: string; status: StepRunStatus }[],
+  runs: readonly { step_id: string; status: string }[],
   stepId: string,
 ): number {
   let n = 0;

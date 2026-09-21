@@ -10,6 +10,7 @@ import { createWarningLog } from "../../src/daemon/warnings.ts";
 import { openDbOn } from "../../src/db/migrate.ts";
 import { createMockAdapter } from "../../src/adapter/mock.ts";
 import type { DaemonContext } from "../../src/daemon/handlers.ts";
+import { fakeTracker } from "../helpers/tracker.ts";
 
 let root: string;
 const daemons: { stop(): Promise<void> }[] = [];
@@ -163,6 +164,8 @@ test("スケジューリングの1周が失敗してもデーモンは落ちず�
       throw new Error("使わない");
     },
     running: new Set(),
+    tracker: fakeTracker(),
+    runningIntakeRuns: new Set(),
     warnings: createWarningLog({ broadcast: () => {}, write: (l) => logged.push(l) }),
   };
 

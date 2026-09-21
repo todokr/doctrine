@@ -64,7 +64,7 @@ export function logPathFor(
   return join(logRoot, taskId, `${stepId}.${attempt}.log`);
 }
 
-type Log = { write(chunk: string): void; close(): Promise<void> };
+export type Log = { write(chunk: string): void; close(): Promise<void> };
 
 /**
  * 行頭の時刻。イベント自身も timestamp を持つが、ログに要るのは
@@ -78,7 +78,7 @@ export function stamp(at = new Date()): string {
 }
 
 /** 1行をログファイルと log.line の両方へ。時刻はここでだけ付ける。 */
-function emitLine(log: Log, deps: RunnerDeps, line: string): void {
+export function emitLine(log: Log, deps: RunnerDeps, line: string): void {
   const stamped = `${stamp()} ${line}`;
   // log.line はアプリ側で1要素=1行として貯めるので改行を付けない。
   log.write(stamped + "\n");
@@ -112,7 +112,7 @@ function lineBuffer(emit: (line: string) => void): { push(c: string): void; flus
  * このためログの書き込み失敗は握りつぶし、以降の write を無視するだけに
  * とどめる — 例外を投げて daemon 全体（他タスクも含む）を落とすことは絶対にしない。
  */
-async function openLog(path: string): Promise<Log> {
+export async function openLog(path: string): Promise<Log> {
   let file: Deno.FsFile | null = null;
   let failed = false;
 
@@ -305,7 +305,7 @@ export async function runAgentStep(
  * アダプタを呼び、イベントをログへ流し、結果が出るまで待つ。agent と guide で共通。
  * 子プロセスの通知と rate_limit_event の収集もここで行う。
  */
-async function driveAgent(
+export async function driveAgent(
   o: {
     sessionId: string;
     resume: boolean;

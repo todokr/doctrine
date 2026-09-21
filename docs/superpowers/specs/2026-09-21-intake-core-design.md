@@ -253,7 +253,7 @@ export type Pfd = { title: string; goal: string[]; artifacts: Artifact[]; proces
 | PFD と質問の受け取り方 | `--json-schema` の構造化出力。ファイルに書かせない。形は下の `DecomposerOutput` | `core/src/domain/stepRunner.ts` の `runGuideStep` と同じ型である。ファイルを読む経路（realpath の検査など）が要らず、書き込みの道具を許さずに済む |
 | 実行の種類（`purpose`） | `investigate`: 開始時と、調査で落ちた後のやり直し。`questions` だけを許す。`decompose`: 回答の後・差し戻しの後・分解で落ちた後のやり直し。`questions` と `pfd` のどちらも許す。`revise`: 改訂に入った後。`decompose` と同じ出力を許し、prompt に承認済みの計画と固定集合を載せる | 調査で落ちたものを `decompose` で再開すると、質問を一度も出さずに分解へ入る（5 章で `needs_attention → investigating` を持つ理由） |
 | 会話 | 開始から最初の承認までは 1 つの会話（調査 → 回答 → 分解 → 差し戻し）。改訂に入るときに新しい会話を始め、承認済みの計画・固定集合・決定の記録・改訂のコメントを prompt に載せる。`intake.retry` は同じ会話を続ける（会話が作られる前に落ちたなら新しく始める）。最初の呼び出しが上限で弾かれたら、会話の記録を消して新しい id で始め直す（`engine.ts` のタスクと同じ） | R-6（差し戻しは同じ会話の続き）。改訂は数日後で baseBranch も進んでいるので、古い会話を続けない |
-| 検証に通らないとき | 違反の一覧を同じ会話へ返して直させる。やり直しは毎回 `adapter.resume` の新しい子プロセスなので、`intake_runs` の行が 1 回ごとに立つ。**同じ `purpose` の行を新しい順に見て、検証落ち（`status = 'failed'` かつ `issues` あり）が 3 行続いたら** `needs_attention`（`invalid_output`）にする。上限待ちの行（`rate_limited`）は数えず、連続も切らない。`attempt` は検証落ちでだけ進める | Review Guide の既定（自分へ戻る・3 回）と揃える。数え方は `core/src/domain/rateLimit.ts` の `consecutiveRateLimited` が `step_runs` の連続を数えるのと同じ形である |
+| 検証に通らないとき | 違反の一覧を同じ会話へ返して直させる。やり直しは毎回 `adapter.resume` の新しい子プロセスなので、`intake_runs` の行が 1 回ごとに立つ。**同じ `purpose` の行を新しい順に見て、検証落ち（`status = 'failed'` かつ `issues` あり）が 3 行続いたら** `needs_attention`（`invalid_output`）にする。上限待ちの行（`rate_limited`）は数えず、連続も切らない。`attempt` は実行を新しく立てるたびに進め、上限待ちからの再開では進めない（ログのパスを実行ごとに分けるため） | Review Guide の既定（自分へ戻る・3 回）と揃える。数え方は `core/src/domain/rateLimit.ts` の `consecutiveRateLimited` が `step_runs` の連続を数えるのと同じ形である |
 | エージェント自体の失敗 | result が ok でない、または子が落ちた場合は、ただちに `needs_attention`（`agent_failed`）にする。やり直しは人が `intake.retry` で行う | PRD 8 章の「エージェントの失敗 → 要確認」 |
 | 実行枠（D-6） | **全体枠だけを取り、プロジェクト枠は取らない。** `currentUsage`（`core/src/domain/scheduler.ts`）が `intake_runs.status = 'running'` の数を全体枠に足す。受付は tick の中で、queued のタスクより先に `intake_runs.status = 'queued'` を受け付ける | 全体枠の理由（マシンの負荷と API のコスト）は分解にも当たる。プロジェクト枠の理由（同じリポジトリでのマージの困難）は、読むだけの分解には当たらない。分解は人を待たせているので先に通す。D-6 の「同じ実行枠」を、枠の理由が当てはまる分だけ同じ規則に従う、と読む |
 | 上限待ち（D-6・PRD 8 章） | `engine.ts` の `decideRateLimit` と同じ判定を使う。待つなら `intake_runs` を `rate_limited` で閉じ、`intakes.rate_limited_until` を入れる。tick が期限の来たものを `queued` の実行として立て直し、同じ会話で再開する。`hasActiveRateLimit` は Intake の上限待ちも数える | 上限はアカウント全体に掛かる。待ちを sleep にしない理由もタスクと同じで、再起動で待ちが消えないようにするためである |
@@ -633,8 +633,12 @@ S の要求は、扱うものを同じ表に入れる。
 
 ## 18. 決めていないこと
 
-- `structured_output` のキー名（`core/src/adapter/claude.ts` の仮置き）と、`--json-schema` に渡せる形の制約
-- 会話が作業ディレクトリに結びつくこと（7 章で worktree のパスを固定する理由）の実測
+- `structured_output` のキー名（`core/src/adapter/claude.ts` の仮置き）と、`--json-schema` に渡せる形の制約。
+  **未実測（2026-09-21）**: 実装の作業では `claude` の実行が権限で拒否された（`claude` は npx のエイリアスで、実行に承認が要る）。
+  `structured_output` の仮置きのまま、トップレベルを 1 つのオブジェクトにし `nullable` を使う形で進めている。
+  実測するときは、`decomposerJsonSchema()` の出力を渡してエラーにならないか、result 行のどのキーにオブジェクトが入るかを見る
+- 会話が作業ディレクトリに結びつくこと（7 章で worktree のパスを固定する理由）の実測。**未実測（2026-09-21）**: 同じ理由。
+  worktree のパスを固定する作りは、結びつくかに関わらず変えない（人の作業ツリーを読ませないため）
 - `closeIssue` の `stateReason` と、親の `subIssues` の取得の形の実測
 - 分解のやり直し回数 3 と、見張りの周期 120 秒が実際に妥当か。成功の基準（PRD 10 章）を回して見直す
 - 質問の `Material` に、図以外の種類（スクリーンショットなど）が要るか

@@ -112,7 +112,7 @@ function head(s: string): string {
 }
 
 /** step_runs.permission_denials に入る文字列（形は protocol の StepRunDenials）。 */
-function denialsColumn(denials: PermissionDenial[]): string | null {
+export function denialsColumn(denials: PermissionDenial[]): string | null {
   if (denials.length === 0) return null;
   const kept: StepRunDenials = {
     total: denials.length,

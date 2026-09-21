@@ -1,13 +1,25 @@
 import { getProject, type TaskRow } from "../db/tasks.ts";
-import type { Db } from "../db/schema.ts";
+import type { Db, IntakeRunRow, IntakeState } from "../db/schema.ts";
 import { commitStepBoundary, StateConflictError } from "../db/boundary.ts";
+import { IntakeStateConflictError, updateIntake } from "../db/intakes.ts";
+import { enqueueIntakeRun } from "../intake/runner.ts";
 import { holdsGlobalSlot, holdsProjectSlot } from "./states.ts";
 
 export const DEFAULT_GLOBAL_LIMIT = 4;
 
 export type SlotUsage = { global: number; byProject: Map<number, number> };
 
-/** カウンタは持たない。状態から数える。持てば必ず状態とズレる。 */
+/**
+ * 調査・分解の実行が走っている（あるいは、上限待ちを解かれて走る）Intake の状態。
+ * 上限待ちの Intake が中止や要確認に移っても rate_limited_until は残りうるので、
+ * Intake を見る 3 つの関数はどれもこの状態に絞る。
+ */
+const RUNNING_INTAKE_STATES: IntakeState[] = ["investigating", "decomposing"];
+
+/**
+ * カウンタは持たない。状態から数える。持てば必ず状態とズレる。
+ * Intake の実行は全体枠だけを取り、プロジェクト枠は取らない（spec 7 章）。
+ */
 export async function currentUsage(db: Db): Promise<SlotUsage> {
   const rows = await db.selectFrom("tasks").select(["project_id", "state"])
     .where("state", "in", ["running", "suspended", "paused", "rate_limited"])
@@ -20,6 +32,11 @@ export async function currentUsage(db: Db): Promise<SlotUsage> {
       usage.byProject.set(r.project_id, (usage.byProject.get(r.project_id) ?? 0) + 1);
     }
   }
+  const intakeRuns = await db.selectFrom("intake_runs")
+    .select((eb) => eb.fn.countAll<number>().as("n"))
+    .where("status", "=", "running")
+    .executeTakeFirstOrThrow();
+  usage.global += Number(intakeRuns.n);
   return usage;
 }
 
@@ -59,11 +76,73 @@ export async function releaseDueRateLimited(
   return released;
 }
 
-/** 上限待ちのタスクが1件でもいるか。上限はアカウント全体に掛かる。 */
+/**
+ * 期限の来た Intake の上限待ちを解く。rate_limited_until を null に戻し、最後の行と同じ
+ * purpose の queued の行を resume: true で立てる。戻した Intake の id を返す。
+ * 上限待ちは状態にせず、investigating / decomposing のまま rate_limited_until で表す（spec 5 章）。
+ */
+export async function releaseDueIntakeRateLimited(
+  db: Db,
+  o: { logRoot: string; now?: Date },
+): Promise<string[]> {
+  const due = await db.selectFrom("intakes").select(["id", "state"])
+    .where("state", "in", RUNNING_INTAKE_STATES)
+    .where("rate_limited_until", "<=", (o.now ?? new Date()).toISOString())
+    .orderBy("rate_limited_until", "asc")
+    .execute();
+
+  const released: string[] = [];
+  for (const { id, state } of due) {
+    const last = await db.selectFrom("intake_runs").select("purpose")
+      .where("intake_id", "=", id).orderBy("id", "desc").executeTakeFirst();
+    if (last === undefined) continue;
+    try {
+      await db.transaction().execute(async (trx) => {
+        await updateIntake(trx, id, { rate_limited_until: null }, { requireState: state });
+        await enqueueIntakeRun(trx, id, last.purpose, { logRoot: o.logRoot, resume: true });
+      });
+      released.push(id);
+    } catch (e) {
+      // 読んでから書くまでに人が中止した。新しい状態を所有しているのは先に書いた側なので見送る。
+      if (!(e instanceof IntakeStateConflictError)) throw e;
+    }
+  }
+  return released;
+}
+
+/**
+ * 上限待ちがいるか。上限はアカウント全体に掛かる。
+ * タスクの rate_limited と、Intake の rate_limited_until の両方を見る。
+ */
 export async function hasActiveRateLimit(db: Db): Promise<boolean> {
-  const row = await db.selectFrom("tasks").select("id")
+  const task = await db.selectFrom("tasks").select("id")
     .where("state", "=", "rate_limited").executeTakeFirst();
-  return row !== undefined;
+  if (task !== undefined) return true;
+  const intake = await db.selectFrom("intakes").select("id")
+    .where("state", "in", RUNNING_INTAKE_STATES)
+    .where("rate_limited_until", "is not", null)
+    .executeTakeFirst();
+  return intake !== undefined;
+}
+
+/**
+ * 全体枠の空きの数だけ、queued の Intake の実行を id 順に返す。プロジェクト枠は見ない。
+ * 分解は人を待たせているので、tick の中でタスクより先に受け付ける。
+ */
+export async function selectAdmissibleIntakeRuns(
+  db: Db,
+  globalLimit: number = DEFAULT_GLOBAL_LIMIT,
+): Promise<IntakeRunRow[]> {
+  const free = globalLimit - (await currentUsage(db)).global;
+  if (free <= 0) return [];
+  return await db.selectFrom("intake_runs")
+    .innerJoin("intakes", "intakes.id", "intake_runs.intake_id")
+    .selectAll("intake_runs")
+    .where("intake_runs.status", "=", "queued")
+    .where("intakes.state", "in", RUNNING_INTAKE_STATES)
+    .orderBy("intake_runs.id", "asc")
+    .limit(free)
+    .execute();
 }
 
 /**

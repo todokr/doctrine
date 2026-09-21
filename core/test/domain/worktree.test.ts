@@ -7,11 +7,15 @@ import { tmpdir } from "node:os";
 import { basename, join, sep } from "node:path";
 import {
   branchNameFor,
+  changedPaths,
+  createDetachedWorktree,
   createWorktree,
   findOrphans,
   hasUncommittedChanges,
+  intakeWorktreePathFor,
   listWorktrees,
   removeWorktree,
+  restoreWorktree,
   slugify,
   stateDir,
   UncommittedChangesError,
@@ -290,4 +294,40 @@ test("slugify は40文字を超えるBMP日本語タイトルをちょうど40�
 
 test("branchNameFor は記号だけのタイトルで doctrine/<id> にフォールバックする", () => {
   assert.equal(branchNameFor("abc123", "!!! ???"), "doctrine/abc123");
+});
+
+test("intakeWorktreePathFor は worktreePathFor と同じ置き場の intake-<id> を返す", () => {
+  process.env.DOCTRINE_STATE_DIR = join(root, "state");
+  assert.equal(
+    intakeWorktreePathFor(repo, "i1"),
+    join(root, "state", "worktrees", basename(repo), "intake-i1"),
+  );
+});
+
+test("createDetachedWorktree はブランチを作らない", async () => {
+  const wt = join(root, "wt", "intake-i1");
+  const created = await createDetachedWorktree({
+    repoPath: repo,
+    worktreePath: wt,
+    baseBranch: "main",
+  });
+  assert.equal(created, await realpath(wt));
+  assert.ok((await stat(join(wt, "README.md"))).isFile());
+  await assert.rejects(run("git", ["-C", wt, "symbolic-ref", "-q", "HEAD"]));
+  const { stdout } = await run("git", ["-C", repo, "branch", "--format=%(refname:short)"]);
+  assert.deepEqual(stdout.trim().split("\n"), ["main"]);
+});
+
+test("changedPaths と restoreWorktree", async () => {
+  const wt = join(root, "wt", "intake-i1");
+  await createDetachedWorktree({ repoPath: repo, worktreePath: wt, baseBranch: "main" });
+  assert.deepEqual(await changedPaths(wt), []);
+
+  await writeFile(join(wt, "README.md"), "changed\n");
+  await writeFile(join(wt, "new.txt"), "n\n");
+  assert.deepEqual((await changedPaths(wt)).sort(), ["README.md", "new.txt"]);
+
+  await restoreWorktree(wt);
+  assert.deepEqual(await changedPaths(wt), []);
+  assert.equal(await readFile(join(wt, "README.md"), "utf8"), "hi\n");
 });

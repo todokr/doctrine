@@ -5,6 +5,8 @@ import { createClaudeAdapter } from "../adapter/claude.ts";
 import { defaultProbe, recoverOnStartup, type WorkflowLookup } from "../domain/recovery.ts";
 import { findOrphans } from "../domain/worktree.ts";
 import { getProject, listProjects, listTasks, type TaskRow } from "../db/tasks.ts";
+import { listIntakes } from "../db/intakes.ts";
+import { ghTracker } from "../github/ghTracker.ts";
 import type { Db } from "../db/schema.ts";
 import { DEFAULT_GLOBAL_LIMIT } from "../domain/scheduler.ts";
 import { parseWorkflow } from "../workflow/schema.ts";
@@ -129,6 +131,8 @@ export async function startDaemon(o: {
     broadcast: () => {},
     loadWorkflow: loadWorkflowFromDisk,
     running: new Set(),
+    tracker: ghTracker(),
+    runningIntakeRuns: new Set(),
     // broadcast は server を作った後に差し替わる。警告は間接に呼ぶ。
     warnings: createWarningLog({ broadcast: (ev) => ctx.broadcast(ev) }),
   };
@@ -152,8 +156,11 @@ export async function startDaemon(o: {
 
   // 孤児の照合（自動削除はしない）
   for (const project of await listProjects(db)) {
-    const known = (await listTasks(db, { projectId: project.id }))
-      .map((t) => t.worktree_path).filter((p): p is string => p !== null);
+    const known = [
+      ...(await listTasks(db, { projectId: project.id })).map((t) => t.worktree_path),
+      ...(await listIntakes(db, { projectId: project.id, includeClosed: true }))
+        .map((i) => i.worktree_path),
+    ].filter((p): p is string => p !== null);
     for (const orphan of await findOrphans(project.path, known)) {
       ctx.warnings.push(`対応するタスクのない worktree: ${orphan}`);
     }

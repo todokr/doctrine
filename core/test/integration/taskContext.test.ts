@@ -15,6 +15,7 @@ import { createWarningLog } from "../../src/daemon/warnings.ts";
 import { createMockAdapter } from "../../src/adapter/mock.ts";
 import type { ServerEvent } from "../../../shared/protocol.ts";
 import { makeRepo, tickWhenIdle, until } from "../helpers/repo.ts";
+import { fakeTracker } from "../helpers/tracker.ts";
 import type { ReviewFile } from "../../src/domain/reviewFiles.ts";
 import type { CommandResult, ReviewEntry } from "../../src/domain/taskContext.ts";
 
@@ -77,6 +78,8 @@ async function context() {
     broadcast: (ev) => events.push(ev),
     loadWorkflow: loadWorkflowFromDisk,
     running: new Set(),
+    tracker: fakeTracker(),
+    runningIntakeRuns: new Set(),
     warnings: createWarningLog({ broadcast: () => {}, write: () => {} }),
   };
   contexts.push(ctx);

@@ -115,7 +115,7 @@ function projectYamlFor(baseBranch: string | undefined): string {
 }
 
 /** 調べるだけの役（計画・審査・ガイド）に渡す Bash の許可。書き込むコマンドは含めない */
-const READ_ONLY_TOOLS = [
+export const READ_ONLY_TOOLS = [
   "Bash(git status:*)",
   "Bash(git diff:*)",
   "Bash(git log:*)",

@@ -27,9 +27,14 @@ import { recentRateLimitSamples } from "../db/rateLimits.ts";
 import { normalizeResetsAt } from "../domain/rateLimit.ts";
 import {
   hasActiveRateLimit,
+  releaseDueIntakeRateLimited,
   releaseDueRateLimited,
   selectAdmissible,
+  selectAdmissibleIntakeRuns,
 } from "../domain/scheduler.ts";
+import { getIntake, listIntakes, updateIntake, updateIntakeRun } from "../db/intakes.ts";
+import { claimIntakeRun, runIntakeRun } from "../intake/runner.ts";
+import type { Tracker } from "../github/tracker.ts";
 import { applyApproval, runTask } from "../domain/engine.ts";
 import {
   branchNameFor,
@@ -67,6 +72,10 @@ export type DaemonContext = {
     name: string,
   ): Promise<{ workflow: Workflow; warnings: string[] }>;
   running: Set<string>;
+  /** Issue の読み込み。調査・分解の prompt に本文とコメントを載せるのに使う。 */
+  tracker: Tracker;
+  /** 走らせている Intake の実行（intake_runs.id）。tick の再入ガード。running とは別に持つ。 */
+  runningIntakeRuns: Set<number>;
   /** 後始末を拒否したときなど、人に見せる必要のある警告 */
   warnings: WarningLog;
 };
@@ -461,8 +470,11 @@ export function createHandler(ctx: DaemonContext): Handler {
       case "worktree.list": {
         const out: { project: string; orphans: string[] }[] = [];
         for (const project of await listProjects(ctx.db)) {
-          const known = (await listTasks(ctx.db, { projectId: project.id }))
-            .map((t) => t.worktree_path).filter((p): p is string => p !== null);
+          const known = [
+            ...(await listTasks(ctx.db, { projectId: project.id })).map((t) => t.worktree_path),
+            ...(await listIntakes(ctx.db, { projectId: project.id, includeClosed: true }))
+              .map((i) => i.worktree_path),
+          ].filter((p): p is string => p !== null);
           out.push({ project: project.path, orphans: await findOrphans(project.path, known) });
         }
         return out;
@@ -646,6 +658,61 @@ export async function tick(ctx: DaemonContext): Promise<void> {
   }
 }
 
+/**
+ * queued の Intake の実行を、全体枠の空きの分だけ走らせる。枠は claim（queued → running）で
+ * 取るので、続くタスクの受付の currentUsage にすぐ映る。
+ */
+async function startIntakeRuns(ctx: DaemonContext): Promise<void> {
+  for (const run of await selectAdmissibleIntakeRuns(ctx.db, ctx.globalLimit)) {
+    if (ctx.runningIntakeRuns.has(run.id)) continue;
+    ctx.runningIntakeRuns.add(run.id);
+    try {
+      if (!await claimIntakeRun(ctx.db, run.id)) {
+        ctx.runningIntakeRuns.delete(run.id);
+        continue;
+      }
+    } catch (e) {
+      ctx.runningIntakeRuns.delete(run.id);
+      throw e;
+    }
+
+    void runIntakeRun(ctx.db, run.id, {
+      db: ctx.db,
+      adapter: ctx.adapter,
+      tracker: ctx.tracker,
+      logRoot: ctx.logRoot,
+    })
+      .catch(async (e) => {
+        // 実行の途中の例外を握りつぶすと .finally() が同じ理由で再 reject し、
+        // unhandled rejection でデーモンごと落ちる。ここで受け止め、行を failed、
+        // Intake を要確認に倒して警告に残す。この後始末自体も reject させない。
+        const message = `Intake ${run.intake_id} の実行中に例外が発生しました: ${
+          (e as Error).message
+        }`;
+        try {
+          await updateIntakeRun(ctx.db, run.id, {
+            status: "failed",
+            ended_at: new Date().toISOString(),
+          });
+          const intake = await getIntake(ctx.db, run.intake_id);
+          if (intake && (intake.state === "investigating" || intake.state === "decomposing")) {
+            await updateIntake(ctx.db, intake.id, {
+              state: "needs_attention",
+              attention_reason: JSON.stringify({ kind: "agent_failed", runId: run.id, message }),
+              rate_limited_until: null,
+              child_pid: null,
+              child_started_at: null,
+            }, { requireState: intake.state });
+          }
+          ctx.warnings.push(message);
+        } catch (e2) {
+          ctx.warnings.push(`${message}（要確認への記録にも失敗: ${(e2 as Error).message}）`);
+        }
+      })
+      .finally(() => ctx.runningIntakeRuns.delete(run.id));
+  }
+}
+
 async function tickOnce(ctx: DaemonContext): Promise<void> {
   for (const taskId of await releaseDueRateLimited(ctx.db)) {
     ctx.broadcast({
@@ -655,10 +722,14 @@ async function tickOnce(ctx: DaemonContext): Promise<void> {
       to: "queued",
     });
   }
+  await releaseDueIntakeRateLimited(ctx.db, { logRoot: ctx.logRoot });
   // 上限はアカウント全体に掛かるので、待っている間に新しいタスクを始めても
   // 同じように弾かれ、step_run と worktree だけが増える。既に running のタスクは
   // 止めない（自分で上限に当たれば同じ経路で待ちに入る）。
   if (await hasActiveRateLimit(ctx.db)) return;
+
+  // 調査・分解は人を待たせているので、queued のタスクより先に枠を取る。
+  await startIntakeRuns(ctx);
 
   for (const task of await selectAdmissible(ctx.db, ctx.globalLimit)) {
     if (ctx.running.has(task.id)) continue;
