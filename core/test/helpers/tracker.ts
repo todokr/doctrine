@@ -4,21 +4,33 @@ import type { Tracker } from "../../src/github/tracker.ts";
 type ListOptions = Parameters<Tracker["listIssues"]>[1];
 
 /**
- * readIssue・status・listIssues だけを実装した Tracker。呼ばれた URL を reads に、
- * listIssues に渡された条件を listCalls に積む。ほかのメソッドは、使うテストが現れたときに足す。
+ * readIssue・status・listIssues・closeIssue だけを実装した Tracker。呼ばれた URL を reads に、
+ * listIssues に渡された条件を listCalls に、closeIssue の呼び出しを closes に積む。
+ * ほかのメソッドは、使うテストが現れたときに足す。
  */
 export function fakeTracker(
   issue: Partial<IssueDetail> = {},
-  o: { status?: GhStatus; issues?: IssueSummary[]; failList?: boolean } = {},
-): Tracker & { reads: string[]; listCalls: ListOptions[] } {
+  o: {
+    status?: GhStatus;
+    issues?: IssueSummary[];
+    failList?: boolean;
+    failClose?: boolean;
+  } = {},
+): Tracker & {
+  reads: string[];
+  listCalls: ListOptions[];
+  closes: { url: string; reason: "completed" | "not_planned" }[];
+} {
   const reads: string[] = [];
   const listCalls: ListOptions[] = [];
+  const closes: { url: string; reason: "completed" | "not_planned" }[] = [];
   const unimplemented = () => {
     throw new Error("fakeTracker では未実装です");
   };
   return {
     reads,
     listCalls,
+    closes,
     readIssue: (_projectPath, url) => {
       reads.push(url);
       return Promise.resolve({
@@ -42,6 +54,10 @@ export function fakeTracker(
     createSubIssue: unimplemented,
     findSubIssues: unimplemented,
     updateIssue: unimplemented,
-    closeIssue: unimplemented,
+    closeIssue: (_projectPath, issue, reason) => {
+      closes.push({ url: issue.url, reason });
+      if (o.failClose) return Promise.reject(new Error("gh issue close に失敗しました"));
+      return Promise.resolve();
+    },
   };
 }

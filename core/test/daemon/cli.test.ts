@@ -42,7 +42,14 @@ test("dctl intake ls / get", () => {
 
 test("dctl に Intake の操作は無い", () => {
   for (
-    const argv of [["intake", "approve", "i1"], ["intake", "start"], ["intake", "reject", "i1"]]
+    const argv of [
+      ["intake", "approve", "i1"],
+      ["intake", "start"],
+      ["intake", "reject", "i1"],
+      ["intake", "complete", "i1"],
+      ["intake", "redispatch", "i1"],
+      ["intake", "cancel", "i1"],
+    ]
   ) {
     assert.throws(() => parseArgv(argv), /未知のコマンドです/);
   }

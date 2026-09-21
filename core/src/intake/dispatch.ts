@@ -9,12 +9,12 @@ import {
   listQuestionSets,
   replaceCurrentTask,
 } from "../db/intakes.ts";
-import type { Db, IntakeProcessRow } from "../db/schema.ts";
+import type { Db, IntakeProcessRow, IntakeRow, ProjectRow } from "../db/schema.ts";
 import { getProject, insertTask, type NewTask } from "../db/tasks.ts";
 import { branchNameFor } from "../domain/worktree.ts";
 import { sha256Hex } from "./pfd/hash.ts";
 import { buildTaskPrompt } from "./pfd/prompt.ts";
-import { computeProcessStatuses } from "./pfd/status.ts";
+import { computeProcessStatuses, type ProcessProgress } from "./pfd/status.ts";
 import { intakeDraft, processProgressOf } from "./view.ts";
 
 export type ApprovedPlan = { pfd: Pfd; draftId: number };
@@ -63,14 +63,21 @@ export type DispatchReport = {
   errors: { processId: string; message: string }[];
 };
 
-/** 人の完了の記録と決定の回答。投入と R-3 のプレビューが同じものを使う。 */
-async function promptFacts(db: Db, intakeId: string): Promise<{
+type DispatchSource = {
+  intake: IntakeRow;
+  project: ProjectRow;
+  pfd: Pfd;
+  /** 生きた行だけ。process_id ごと。 */
   rows: Map<string, IntakeProcessRow>;
   humanNotes: Record<string, string>;
   decisions: Record<string, string>;
-}> {
+};
+
+/** タスクの prompt に載せる材料を DB から組む。dispatchIntake と redispatchProcess が使う。 */
+async function loadDispatchSource(db: Db, intake: IntakeRow, pfd: Pfd): Promise<DispatchSource> {
+  const project = (await getProject(db, intake.project_id))!;
   const rows = new Map(
-    (await listProcesses(db, intakeId)).filter((r) => r.retired_at === null)
+    (await listProcesses(db, intake.id)).filter((r) => r.retired_at === null)
       .map((r) => [r.process_id, r]),
   );
   const humanNotes: Record<string, string> = {};
@@ -78,12 +85,12 @@ async function promptFacts(db: Db, intakeId: string): Promise<{
     if (r.human_done_at !== null) humanNotes[r.process_id] = r.human_note ?? "";
   }
   const decisions = decisionTexts(
-    (await listQuestionSets(db, intakeId)).map((q) => ({
+    (await listQuestionSets(db, intake.id)).map((q) => ({
       questions: JSON.parse(q.questions) as Question[],
       answers: q.answers === null ? null : JSON.parse(q.answers) as Answer[],
     })),
   );
-  return { rows, humanNotes, decisions };
+  return { intake, project, pfd, rows, humanNotes, decisions };
 }
 
 /**
@@ -101,15 +108,66 @@ export async function previewTaskPrompt(
   if (!process) throw new Error(`プロセス ${o.processId} は案にありません`);
   if (process.actor === "human") throw new Error("人のプロセスはタスクになりません");
 
-  const { rows, humanNotes, decisions } = await promptFacts(db, o.intakeId);
+  const src = await loadDispatchSource(db, intake, pfd);
   return buildTaskPrompt({
     pfd,
     processId: o.processId,
     parentIssue: { url: intake.issue_url, title: intake.issue_title },
-    subIssueUrl: rows.get(o.processId)?.sub_issue_url ?? null,
-    humanNotes,
-    decisions,
+    subIssueUrl: src.rows.get(o.processId)?.sub_issue_url ?? null,
+    humanNotes: src.humanNotes,
+    decisions: src.decisions,
   });
+}
+
+function statusesOf(src: DispatchSource, progress: ReadonlyMap<string, ProcessProgress>) {
+  return computeProcessStatuses({
+    pfd: src.pfd,
+    baseBranch: src.project.base_branch,
+    revising: false,
+    dispatchPaused: false,
+    progress,
+  });
+}
+
+/**
+ * 1 プロセスのタスクを作り、current_task_id を row の値から置き換える。
+ * prompt を組めなければ投げる。置き換えが食い違えば null。作ったタスクの id を返す。
+ */
+async function dispatchProcess(
+  db: Db,
+  src: DispatchSource,
+  row: IntakeProcessRow,
+): Promise<string | null> {
+  const { intake, project, pfd } = src;
+  const process = pfd.processes.find((p) => p.id === row.process_id)!;
+  const prompt = buildTaskPrompt({
+    pfd,
+    processId: process.id,
+    parentIssue: { url: intake.issue_url, title: intake.issue_title },
+    subIssueUrl: row.sub_issue_url,
+    humanNotes: src.humanNotes,
+    decisions: src.decisions,
+  });
+  const taskId = crypto.randomUUID();
+  const committed = await commitDispatch(db, {
+    intakeId: intake.id,
+    processId: process.id,
+    expectedTaskId: row.current_task_id,
+    task: {
+      id: taskId,
+      project_id: intake.project_id,
+      title: process.name,
+      prompt,
+      workflow_name: project.default_workflow,
+      branch: branchNameFor(taskId, process.name),
+      priority: 2,
+      intake_id: intake.id,
+      intake_process_id: process.id,
+      issue_url: row.sub_issue_url,
+      parent_issue_url: intake.issue_url,
+    },
+  });
+  return committed ? taskId : null;
 }
 
 /**
@@ -124,63 +182,51 @@ export async function dispatchIntake(db: Db, intakeId: string): Promise<Dispatch
   ) return report;
   const plan = await loadApprovedPlan(db, intakeId);
   if (!plan) return report;
-  const { pfd } = plan;
-  const project = (await getProject(db, intake.project_id))!;
-
-  const statuses = computeProcessStatuses({
-    pfd,
-    baseBranch: project.base_branch,
-    revising: false,
-    dispatchPaused: false,
-    progress: await processProgressOf(db, intakeId),
-  });
-
-  const { rows, humanNotes, decisions } = await promptFacts(db, intakeId);
+  const src = await loadDispatchSource(db, intake, plan.pfd);
+  const statuses = statusesOf(src, await processProgressOf(db, intakeId));
 
   for (const status of statuses) {
     if (status.state !== "ready" || status.blockedBy !== null) continue;
-    const process = pfd.processes.find((p) => p.id === status.id)!;
+    const process = plan.pfd.processes.find((p) => p.id === status.id)!;
     if (process.actor !== "agent") continue;
-    const row = rows.get(process.id)!;
-
-    let prompt: string;
     try {
-      prompt = buildTaskPrompt({
-        pfd,
-        processId: process.id,
-        parentIssue: { url: intake.issue_url, title: intake.issue_title },
-        subIssueUrl: row.sub_issue_url,
-        humanNotes,
-        decisions,
-      });
+      const taskId = await dispatchProcess(db, src, src.rows.get(process.id)!);
+      if (taskId !== null) report.created.push({ processId: process.id, taskId });
     } catch (e) {
       report.errors.push({
         processId: process.id,
         message: e instanceof Error ? e.message : String(e),
       });
-      continue;
     }
-
-    const taskId = crypto.randomUUID();
-    const committed = await commitDispatch(db, {
-      intakeId,
-      processId: process.id,
-      expectedTaskId: row.current_task_id,
-      task: {
-        id: taskId,
-        project_id: intake.project_id,
-        title: process.name,
-        prompt,
-        workflow_name: project.default_workflow,
-        branch: branchNameFor(taskId, process.name),
-        priority: 2,
-        intake_id: intake.id,
-        intake_process_id: process.id,
-        issue_url: row.sub_issue_url,
-        parent_issue_url: intake.issue_url,
-      },
-    });
-    if (committed) report.created.push({ processId: process.id, taskId });
   }
   return report;
+}
+
+/**
+ * 要確認のプロセスに新しいタスクを作る（C-6）。新しいタスクは同じプロセス・同じ sub-issue に紐づき、
+ * 古いタスクは intake_process_id を持ったまま残る。自動 dispatch の一時停止は見ない（人の明示の操作のため）。
+ */
+export async function redispatchProcess(
+  db: Db,
+  o: { intakeId: string; processId: string },
+): Promise<{ taskId: string }> {
+  const intake = await getIntake(db, o.intakeId);
+  if (!intake) throw new Error("Intake がありません");
+  if (intake.state !== "active") {
+    throw new Error(`再投入できる状態ではありません: ${intake.state}`);
+  }
+  const plan = await loadApprovedPlan(db, o.intakeId);
+  if (!plan) throw new Error("承認された計画がありません");
+  const src = await loadDispatchSource(db, intake, plan.pfd);
+  const row = src.rows.get(o.processId);
+  const status = statusesOf(src, await processProgressOf(db, o.intakeId))
+    .find((s) => s.id === o.processId);
+  if (!row || status?.state !== "needs_attention") {
+    throw new Error(
+      `要確認のプロセスだけを再投入できます: ${o.processId}（${status?.state ?? "案に無い"}）`,
+    );
+  }
+  const taskId = await dispatchProcess(db, src, row);
+  if (taskId === null) throw new Error("ほかの操作が先にタスクを置き換えました");
+  return { taskId };
 }

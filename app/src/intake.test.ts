@@ -271,24 +271,19 @@ describe("issueTarget", () => {
   const active = INTAKES.find((i) => i.state === "active" && !i.needs_human)!;
 
   test("進行中の Intake がある Issue は開始の代わりに開く", () => {
-    expect(issueTarget({ url: "https://github.com/o/r/issues/9", intake_id: "i1" }, []))
-      .toEqual({ kind: "open", intakeId: "i1" });
-  });
-
-  test("直接入力の Issue も一覧の Intake と照合して開く", () => {
-    expect(issueTarget({ url: active.issue_url }, INTAKES))
+    expect(issueTarget(active.issue_url, INTAKES))
       .toEqual({ kind: "open", intakeId: active.id });
   });
 
   test("終了した Intake しかない Issue は開始できる", () => {
     const canceled = INTAKES.find((i) => i.state === "canceled")!;
-    expect(issueTarget({ url: canceled.issue_url }, [canceled]))
+    expect(issueTarget(canceled.issue_url, [canceled]))
       .toEqual({ kind: "start", url: canceled.issue_url });
   });
 
   test("Intake の無い Issue は開始", () => {
     const url = "https://github.com/o/r/issues/99";
-    expect(issueTarget({ url }, INTAKES)).toEqual({ kind: "start", url });
+    expect(issueTarget(url, INTAKES)).toEqual({ kind: "start", url });
   });
 });
 

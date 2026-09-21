@@ -140,13 +140,26 @@ Intake を開くと、main に状態に応じた面を出す。面は `state` �
 
 - `ok: true` なら `github.issues` を取る。既定は `assignee: "me"` で、切り替え（`seg`）「自分が担当 / すべて」を持つ（S-1）
 - タイトル検索は、入力して Enter で `search` 付きで取り直す。打鍵のたびに gh を呼ばないためである
-- 一覧の行は番号・タイトル・担当・更新を出す。`intake_id` がある行は「Intake あり」の印を付け、押すと開始ではなくその Intake を開く（S-3）
+- 一覧の行は番号・タイトル・担当・更新を出す。進行中の Intake がある行は「Intake あり」の印を付け、押すと開始ではなくその Intake を開く（S-3。判定は 4.4）
 - 行を選ぶと、右に `github.issue` の本文とコメントを `Markdown` で出し、「Intake を開始」ボタンを置く（S-2）
 - 番号か URL を直接入れる欄も持つ。純関数 `parseIssueInput(input: string, repo: { nameWithOwner: string }): string | null` が、
   `#123` / `123` / `https://github.com/<owner>/<repo>/issues/123` を URL にする。別のリポジトリの URL と空文字は `null` にする
 - 開始は `intake.start` を呼ぶ。成功したら `intakeSel` を返ってきた id にする。`alreadyActive` が true でも同じで、新しく作らずに、進行中のその Intake を開く（S-3）。
   コアが失敗にしないのは、既存の id を返すためである（コア設計 13 章）
 - S-4（同時に複数）は、画面に制限を置かないことで満たす。S-6（プロセスが 1 つ）は、画面に特別扱いを持たないことで満たす。プロセス 1 つの図もそのまま描ける
+
+### 4.4 gh の結果のキャッシュ
+
+gh の呼び出しは 1 回ごとに待ちがあり、しかも `github.status` → `github.issues` と直列になる。面を開くたびにそれを待つと描画がもたつくため、
+`github.status` `github.issues` `github.issue` の結果を UI 側でキャッシュし、手元の値をすぐ出してから gh で取り直して置き換える（stale-while-revalidate）。
+
+- 置き場所は IndexedDB（`doctrine-gh-cache`）で、前にメモリの表を置く（`app/src/ghCache.ts`）。同じ起動の中で開き直したときはメモリから描画の時点で出し、アプリを起動し直したあとは IndexedDB から出す
+- キーは `github.status` がプロジェクト、`github.issues` がプロジェクト・担当・検索語、`github.issue` がプロジェクトと URL
+- `github.status` もキャッシュする。一覧の取得は gh が使えると分かってから始まるので、状態を待つと一覧も待つことになるためである
+- 開くたびに必ず取り直す。取り直している間は一覧の上に「更新中」、失敗したら手元の値を出したまま「取り直せませんでした（理由）」を出す。手元に何も無いときの失敗は従来どおり失敗の箱にする
+- 取り直した `github.status` が `ok: false` なら、手元の一覧を捨てて 4.2 の箱に替える
+- 「Intake あり」の印と、選んだ Issue で開始するか開くかは、`intake_id` を見ず `s.intakes` の進行中の Intake で決める。手元の一覧の `intake_id` は、取ったあとに始めた Intake も、取ったあとに終わった Intake も知らないためである
+- 期限切れや件数の上限は持たない。どのキーも開けば取り直して上書きされる
 
 ## 5. 質問に答える面（Q-2・Q-3・Q-6）
 

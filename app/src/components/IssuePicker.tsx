@@ -1,12 +1,39 @@
 import { useEffect, useState } from "react";
 import type { GhStatus, IssueDetail } from "../../../shared/intake/github.ts";
-import type { GithubIssue } from "../../../shared/protocol.ts";
+import type { GithubIssue, IntakeSummary } from "../../../shared/protocol.ts";
+import { type Cached, ghCache, ghCacheKey, revalidate } from "../ghCache";
 import { ghGuidance, issueNumber, issueTarget, parseIssueInput, type IssueTarget } from "../intake";
 import { clock, type Loaded } from "../model";
 import { useIntakeRpc, useStore } from "../store";
 import { Markdown } from "./text";
 
 const errorMessage = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+const IDLE: Cached<never> = { loaded: { kind: "loading" }, refreshing: false, refreshError: null };
+
+// 描画の時点で手元にあるものを出す。前の key の値を 1 度でも出さないように、key が変わった描画から使う
+function initial<T>(key: string | null): Cached<T> {
+  if (key === null) return IDLE;
+  const value = ghCache.peek(key) as T | undefined;
+  return { loaded: value === undefined ? { kind: "loading" } : { kind: "ok", value }, refreshing: true, refreshError: null };
+}
+
+/** key の値を手元のキャッシュから出し、gh から取り直す。key が null なら何も取らない。tick を変えると取り直す */
+function useGhCached<T>(key: string | null, fetch: () => Promise<T>, tick = 0): Cached<T> {
+  const [state, setState] = useState<{ key: string | null; cached: Cached<T> }>(() => ({ key, cached: initial(key) }));
+  useEffect(() => {
+    if (key === null) return;
+    return revalidate(ghCache, key, fetch, (cached: Cached<T>) => setState({ key, cached }));
+    // fetch は毎回作り直されるので、key と tick だけで決める
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key, tick]);
+  return state.key === key ? state.cached : initial(key);
+}
+
+function Refreshing({ refreshing, error }: { refreshing: boolean; error: string | null }) {
+  if (error !== null) return <span className="hint">{`取り直せませんでした（${error}）`}</span>;
+  return refreshing ? <span className="hint">更新中</span> : null;
+}
 
 export function GhUnavailable(
   { status, onRetry }: { status: Extract<GhStatus, { ok: false }>; onRetry: () => void },
@@ -26,8 +53,9 @@ export function GhUnavailable(
 }
 
 export function IssueList(
-  { issues, selected, onSelect }: {
+  { issues, intakes, selected, onSelect }: {
     issues: GithubIssue[];
+    intakes: IntakeSummary[];
     selected: string | null;
     onSelect: (url: string) => void;
   },
@@ -43,7 +71,7 @@ export function IssueList(
         >
           <span className="n">{`#${i.number}`}</span>
           <span>{i.title}</span>
-          {i.intake_id ? <span className="pill p-muted">Intake あり</span> : <span />}
+          {issueTarget(i.url, intakes).kind === "open" ? <span className="pill p-muted">Intake あり</span> : <span />}
           <span className="sub">
             担当: {i.assignees.join("、") || "なし"}・更新 {clock(Date.parse(i.updatedAt))}
           </span>
@@ -101,66 +129,34 @@ export function IssuePicker() {
   const api = useIntakeRpc();
   const [projectId, setProjectId] = useState(() => s.project !== "all" ? s.project : s.projects[0]?.id);
   const path = s.projects.find((p) => p.id === projectId)?.path;
-  const [status, setStatus] = useState<Loaded<GhStatus>>({ kind: "loading" });
   const [statusTick, setStatusTick] = useState(0);
   const [assignee, setAssignee] = useState<"me" | "any">("me");
   const [searchText, setSearchText] = useState("");
   const [search, setSearch] = useState("");
-  const [issues, setIssues] = useState<Loaded<GithubIssue[]>>({ kind: "loading" });
   const [picked, setPicked] = useState<Picked | null>(null);
-  const [detail, setDetail] = useState<Loaded<IssueDetail> | undefined>(undefined);
   const [direct, setDirect] = useState("");
   const [pending, setPending] = useState(false);
 
-  // プロジェクトが変わるたびに gh の状態を取り直し、別のプロジェクトのものを捨てる
+  // 別のプロジェクトで選んでいたものを捨てる
   useEffect(() => {
-    setStatus({ kind: "loading" });
-    setIssues({ kind: "loading" });
     setPicked(null);
-    setDetail(undefined);
     setDirect("");
-    if (!path) return;
-    let alive = true;
-    api.ghStatus(path).then(
-      (value) => alive && setStatus({ kind: "ok", value }),
-      (e) => alive && setStatus({ kind: "error", message: errorMessage(e) }),
-    );
-    return () => {
-      alive = false;
-    };
-    // api は毎回作り直される
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [path, statusTick]);
+  }, [path]);
 
+  // gh が使えるかはプロジェクトごとに違うので、状態もプロジェクトごとに持つ
+  const statusCached = useGhCached(path ? ghCacheKey.status(path) : null, () => api.ghStatus(path!), statusTick);
+  const status = statusCached.loaded;
   const ghOk = status.kind === "ok" && status.value.ok;
-  useEffect(() => {
-    if (!path || !ghOk) return;
-    let alive = true;
-    setIssues({ kind: "loading" });
-    api.issues(path, { assignee, search }).then(
-      (value) => alive && setIssues({ kind: "ok", value }),
-      (e) => alive && setIssues({ kind: "error", message: errorMessage(e) }),
-    );
-    return () => {
-      alive = false;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [path, ghOk, status, assignee, search]);
-
-  const pickedUrl = picked?.url;
-  useEffect(() => {
-    if (!path || !pickedUrl) return;
-    let alive = true;
-    setDetail({ kind: "loading" });
-    api.issue(path, pickedUrl).then(
-      (value) => alive && setDetail({ kind: "ok", value }),
-      (e) => alive && setDetail({ kind: "error", message: errorMessage(e) }),
-    );
-    return () => {
-      alive = false;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [path, pickedUrl]);
+  const issuesCached = useGhCached(
+    path && ghOk ? ghCacheKey.issues(path, assignee, search) : null,
+    () => api.issues(path!, { assignee, search }),
+  );
+  const issues = issuesCached.loaded;
+  const detailCached = useGhCached(
+    path && picked ? ghCacheKey.issue(path, picked.url) : null,
+    () => api.issue(path!, picked!.url),
+  );
+  const detail: Loaded<IssueDetail> | undefined = picked ? detailCached.loaded : undefined;
 
   const head = (
     <>
@@ -204,10 +200,8 @@ export function IssuePicker() {
   const choose = (url: string) => {
     const listed = issues.kind === "ok" ? issues.value.find((i) => i.url === url) : undefined;
     const n = issueNumber(url);
-    setDetail(undefined);
     setPicked({ url, number: listed?.number ?? (n === null ? null : Number(n)), title: listed?.title ?? "" });
   };
-  const listed = picked && issues.kind === "ok" ? issues.value.find((i) => i.url === picked.url) : undefined;
   const title = picked?.title || (detail?.kind === "ok" ? detail.value.title : "");
 
   return (
@@ -235,7 +229,13 @@ export function IssuePicker() {
           {issues.kind === "error" && <div className="box danger"><p>{issues.message}</p></div>}
           {issues.kind === "loading" && <p className="hint">読み込み中</p>}
           {issues.kind === "ok" && (
-            <IssueList issues={issues.value} selected={picked?.url ?? null} onSelect={choose} />
+            <Refreshing
+              refreshing={statusCached.refreshing || issuesCached.refreshing}
+              error={statusCached.refreshError ?? issuesCached.refreshError}
+            />
+          )}
+          {issues.kind === "ok" && (
+            <IssueList issues={issues.value} intakes={s.intakes} selected={picked?.url ?? null} onSelect={choose} />
           )}
           <div style={{ display: "grid", gap: 4 }}>
             <label className="hint" htmlFor="issue-direct">番号か URL を直接入れる</label>
@@ -265,7 +265,7 @@ export function IssuePicker() {
           <IssuePreview
             issue={{ url: picked.url, number: picked.number, title }}
             detail={detail}
-            target={issueTarget({ url: picked.url, intake_id: listed?.intake_id }, s.intakes)}
+            target={issueTarget(picked.url, s.intakes)}
             pending={pending}
             onOpen={(id) => dispatch({ type: "intake.select", id })}
             onStart={async () => {

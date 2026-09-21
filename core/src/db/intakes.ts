@@ -13,6 +13,7 @@ import type {
   IntakeRunStatus,
   IntakeState,
   PrObservationRow,
+  TaskRow,
 } from "./schema.ts";
 
 export type {
@@ -329,6 +330,26 @@ export async function updateProcess(
 }
 
 /**
+ * 人のプロセスの完了を記録する。生きた行で、まだ記録が無いときだけ書く。
+ * 書けなければ false（二重の記録・取りやめになった行）。
+ */
+export async function recordHumanDone(
+  db: Db,
+  intakeId: string,
+  processId: string,
+  o: { note: string; at: string },
+): Promise<boolean> {
+  const updated = await db.updateTable("intake_processes")
+    .set({ human_note: o.note, human_done_at: o.at })
+    .where("intake_id", "=", intakeId)
+    .where("process_id", "=", processId)
+    .where("human_done_at", "is", null)
+    .where("retired_at", "is", null)
+    .executeTakeFirstOrThrow();
+  return updated.numUpdatedRows > 0n;
+}
+
+/**
  * current_task_id を expected から next へ置き換える比較付きの更新（二重投入の防止）。
  * 今の値が expected でなければ書かずに false を返す。expected が null なら IS NULL で比べる。
  */
@@ -346,6 +367,13 @@ export async function replaceCurrentTask(
     .where("current_task_id", expected === null ? "is" : "=", expected)
     .executeTakeFirstOrThrow();
   return updated.numUpdatedRows > 0n;
+}
+
+/** その Intake から投入されたタスクのうち、終端でないもの。再投入で current_task_id から外れたタスクも含む。 */
+export function listLiveIntakeTasks(db: Db, intakeId: string): Promise<TaskRow[]> {
+  return db.selectFrom("tasks").selectAll().where("intake_id", "=", intakeId)
+    .where("state", "not in", ["completed", "failed", "canceled"])
+    .orderBy("created_at").execute();
 }
 
 /** task_id ごとに最新の事実だけを持つ。observed_at は関数の中で入れる。 */

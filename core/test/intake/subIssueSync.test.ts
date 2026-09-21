@@ -146,7 +146,14 @@ test("変わっていなければ gh を呼ばない", async () => {
   const before = ft.calls.length;
   const result = await syncSubIssues(d, ft.tracker, input());
   assert.equal(ft.calls.length, before);
-  assert.deepEqual(result, { created: [], adopted: [], updated: [], closed: [], failures: [] });
+  assert.deepEqual(result, {
+    created: [],
+    adopted: [],
+    updated: [],
+    closed: [],
+    completed: [],
+    failures: [],
+  });
 });
 
 test("作成の後で落ちても、やり直しで重複を作らない", async () => {
@@ -351,6 +358,40 @@ test("sub-issue の無いまま取りやめになったプロセスは何もし�
   await syncSubIssues(d, ft.tracker, input(withoutProcess4()));
   assert.equal(count(ft, "closeIssue"), 0);
   assert.equal(count(ft, "createSubIssue"), 3);
+});
+
+test("完了を記録した人のプロセスの sub-issue を completed で閉じる", async () => {
+  const { d, ft, input } = await fixture();
+  await syncSubIssues(d, ft.tracker, input());
+  await updateProcess(d, "i1", "3", { human_note: "x", human_done_at: now() });
+
+  const result = await syncSubIssues(d, ft.tracker, input());
+  assert.deepEqual(result.completed, ["3"]);
+  const r3 = await row(d, "3");
+  const issue = issueOf(ft, r3.sub_issue_url);
+  assert.equal(issue.state, "CLOSED");
+  assert.equal(issue.closeReason, "completed");
+  assert.equal(r3.sub_issue_closed, 1);
+
+  const before = ft.calls.length;
+  await syncSubIssues(d, ft.tracker, input());
+  assert.equal(count(ft, "closeIssue", before), 0);
+});
+
+test("人のプロセスの sub-issue を閉じられなければ、次の回でやり直す", async () => {
+  const { d, ft, input } = await fixture();
+  await syncSubIssues(d, ft.tracker, input());
+  await updateProcess(d, "i1", "3", { human_note: "x", human_done_at: now() });
+
+  ft.failWhen((c) => c.op === "closeIssue");
+  const second = await syncSubIssues(d, ft.tracker, input());
+  assert.deepEqual(second.failures.map((f) => [f.processId, f.op]), [["3", "close"]]);
+  assert.equal((await row(d, "3")).sub_issue_closed, 0);
+
+  ft.heal();
+  const third = await syncSubIssues(d, ft.tracker, input());
+  assert.deepEqual(third.completed, ["3"]);
+  assert.equal((await row(d, "3")).sub_issue_closed, 1);
 });
 
 test("行の無いプロセスは失敗として扱い、残りを進める", async () => {

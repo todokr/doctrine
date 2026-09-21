@@ -7,18 +7,26 @@ import {
   insertIntake,
   insertProcesses,
   latestDraft,
+  listLiveIntakeTasks,
   listQuestionSets,
   type NewIntakeComment,
+  recordHumanDone,
   updateIntake,
 } from "../db/intakes.ts";
 import type { Db, IntakeRow, IntakeState } from "../db/schema.ts";
-import { assertIntakeTransition } from "../domain/intakeStates.ts";
+import { getProject, type TaskState } from "../db/tasks.ts";
+import { cancelTask } from "../domain/cancelTask.ts";
+import { assertIntakeTransition, isIntakeTerminal } from "../domain/intakeStates.ts";
 import { killStaleChild, type ProcessProbe } from "../domain/recovery.ts";
 import type { Tracker } from "../github/tracker.ts";
 import type { Pfd } from "../../../shared/intake/pfd.ts";
 import type { Question } from "../../../shared/intake/question.ts";
 import { validateAnswers } from "../../../shared/intake/validateQuestion.ts";
+import { loadApprovedPlan } from "./dispatch.ts";
+import { computeProcessStatuses } from "./pfd/status.ts";
 import { enqueueIntakeRun } from "./runner.ts";
+import { closeSubIssuesOnCancel } from "./subIssueSync.ts";
+import { processProgressOf } from "./view.ts";
 
 /** 状態を変えた操作が返す。ハンドラがイベントにして配る。 */
 export type IntakeTransition = {
@@ -189,19 +197,29 @@ export async function approveIntake(
   return { intakeId: intake.id, from: "reviewing", to: "active", revising };
 }
 
+export type CancelOutcome = IntakeTransition & {
+  /** stop で止めたタスク。ハンドラが task.stateChanged を配る。 */
+  stoppedTasks: { taskId: string; from: TaskState }[];
+  /** stop の後始末の失敗。Intake はもう canceled なので、見張りはやり直さない。ハンドラが警告に積む。 */
+  problems: string[];
+};
+
 /**
  * 走っている実行は止めない（runner が settle で状態の食い違いを見て interrupted で閉じる）。
  * 立ったまま拾われない queued の行は、記録を正直に保つためここで閉じる。
+ *
+ * stop は、状態を canceled にした後で（以後の投入を先に止めるため）、その Intake のタスクを止め、
+ * 開いている sub-issue を閉じる。後始末の失敗は中止を失敗にせず problems に入れる。
  */
 export async function cancelIntake(
   db: Db,
-  probe: ProcessProbe,
-  o: { intakeId: string },
-): Promise<IntakeTransition> {
+  deps: { probe: ProcessProbe; tracker: Pick<Tracker, "closeIssue"> },
+  o: { intakeId: string; mode: "leave" | "stop"; projectPath: string },
+): Promise<CancelOutcome> {
   const intake = await requireIntake(db, o.intakeId);
   const revising = intake.revising === 1;
   assertIntakeTransition(intake.state, "canceled", revising);
-  await killStaleChild(intake, probe, "SIGTERM");
+  await killStaleChild(intake, deps.probe, "SIGTERM");
 
   const now = new Date().toISOString();
   await db.transaction().execute(async (trx) => {
@@ -218,5 +236,120 @@ export async function cancelIntake(
       .where("status", "=", "queued")
       .execute();
   });
-  return { intakeId: intake.id, from: intake.state, to: "canceled", revising };
+  const outcome: CancelOutcome = {
+    intakeId: intake.id,
+    from: intake.state,
+    to: "canceled",
+    revising,
+    stoppedTasks: [],
+    problems: [],
+  };
+  if (o.mode === "leave") return outcome;
+
+  for (const task of await listLiveIntakeTasks(db, intake.id)) {
+    try {
+      const { from } = await cancelTask(db, task, deps.probe);
+      outcome.stoppedTasks.push({ taskId: task.id, from });
+    } catch (e) {
+      outcome.problems.push(`タスク ${task.id} を止められませんでした: ${describe(e)}`);
+    }
+  }
+  try {
+    const project = (await getProject(db, intake.project_id))!;
+    const closed = await closeSubIssuesOnCancel(db, deps.tracker, {
+      projectPath: o.projectPath,
+      intakeId: intake.id,
+      baseBranch: project.base_branch,
+    });
+    for (const f of closed.failures) {
+      outcome.problems.push(
+        `プロセス ${f.processId} の sub-issue を閉じられませんでした: ${f.message}`,
+      );
+    }
+  } catch (e) {
+    outcome.problems.push(`sub-issue を閉じられませんでした: ${describe(e)}`);
+  }
+  return outcome;
+}
+
+const describe = (e: unknown) => e instanceof Error ? e.message : String(e);
+
+/**
+ * 人のプロセスの完了を記録する（H-2）。経路は RPC だけで、runner にも dctl にも無い（H-4）。
+ * sub-issue を閉じるのと下流の投入は見張りの周が行う。
+ */
+export async function completeHumanProcess(
+  db: Db,
+  o: { intakeId: string; processId: string; note: unknown },
+): Promise<void> {
+  const { note } = o;
+  if (typeof note !== "string" || note.trim() === "") throw new Error("完了の内容は必須です");
+  const intake = await requireIntake(db, o.intakeId);
+  // 改訂中は state が active でなく、固定集合が計算中なので、ここで拒む
+  if (intake.state !== "active") {
+    throw new Error(`完了を記録できる状態ではありません: ${intake.state}`);
+  }
+  const plan = await loadApprovedPlan(db, intake.id);
+  const process = plan?.pfd.processes.find((p) => p.id === o.processId);
+  if (!plan || !process || process.actor !== "human") {
+    throw new Error(`人のプロセスではありません: ${o.processId}`);
+  }
+  const project = (await getProject(db, intake.project_id))!;
+  const status = computeProcessStatuses({
+    pfd: plan.pfd,
+    baseBranch: project.base_branch,
+    revising: false,
+    dispatchPaused: intake.dispatch_paused === 1,
+    progress: await processProgressOf(db, intake.id),
+  }).find((s) => s.id === o.processId);
+  if (status?.state === "done") throw new Error("すでに完了が記録されています");
+  if (status?.state === "waiting") {
+    throw new Error(`入力が揃っていません: ${status.missing.join(", ")}`);
+  }
+  if (status?.state !== "your_turn") {
+    throw new Error(`完了を記録できるプロセスではありません: ${o.processId}`);
+  }
+
+  await db.transaction().execute(async (trx) => {
+    await updateIntake(trx, intake.id, {}, { requireState: "active" });
+    const recorded = await recordHumanDone(trx, intake.id, o.processId, {
+      note,
+      at: new Date().toISOString(),
+    });
+    if (!recorded) throw new Error("すでに完了が記録されています");
+  });
+}
+
+/** 自動 dispatch の一時停止と再開（W-10）。承認済みの計画があり、終わっていない Intake だけ。 */
+export async function setDispatchPaused(
+  db: Db,
+  o: { intakeId: string; paused: boolean },
+): Promise<IntakeRow> {
+  const intake = await requireIntake(db, o.intakeId);
+  const revising = intake.revising === 1 && !isIntakeTerminal(intake.state);
+  if (intake.state !== "active" && !revising) {
+    throw new Error(`自動 dispatch を切り替えられる状態ではありません: ${intake.state}`);
+  }
+  await updateIntake(db, intake.id, { dispatch_paused: o.paused ? 1 : 0 }, {
+    requireState: intake.state,
+  });
+  return await requireIntake(db, intake.id);
+}
+
+/** completed の Intake の親 Issue を completed で閉じる（W-11）。DB には何も書かない。 */
+export async function closeParentIssue(
+  db: Db,
+  tracker: Pick<Tracker, "closeIssue">,
+  o: { intakeId: string; projectPath: string },
+): Promise<IntakeRow> {
+  const intake = await requireIntake(db, o.intakeId);
+  if (intake.state !== "completed") {
+    throw new Error(`完了した Intake だけ親 Issue を閉じられます: ${intake.state}`);
+  }
+  await tracker.closeIssue(
+    o.projectPath,
+    { url: intake.issue_url, nodeId: intake.issue_node_id },
+    "completed",
+  );
+  return intake;
 }
