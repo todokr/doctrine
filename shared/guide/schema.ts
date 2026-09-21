@@ -78,7 +78,7 @@ const graphSchema = z.strictObject({
   ),
 });
 
-const diagramSchema = z.strictObject({
+export const diagramSchema = z.strictObject({
   id: z.string().describe("diagrams の中で一意な id"),
   title: z.string().describe("図のタイトル"),
   body: z.discriminatedUnion("shape", [sequenceSchema, graphSchema]),
