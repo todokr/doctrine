@@ -197,12 +197,8 @@ export function ghGuidance(
 
 export type IssueTarget = { kind: "open"; intakeId: string } | { kind: "start"; url: string };
 
-/** 進行中の Intake がある Issue は、開始の代わりにそれを開く。直接入力の Issue は intake_id を持たないので、一覧とも照合する */
-export function issueTarget(
-  issue: { url: string; intake_id?: string | null },
-  intakes: IntakeSummary[],
-): IssueTarget {
-  if (issue.intake_id) return { kind: "open", intakeId: issue.intake_id };
-  const open = intakes.find((i) => i.issue_url === issue.url && !isClosedIntake(i.state));
-  return open ? { kind: "open", intakeId: open.id } : { kind: "start", url: issue.url };
+/** 進行中の Intake がある Issue は、開始の代わりにそれを開く。キャッシュした一覧の intake_id は古いことがあるので、s.intakes だけで決める */
+export function issueTarget(url: string, intakes: IntakeSummary[]): IssueTarget {
+  const open = intakes.find((i) => i.issue_url === url && !isClosedIntake(i.state));
+  return open ? { kind: "open", intakeId: open.id } : { kind: "start", url };
 }
