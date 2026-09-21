@@ -3,7 +3,7 @@ import { socketPath } from "../daemon/server.ts";
 import type { Response, ServerEvent } from "../../../shared/protocol.ts";
 
 const NUMERIC = new Set(["priority", "limit", "tail", "step_run_id"]);
-const BOOLEAN = new Set(["force", "follow"]);
+const BOOLEAN = new Set(["force", "follow", "include_closed"]);
 
 /** リクエストが応答を待つ最大時間。`--follow` で接続を張りっぱなしにする
  * ストリーミングモードを将来追加するときは、この一律タイムアウトは使えない
@@ -67,6 +67,11 @@ export const USAGE = `使い方: dctl <コマンド> [引数]
   project-add --path <path>       .doctrine/ の雛形を作って登録する
   project-update --path <path>    .doctrine/project.yaml の変更を取り込む
 
+Intake
+  intake ls [--project <path>] [--include_closed]
+  intake get <intake-id>
+  開始・回答・差し戻し・承認・中止はアプリから行う
+
 worktree
   worktrees
   gc <task-id> [--force]
@@ -106,6 +111,18 @@ export function parseArgv(argv: string[]): { method: string; params: Record<stri
       return { method: "project.add", params: flags };
     case "project-update":
       return { method: "project.update", params: flags };
+    case "intake": {
+      // 読むだけ。承認は人だけが行うので、操作のサブコマンドは足さない。
+      const [sub, intakeId] = positional;
+      switch (sub) {
+        case "ls":
+          return { method: "intake.list", params: flags };
+        case "get":
+          return { method: "intake.get", params: { intake_id: intakeId } };
+        default:
+          throw new Error(`未知のコマンドです: intake ${sub ?? ""}\n\n${USAGE}`);
+      }
+    }
     case "worktrees":
       return { method: "worktree.list", params: {} };
     case "gc":
