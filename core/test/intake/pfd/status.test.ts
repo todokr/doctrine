@@ -4,6 +4,7 @@ import type { PrFact } from "../../../../shared/intake/processStatus.ts";
 import type { TaskState } from "../../../src/db/tasks.ts";
 import {
   computeProcessStatuses,
+  goalReached,
   type ProcessProgress,
   type StatusInput,
 } from "../../../src/intake/pfd/status.ts";
@@ -207,4 +208,34 @@ test("computeProcessStatuses: W-9 の 8 状態をすべて返せる", () => {
     [...seen].sort(),
     ["done", "merged", "needs_attention", "pr_open", "ready", "running", "waiting", "your_turn"],
   );
+});
+
+function goalReachedOf(input: StatusInput): boolean {
+  return goalReached(input.pfd, computeProcessStatuses(input));
+}
+
+test("goalReached: goal を出すプロセスがマージされるまでは false", () => {
+  const input = withProgress({
+    "1": agent("completed", pr("MERGED")),
+    "2": agent("completed", pr("MERGED")),
+    "3": human(),
+    "4": agent("running", null),
+  });
+  assert.equal(goalReachedOf(input), false);
+});
+
+test("goalReached: goal を出すプロセスがマージされれば true", () => {
+  const input = withProgress({
+    "1": agent("completed", pr("MERGED")),
+    "2": agent("completed", pr("MERGED")),
+    "3": human(),
+    "4": agent("completed", pr("MERGED")),
+  });
+  assert.equal(goalReachedOf(input), true);
+});
+
+test("goalReached: 人のプロセスの完了でも揃う", () => {
+  const pfd = example();
+  pfd.goal = ["metric-definition"];
+  assert.equal(goalReachedOf({ ...base, pfd, progress: new Map([["3", human()]]) }), true);
 });

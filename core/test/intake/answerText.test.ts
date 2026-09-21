@@ -1,7 +1,8 @@
 import { test } from "@std/testing/bdd";
 import assert from "node:assert/strict";
-import { buildAnswerText } from "../../../shared/intake/answerText.ts";
+import { buildAnswerText, decisionTexts } from "../../../shared/intake/answerText.ts";
 import type { Question } from "../../../shared/intake/question.ts";
+import { question } from "./runnerHelper.ts";
 
 function single(id: string): Question {
   return {
@@ -33,4 +34,15 @@ test("答えの無い質問は回答なしと書く", () => {
     { questionId: "q1", optionIds: ["b"], other: null, note: null },
   ]);
   assert.match(text, /q2[\s\S]*回答なし/);
+});
+
+test("decisionTexts: 回答済みの質問だけを、質問 id ごとの文章にする", () => {
+  const texts = decisionTexts([
+    {
+      questions: [question("q1")],
+      answers: [{ questionId: "q1", optionIds: ["a"], other: null, note: "x" }],
+    },
+    { questions: [question("q2")], answers: null },
+  ]);
+  assert.deepEqual(texts, { q1: "選んだ選択肢: 案A（a）、補足: x" });
 });

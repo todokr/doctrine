@@ -13,6 +13,25 @@ function describeAnswer(q: Question, a: Answer | undefined): string[] {
 }
 
 /**
+ * 回答済みの質問のまとまりから、質問 id → 回答の文章 を作る。buildTaskPrompt の decisions に渡す。
+ * 未回答のまとまり（answers が null）は飛ばす。
+ */
+export function decisionTexts(
+  sets: readonly { questions: Question[]; answers: Answer[] | null }[],
+): Record<string, string> {
+  const texts: Record<string, string> = {};
+  for (const set of sets) {
+    if (set.answers === null) continue;
+    for (const q of set.questions) {
+      const a = set.answers.find((x) => x.questionId === q.id);
+      if (a === undefined) continue;
+      texts[q.id] = describeAnswer(q, a).join("、");
+    }
+  }
+  return texts;
+}
+
+/**
  * 人の回答を、分解の会話へ返す文面にする。画面のモーダルと同じ関数をデーモンが使う。
  * 回答の検証は validateAnswers の役目で、ここでは投げない。
  */
