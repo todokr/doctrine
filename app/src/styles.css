@@ -166,7 +166,13 @@ th{color:var(--ink-3);font-size:11px;font-weight:500;border-top:0;background:var
 .md h2{font-size:13.5px;margin:14px 0 2px}
 .md ul,.md ol{margin:4px 0;padding-left:22px}
 .md p{margin:4px 0}
-.md code{font-family:var(--mono);font-size:11.5px;background:var(--surface-2);padding:0 4px;border-radius:3px}
+.md code,.g-md code{font-family:var(--mono);font-size:11.5px;background:var(--surface-2);padding:0 4px;border-radius:3px}
+/* ガイドの散文。幅の狭い箱の中に置くので、.md の余白は持たない */
+.g-md{line-height:1.75;min-width:0;overflow-wrap:anywhere}
+.g-md h1{font-size:13px;margin:8px 0 2px}
+.g-md h2{font-size:12.5px;margin:8px 0 2px}
+.g-md ul,.g-md ol{margin:4px 0;padding-left:20px}
+.g-md p,.g-sec .g-md p,.stepcard .g-md p{margin:4px 0}
 .rv-body{display:grid;grid-template-columns:232px minmax(0,1fr);gap:14px;align-items:start}
 @media (max-width:1150px){.rv-body{grid-template-columns:1fr}}
 .rv-body.has-guide{grid-template-columns:220px minmax(0,1fr) 360px}
@@ -203,7 +209,7 @@ th{color:var(--ink-3);font-size:11px;font-weight:500;border-top:0;background:var
 .g-list li{line-height:1.6}
 .g-list b{display:block;font-size:12px}
 .g-list li span{color:var(--ink-2);font-size:12px}
-.seqd,.reld{width:100%;height:auto;display:block;margin-top:4px}
+.seqd{width:100%;height:auto;display:block;margin-top:4px}
 .sd-actor{font-family:var(--mono);font-size:10px;fill:var(--ink-2)}
 .sd-life{stroke:var(--line);stroke-width:1}
 .sd-lbl{font-family:var(--sans);font-size:9.5px;fill:var(--ink-3)}
@@ -211,11 +217,17 @@ th{color:var(--ink-3);font-size:11px;font-weight:500;border-top:0;background:var
 @keyframes sd-draw{to{stroke-dashoffset:0}}
 @media (prefers-reduced-motion:reduce){.sd-arrow{animation:none;stroke-dashoffset:0}}
 .sd-arrowhead{fill:var(--run)}
-.rel-box{fill:var(--surface-2);stroke:var(--line)}
-.rel-name{font-family:var(--mono);font-size:11px;fill:var(--ink);font-weight:600}
-.rel-field{font-family:var(--mono);font-size:9px;fill:var(--ink-3)}
-.rel-line{stroke:var(--ink-3);stroke-width:1.2}
-.rel-card{font-size:9.5px;fill:var(--ink-3)}
+.sd-arrow.added{stroke:var(--ok)}
+.sd-arrow.changed{stroke:var(--accent)}
+.sd-arrow.removed{stroke:var(--danger)}
+.diagram{margin:0;display:grid;gap:4px}
+.graphl{display:grid;gap:6px}
+.g-change{font-size:11px;font-weight:700;margin-right:4px}
+.g-change.added{color:var(--ok)}
+.g-change.changed{color:var(--accent-text)}
+.g-change.removed{color:var(--danger)}
+.g-order-item{border:1px solid var(--line);border-radius:7px;padding:6px 8px;display:grid;gap:1px}
+.g-order-item::before{content:counter(go) ". ";color:var(--accent-text);font-weight:700}
 .wr-scroll{overflow-x:auto}
 .wr{display:block}
 .wr-edge{stroke:var(--line);stroke-width:1.4}

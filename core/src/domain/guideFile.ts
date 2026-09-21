@@ -1,6 +1,8 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { z } from "zod/v4";
 import type { Guide, GuideLocation } from "../../../shared/guide/schema.ts";
+import { validateGuide } from "../../../shared/guide/validate.ts";
 import type { GuideHunk } from "../../../shared/guide/hunkId.ts";
 import type { DiffFile } from "./diff.ts";
 
@@ -50,6 +52,75 @@ export function checkGuideLocations(
     r.locations.forEach((loc, j) => check(`risks.${i}.locations.${j}`, loc))
   );
   return issues;
+}
+
+/** guide.json の上限。超えたら中身を返さない。 */
+export const MAX_GUIDE_BYTES = 256 * 1024;
+
+/**
+ * 封筒の外側だけを見るスキーマ。guide の中身は validateGuide に渡す。
+ * guideSchema を直接当てると validateGuide の整合性検査（id の重複・参照先の実在）を飛ばす。
+ */
+export const guideEnvelopeSchema = z.strictObject({
+  tree: z.string(),
+  createdAt: z.string(),
+  guide: z.unknown(),
+});
+
+/** guide.json の読み出し結果。broken の issues は validateGuide の issues と同じ形。 */
+export type GuideRead =
+  | { status: "missing" }
+  | { status: "too_large"; size: number }
+  | { status: "broken"; issues: string[] }
+  | { status: "ok"; envelope: GuideEnvelope };
+
+/** worktree の guide.json を読む。例外は投げず、読めなかった理由を status で返す。 */
+export async function readGuideFile(worktreePath: string): Promise<GuideRead> {
+  const path = join(worktreePath, GUIDE_RELPATH);
+
+  let size: number;
+  try {
+    const stat = await Deno.stat(path);
+    if (!stat.isFile) return { status: "missing" };
+    size = stat.size;
+  } catch {
+    return { status: "missing" };
+  }
+  if (size > MAX_GUIDE_BYTES) return { status: "too_large", size };
+
+  let text: string;
+  try {
+    text = await Deno.readTextFile(path);
+  } catch {
+    return { status: "missing" };
+  }
+
+  let json: unknown;
+  try {
+    json = JSON.parse(text);
+  } catch (e) {
+    return { status: "broken", issues: [`JSON として読めません: ${(e as Error).message}`] };
+  }
+
+  // 誤りの文面は validateGuide と同じ日本語ロケールに揃える
+  const envelope = guideEnvelopeSchema.safeParse(json, { error: z.locales.ja().localeError });
+  if (!envelope.success) {
+    return {
+      status: "broken",
+      issues: envelope.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`),
+    };
+  }
+
+  const validated = validateGuide(envelope.data.guide);
+  if (!validated.ok) return { status: "broken", issues: validated.issues };
+  return {
+    status: "ok",
+    envelope: {
+      tree: envelope.data.tree,
+      createdAt: envelope.data.createdAt,
+      guide: validated.guide,
+    },
+  };
 }
 
 export async function writeGuideFile(worktreePath: string, envelope: GuideEnvelope): Promise<void> {

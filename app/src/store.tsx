@@ -16,11 +16,13 @@ import {
   rpc,
   saveDrafts,
 } from "./daemon/client";
+import { receiveGuide } from "./guide";
 import { buildDiff } from "./patch";
 import {
   contextOf,
   diffOf,
   genOf,
+  guideOf,
   reduce,
   scopeOf,
   selectedTask,
@@ -53,6 +55,7 @@ function initialState(): State {
     step: {},
     diffs: {},
     contexts: {},
+    guides: {},
     gen: {},
     drafts: {},
     draftsLoaded: false,
@@ -221,6 +224,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const scope = reviewing ? scopeOf(s, reviewing) : "all";
   const needDiff = reviewing !== null && diffOf(s, reviewing, scope) === undefined;
   const needContext = reviewing !== null && contextOf(s, reviewing) === undefined;
+  const needGuide = reviewing !== null && guideOf(s, reviewing) === undefined;
   const gen = reviewing ? genOf(s, reviewing) : 0;
 
   useEffect(() => {
@@ -248,6 +252,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         dispatch({ type: "context", id, gen, loaded: { kind: "error", message: errorMessage(e) } })
       );
   }, [reviewing, needContext, gen]);
+
+  useEffect(() => {
+    if (!reviewing || !needGuide) return;
+    const id = reviewing;
+    dispatch({ type: "guide", id, gen, loaded: { kind: "loading" } });
+    // diff とは別の要求なので、ガイドが取れなくても diff は読める
+    void rpc("task.guide", { task_id: id })
+      .then((res) => dispatch({ type: "guide", id, gen, loaded: { kind: "ok", value: receiveGuide(res) } }))
+      .catch((e) =>
+        dispatch({ type: "guide", id, gen, loaded: { kind: "error", message: errorMessage(e) } })
+      );
+  }, [reviewing, needGuide, gen]);
 
   useEffect(() => {
     if (!s.toast) return;

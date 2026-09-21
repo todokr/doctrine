@@ -7,9 +7,11 @@ import type {
   ReviewFile,
   TaskContext,
   TaskDiff,
+  TaskGuide,
 } from "../../shared/protocol.ts";
+import type { Diagram, Guide } from "../../shared/guide/schema.ts";
 
-export type { CommandResult, MovedBlock, ReviewEntry, ReviewFile, TaskContext, TaskDiff };
+export type { CommandResult, Diagram, Guide, MovedBlock, ReviewEntry, ReviewFile, TaskContext, TaskDiff, TaskGuide };
 
 /**
  * デーモンが知らない状態を返したとき用。版のずれ（新しい dctld ＋ 古い画面）で起こりうる。
@@ -35,18 +37,6 @@ export type DiffFile = DiffFileMeta & {
   moves: MovedBlock[];
 };
 
-export type SequenceDiagram = { actors: string[]; messages: { from: string; to: string; label: string }[] };
-export type ReadingStep = { title: string; paths: string[]; diagram: "sequence" | "relation" | null; explain: string };
-export type Guide = {
-  why: string;
-  what: { path: string; desc: string }[];
-  sequence: SequenceDiagram;
-  readingOrder: ReadingStep[];
-  decisions: { title: string; body: string }[];
-  risks: string[];
-  tests: { behavior: string; test: string }[];
-};
-
 export type Task = {
   id: string;
   wf: string;
@@ -62,7 +52,6 @@ export type Task = {
   since: number;
   /** 上限待ちのタスクが再開してよい時刻。task.stateChanged では埋まらないので null になりうる */
   resumeAt?: number | null;
-  guide?: Guide;
   dirty?: boolean;
   refused?: boolean;
   /**

@@ -41,6 +41,7 @@ import {
 } from "../domain/worktree.ts";
 import { defaultProbe, killStaleChild } from "../domain/recovery.ts";
 import { buildTaskContext } from "../domain/taskContext.ts";
+import { readGuideFile } from "../domain/guideFile.ts";
 import { captureTree, releaseTrees } from "../domain/reviewTree.ts";
 import { assertTransition, isTerminal } from "../domain/states.ts";
 import type { AgentAdapter } from "../adapter/types.ts";
@@ -50,6 +51,7 @@ import type {
   ServerEvent,
   StepRunDenials,
   StepView,
+  TaskGuide,
   TaskLogs,
 } from "../../../shared/protocol.ts";
 import type { WarningLog } from "./warnings.ts";
@@ -424,6 +426,36 @@ export function createHandler(ctx: DaemonContext): Handler {
           truncated,
         };
         return result;
+      }
+
+      case "task.guide": {
+        const task = await getTask(ctx.db, req(params, "task_id"));
+        if (!task) throw new Error("タスクがありません");
+        // task.diff と同じ理由で、空を返さずはっきり失敗させる。
+        if (!task.worktree_path) throw new Error("worktree がありません");
+
+        // 先にファイルを読む。ワークフローはファイルが無いときのラベルを決めるためだけに使うので、
+        // ok / stale / broken / too_large はワークフロー YAML が読めなくても返る。
+        const read = await readGuideFile(task.worktree_path);
+        if (read.status === "missing") {
+          const project = (await getProject(ctx.db, task.project_id))!;
+          const workflow = await ctx.loadWorkflow(project.path, task.workflow_name)
+            .then(({ workflow }) => workflow)
+            .catch(() => null);
+          const hasGuideStep = workflow?.steps.some((s) => s.type === "guide") ?? true;
+          return { status: hasGuideStep ? "missing" : "none" } satisfies TaskGuide;
+        }
+        if (read.status !== "ok") return read satisfies TaskGuide;
+
+        const worktreeTree = await captureTree(task.worktree_path);
+        return {
+          status: "ok",
+          guide: read.envelope.guide,
+          createdAt: read.envelope.createdAt,
+          tree: read.envelope.tree,
+          worktreeTree,
+          stale: read.envelope.tree !== worktreeTree,
+        } satisfies TaskGuide;
       }
 
       case "worktree.list": {

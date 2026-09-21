@@ -1,5 +1,5 @@
 // テスト用の標本。画面はこれを使わない（画面のデータはデーモンから来る）
-import type { Guide, Project, Task, TaskDiff } from "./types";
+import type { Project, Task, TaskDiff } from "./types";
 import type { ServerEvent } from "../../shared/protocol.ts";
 
 export const NOW = Date.parse("2026-09-15T15:00:00+09:00");
@@ -10,60 +10,12 @@ export const PROJECTS: Project[] = [
   { id: "blog", color: "#296B49", path: "~/git/blog", def: "feature" },
 ];
 
-const GUIDE_9F21: Guide = {
-  why: "差し戻しのたびに implement ステップの会話が単一の暗黙ロールに閉じていたため、plan ステップで積んだ文脈と implement ステップの文脈が同じ会話に混ざっていた。role ごとにセッションを分け、差し戻された agent ステップに戻ったとき、その役割の会話だけを --resume できるようにする。",
-  what: [
-    { path: "src/workflow/schema.ts", desc: "agent ステップに任意の session（役割名）を追加" },
-    { path: "src/db/migrations.ts", desc: "task_sessions テーブルを追加し、既存の claude_session_id を default ロールへ複写" },
-    { path: "src/db/queries.ts", desc: "getSessionId / sessionUpsert を新設" },
-    { path: "src/core/engine.ts", desc: "agent ステップの実行前後で、セッションを role 単位に解決・保存するよう変更" },
-    { path: "test/core/engine.test.ts", desc: "role 単位の resume と、省略時の既定ロールを確認" },
-    { path: "test/db/migrations.test.ts", desc: "既存セッションの複写を確認" },
-  ],
-  sequence: {
-    actors: ["差し戻し", "Engine", "task_sessions", "Claude CLI"],
-    messages: [
-      { from: "差し戻し", to: "Engine", label: "onReject.goto: implement" },
-      { from: "Engine", to: "task_sessions", label: 'getSessionId(taskId, "implementer")' },
-      { from: "task_sessions", to: "Engine", label: "claude_session_id | null" },
-      { from: "Engine", to: "Claude CLI", label: "--resume <id>（無ければ新規）" },
-      { from: "Claude CLI", to: "Engine", label: "session_id" },
-      { from: "Engine", to: "task_sessions", label: "sessionUpsert(...)" },
-    ],
-  },
-  readingOrder: [
-    { title: "入力側: ワークフローに role を足す", paths: ["src/workflow/schema.ts"], diagram: null,
-      explain: "まず入口から。agent ステップに任意の文字列 session を足しただけの変更です。省略すると暗黙の既定ロール default を使うので、既存のワークフロー定義は無変更のまま動きます。" },
-    { title: "保存先: task_sessions テーブルと移行", paths: ["src/db/migrations.ts"], diagram: "relation",
-      explain: "role ごとにセッションIDを持つため、(task_id, role) を主キーにしたテーブルを新設します。これまで tasks.claude_session_id に1本だけ持っていた値は、default ロールの行へ複写して過去の会話を失わないようにしています。" },
-    { title: "中心: セッションの読み書きと、その呼び出し", paths: ["src/db/queries.ts", "src/core/engine.ts"], diagram: "sequence",
-      explain: "今回の変更の心臓部で、2つのファイルを続けて読みます。まず queries.ts で role 単位にセッションIDを引く getSessionId と、保存する sessionUpsert を確認し、次に engine.ts の runAgentStep がそれを実行の前後で呼んでいることを確認します。差し戻し（onReject.goto）で同じ role の agent ステップに戻ると、下の流れで同じ会話が --resume されます。" },
-    { title: "振る舞いの確認: テスト", paths: ["test/core/engine.test.ts"], diagram: null,
-      explain: "role 単位で resume されること、省略時は既定ロールを使うことの2点をテストしています。" },
-  ],
-  decisions: [
-    { title: "session を省略した agent ステップは暗黙の既定ロールを共有する", body: "既存のワークフロー（今までどおり「タスクに会話は1本」）を壊さないため" },
-    { title: "セッションの保存は実行後に行う", body: "実行中にデーモンが落ちても、直前の resume 可能な状態を上書きしない" },
-    { title: "task_sessions の主キーは (task_id, role)", body: "同じ role の2つ目の agent ステップに来ても同じ会話を拾える" },
-  ],
-  risks: [
-    "同じ role に全く違う目的のステップを割り当てると、意図せず古い文脈を引き継ぐ。role を適切に分けるのはワークフローの書き手の責任",
-    "マイグレーションで複写に失敗した行は resume できず新規セッションになる（実害は文脈が失われるだけで、実行自体は止まらない）",
-  ],
-  tests: [
-    { behavior: "差し戻し後に同じ role へ戻ると同一セッションで resume される", test: "engine.test.ts > role単位でセッションを共有する" },
-    { behavior: "session 省略時は暗黙の既定ロールを使う", test: "engine.test.ts > 省略時は既定ロール" },
-    { behavior: "移行後、既存の claude_session_id が default ロールへ複写される", test: "migrations.test.ts > 011が複写する" },
-  ],
-};
-
-
 // 状態は doctrine の7状態。refused はフラグ。
 // worktree は seedTasks が state から決めるので、dctl gc で消した後の姿は gced で指定する
 type Seed = Omit<Task, "project" | "prompt" | "branch" | "worktree"> & { gced?: true };
 
 const SEEDS: Seed[] = [
-  { id: "t-9f21", wf: "doctrine/guided", title: "ステップの再開をロール単位のセッションに切り替える", state: "suspended", step: "human-review", attempt: 1, prio: 1, since: NOW - 8 * MIN, guide: GUIDE_9F21 },
+  { id: "t-9f21", wf: "doctrine/guided", title: "ステップの再開をロール単位のセッションに切り替える", state: "suspended", step: "human-review", attempt: 1, prio: 1, since: NOW - 8 * MIN },
   { id: "t-2b91", wf: "doctrine/feature", title: "worktree.list をディスク上の全件にする", state: "suspended", step: "review", attempt: 1, prio: 2, since: NOW - 42 * MIN },
   { id: "s-1103", wf: "shop-api/feature", title: "在庫引当のリトライを冪等にする", state: "suspended", step: "review", attempt: 2, prio: 1, since: NOW - 15 * MIN },
   { id: "t-a1b2", wf: "doctrine/guided", title: "Review Guide の保存形式を試す", state: "suspended", step: "plan-approval", attempt: 1, prio: 2, since: NOW - 130 * MIN },

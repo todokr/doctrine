@@ -22,6 +22,7 @@ import type {
   TaskSummary,
 } from "../../shared/protocol.ts";
 import { toolInputParts } from "../../shared/toolInput.ts";
+import { guidePaths, type GuideView } from "./guide";
 import type { ConnectionStatus } from "./daemon/client";
 
 export const MIN = 60000;
@@ -126,6 +127,13 @@ export type DiffView = { meta: TaskDiff; files: DiffFile[] };
 export const fellBackToAll = (d: DiffView, scope: Scope) =>
   scope === "since" && d.meta.since_step_run_id === null;
 
+/**
+ * 前回レビュー以降だけを見ている状態。ガイドの箇所は merge-base から tree までの diff に対して
+ * 検証されているので、このとき指す箇所が画面に無いことが正常に起こる。
+ * 前回が無くて全体に倒れているとき（fellBackToAll）は全体を見ているので含めない。
+ */
+export const isPartial = (d: DiffView, scope: Scope) => scope === "since" && !fellBackToAll(d, scope);
+
 export type DiffLine = { kind: "a" | "d" | ""; text: string; old: number | null; new: number | null; line: number };
 
 /** hunk の本文を行に分け、旧・新の行番号を振る。コメントは削除行なら旧、それ以外は新の行番号に付ける */
@@ -158,7 +166,7 @@ export const canReject = (draft: Draft) => draft.comments.length > 0 || draft.ov
 
 // ---------------------------------------------------------------- Review Guide
 export function unguidedFiles(files: DiffFile[], guide: Guide): DiffFile[] {
-  const mentioned = new Set(guide.readingOrder.flatMap((r) => r.paths));
+  const mentioned = new Set(guidePaths(guide));
   return files.filter((f) => !mentioned.has(f.path));
 }
 
@@ -469,6 +477,8 @@ export type State = {
   /** タスクごと・範囲ごとの diff。範囲を切り替えるたびに取り直す */
   diffs: Record<string, Partial<Record<Scope, Loaded<DiffView>>>>;
   contexts: Record<string, Loaded<TaskContext>>;
+  /** タスクごとのガイド。取れなかったこと（error）と、ガイドが無いこと（GuideView の none）は別 */
+  guides: Record<string, Loaded<GuideView>>;
   /**
    * タスクごとの取得の世代。捨てるたびに1つ上げる。取りに行った側は
    * 始めた時点の世代を持ち帰り、その間に捨てられていたら書き込まない
@@ -491,14 +501,30 @@ export const draftOf = (s: State, id: string): Draft => s.drafts[id] ?? EMPTY_DR
 export const diffOf = (s: State, id: string, scope: Scope): Loaded<DiffView> | undefined =>
   s.diffs[id]?.[scope];
 export const contextOf = (s: State, id: string): Loaded<TaskContext> | undefined => s.contexts[id];
+export const guideOf = (s: State, id: string): Loaded<GuideView> | undefined => s.guides[id];
 export const scopeOf = (s: State, id: string): Scope => s.scope[id] ?? "all";
 export const genOf = (s: State, id: string): number => s.gen[id] ?? 0;
 export const selectedTask = (s: State) => s.tasks.find((t) => t.id === s.sel) ?? null;
 
+/**
+ * ガイドに沿って読めるステップの数。ガイドを出せないタスクと、前回レビュー以降を見ている間
+ * （diff が取れるまでを含む）は 0。ステップ位置を動かす経路（[ ] キーと reduce）はここを通る。
+ */
+function stepCount(s: State, id: string): number {
+  const g = guideOf(s, id);
+  if (g?.kind !== "ok" || g.value.kind !== "ok") return 0;
+  const scope = scopeOf(s, id);
+  const d = diffOf(s, id, scope);
+  if (scope === "since" && (d?.kind !== "ok" || isPartial(d.value, scope))) return 0;
+  return g.value.guide.readingOrder.length;
+}
+
 export function currentStep(s: State, t: Task): number | null {
-  if (!t.guide) return null;
+  const count = stepCount(s, t.id);
+  if (count === 0) return null;
   const v = s.step[t.id];
-  return v === undefined ? 0 : v;
+  // 差し戻しのあとにガイドが作り直されると、前のガイドで選んだ位置が範囲を外れうる
+  return v === undefined ? 0 : v === null ? null : Math.min(v, count - 1);
 }
 
 export type Action =
@@ -517,6 +543,7 @@ export type Action =
   | { type: "drafts.loaded"; drafts: Record<string, Draft> }
   | { type: "diff"; id: string; scope: Scope; gen: number; loaded: Loaded<DiffView> }
   | { type: "context"; id: string; gen: number; loaded: Loaded<TaskContext> }
+  | { type: "guide"; id: string; gen: number; loaded: Loaded<GuideView> }
   // approve / reject.confirm / cancel は判断そのものではない。ボタン側が rpc を
   // 送って成功したときにだけ dispatch される。ここでの役目は後片付け
   // （下書きを消す・次のレビュー待ちを選ぶ・トーストを出す）だけで、
@@ -559,14 +586,16 @@ const withoutDraft = (s: State, id: string): Record<string, Draft> => {
 };
 
 /**
- * そのタスクの取得済み diff / 経緯を捨てる。worktree は suspended の間は
+ * そのタスクの取得済み diff / 経緯 / ガイドを捨てる。worktree は suspended の間は
  * 凍っているので 15 秒ごとに取り直さないぶん、中身が変わり得る出来事
  * （ステップが進んだ・判断を送った）では明示的に捨てる必要がある。
+ * ガイドは stale の判定が worktree の今のツリーとの比較なので、捨てて取り直す。
  */
-function invalidate(s: State, id: string): Pick<State, "diffs" | "contexts" | "gen"> {
+function invalidate(s: State, id: string): Pick<State, "diffs" | "contexts" | "guides" | "gen"> {
   const { [id]: _d, ...diffs } = s.diffs;
   const { [id]: _c, ...contexts } = s.contexts;
-  return { diffs, contexts, gen: { ...s.gen, [id]: genOf(s, id) + 1 } };
+  const { [id]: _g, ...guides } = s.guides;
+  return { diffs, contexts, guides, gen: { ...s.gen, [id]: genOf(s, id) + 1 } };
 }
 
 /** 判断の後は、次のレビュー待ちを選んだ状態にする（spec 6章） */
@@ -598,8 +627,10 @@ export function reduce(s: State, a: Action): State {
     case "scope":
       return t ? { ...s, scope: { ...s.scope, [t.id]: a.scope } } : s;
     case "step": {
-      if (!t?.guide) return s;
-      if (a.idx !== null && (a.idx < 0 || a.idx >= t.guide.readingOrder.length)) return s;
+      if (!t) return s;
+      const count = stepCount(s, t.id);
+      if (count === 0) return s;
+      if (a.idx !== null && (a.idx < 0 || a.idx >= count)) return s;
       return { ...s, step: { ...s.step, [t.id]: a.idx }, editing: null };
     }
     case "comment.new":
@@ -635,6 +666,9 @@ export function reduce(s: State, a: Action): State {
     case "context":
       if (a.gen !== genOf(s, a.id)) return s;
       return { ...s, contexts: { ...s.contexts, [a.id]: a.loaded } };
+    case "guide":
+      if (a.gen !== genOf(s, a.id)) return s;
+      return { ...s, guides: { ...s.guides, [a.id]: a.loaded } };
     case "approve": {
       // rpc("task.approve") はもう成功している（呼び出し側が判定済み）。ここでの
       // 仕事は後片付けだけ。task.stateChanged は RPC の応答より先に届くことがあるので、
@@ -689,6 +723,7 @@ export function reduce(s: State, a: Action): State {
         logs: keep(s.logs),
         diffs: keep(s.diffs),
         contexts: keep(s.contexts),
+        guides: keep(s.guides),
         gen: keep(s.gen),
       };
       if (s.sel !== null && ids.has(s.sel)) return next;
@@ -787,6 +822,7 @@ export function reduce(s: State, a: Action): State {
         conn: a.conn,
         diffs: drop(s.diffs, (byScope) => Object.values(byScope).every((v) => v?.kind === "error")),
         contexts: drop(s.contexts, (v) => v.kind === "error"),
+        guides: drop(s.guides, (v) => v.kind === "error"),
       };
     }
   }
