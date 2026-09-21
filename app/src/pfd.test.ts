@@ -1,8 +1,8 @@
 import { describe, expect, test } from "vitest";
 import type { Pfd } from "../../shared/intake/pfd.ts";
 import type { ProcessStatus } from "../../shared/intake/processStatus.ts";
-import { PFD_SAMPLE, PFD_STATUSES_A, PFD_STATUSES_B } from "./fixtures";
-import { buildPfdView, LOOK, pfdKey, processStages, type PfdView } from "./pfd";
+import { ANSWERS, PFD_SAMPLE, PFD_STATUSES_A, PFD_STATUSES_B, QUESTIONS } from "./fixtures";
+import { buildPfdView, LOOK, parsePfdKey, pfdElement, pfdKey, processStages, type PfdView } from "./pfd";
 
 /** 成果物 id の配列と、[id, 入力, 出力] の配列から PFD を作る。given は goal に無く、どのプロセスの出力でもない成果物 */
 const pfd = (artifacts: string[], processes: [string, string[], string[]][], goal: string[]): Pfd => {
@@ -198,5 +198,53 @@ describe("pfdKey", () => {
   test("種類で接頭辞を付ける", () => {
     expect(pfdKey("artifact", "x")).toBe("a:x");
     expect(pfdKey("process", "x")).toBe("p:x");
+  });
+});
+
+describe("parsePfdKey", () => {
+  test("pfdKey の逆。最初の : だけで分ける", () => {
+    expect(parsePfdKey(pfdKey("process", "a:b"))).toEqual({ kind: "process", id: "a:b" });
+    expect(parsePfdKey(pfdKey("artifact", "x"))).toEqual({ kind: "artifact", id: "x" });
+    expect(parsePfdKey("z:x")).toBeNull();
+  });
+});
+
+describe("pfdElement", () => {
+  const ids = (list: { id: string }[]) => list.map((x) => x.id);
+
+  test("成果物の前段と後続", () => {
+    const schema = pfdElement(PFD_SAMPLE, "a:schema");
+    if (schema?.kind !== "artifact") throw new Error("成果物のはず");
+    expect(ids(schema.producers)).toEqual(["design"]);
+    expect(ids(schema.consumers)).toEqual(["build-api", "build-ui"]);
+
+    const issue = pfdElement(PFD_SAMPLE, "a:issue");
+    if (issue?.kind !== "artifact") throw new Error("成果物のはず");
+    expect(issue.producers).toEqual([]);
+  });
+
+  test("決定の成果物は質問と回答の文を持つ", () => {
+    const policy = pfdElement(PFD_SAMPLE, "a:policy", [{ questions: QUESTIONS, answers: ANSWERS }]);
+    if (policy?.kind !== "artifact") throw new Error("成果物のはず");
+    expect(policy.decision?.questionId).toBe("q1");
+    expect(policy.decision?.prompt).toBe("書き込みをどう扱うか");
+    expect(policy.decision?.answer).toContain("同期");
+
+    const bare = pfdElement(PFD_SAMPLE, "a:policy");
+    if (bare?.kind !== "artifact") throw new Error("成果物のはず");
+    expect(bare.decision).toEqual({ questionId: "q1", prompt: null, answer: null });
+  });
+
+  test("プロセスの段と入出力", () => {
+    const approve = pfdElement(PFD_SAMPLE, "p:approve");
+    if (approve?.kind !== "process") throw new Error("プロセスのはず");
+    expect(approve.stage).toBe(3);
+    expect(ids(approve.inputs)).toEqual(["api", "ui"]);
+    expect(ids(approve.outputs)).toEqual(["review"]);
+  });
+
+  test("案に無いキーは null", () => {
+    expect(pfdElement(PFD_SAMPLE, "p:nope")).toBeNull();
+    expect(pfdElement(PFD_SAMPLE, "x")).toBeNull();
   });
 });

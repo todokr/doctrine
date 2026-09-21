@@ -7,6 +7,7 @@ import type {
   ResultOf,
   ServerEvent,
 } from "../../../shared/protocol.ts";
+import type { IntakeDraft } from "../intake";
 import type { Draft } from "../types";
 
 export type ConnectionStatus = {
@@ -45,10 +46,14 @@ export function connectionStatus(): Promise<ConnectionStatus> {
  * invoke を1か所に閉じるという約束はこちらにも効くので、同じ場所に置く。
  * 置き場（アプリのデータディレクトリ）は Rust が決める。
  */
-export function loadDrafts(): Promise<Record<string, Draft>> {
-  return invoke<Record<string, Draft>>("load_drafts");
+export type SavedDrafts = { tasks: Record<string, Draft>; intakes: Record<string, IntakeDraft> };
+
+export async function loadDrafts(): Promise<SavedDrafts> {
+  // ファイルが無いと Rust は {} を返す。形が違うファイルも空として読む
+  const saved = await invoke<Partial<SavedDrafts>>("load_drafts");
+  return { tasks: saved.tasks ?? {}, intakes: saved.intakes ?? {} };
 }
 
-export function saveDrafts(drafts: Record<string, Draft>): Promise<void> {
+export function saveDrafts(drafts: SavedDrafts): Promise<void> {
   return invoke("save_drafts", { drafts });
 }

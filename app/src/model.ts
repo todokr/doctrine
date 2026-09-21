@@ -25,7 +25,15 @@ import type {
 import { toolInputParts } from "../../shared/toolInput.ts";
 import type { GuideView } from "./guide";
 import type { ConnectionStatus } from "./daemon/client";
-import { intakeOrder } from "./intake";
+import type { Answer } from "../../shared/intake/question.ts";
+import {
+  canRejectIntake,
+  commentTarget,
+  EMPTY_INTAKE_DRAFT,
+  type IntakeDraft,
+  intakeOrder,
+  setWholeComment,
+} from "./intake";
 
 export const MIN = 60000;
 
@@ -497,14 +505,17 @@ export type State = {
   /** タスクごとに選んだ並べ方。未設定なら layoutOf が既定を決める */
   layout: Record<string, Layout>;
   drafts: Record<string, Draft>;
+  /** Intake ごとの下書き（回答中の答え・差し戻しのコメント） */
+  intakeDrafts: Record<string, IntakeDraft>;
   editing: Editing | null;
-  modal: "reject-preview" | null;
+  modal: "reject-preview" | "intake-answer" | "intake-reject" | null;
   toast: string | null;
   conn: ConnectionStatus;
 };
 
 export const EMPTY_DRAFT: Draft = { comments: [], overall: "" };
 export const draftOf = (s: State, id: string): Draft => s.drafts[id] ?? EMPTY_DRAFT;
+export const intakeDraftOf = (s: State, id: string): IntakeDraft => s.intakeDrafts[id] ?? EMPTY_INTAKE_DRAFT;
 export const diffOf = (s: State, id: string, scope: Scope): Loaded<DiffView> | undefined =>
   s.diffs[id]?.[scope];
 export const contextOf = (s: State, id: string): Loaded<TaskContext> | undefined => s.contexts[id];
@@ -560,7 +571,16 @@ export type Action =
   | { type: "comment.cancel" }
   | { type: "comment.delete"; index: number }
   | { type: "overall"; text: string }
-  | { type: "drafts.loaded"; drafts: Record<string, Draft> }
+  | { type: "drafts.loaded"; drafts: { tasks: Record<string, Draft>; intakes: Record<string, IntakeDraft> } }
+  | { type: "intake.answers"; id: string; questionSetId: number; answers: Answer[] }
+  | { type: "intake.comment.add"; id: string; key: string; body: string }
+  | { type: "intake.comment.delete"; id: string; index: number }
+  | { type: "intake.whole"; id: string; body: string }
+  | { type: "intake.preview"; modal: "intake-answer" | "intake-reject" }
+  // 送信が成功した後の後片付けだけ。approve / reject.confirm と同じく状態を見ない
+  | { type: "intake.sent"; id: string; what: "answer" | "reject" | "approve" }
+  /** 承認などが失敗したとき、詳細を取り直させる */
+  | { type: "intake.reload"; id: string }
   | { type: "diff"; id: string; scope: Scope; gen: number; loaded: Loaded<DiffView> }
   | { type: "context"; id: string; gen: number; loaded: Loaded<TaskContext> }
   | { type: "guide"; id: string; gen: number; loaded: Loaded<GuideView> }
@@ -629,6 +649,13 @@ function invalidateIntake(s: State, id: string): Pick<State, "intakeDetails" | "
   return { intakeDetails, intakeGen: { ...s.intakeGen, [id]: intakeGenOf(s, id) + 1 } };
 }
 
+const setIntakeDraft = (s: State, id: string, patch: Partial<IntakeDraft>): Record<string, IntakeDraft> => ({
+  ...s.intakeDrafts,
+  [id]: { ...intakeDraftOf(s, id), ...patch },
+});
+
+const SENT_TOAST = { answer: "回答を送りました", reject: "差し戻しました", approve: "承認しました" } as const;
+
 /** 判断の後は、次のレビュー待ちを選んだ状態にする（spec 6章） */
 function selectNextReview(s: State, except: string): string | null {
   const next = sidebarOrder(s.tasks, s.view, s.project).find((x) => groupOf(x) === "review" && x.id !== except);
@@ -692,9 +719,48 @@ export function reduce(s: State, a: Action): State {
       return t ? { ...s, drafts: setDraft(s, t.id, { ...draftOf(s, t.id), overall: a.text }) } : s;
     case "drafts.loaded": {
       // 読み込みの間に書かれた下書きを消さない。同じタスクなら画面のものが新しい
-      const drafts = { ...a.drafts, ...s.drafts };
-      return { ...s, drafts, draftsLoaded: true };
+      const drafts = { ...a.drafts.tasks, ...s.drafts };
+      const intakeDrafts = { ...a.drafts.intakes, ...s.intakeDrafts };
+      return { ...s, drafts, intakeDrafts, draftsLoaded: true };
     }
+    case "intake.answers":
+      return {
+        ...s,
+        intakeDrafts: setIntakeDraft(s, a.id, { answers: { questionSetId: a.questionSetId, answers: a.answers } }),
+      };
+    case "intake.comment.add": {
+      const target = commentTarget(a.key);
+      const body = a.body.trim();
+      if (!target || !body) return s;
+      const d = intakeDraftOf(s, a.id);
+      return { ...s, intakeDrafts: setIntakeDraft(s, a.id, { comments: [...d.comments, { ...target, body }] }) };
+    }
+    case "intake.comment.delete": {
+      const d = intakeDraftOf(s, a.id);
+      return { ...s, intakeDrafts: setIntakeDraft(s, a.id, { comments: d.comments.filter((_, i) => i !== a.index) }) };
+    }
+    case "intake.whole":
+      return {
+        ...s,
+        intakeDrafts: setIntakeDraft(s, a.id, { comments: setWholeComment(intakeDraftOf(s, a.id).comments, a.body) }),
+      };
+    case "intake.preview": {
+      if (a.modal === "intake-answer") return { ...s, modal: "intake-answer" };
+      return s.intakeSel !== null && canRejectIntake(intakeDraftOf(s, s.intakeSel)) ? { ...s, modal: "intake-reject" } : s;
+    }
+    case "intake.sent": {
+      // 同じ理由で状態を見ない。送信はもう成功していて、下書きは送った中身だから捨てる
+      const patch: Partial<IntakeDraft> = a.what === "answer" ? { answers: null } : { comments: [] };
+      return {
+        ...s,
+        intakeDrafts: setIntakeDraft(s, a.id, patch),
+        modal: null,
+        ...invalidateIntake(s, a.id),
+        toast: SENT_TOAST[a.what],
+      };
+    }
+    case "intake.reload":
+      return { ...s, ...invalidateIntake(s, a.id) };
     case "diff":
       if (a.gen !== genOf(s, a.id)) return s;
       return { ...s, diffs: { ...s.diffs, [a.id]: { ...s.diffs[a.id], [a.scope]: a.loaded } } };
@@ -720,6 +786,7 @@ export function reduce(s: State, a: Action): State {
         intakes: a.intakes,
         intakeDetails: keep(s.intakeDetails),
         intakeGen: keep(s.intakeGen),
+        intakeDrafts: keep(s.intakeDrafts),
       };
     }
     case "intake.started": {

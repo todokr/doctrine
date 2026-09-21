@@ -48,7 +48,7 @@ import {
   type State,
 } from "./model";
 import type { GuideView } from "./guide";
-import { intakeOrder } from "./intake";
+import { EMPTY_INTAKE_DRAFT, type IntakeDraft, intakeOrder } from "./intake";
 import { buildDiff } from "./patch";
 import type { Guide, RateLimitWindow, ReviewEntry, Task, TaskContext } from "./types";
 import type {
@@ -82,6 +82,7 @@ const base = (overrides: Partial<State> = {}): State => ({
   intakeDetails: {},
   intakeGen: {},
   drafts: {},
+  intakeDrafts: {},
   draftsLoaded: true,
   editing: null,
   modal: null,
@@ -885,11 +886,105 @@ describe("下書きの読み込み", () => {
     const s = base({ draftsLoaded: false, drafts: { "t-2b91": { comments: [], overall: "いま書いた" } } });
     const after = reduce(s, {
       type: "drafts.loaded",
-      drafts: { "t-2b91": { comments: [], overall: "ファイルの古い方" }, "b-204": { comments: [], overall: "別のタスク" } },
+      drafts: {
+        tasks: { "t-2b91": { comments: [], overall: "ファイルの古い方" }, "b-204": { comments: [], overall: "別のタスク" } },
+        intakes: {},
+      },
     });
     expect(after.drafts["t-2b91"].overall).toBe("いま書いた");
     expect(after.drafts["b-204"].overall).toBe("別のタスク");
     expect(after.draftsLoaded).toBe(true);
+  });
+
+  test("読み込み中に書いた Intake の下書きも、ファイルの中身で上書きしない", () => {
+    const onScreen: IntakeDraft = { ...EMPTY_INTAKE_DRAFT, notes: { x: "画面" } };
+    const s = base({ draftsLoaded: false, intakeDrafts: { i1: onScreen } });
+    const after = reduce(s, {
+      type: "drafts.loaded",
+      drafts: {
+        tasks: {},
+        intakes: { i1: { ...EMPTY_INTAKE_DRAFT, notes: { x: "ファイル" } }, i2: { ...EMPTY_INTAKE_DRAFT, notes: { x: "別" } } },
+      },
+    });
+    expect(after.intakeDrafts.i1).toBe(onScreen);
+    expect(after.intakeDrafts.i2.notes.x).toBe("別");
+  });
+});
+
+describe("Intake の下書き", () => {
+  const at1 = (s: State = base({ intakeSel: "i1" })) => s;
+  const add = (s: State, key: string, body: string) => reduce(s, { type: "intake.comment.add", id: "i1", key, body });
+
+  test("intake.comment.add はキーを対象にして足し、空白だけは足さない", () => {
+    const s = add(at1(), "p:design", " 直して ");
+    expect(s.intakeDrafts.i1.comments).toEqual([{ target_kind: "process", target_id: "design", body: "直して" }]);
+    expect(add(s, "p:design", "  ")).toBe(s);
+    expect(add(s, "zzz", "x")).toBe(s);
+  });
+
+  test("intake.comment.delete は位置のコメントを消す", () => {
+    let s = add(at1(), "p:design", "a");
+    s = add(s, "a:schema", "b");
+    s = reduce(s, { type: "intake.comment.delete", id: "i1", index: 0 });
+    expect(s.intakeDrafts.i1.comments.map((c) => c.body)).toEqual(["b"]);
+  });
+
+  test("intake.whole は whole を 1 件だけ持つ", () => {
+    let s = reduce(at1(), { type: "intake.whole", id: "i1", body: "一" });
+    s = reduce(s, { type: "intake.whole", id: "i1", body: "二" });
+    expect(s.intakeDrafts.i1.comments).toEqual([{ target_kind: "whole", target_id: null, body: "二" }]);
+  });
+
+  test("intake.preview はコメントが無いと差し戻しのモーダルを開かない", () => {
+    const s = at1();
+    expect(reduce(s, { type: "intake.preview", modal: "intake-reject" }).modal).toBeNull();
+    const withComment = add(s, "p:design", "x");
+    expect(reduce(withComment, { type: "intake.preview", modal: "intake-reject" }).modal).toBe("intake-reject");
+    expect(reduce(s, { type: "intake.preview", modal: "intake-answer" }).modal).toBe("intake-answer");
+  });
+
+  test("intake.sent は送ったものだけを消し、詳細を捨てる", () => {
+    const draft: IntakeDraft = {
+      ...EMPTY_INTAKE_DRAFT,
+      comments: [{ target_kind: "whole", target_id: null, body: "全体" }],
+      answers: { questionSetId: 2, answers: [] },
+    };
+    const s = base({
+      intakeSel: "i1",
+      modal: "intake-reject",
+      intakeDrafts: { i1: draft },
+      intakeDetails: { i1: detailOk("i1") },
+      intakeGen: { i1: 3 },
+    });
+
+    const rejected = reduce(s, { type: "intake.sent", id: "i1", what: "reject" });
+    expect(rejected.intakeDrafts.i1.comments).toEqual([]);
+    expect(rejected.intakeDrafts.i1.answers).toEqual(draft.answers);
+    expect(rejected.modal).toBeNull();
+    expect(rejected.intakeDetails.i1).toBeUndefined();
+    expect(rejected.intakeGen.i1).toBe(4);
+    expect(rejected.toast).toBe("差し戻しました");
+
+    const answered = reduce(s, { type: "intake.sent", id: "i1", what: "answer" });
+    expect(answered.intakeDrafts.i1.answers).toBeNull();
+    expect(answered.intakeDrafts.i1.comments).toEqual(draft.comments);
+
+    expect(reduce(s, { type: "intake.sent", id: "i1", what: "approve" }).toast).toBe("承認しました");
+  });
+
+  test("intake.reload は詳細を捨てるだけ", () => {
+    const s = base({ intakeDetails: { i1: detailOk("i1") }, intakeGen: { i1: 1 }, modal: "intake-reject" });
+    const after = reduce(s, { type: "intake.reload", id: "i1" });
+    expect(after.intakeDetails.i1).toBeUndefined();
+    expect(after.intakeGen.i1).toBe(2);
+    expect(after.modal).toBe("intake-reject");
+  });
+
+  test("intakes.sync は一覧から消えた Intake の下書きを捨て、選択中のものは残す", () => {
+    const d = EMPTY_INTAKE_DRAFT;
+    const s = base({ intakeSel: "c", intakeDrafts: { a: d, b: d, c: d } });
+    const after = reduce(s, { type: "intakes.sync", intakes: [{ ...INTAKES[0], id: "a" }] });
+    expect(Object.keys(after.intakeDrafts).sort()).toEqual(["a", "c"]);
   });
 });
 

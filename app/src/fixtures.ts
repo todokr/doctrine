@@ -1,6 +1,6 @@
 // テスト用の標本。画面はこれを使わない（画面のデータはデーモンから来る）
 import type { Project, Task, TaskDiff } from "./types";
-import type { GithubIssue, IntakeSummary, ServerEvent } from "../../shared/protocol.ts";
+import type { GithubIssue, IntakeDetail, IntakeSummary, ServerEvent } from "../../shared/protocol.ts";
 import type { Pfd } from "../../shared/intake/pfd.ts";
 import type { PrFact, ProcessStatus } from "../../shared/intake/processStatus.ts";
 import type { Answer, Question } from "../../shared/intake/question.ts";
@@ -367,3 +367,72 @@ export const GITHUB_ISSUES: GithubIssue[] = [
     intake_id: null,
   },
 ];
+
+const INTAKE_1 = INTAKES.find((i) => i.id === "i1")!;
+
+/** レビュー待ち。案は 2 回目（1 回目の案へのコメント 1 件と、その返答を持つ）。質問は回答済みの 1 件 */
+export const INTAKE_REVIEWING: IntakeDetail = {
+  ...INTAKE_1,
+  state: "reviewing",
+  drafts: [
+    { id: 11, seq: 1, created_at: at(150) },
+    { id: 12, seq: 2, created_at: at(60) },
+  ],
+  latest_draft: {
+    id: 12,
+    seq: 2,
+    pfd: PFD_SAMPLE,
+    hash: "hash-of-draft-12",
+    replies: [{ commentId: 7, reply: "列を減らしました" }],
+    created_at: at(60),
+  },
+  approval: null,
+  question_sets: [{
+    id: 1,
+    run_id: 1,
+    questions: QUESTIONS,
+    answers: ANSWERS,
+    created_at: at(200),
+    answered_at: at(180),
+  }],
+  comments: [{
+    id: 7,
+    draft_id: 11,
+    target_kind: "process",
+    target_id: "design",
+    body: "列が多すぎる",
+    created_at: at(100),
+  }],
+  processes: [],
+  runs: [],
+};
+
+/** 回答待ち。回答済みの質問のまとまり 1 件と、未回答のまとまり 1 件 */
+export const INTAKE_ANSWERING: IntakeDetail = {
+  ...INTAKE_1,
+  state: "answering",
+  drafts: [],
+  latest_draft: null,
+  approval: null,
+  question_sets: [
+    {
+      id: 1,
+      run_id: 1,
+      questions: QUESTIONS,
+      answers: ANSWERS,
+      created_at: at(200),
+      answered_at: at(180),
+    },
+    {
+      id: 2,
+      run_id: 2,
+      questions: QUESTIONS.slice(0, 1),
+      answers: null,
+      created_at: at(20),
+      answered_at: null,
+    },
+  ],
+  comments: [],
+  processes: [],
+  runs: [],
+};

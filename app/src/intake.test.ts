@@ -1,21 +1,38 @@
 import { describe, expect, test } from "vitest";
 import { validateAnswers, validateQuestions } from "../../shared/intake/validateQuestion.ts";
 import type { IntakeState } from "../../shared/intake/state.ts";
-import { ANSWERS, INTAKES, PROJECTS, QUESTIONS } from "./fixtures";
+import { buildFeedback } from "../../shared/intake/feedback.ts";
+import type { IntakeComment, IntakeDetail, NewComment } from "../../shared/protocol.ts";
+import { ANSWERS, INTAKE_ANSWERING, INTAKE_REVIEWING, INTAKES, PFD_SAMPLE, PROJECTS, QUESTIONS } from "./fixtures";
+import { buildPfdView } from "./pfd";
 import {
   answerIssues,
+  canRejectIntake,
+  commentCounts,
+  commentReplies,
+  commentsOn,
+  commentTarget,
+  commentTargetLabel,
   countIntakeAttention,
+  draftAnswers,
+  EMPTY_INTAKE_DRAFT,
   ghGuidance,
   intakeFace,
+  intakeHistory,
+  type IntakeDraft,
   intakeOrder,
   intakeProgress,
   intakeSection,
   issueNumber,
   issueTarget,
   normalizeAnswers,
+  openQuestionSet,
   parseIssueInput,
+  rejectionText,
+  setWholeComment,
   toggleOption,
   updateAnswer,
+  wholeComment,
 } from "./intake";
 
 const [Q1, Q2] = QUESTIONS;
@@ -272,5 +289,142 @@ describe("issueTarget", () => {
   test("Intake の無い Issue は開始", () => {
     const url = "https://github.com/o/r/issues/99";
     expect(issueTarget({ url }, INTAKES)).toEqual({ kind: "start", url });
+  });
+});
+
+const NEW = (target_kind: NewComment["target_kind"], target_id: string | null, body: string): NewComment => ({ target_kind, target_id, body });
+const draftOf = (comments: NewComment[]): IntakeDraft => ({ ...EMPTY_INTAKE_DRAFT, comments });
+
+describe("commentTarget", () => {
+  test("キーを対象にする", () => {
+    expect(commentTarget("a:schema")).toEqual({ target_kind: "artifact", target_id: "schema" });
+    expect(commentTarget("p:design")).toEqual({ target_kind: "process", target_id: "design" });
+    expect(commentTarget("x")).toBeNull();
+  });
+});
+
+describe("commentCounts", () => {
+  test("コメントが要素の id に紐づく", () => {
+    const counts = commentCounts([
+      NEW("process", "design", "1"),
+      NEW("artifact", "schema", "2"),
+      NEW("process", "design", "3"),
+      NEW("whole", null, "4"),
+    ]);
+    expect(counts).toEqual({ "p:design": 2, "a:schema": 1 });
+    const view = buildPfdView(PFD_SAMPLE, { comments: counts });
+    expect(view.nodes.find((n) => n.key === "p:design")!.comments).toBe(2);
+    expect(view.nodes.find((n) => n.key === "a:issue")!.comments).toBe(0);
+  });
+});
+
+describe("commentsOn", () => {
+  test("その要素のコメントと位置", () => {
+    const comments = [NEW("process", "design", "a"), NEW("artifact", "schema", "b"), NEW("process", "design", "c")];
+    expect(commentsOn(comments, "p:design").map((c) => c.index)).toEqual([0, 2]);
+  });
+});
+
+describe("setWholeComment", () => {
+  test("書き換え・追加・削除", () => {
+    const first = setWholeComment([NEW("process", "design", "x")], "全体");
+    expect(first).toEqual([NEW("process", "design", "x"), NEW("whole", null, "全体")]);
+    expect(wholeComment(first)).toBe("全体");
+
+    const second = setWholeComment(first, "直した");
+    expect(second).toHaveLength(2);
+    expect(second[1]).toEqual(NEW("whole", null, "直した"));
+    expect(wholeComment(second)).toBe("直した");
+
+    const third = setWholeComment(second, "  ");
+    expect(third).toEqual([NEW("process", "design", "x")]);
+    expect(wholeComment(third)).toBe("");
+  });
+});
+
+describe("canRejectIntake", () => {
+  test("コメントが無いと差し戻せない", () => {
+    expect(canRejectIntake(draftOf([]))).toBe(false);
+    expect(canRejectIntake(draftOf([NEW("whole", null, "全体")]))).toBe(true);
+    expect(canRejectIntake(draftOf([NEW("artifact", "schema", "x")]))).toBe(true);
+  });
+});
+
+describe("rejectionText", () => {
+  test("差し戻しの文面を組み立てる", () => {
+    const comments = [NEW("process", "design", "列を減らす"), NEW("whole", null, "全体に粗い")];
+    const text = rejectionText(PFD_SAMPLE, draftOf(comments));
+    expect(text).toBe(buildFeedback(PFD_SAMPLE, comments));
+    expect(text).toContain("### コメント 1: プロセス design「スキーマを設計する」");
+    expect(text).toContain("### コメント 2: 計画全体");
+    expect(text).toContain("列を減らす");
+    expect(text).toContain("全体に粗い");
+  });
+});
+
+describe("commentTargetLabel", () => {
+  test("案に無い要素は id だけ", () => {
+    expect(commentTargetLabel(NEW("artifact", "gone", "x"), PFD_SAMPLE)).toBe("成果物 gone");
+    expect(commentTargetLabel(NEW("artifact", "schema", "x"), PFD_SAMPLE)).toBe("成果物 schema「CSV スキーマ」");
+    expect(commentTargetLabel(NEW("process", "design", "x"), null)).toBe("プロセス design");
+    expect(commentTargetLabel(NEW("whole", null, "x"), PFD_SAMPLE)).toBe("計画全体");
+  });
+});
+
+describe("openQuestionSet と draftAnswers", () => {
+  test("未回答のまとまりを返し、下書きの答えはまとまりが同じときだけ使う", () => {
+    const set = openQuestionSet(INTAKE_ANSWERING);
+    expect(set?.id).toBe(2);
+    expect(openQuestionSet(INTAKE_REVIEWING)).toBeNull();
+
+    const draft: IntakeDraft = { ...EMPTY_INTAKE_DRAFT, answers: { questionSetId: 2, answers: ANSWERS } };
+    expect(draftAnswers(draft, 3)).toEqual([]);
+    expect(draftAnswers(draft, 2)).toEqual(ANSWERS);
+    expect(draftAnswers(EMPTY_INTAKE_DRAFT, 2)).toEqual([]);
+  });
+});
+
+describe("commentReplies", () => {
+  test("返答はコメントの DB の id で引く", () => {
+    const c = (id: number): IntakeComment => ({ id, draft_id: 1, target_kind: "whole", target_id: null, body: "b", created_at: "t" });
+    expect(commentReplies([c(7), c(8)], [{ commentId: 8, reply: "直した" }])).toEqual([
+      { comment: c(7), reply: null },
+      { comment: c(8), reply: "直した" },
+    ]);
+  });
+});
+
+describe("intakeHistory", () => {
+  const base = INTAKE_REVIEWING;
+  const comment = (id: number, draft_id: number): IntakeComment => ({ id, draft_id, target_kind: "whole", target_id: null, body: "b", created_at: at });
+  const at = "2026-09-15T14:00:00+09:00";
+  const draft = (id: number, seq: number, when: string) => ({ id, seq, created_at: when });
+
+  test("起きた順に並べ、未回答のまとまりは入れない", () => {
+    const answered = { ...base.question_sets[0], created_at: "2026-09-15T10:00:00+09:00" };
+    const open = { ...answered, id: 9, answers: null, created_at: "2026-09-15T13:59:00+09:00" };
+    const detail: IntakeDetail = {
+      ...base,
+      question_sets: [answered, open],
+      drafts: [draft(11, 1, "2026-09-15T11:00:00+09:00"), draft(12, 2, "2026-09-15T12:00:00+09:00")],
+      comments: [comment(7, 11)],
+      approval: { id: 1, draft_id: 12, hash: "h", approved_at: "2026-09-15T13:00:00+09:00" },
+    };
+    const history = intakeHistory(detail);
+    expect(history.map((e) => e.kind)).toEqual(["questions", "draft", "draft", "approval"]);
+    const [, first, second] = history;
+    expect(first.kind === "draft" && first.pendingComments).toEqual([]);
+    expect(second.kind === "draft" && second.previousComments.map((c) => c.id)).toEqual([7]);
+  });
+
+  test("差し戻した直後は最後の案に pendingComments が入る", () => {
+    const detail: IntakeDetail = {
+      ...base,
+      question_sets: [],
+      drafts: [draft(11, 1, "2026-09-15T11:00:00+09:00")],
+      comments: [comment(7, 11)],
+    };
+    const [entry] = intakeHistory(detail);
+    expect(entry.kind === "draft" && entry.pendingComments).toHaveLength(1);
   });
 });
