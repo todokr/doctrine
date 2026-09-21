@@ -33,6 +33,7 @@ import {
   type IntakeDraft,
   intakeOrder,
   setWholeComment,
+  summaryOf,
 } from "./intake";
 
 export const MIN = 60000;
@@ -99,6 +100,11 @@ export const GROUPS: { key: Exclude<Group, "done">; name: string; sort: (a: Task
 ];
 
 export type View = "tasks" | "done" | "intake";
+
+/** そのタスクが並ぶビュー。終了したタスクは「終了したタスク」にしか並ばない */
+export function taskViewFor(t: Task): Exclude<View, "intake"> {
+  return groupOf(t) === "done" ? "done" : "tasks";
+}
 
 export const visibleTasks = (tasks: Task[], project: string) =>
   tasks.filter((t) => project === "all" || t.project === project);
@@ -353,7 +359,9 @@ export function toTask(
     // 引き継がない。イベントを取りこぼすと取り直しだけで終端になることがあり、
     // 引き継ぐと完了・失敗したタスクに差し戻し中の通知が残る
     bounce: isTerminal(state) ? undefined : previous?.bounce,
-    intake: null,
+    intake: row.intake_id !== null && row.intake_process_id !== null
+      ? { id: row.intake_id, processId: row.intake_process_id, issueUrl: row.issue_url, parentIssueUrl: row.parent_issue_url }
+      : null,
   };
 }
 
@@ -501,6 +509,8 @@ export type State = {
   /** intake.get の結果。選んだ Intake ぶんだけ持つ */
   intakeDetails: Record<string, Loaded<IntakeDetail>>;
   intakeGen: Record<string, number>;
+  /** 進行中の面で改訂に入るモードにしている Intake の id。詳細を捨てても消えないよう、面の外に持つ */
+  intakeRevise: string | null;
   /** データディレクトリから下書きを読み終えたか。読む前に書くと空で上書きしてしまう */
   draftsLoaded: boolean;
   /** タスクごとに選んだ並べ方。未設定なら layoutOf が既定を決める */
@@ -509,7 +519,7 @@ export type State = {
   /** Intake ごとの下書き（回答中の答え・差し戻しのコメント） */
   intakeDrafts: Record<string, IntakeDraft>;
   editing: Editing | null;
-  modal: "reject-preview" | "intake-answer" | "intake-reject" | null;
+  modal: "reject-preview" | "intake-answer" | "intake-reject" | "intake-cancel" | null;
   toast: string | null;
   conn: ConnectionStatus;
 };
@@ -577,9 +587,23 @@ export type Action =
   | { type: "intake.comment.add"; id: string; key: string; body: string }
   | { type: "intake.comment.delete"; id: string; index: number }
   | { type: "intake.whole"; id: string; body: string }
-  | { type: "intake.preview"; modal: "intake-answer" | "intake-reject" }
+  | { type: "intake.preview"; modal: "intake-answer" | "intake-reject" | "intake-cancel" }
   // 送信が成功した後の後片付けだけ。approve / reject.confirm と同じく状態を見ない
-  | { type: "intake.sent"; id: string; what: "answer" | "reject" | "approve" }
+  | { type: "intake.sent"; id: string; what: "answer" | "reject" | "approve" | "revise" }
+  | { type: "intake.sent"; id: string; what: "complete"; processId: string }
+  /** 人のプロセスの「決めた内容」の下書き */
+  | { type: "intake.note"; id: string; processId: string; text: string }
+  /** RPC が返した詳細（refresh / completeHumanProcess / redispatch）をそのまま置く */
+  | { type: "intake.fresh"; id: string; detail: IntakeDetail }
+  /** 中止・一時停止・改訂をやめる・Issue を閉じるが成功した。一覧の行を置き換え、詳細を捨てる */
+  | { type: "intake.done"; intake: IntakeSummary; toast: string }
+  /** 「改訂に入る…」と「やめる」。leave は下書きのコメントを残す */
+  | { type: "intake.revise.enter"; id: string }
+  | { type: "intake.revise.leave" }
+  /** Intake のプロセスから、そのタスクを開く */
+  | { type: "task.open"; id: string }
+  /** タスクから、その Intake を開く */
+  | { type: "intake.open"; id: string }
   /** 承認などが失敗したとき、詳細を取り直させる */
   | { type: "intake.reload"; id: string }
   | { type: "diff"; id: string; scope: Scope; gen: number; loaded: Loaded<DiffView> }
@@ -655,7 +679,13 @@ const setIntakeDraft = (s: State, id: string, patch: Partial<IntakeDraft>): Reco
   [id]: { ...intakeDraftOf(s, id), ...patch },
 });
 
-const SENT_TOAST = { answer: "回答を送りました", reject: "差し戻しました", approve: "承認しました" } as const;
+const SENT_TOAST = {
+  answer: "回答を送りました",
+  reject: "差し戻しました",
+  approve: "承認しました",
+  revise: "改訂を始めました",
+  complete: "完了を記録しました",
+} as const;
 
 /** 判断の後は、次のレビュー待ちを選んだ状態にする（spec 6章） */
 function selectNextReview(s: State, except: string): string | null {
@@ -746,20 +776,57 @@ export function reduce(s: State, a: Action): State {
         intakeDrafts: setIntakeDraft(s, a.id, { comments: setWholeComment(intakeDraftOf(s, a.id).comments, a.body) }),
       };
     case "intake.preview": {
-      if (a.modal === "intake-answer") return { ...s, modal: "intake-answer" };
+      if (a.modal !== "intake-reject") return { ...s, modal: a.modal };
       return s.intakeSel !== null && canRejectIntake(intakeDraftOf(s, s.intakeSel)) ? { ...s, modal: "intake-reject" } : s;
     }
     case "intake.sent": {
       // 同じ理由で状態を見ない。送信はもう成功していて、下書きは送った中身だから捨てる
-      const patch: Partial<IntakeDraft> = a.what === "answer" ? { answers: null } : { comments: [] };
+      let patch: Partial<IntakeDraft>;
+      if (a.what === "answer") patch = { answers: null };
+      else if (a.what === "complete") {
+        const { [a.processId]: _, ...notes } = intakeDraftOf(s, a.id).notes;
+        patch = { notes };
+      } else patch = { comments: [] };
       return {
         ...s,
         intakeDrafts: setIntakeDraft(s, a.id, patch),
+        intakeRevise: a.what === "revise" ? null : s.intakeRevise,
         modal: null,
         ...invalidateIntake(s, a.id),
         toast: SENT_TOAST[a.what],
       };
     }
+    case "intake.note":
+      return {
+        ...s,
+        intakeDrafts: setIntakeDraft(s, a.id, { notes: { ...intakeDraftOf(s, a.id).notes, [a.processId]: a.text } }),
+      };
+    case "intake.fresh":
+      return {
+        ...s,
+        intakes: s.intakes.map((i) => (i.id === a.id ? summaryOf(a.detail) : i)),
+        intakeDetails: { ...s.intakeDetails, [a.id]: { kind: "ok", value: a.detail } },
+        intakeGen: { ...s.intakeGen, [a.id]: intakeGenOf(s, a.id) + 1 },
+      };
+    case "intake.done":
+      return {
+        ...s,
+        intakes: s.intakes.map((i) => (i.id === a.intake.id ? a.intake : i)),
+        ...invalidateIntake(s, a.intake.id),
+        modal: null,
+        toast: a.toast,
+      };
+    case "intake.revise.enter":
+      return { ...s, intakeRevise: a.id };
+    case "intake.revise.leave":
+      return { ...s, intakeRevise: null };
+    case "task.open": {
+      const target = s.tasks.find((x) => x.id === a.id);
+      if (!target) return { ...s, toast: "タスクが一覧にありません" };
+      return { ...s, view: taskViewFor(target), sel: a.id, editing: null };
+    }
+    case "intake.open":
+      return { ...s, view: "intake", intakeSel: a.id, editing: null };
     case "intake.reload":
       return { ...s, ...invalidateIntake(s, a.id) };
     case "diff":
@@ -785,6 +852,7 @@ export function reduce(s: State, a: Action): State {
       return {
         ...s,
         intakes: a.intakes,
+        intakeRevise: s.intakeRevise !== null && (ids.has(s.intakeRevise) || s.intakeRevise === s.intakeSel) ? s.intakeRevise : null,
         intakeDetails: keep(s.intakeDetails),
         intakeGen: keep(s.intakeGen),
         intakeDrafts: keep(s.intakeDrafts),
@@ -799,7 +867,12 @@ export function reduce(s: State, a: Action): State {
     }
     case "intake.detail":
       if (a.gen !== intakeGenOf(s, a.id)) return s;
-      return { ...s, intakeDetails: { ...s.intakeDetails, [a.id]: a.loaded } };
+      // 一覧の行は最大 15 秒古いので、取り直した詳細で needs_human と進み具合を先に直す。行が無ければ足さない
+      const { loaded } = a;
+      const intakes = loaded.kind === "ok"
+        ? s.intakes.map((i) => (i.id === a.id ? summaryOf(loaded.value) : i))
+        : s.intakes;
+      return { ...s, intakes, intakeDetails: { ...s.intakeDetails, [a.id]: loaded } };
     case "approve": {
       // rpc("task.approve") はもう成功している（呼び出し側が判定済み）。ここでの
       // 仕事は後片付けだけ。task.stateChanged は RPC の応答より先に届くことがあるので、

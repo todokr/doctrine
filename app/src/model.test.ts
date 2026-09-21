@@ -1,5 +1,6 @@
 import { describe, expect, test, vi } from "vitest";
 import {
+  INTAKE_ACTIVE,
   INTAKES,
   NOW,
   PROJECTS,
@@ -39,6 +40,7 @@ import {
   sidebarOrder,
   stepRunHistory,
   stopReasons,
+  taskViewFor,
   timeLabel,
   toProject,
   toRateLimitWindow,
@@ -48,7 +50,7 @@ import {
   type State,
 } from "./model";
 import type { GuideView } from "./guide";
-import { EMPTY_INTAKE_DRAFT, type IntakeDraft, intakeOrder } from "./intake";
+import { countIntakeAttention, EMPTY_INTAKE_DRAFT, type IntakeDraft, intakeOrder } from "./intake";
 import { buildDiff } from "./patch";
 import type { Guide, RateLimitWindow, ReviewEntry, Task, TaskContext } from "./types";
 import type {
@@ -81,6 +83,7 @@ const base = (overrides: Partial<State> = {}): State => ({
   showClosedIntakes: false,
   intakeDetails: {},
   intakeGen: {},
+  intakeRevise: null,
   drafts: {},
   intakeDrafts: {},
   draftsLoaded: true,
@@ -416,6 +419,12 @@ const PJ = [summary()];
 const t1 = (o: Partial<TaskSummary> = {}) => toTask(row(o), PJ);
 
 describe("toProject / toTask", () => {
+  test("Intake の紐づけ列を写す", () => {
+    const t = t1({ intake_id: "i1", intake_process_id: "design", issue_url: "u1", parent_issue_url: "u0" });
+    expect(t.intake).toEqual({ id: "i1", processId: "design", issueUrl: "u1", parentIssueUrl: "u0" });
+    expect(t1({ intake_id: null }).intake).toBeNull();
+  });
+
   test("プロジェクトの表示名はパスの末尾", () => {
     expect(toProject(summary()).id).toBe("doctrine");
     expect(toProject(summary({ path: "/home/u/work/shop-api/" })).id).toBe("shop-api");
@@ -985,6 +994,127 @@ describe("Intake の下書き", () => {
     const s = base({ intakeSel: "c", intakeDrafts: { a: d, b: d, c: d } });
     const after = reduce(s, { type: "intakes.sync", intakes: [{ ...INTAKES[0], id: "a" }] });
     expect(Object.keys(after.intakeDrafts).sort()).toEqual(["a", "c"]);
+  });
+
+  test("intake.note はプロセスごとに入力のまま持つ", () => {
+    let s = base({ intakeDrafts: { i1: { ...EMPTY_INTAKE_DRAFT, notes: { other: "b" } } } });
+    s = reduce(s, { type: "intake.note", id: "i1", processId: "approve", text: " 決めた " });
+    expect(s.intakeDrafts.i1.notes).toEqual({ other: "b", approve: " 決めた " });
+  });
+
+  test("intake.sent の complete はそのプロセスの内容だけを消す", () => {
+    const comments = [{ target_kind: "whole" as const, target_id: null, body: "全体" }];
+    const s = base({
+      modal: "intake-cancel",
+      intakeDrafts: { i1: { ...EMPTY_INTAKE_DRAFT, comments, notes: { approve: "a", other: "b" } } },
+      intakeDetails: { i1: detailOk("i1") },
+    });
+    const after = reduce(s, { type: "intake.sent", id: "i1", what: "complete", processId: "approve" });
+    expect(after.intakeDrafts.i1.notes).toEqual({ other: "b" });
+    expect(after.intakeDrafts.i1.comments).toEqual(comments);
+    expect(after.intakeDetails.i1).toBeUndefined();
+    expect(after.toast).toBe("完了を記録しました");
+  });
+
+  test("intake.sent の revise はコメントを消し、改訂に入るモードを抜ける", () => {
+    const comments = [{ target_kind: "whole" as const, target_id: null, body: "全体" }];
+    const s = base({ intakeRevise: "i1", intakeDrafts: { i1: { ...EMPTY_INTAKE_DRAFT, comments } } });
+    const after = reduce(s, { type: "intake.sent", id: "i1", what: "revise" });
+    expect(after.intakeDrafts.i1.comments).toEqual([]);
+    expect(after.intakeRevise).toBeNull();
+    expect(after.toast).toBe("改訂を始めました");
+  });
+
+  test("intake.preview で中止のモーダルを開く", () => {
+    expect(reduce(base(), { type: "intake.preview", modal: "intake-cancel" }).modal).toBe("intake-cancel");
+  });
+
+  test("改訂に入るモードは詳細を捨てても消えない", () => {
+    let s = base({ intakeSel: "i1", intakeDetails: { i1: detailOk("i1") } });
+    s = reduce(s, { type: "intake.revise.enter", id: "i1" });
+    s = reduce(s, { type: "daemon", ev: { event: "intake.updated", intake_id: "i1" }, now: NOW });
+    expect(s.intakeDetails.i1).toBeUndefined();
+    expect(s.intakeRevise).toBe("i1");
+    expect(reduce(s, { type: "intake.revise.leave" }).intakeRevise).toBeNull();
+  });
+
+  test("intakes.sync は一覧から消えた Intake の改訂モードを外す", () => {
+    const list = [{ ...INTAKES[0], id: "a" }];
+    expect(reduce(base({ intakeRevise: "gone", intakeSel: null }), { type: "intakes.sync", intakes: list }).intakeRevise).toBeNull();
+    expect(reduce(base({ intakeRevise: "gone", intakeSel: "gone" }), { type: "intakes.sync", intakes: list }).intakeRevise).toBe("gone");
+    expect(reduce(base({ intakeRevise: "a" }), { type: "intakes.sync", intakes: list }).intakeRevise).toBe("a");
+  });
+});
+
+describe("進行中の面", () => {
+  const active = (): IntakeDetail => ({ ...INTAKE_ACTIVE, id: "i1" });
+  const loaded = (): Loaded<IntakeDetail> => ({ kind: "ok", value: active() });
+
+  test("intake.detail は一覧の行の needs_human と進み具合を詳細で直す", () => {
+    const s = base({ intakes: [{ ...INTAKES[3], id: "i1", needs_human: false }], intakeGen: { i1: 0 } });
+    const after = reduce(s, { type: "intake.detail", id: "i1", gen: 0, loaded: loaded() });
+    expect(after.intakes[0].needs_human).toBe(true);
+    expect(after.intakes[0].progress).toEqual(active().progress);
+    expect(countIntakeAttention(after.intakes)).toBe(1);
+  });
+
+  test("intake.detail は一覧に無い Intake を足さない", () => {
+    const after = reduce(base({ intakes: [], intakeGen: { i1: 0 } }), { type: "intake.detail", id: "i1", gen: 0, loaded: loaded() });
+    expect(after.intakes).toEqual([]);
+    expect(after.intakeDetails.i1).toEqual(loaded());
+  });
+
+  test("intake.fresh は世代を上げて詳細を置き、行を直す", () => {
+    const s = base({ intakes: [{ ...INTAKES[3], id: "i1", needs_human: false }], intakeGen: { i1: 2 } });
+    const after = reduce(s, { type: "intake.fresh", id: "i1", detail: active() });
+    expect(after.intakeGen.i1).toBe(3);
+    expect(after.intakeDetails.i1).toEqual(loaded());
+    expect(after.intakes[0].needs_human).toBe(true);
+    const stale = reduce(after, { type: "intake.detail", id: "i1", gen: 2, loaded: { kind: "error", message: "x" } });
+    expect(stale.intakeDetails.i1).toEqual(loaded());
+  });
+
+  test("intake.done は行を置き換えて詳細を捨てる", () => {
+    const paused = { ...INTAKES[3], id: "i1", dispatch_paused: true };
+    const s = base({
+      modal: "intake-cancel",
+      intakes: [{ ...INTAKES[3], id: "i1" }],
+      intakeDetails: { i1: detailOk("i1") },
+    });
+    const after = reduce(s, { type: "intake.done", intake: paused, toast: "中止しました" });
+    expect(after.intakes[0]).toEqual(paused);
+    expect(after.intakeDetails.i1).toBeUndefined();
+    expect(after.modal).toBeNull();
+    expect(after.toast).toBe("中止しました");
+  });
+
+  test("task.open は終了したタスクなら終了ビューで開く", () => {
+    const s = base({ view: "intake", sel: "t-2b91" });
+    const done = reduce(s, { type: "task.open", id: "t-0a77" });
+    expect(done.view).toBe("done");
+    expect(done.sel).toBe("t-0a77");
+    const running = reduce(s, { type: "task.open", id: "t-7f3a" });
+    expect(running.view).toBe("tasks");
+    expect(running.sel).toBe("t-7f3a");
+    const unknown = reduce(s, { type: "task.open", id: "nope" });
+    expect(unknown.view).toBe("intake");
+    expect(unknown.sel).toBe("t-2b91");
+    expect(unknown.toast).toBe("タスクが一覧にありません");
+  });
+
+  test("intake.open はタスクの選択を残して Intake を開く", () => {
+    const s = reduce(base({ sel: "t-7f3a" }), { type: "intake.open", id: "i2" });
+    expect(s.view).toBe("intake");
+    expect(s.intakeSel).toBe("i2");
+    expect(s.sel).toBe("t-7f3a");
+  });
+
+  test("taskViewFor", () => {
+    const seed = (o: Partial<Task>): Task => ({ ...seedTasks()[0], ...o });
+    for (const state of ["completed", "canceled"] as const) expect(taskViewFor(seed({ state }))).toBe("done");
+    expect(taskViewFor(seed({ state: "failed", worktree: null }))).toBe("done");
+    expect(taskViewFor(seed({ state: "failed", worktree: "/w" }))).toBe("tasks");
+    for (const state of ["suspended", "running"] as const) expect(taskViewFor(seed({ state }))).toBe("tasks");
   });
 });
 
