@@ -2,8 +2,8 @@ import { describe, expect, test } from "vitest";
 import type { Pfd } from "../../shared/intake/pfd.ts";
 import type { ProcessStatus } from "../../shared/intake/processStatus.ts";
 import type { IntakeProcessView } from "../../shared/protocol.ts";
-import { ANSWERS, INTAKE_ACTIVE, PFD_SAMPLE, PFD_STATUSES_A, PFD_STATUSES_B, QUESTIONS } from "./fixtures";
-import { buildPfdView, frozenIds, LOOK, parsePfdKey, pfdElement, pfdKey, processStages, type PfdView } from "./pfd";
+import { ANSWERS, INTAKE_ACTIVE, PFD_LONG_LABELS, PFD_SAMPLE, PFD_STATUSES_A, PFD_STATUSES_B, QUESTIONS } from "./fixtures";
+import { buildPfdView, frozenIds, LOOK, textWidth, parsePfdKey, pfdElement, pfdKey, processStages, type PfdView } from "./pfd";
 
 /** 成果物 id の配列と、[id, 入力, 出力] の配列から PFD を作る。given は goal に無く、どのプロセスの出力でもない成果物 */
 const pfd = (artifacts: string[], processes: [string, string[], string[]][], goal: string[]): Pfd => {
@@ -34,11 +34,11 @@ describe("buildPfdView", () => {
     expect(x("p:p2")).toBeLessThan(x("a:a2"));
   });
 
-  test("すべての辺が描け、ノードが重ならない", () => {
-    const view = buildPfdView(PFD_SAMPLE);
-    const edgeCount = PFD_SAMPLE.processes.reduce((n, p) => n + p.inputs.length + p.outputs.length, 0);
+  test.each([["短いラベル", PFD_SAMPLE], ["長いラベル", PFD_LONG_LABELS]])("すべての辺が描け、ノードが重ならない（%s）", (_, sample) => {
+    const view = buildPfdView(sample);
+    const edgeCount = sample.processes.reduce((n, p) => n + p.inputs.length + p.outputs.length, 0);
     expect(view.edges).toHaveLength(edgeCount);
-    expect(view.nodes).toHaveLength(PFD_SAMPLE.artifacts.length + PFD_SAMPLE.processes.length);
+    expect(view.nodes).toHaveLength(sample.artifacts.length + sample.processes.length);
     for (const a of view.nodes) {
       for (const b of view.nodes) {
         if (a === b) continue;
@@ -46,6 +46,50 @@ describe("buildPfdView", () => {
         expect(apart).toBe(true);
       }
     }
+  });
+
+  test("長いラベルは折り返し、どの行も箱の幅に収まる", () => {
+    const long = "task.pause / task.resume / task.logs / worktree.list を全件を返す形に変える";
+    const view = buildPfdView({
+      title: "t",
+      goal: ["out"],
+      artifacts: [{ id: "in", name: long, given: true }, { id: "out", name: "出力" }],
+      processes: [{ id: "p", name: long, actor: "agent", inputs: ["in"], outputs: ["out"] }],
+    } as Pfd);
+    for (const key of ["a:in", "p:p"]) {
+      const n = node(view, key);
+      expect(n.lines.length).toBeGreaterThan(1);
+      expect(n.lines.join("").replace(/…$/, "").length).toBeGreaterThan(0);
+      for (const line of n.lines) expect(textWidth(line)).toBeLessThanOrEqual(n.w - 16);
+    }
+  });
+
+  test("最初からある成果物は、それを使うプロセスの直前の列に置く", () => {
+    // d は段 2 のプロセス p2 だけが使う決定。左端に置くと、辺が段 1 の列を横切る
+    const view = buildPfdView({
+      title: "t",
+      goal: ["a2"],
+      artifacts: [
+        { id: "a0", name: "a0", given: true },
+        { id: "d", name: "d", given: true, decision: "q1" },
+        { id: "a1", name: "a1" },
+        { id: "a2", name: "a2" },
+      ],
+      processes: [
+        { id: "p1", name: "p1", actor: "agent", inputs: ["a0"], outputs: ["a1"] },
+        { id: "p2", name: "p2", actor: "agent", inputs: ["a1", "d"], outputs: ["a2"] },
+      ],
+    } as Pfd);
+    expect(node(view, "a:d").x).toBe(node(view, "a:a1").x);
+    expect(node(view, "a:d").x).toBeGreaterThan(node(view, "p:p1").x);
+  });
+
+  test("種類の印: 決定の成果物は「既存」を付けず「決定」だけ", () => {
+    const view = buildPfdView(PFD_SAMPLE);
+    expect(node(view, "a:policy").marks).toEqual(["決定"]);
+    expect(node(view, "a:issue").marks).toEqual(["既存"]);
+    expect(node(view, "a:release").marks).toEqual(["◎"]);
+    expect(node(view, "p:approve").marks).toEqual(["人"]);
   });
 
   test("辺は key でノードを指す", () => {

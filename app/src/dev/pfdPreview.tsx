@@ -8,11 +8,12 @@ import "@fontsource/ibm-plex-mono/400.css";
 import "@fontsource/ibm-plex-mono/500.css";
 import "../styles.css";
 import { PfdDiagram } from "../components/PfdDiagram";
-import { PFD_SAMPLE, PFD_STATUSES_A, PFD_STATUSES_B } from "../fixtures";
+import { PFD_LONG_LABELS, PFD_SAMPLE, PFD_STATUSES_A, PFD_STATUSES_B } from "../fixtures";
 import { buildPfdView } from "../pfd";
 
 const CASES = [
   { title: "承認前", view: buildPfdView(PFD_SAMPLE) },
+  { title: "長いラベル", view: buildPfdView(PFD_LONG_LABELS) },
   { title: "承認後（状態 A）", view: buildPfdView(PFD_SAMPLE, { statuses: PFD_STATUSES_A }) },
   { title: "承認後（状態 B）", view: buildPfdView(PFD_SAMPLE, { statuses: PFD_STATUSES_B }) },
   {
