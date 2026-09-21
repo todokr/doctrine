@@ -170,12 +170,14 @@
     {
       "id": "r-exclude",
       "kind": "considered",
+      "impact": "medium",
       "body": "プロジェクトの `.gitignore` は書き換えず、`.git/info/exclude` に `.doctrine-out/` の 1 行だけを追記する。`info/exclude` は共有の `.git` に 1 つだけあり、すべての worktree に効くことを、設計時に実測で確かめている。",
       "locations": [{ "path": "src/core/worktree.ts", "hunk": "h_0cc6ee8cca07b3" }]
     },
     {
       "id": "r-column-kept",
       "kind": "considered",
+      "impact": "medium",
       "body": "`tasks.claude_session_id` 列はマイグレーションで消さず、コードからの参照だけを外した。マイグレーションは既存の非 null の値を `task_sessions` に写すだけで、元の列には手を付けない。",
       "locations": [
         { "path": "src/db/migrations.ts", "hunk": "h_127dbf6639d4fd" },
@@ -185,7 +187,8 @@
     {
       "id": "r-column-stale",
       "kind": "breaks",
-      "body": "この変更以後、`tasks.claude_session_id` は書かれない。列はマイグレーションで消えずに残るので、この列を読むものは、移行した時点の値か null を見ることになる。",
+      "impact": "high",
+      "body": "この変更以後、`tasks.claude_session_id` は書かれない。列はマイグレーションで消えずに残るので、この列を読むものは、移行した時点の値か null を見ることになる。この変更を戻すと、変更前のコードは `tasks.claude_session_id` を読んで resume するかを決めるが、戻すまでに作られた会話の ID はこの列に書かれていないので、それらの会話は引き継がれず新しい会話が始まる。",
       "locations": [
         { "path": "src/core/engine.ts", "hunk": "h_180733771bf8d2" },
         { "path": "src/db/migrations.ts", "hunk": "h_127dbf6639d4fd" }
@@ -194,6 +197,7 @@
     {
       "id": "r-role-charset",
       "kind": "assumption",
+      "impact": "low",
       "body": "ロール名は `session` に書かれた文字列そのもので、英数字・ハイフン・アンダースコアに限られる。この範囲外の文字はワークフローの読み込み時に弾かれるので、`task_sessions` の `role` にはこの範囲の文字列しか入らない。",
       "locations": [{ "path": "src/workflow/schema.ts", "hunk": "h_0106de52c9da94" }]
     }

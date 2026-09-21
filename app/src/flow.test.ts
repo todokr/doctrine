@@ -104,7 +104,7 @@ describe("findUnguided", () => {
   test("risks だけが指す hunk は、読む順に入っていないとして出る", () => {
     const files = buildDiff(SAMPLE_DIFF);
     const added = fileOf(files, "src/added.ts");
-    const risk: Risk = { id: "r", kind: "unknown", body: "", locations: [{ path: "src/added.ts", hunk: added.hunks[0].id }] };
+    const risk: Risk = { id: "r", kind: "unknown", impact: "low", body: "", locations: [{ path: "src/added.ts", hunk: added.hunks[0].id }] };
     const { items } = findUnguided(files, makeGuide([[{ path: "src/keep.ts" }]], [risk]), false);
     expect(items).toContainEqual({ kind: "hunk", file: added, index: 0 });
   });
@@ -232,7 +232,7 @@ describe("risksAt", () => {
     expect(byHunk.get("h_180733771bf8d2")?.map((r) => r.id)).toEqual(["r-column-kept", "r-column-stale"]);
     expect(byPath.size).toBe(0);
 
-    const pathRisk: Risk = { id: "r-path", kind: "assumption", body: "", locations: [{ path: "src/x.ts" }] };
+    const pathRisk: Risk = { id: "r-path", kind: "assumption", impact: "low", body: "", locations: [{ path: "src/x.ts" }] };
     const added = risksAt({ ...exampleGuide, risks: [...exampleGuide.risks, pathRisk] });
     expect(added.byPath.get("src/x.ts")?.map((r) => r.id)).toEqual(["r-path"]);
   });
