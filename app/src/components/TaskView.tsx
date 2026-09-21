@@ -10,13 +10,13 @@ import {
   hm,
   isTerminal,
   omittedDenials,
+  RUN_PILL,
   stepRunHistory,
   stopReasons,
 } from "../model";
 import { useDecide, useNotYet, useStore } from "../store";
 import { isAtBottom } from "../tailStick";
 import type { Task, TaskState } from "../types";
-import type { StepRun } from "../../../shared/protocol.ts";
 import { Crumbs, OpenInEditor } from "./ReviewView";
 import { WorkflowRail } from "./WorkflowRail";
 
@@ -30,16 +30,6 @@ const STATE_PILL: Record<TaskState, [string, string]> = {
   completed: ["完了", "p-ok"],
   canceled: ["中止", "p-muted"],
   unknown: ["不明な状態", "p-danger"],
-};
-
-const RUN_PILL: Record<StepRun["status"], [string, string]> = {
-  running: ["実行中", "p-run"],
-  awaiting: ["レビュー待ち", "p-attn"],
-  success: ["成功", "p-ok"],
-  failed: ["失敗", "p-danger"],
-  interrupted: ["中断", "p-muted"],
-  bounced: ["差し戻し", "p-muted"],
-  rate_limited: ["上限待ち", "p-muted"],
 };
 
 /** 末尾を一度に何行もらうか。task.logs の既定と揃える */
