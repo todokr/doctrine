@@ -445,3 +445,24 @@ kbd{font-family:var(--mono);font-size:10.5px;border:1px solid var(--line);border
 .issue-body .md{padding:0}
 .cmt{border-top:1px dashed var(--line);padding-top:8px;font-size:12.5px}
 .cmt .who{font-size:11px;color:var(--ink-3)}
+
+/* 計画レビュー・経緯 */
+.plan-title{margin:0;font-size:14px}
+.plan-body{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:14px;align-items:start}
+@media (max-width:1150px){.plan-body{grid-template-columns:1fr}}
+.el-panel{border:1px solid var(--accent);border-radius:9px;background:var(--surface);padding:14px;display:grid;gap:12px;align-content:start;position:sticky;top:0;max-height:calc(100vh - 160px);overflow-y:auto}
+@media (max-width:1150px){.el-panel{position:static;max-height:none}}
+.el-head{display:grid;gap:2px}
+.el-sec{display:grid;gap:6px}
+.el-sec h3,.el-sec-title{margin:0;font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:var(--ink-3)}
+.el-links{display:flex;gap:6px;flex-wrap:wrap}
+.el-link{border:0;background:transparent;padding:0;color:var(--accent);text-decoration:underline;cursor:pointer;font-size:12.5px}
+.el-comment{display:grid;gap:2px;border-top:1px dashed var(--line);padding-top:6px;font-size:12.5px}
+.el-prompt summary{cursor:pointer;color:var(--ink-2);font-size:12px;font-weight:700}
+.el-prompt[open] summary{margin-bottom:8px}
+details.history{border:1px solid var(--line);border-radius:9px;padding:10px 14px}
+details.history>summary{cursor:pointer;color:var(--ink-2);font-size:12px;font-weight:700}
+.hist-row{border-top:1px solid var(--line);padding:10px 0;display:grid;gap:10px}
+details.history[open]>summary{margin-bottom:8px}
+.hist-head{display:flex;gap:10px;align-items:baseline}
+.hist-comments{display:grid;gap:6px}
