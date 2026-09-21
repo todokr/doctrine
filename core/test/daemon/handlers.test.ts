@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { openDb, openDbOn } from "../../src/db/migrate.ts";
 import { getTask, insertTask } from "../../src/db/tasks.ts";
+import { insertIntake } from "../../src/db/intakes.ts";
 import { listStepRuns } from "../../src/db/stepRuns.ts";
 import { captureTree, reviewRefName } from "../../src/domain/reviewTree.ts";
 import { ensureDoctrineOutExcluded } from "../../src/domain/worktree.ts";
@@ -146,6 +147,65 @@ test("冪等なワークフローは task.create で警告を出さない", asyn
   ) as { warnings: string[] };
   assert.deepEqual(created.warnings, []);
   assert.equal(ctx.warnings.recent().length, 0);
+});
+
+test("task.list は紐づけ付きのタスクの intake_id・intake_process_id・issue_url・parent_issue_url を読み戻せる", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  await h("project.add", { path: repo }, NOOP_CONN);
+  const [project] = await h("project.list", {}, NOOP_CONN) as ProjectSummary[];
+  await insertIntake(ctx.db, {
+    id: "i1",
+    project_id: project.id,
+    issue_url: "https://github.com/o/r/issues/1",
+    issue_node_id: "I_1",
+    issue_title: "親",
+  });
+  await insertTask(ctx.db, {
+    id: "t-link",
+    project_id: project.id,
+    title: "T",
+    prompt: "P",
+    workflow_name: "feature",
+    branch: "b-link",
+    priority: 2,
+    intake_id: "i1",
+    intake_process_id: "p1",
+    issue_url: "https://github.com/o/r/issues/2",
+    parent_issue_url: "https://github.com/o/r/issues/1",
+  });
+
+  const tasks = await h("task.list", {}, NOOP_CONN) as unknown as Record<string, unknown>[];
+  const row = tasks.find((t) => t.id === "t-link")!;
+  assert.equal(row.intake_id, "i1");
+  assert.equal(row.intake_process_id, "p1");
+  assert.equal(row.issue_url, "https://github.com/o/r/issues/2");
+  assert.equal(row.parent_issue_url, "https://github.com/o/r/issues/1");
+  assertShape(row, TASK_SUMMARY_SHAPE, "task.list の結果");
+});
+
+test("task.create で作ったタスクは紐づけを持たない", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  await h("project.add", { path: repo }, NOOP_CONN);
+  const created = await h(
+    "task.create",
+    {
+      project: repo,
+      title: "T",
+      prompt: "p",
+      intake_id: "i1",
+      issue_url: "https://github.com/o/r/issues/2",
+    },
+    NOOP_CONN,
+  ) as { id: string };
+
+  const tasks = await h("task.list", {}, NOOP_CONN) as unknown as Record<string, unknown>[];
+  const row = tasks.find((t) => t.id === created.id)!;
+  assert.equal(row.intake_id, null);
+  assert.equal(row.intake_process_id, null);
+  assert.equal(row.issue_url, null);
+  assert.equal(row.parent_issue_url, null);
 });
 
 test("tick は非冪等コマンドの警告を毎周期 ctx.warnings に積み直さない", async () => {
@@ -1260,6 +1320,10 @@ const TASK_SUMMARY_SHAPE: Record<keyof TaskSummary, (v: unknown) => boolean> = {
   priority: isNumber,
   created_at: isString,
   updated_at: isString,
+  intake_id: nullable(isString),
+  intake_process_id: nullable(isString),
+  issue_url: nullable(isString),
+  parent_issue_url: nullable(isString),
 };
 
 const PROJECT_SHAPE: Record<keyof ProjectSummary, (v: unknown) => boolean> = {
