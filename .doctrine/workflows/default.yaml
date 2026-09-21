@@ -386,10 +386,13 @@ steps:
   # 検出は文字列でしか見ないのでガードの有無を区別できない。警告は消さないでおく。
   # 正規表現にガードを理解させると、ガードを外したときに黙って通るようになる。
   #
-  # base を直書きしているのは、テンプレート変数が task / worktree / project / steps の
-  # 4系統だけで、project.yaml の baseBranch を展開できないため。
+  # base を直書きしているのは、テンプレート変数に project.yaml の baseBranch が無く、
+  # 展開できないため。
   # 本文の implement-notes.md は implement が毎回上書きしていて、中身が
   # 「やったこと・通した検証・できなかったこと」なので PR 本文としてそのまま読める。
+  # Intake から投入されたタスクなら、末尾に {{ issue.closes }} の行を足して、
+  # PR のマージで sub-issue を閉じる。Intake 由来でないタスクでは空文字なので、
+  # 本文は implement-notes.md のまま。
   - id: open-pr
     type: command
-    run: "git push -u origin HEAD && { gh pr view --json url --jq .url || gh pr create --base develop --title \"{{ task.title }}\" --body-file .doctrine-out/implement-notes.md; }"
+    run: "git push -u origin HEAD && { gh pr view --json url --jq .url || { cat .doctrine-out/implement-notes.md; if [ -n '{{ issue.closes }}' ]; then printf '\\n%s\\n' '{{ issue.closes }}'; fi; } | gh pr create --base develop --title \"{{ task.title }}\" --body-file -; }"

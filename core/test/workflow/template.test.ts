@@ -34,7 +34,10 @@ test("issue の未知のフィールドは落とす", () => {
   for (const expr of ["{{ issue.number }}", "{{ issue }}"]) {
     assert.throws(() => expand(expr, ctx), (e: unknown) => {
       assert.ok(e instanceof TemplateError);
-      assert.match((e as Error).message, /issue のフィールドは url \/ parent_url \/ closes のみです/);
+      assert.match(
+        (e as Error).message,
+        /issue のフィールドは url \/ parent_url \/ closes のみです/,
+      );
       return true;
     });
   }
