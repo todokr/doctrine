@@ -18,6 +18,7 @@ import { createWarningLog } from "../../src/daemon/warnings.ts";
 import { createMockAdapter } from "../../src/adapter/mock.ts";
 import type { ServerEvent, TaskDetail } from "../../../shared/protocol.ts";
 import { makeRepo, tickWhenIdle, until } from "../helpers/repo.ts";
+import { fakeTracker } from "../helpers/tracker.ts";
 
 const execFileAsync = promisify(execFile);
 const NOOP_CONN = { follow() {}, unfollow() {}, isFollowing: () => false };
@@ -81,6 +82,8 @@ async function context(adapter = createMockAdapter({ result: { ok: true, text: "
     broadcast: (ev) => events.push(ev),
     loadWorkflow: loadWorkflowFromDisk,
     running: new Set(),
+    tracker: fakeTracker(),
+    runningIntakeRuns: new Set(),
     warnings: createWarningLog({ broadcast: () => {}, write: () => {} }),
   };
   contexts.push(ctx);

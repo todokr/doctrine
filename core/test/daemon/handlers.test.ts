@@ -25,6 +25,11 @@ import type {
 import { branchNameFor } from "../../src/domain/worktree.ts";
 import { randomUUID } from "node:crypto";
 import { makeRepo, tickWhenIdle, until } from "../helpers/repo.ts";
+import { fakeTracker } from "../helpers/tracker.ts";
+import { getIntake, insertIntake, listIntakeRuns, updateIntake } from "../../src/db/intakes.ts";
+import { enqueueIntakeRun } from "../../src/intake/runner.ts";
+import { createDetachedWorktree, intakeWorktreePathFor } from "../../src/domain/worktree.ts";
+import { question, questionsOut } from "../intake/runnerHelper.ts";
 
 const run = promisify(execFile);
 let root: string;
@@ -53,7 +58,7 @@ beforeEach(async () => {
   process.env.DOCTRINE_STATE_DIR = join(root, "state");
 });
 afterEach(async () => {
-  await until(() => contexts.every((c) => c.running.size === 0));
+  await until(() => contexts.every((c) => c.running.size === 0 && c.runningIntakeRuns.size === 0));
   contexts.length = 0;
   await rm(root, { recursive: true, force: true });
   delete process.env.DOCTRINE_STATE_DIR;
@@ -77,6 +82,8 @@ async function context(events: ServerEvent[] = []): Promise<DaemonContext> {
       );
     },
     running: new Set(),
+    tracker: fakeTracker(),
+    runningIntakeRuns: new Set(),
   };
   contexts.push(ctx);
   return ctx;
@@ -2212,4 +2219,72 @@ test("task.guide は無いタスクを名指しで断る", async () => {
     () => h("task.guide", { task_id: "nope" }, NOOP_CONN),
     /タスクがありません/,
   );
+});
+
+async function addIntake(ctx: DaemonContext, projectId: number): Promise<void> {
+  await insertIntake(ctx.db, {
+    id: "i1",
+    project_id: projectId,
+    issue_url: "https://github.com/o/r/issues/1",
+    issue_node_id: "N1",
+    issue_title: "T",
+  });
+}
+
+test("tick は Intake の実行をタスクより先に受け付ける", async () => {
+  const ctx = await context();
+  ctx.globalLimit = 1;
+  ctx.adapter = createMockAdapter({ result: questionsOut([question("q1")]), delayMs: 100 });
+  const h = createHandler(ctx);
+  const project = await h("project.add", { path: repo }, NOOP_CONN) as { id: number };
+  await addIntake(ctx, project.id);
+  await enqueueIntakeRun(ctx.db, "i1", "investigate", { logRoot: ctx.logRoot, resume: false });
+  const t = await h("task.create", { project: repo, title: "T", prompt: "p" }, NOOP_CONN) as {
+    id: string;
+  };
+
+  await tick(ctx);
+
+  assert.equal((await listIntakeRuns(ctx.db, "i1"))[0].status, "running");
+  assert.equal((await getTask(ctx.db, t.id))!.state, "queued", "全体枠 1 は Intake が使っている");
+  await until(async () => (await getIntake(ctx.db, "i1"))!.state === "answering");
+  await until(() => ctx.runningIntakeRuns.size === 0);
+});
+
+test("Intake の実行が例外で落ちたら、行を failed・Intake を要確認にして警告に残す", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  const project = await h("project.add", { path: repo }, NOOP_CONN) as { id: number };
+  await addIntake(ctx, project.id);
+  // 改訂の実行はまだ扱えず、runIntakeRun が例外を投げる
+  await updateIntake(ctx.db, "i1", { state: "decomposing" });
+  await enqueueIntakeRun(ctx.db, "i1", "revise", { logRoot: ctx.logRoot, resume: false });
+
+  await tick(ctx);
+  await until(() => ctx.runningIntakeRuns.size === 0);
+
+  const intake = (await getIntake(ctx.db, "i1"))!;
+  assert.equal(intake.state, "needs_attention");
+  assert.equal(JSON.parse(intake.attention_reason!).kind, "agent_failed");
+  assert.equal((await listIntakeRuns(ctx.db, "i1"))[0].status, "failed");
+  assert.match(ctx.warnings.recent()[0].message, /Intake i1 の実行中に例外/);
+});
+
+test("worktree.list は Intake の worktree を孤児にしない", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  const project = await h("project.add", { path: repo }, NOOP_CONN) as { id: number };
+  await addIntake(ctx, project.id);
+  const worktree = await createDetachedWorktree({
+    repoPath: repo,
+    worktreePath: intakeWorktreePathFor(repo, "i1"),
+    baseBranch: "main",
+  });
+
+  const before = await h("worktree.list", {}, NOOP_CONN) as { orphans: string[] }[];
+  assert.deepEqual(before.flatMap((r) => r.orphans), [worktree]);
+
+  await updateIntake(ctx.db, "i1", { worktree_path: worktree });
+  const after = await h("worktree.list", {}, NOOP_CONN) as { orphans: string[] }[];
+  assert.deepEqual(after.flatMap((r) => r.orphans), []);
 });

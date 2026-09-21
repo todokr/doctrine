@@ -5,9 +5,20 @@ import { getTask, insertProject, insertTask, type TaskState } from "../../src/db
 import {
   currentUsage,
   hasActiveRateLimit,
+  releaseDueIntakeRateLimited,
   releaseDueRateLimited,
   selectAdmissible,
+  selectAdmissibleIntakeRuns,
 } from "../../src/domain/scheduler.ts";
+import {
+  getIntake,
+  insertIntake,
+  insertIntakeRun,
+  type IntakeRunStatus,
+  type IntakeState,
+  listIntakeRuns,
+  updateIntake,
+} from "../../src/db/intakes.ts";
 import type { Db } from "../../src/db/schema.ts";
 
 async function fixture(maxConcurrent = 1) {
@@ -215,4 +226,115 @@ test("占有数はカウンタではなく running から導出する", async ()
   const usage = await currentUsage(d);
   assert.equal(usage.global, 1);
   assert.equal(usage.byProject.get(p), 2);
+});
+
+async function addIntake(
+  d: Db,
+  p: number,
+  id: string,
+  o: { state?: IntakeState; rateLimitedUntil?: string } = {},
+) {
+  await insertIntake(d, {
+    id,
+    project_id: p,
+    issue_url: `https://github.com/o/r/issues/${id}`,
+    issue_node_id: `N${id}`,
+    issue_title: id,
+  });
+  await updateIntake(d, id, {
+    state: o.state ?? "investigating",
+    rate_limited_until: o.rateLimitedUntil ?? null,
+  });
+}
+
+async function addRun(d: Db, intakeId: string, status: IntakeRunStatus, attempt = 1) {
+  return await insertIntakeRun(d, {
+    intake_id: intakeId,
+    purpose: "investigate",
+    attempt,
+    status,
+    started_at: null,
+    log_path: `/logs/${intakeId}.log`,
+  });
+}
+
+test("Intake の実行は全体枠だけを数える", async () => {
+  const { d, p } = await fixture();
+  await addIntake(d, p, "i1");
+  await addRun(d, "i1", "running");
+  await addRun(d, "i1", "queued");
+  const usage = await currentUsage(d);
+  assert.equal(usage.global, 1);
+  assert.equal(usage.byProject.size, 0);
+});
+
+test("Intake の実行で全体枠が埋まればタスクを受け付けない", async () => {
+  const { d, p } = await fixture();
+  await addIntake(d, p, "i1");
+  await addRun(d, "i1", "running");
+  await add(d, p, "t1");
+  assert.deepEqual(await selectAdmissible(d, 1), []);
+});
+
+test("selectAdmissibleIntakeRuns は全体枠の空きまで返す", async () => {
+  const { d, p } = await fixture(3);
+  await addIntake(d, p, "i1");
+  await addIntake(d, p, "i2");
+  await addIntake(d, p, "i3");
+  const first = await addRun(d, "i1", "queued");
+  await addRun(d, "i2", "queued");
+  await addRun(d, "i3", "queued");
+  await add(d, p, "r1", { state: "running" });
+  const admitted = await selectAdmissibleIntakeRuns(d, 2);
+  assert.deepEqual(admitted.map((r) => r.id), [first]);
+});
+
+test("Intake の上限待ちも hasActiveRateLimit に数える", async () => {
+  const { d, p } = await fixture();
+  await addIntake(d, p, "i1");
+  assert.equal(await hasActiveRateLimit(d), false);
+  await updateIntake(d, "i1", { rate_limited_until: "2026-09-19T04:00:00.000Z" });
+  assert.equal(await hasActiveRateLimit(d), true);
+});
+
+test("releaseDueIntakeRateLimited は期限の来たものだけ戻す", async () => {
+  const { d, p } = await fixture();
+  await addIntake(d, p, "due", { rateLimitedUntil: "2026-09-19T03:00:00.000Z" });
+  await addIntake(d, p, "later", { rateLimitedUntil: "2026-09-19T09:00:00.000Z" });
+  await addRun(d, "due", "rate_limited", 2);
+  await addRun(d, "later", "rate_limited", 1);
+
+  const released = await releaseDueIntakeRateLimited(d, {
+    logRoot: "/logs",
+    now: new Date("2026-09-19T04:00:00.000Z"),
+  });
+  assert.deepEqual(released, ["due"]);
+  assert.equal((await getIntake(d, "due"))!.rate_limited_until, null);
+  assert.equal((await getIntake(d, "later"))!.rate_limited_until, "2026-09-19T09:00:00.000Z");
+
+  const dueRuns = await listIntakeRuns(d, "due");
+  assert.equal(dueRuns.length, 2);
+  assert.equal(dueRuns[1].status, "queued");
+  assert.equal(dueRuns[1].purpose, "investigate");
+  // 上限待ちからの再開では attempt を進めない
+  assert.equal(dueRuns[1].attempt, 2);
+  assert.equal((await listIntakeRuns(d, "later")).length, 1);
+});
+
+test("終わった Intake の上限待ちは数えず、戻さず、受け付けない", async () => {
+  const { d, p } = await fixture();
+  await addIntake(d, p, "gone", {
+    state: "canceled",
+    rateLimitedUntil: "2026-09-19T03:00:00.000Z",
+  });
+  await addRun(d, "gone", "queued");
+  assert.equal(await hasActiveRateLimit(d), false);
+  assert.deepEqual(
+    await releaseDueIntakeRateLimited(d, {
+      logRoot: "/logs",
+      now: new Date("2026-09-19T04:00:00.000Z"),
+    }),
+    [],
+  );
+  assert.deepEqual(await selectAdmissibleIntakeRuns(d, 4), []);
 });
