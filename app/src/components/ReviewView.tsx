@@ -1,6 +1,7 @@
 import { useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { sendDecision } from "../decision";
 import { risksAt } from "../flow";
+import { taskIntakeLabel } from "../intake";
 import {
   ago,
   canFlow,
@@ -45,7 +46,7 @@ function rememberPosition(): string | null {
 }
 
 export function Crumbs({ t }: { t: Task }) {
-  const { s } = useStore();
+  const { s, dispatch } = useStore();
   const p = s.projects.find((x) => x.id === t.project);
   return (
     <div className="crumbs">
@@ -54,6 +55,11 @@ export function Crumbs({ t }: { t: Task }) {
       <span className="mono">{t.wf}</span>
       <span className="mono">{t.id}</span>
       <span className="mono">P{t.prio}</span>
+      {t.intake && (
+        <button className="el-link" onClick={() => dispatch({ type: "intake.open", id: t.intake!.id })}>
+          {taskIntakeLabel(t.intake, s.intakes)}
+        </button>
+      )}
     </div>
   );
 }
