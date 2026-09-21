@@ -1,9 +1,10 @@
 import type { CSSProperties, ReactNode } from "react";
 import { findUnguided } from "../flow";
-import { groupPaths, locationPaths, type GuideView } from "../guide";
+import { groupPaths, IMPACT_ORDER, locationAnchor, splitRisks, type GuideView } from "../guide";
 import { clock, type Loaded } from "../model";
 import type { DiffFile, Guide, Risk } from "../types";
 import { DiagramView } from "./Diagrams";
+import { scrollToAnchor } from "./DiffFileBlock";
 import { Markdown } from "./text";
 
 const sec = (i: number) => ({ "--gi": i }) as CSSProperties;
@@ -17,7 +18,13 @@ export const RISK_LABEL: Record<Risk["kind"], string> = {
   considered: "検討済み",
 };
 
-export const prose = (src: string) => <div className="g-md"><Markdown src={src} /></div>;
+export const IMPACT_LABEL: Record<Risk["impact"], string> = {
+  high: "影響 大",
+  medium: "影響 中",
+  low: "影響 小",
+};
+
+export const prose =(src: string) => <div className="g-md"><Markdown src={src} /></div>;
 
 const sourceLabel = (s: NonNullable<Decision["source"]>) => (s.kind === "step" ? `ステップ ${s.value}` : s.value);
 
@@ -87,12 +94,40 @@ function UnguidedNote({ files, guide, truncated }: { files: DiffFile[]; guide: G
   );
 }
 
-export function RiskItem({ risk }: { risk: Risk }) {
+/** 影響の段階。文字そのもので段階が分かるので、色に頼らない */
+function ImpactBadge({ impact }: { impact: Risk["impact"] }) {
+  return <span className={`impact impact-${impact}`}>{IMPACT_LABEL[impact]}</span>;
+}
+
+/** Risk が指す箇所。今の diff にある箇所はその場所へ飛ぶボタン、無い箇所は文字だけ */
+function RiskLocations({ locations, files }: { locations: Risk["locations"]; files: readonly DiffFile[] }) {
+  if (locations.length === 0) return <span className="hint">変更全体に関わる</span>;
+  const seen = new Set<string>();
+  return (
+    <span className="risk-locs">
+      {locations.map((loc) => {
+        const at = locationAnchor(files, loc);
+        const key = at?.anchor ?? `absent:${loc.path}:${loc.hunk ?? ""}`;
+        if (seen.has(key)) return null;
+        seen.add(key);
+        if (!at) return <span key={key} className="hint mono">{loc.path}（今の diff にありません）</span>;
+        return (
+          <button key={key} className="risk-loc mono" onClick={() => scrollToAnchor(at.anchor)}>
+            {at.file.path}
+            {at.hunk !== null && ` hunk ${at.hunk + 1} / ${at.file.hunks.length}`}
+          </button>
+        );
+      })}
+    </span>
+  );
+}
+
+export function RiskItem({ risk, files }: { risk: Risk; files: readonly DiffFile[] }) {
   return (
     <li>
-      <b>{RISK_LABEL[risk.kind]}</b>
+      <div className="risk-head"><ImpactBadge impact={risk.impact} /><b>{RISK_LABEL[risk.kind]}</b></div>
       {prose(risk.body)}
-      {risk.locations.length > 0 && <span className="mono">{locationPaths(risk.locations).join(", ")}</span>}
+      <RiskLocations locations={risk.locations} files={files} />
     </li>
   );
 }
@@ -110,23 +145,56 @@ export function DecisionItem({ d }: { d: Decision }) {
 /** hunk の真上（またはファイル見出しの下）に出す、その箇所に紐づくリスク */
 export function RiskNote({ risks }: { risks: Risk[] | undefined }): ReactNode {
   if (!risks?.length) return null;
+  const { shown, folded } = splitRisks(risks);
   return (
     <div className="hunk-risk" role="note">
-      {risks.map((r) => (
+      {shown.map((r) => (
         <div key={r.id}>
-          <b>{RISK_LABEL[r.kind]}</b>
+          <div className="risk-head"><ImpactBadge impact={r.impact} /><b>{RISK_LABEL[r.kind]}</b></div>
           {prose(r.body)}
         </div>
+      ))}
+      {folded.map((r) => (
+        <details key={r.id} className="risk-fold">
+          <summary><ImpactBadge impact={r.impact} /> <b>{RISK_LABEL[r.kind]}</b></summary>
+          {prose(r.body)}
+        </details>
       ))}
     </div>
   );
 }
 
+/** 影響の段階ごとの件数。0 件の段階は出さない */
+const impactCounts = (risks: readonly Risk[]) =>
+  IMPACT_ORDER.map((i) => ({ impact: i, n: risks.filter((r) => r.impact === i).length })).filter((c) => c.n > 0);
+
 /**
- * 全体の把握。Why / What / How は開いて出し、Key Decisions / Risks / Tests は
- * （各グループの refs にも出るので）件数だけ見出しに出して畳む
+ * 全体把握の Risks。影響の強い順に並べ、considered と影響 小 は入れ子の畳みに入れる。
+ * 畳んでいないものがあれば開いて出す
  */
-export function GuideOverview({ guide }: { guide: Guide }) {
+function RiskSection({ risks, files }: { risks: Risk[]; files: readonly DiffFile[] }) {
+  const { shown, folded } = splitRisks(risks);
+  const counts = impactCounts(risks).map((c) => `${IMPACT_LABEL[c.impact].replace("影響 ", "")} ${c.n}`).join(" · ");
+  return (
+    <details className="g-fold" open={shown.length > 0}>
+      <summary>Risks（{risks.length}）<span className="hint"> 影響 {counts}</span></summary>
+      <ul className="g-list">{shown.map((r) => <RiskItem key={r.id} risk={r} files={files} />)}</ul>
+      {folded.length > 0 && (
+        <details className="g-fold">
+          <summary>影響 小・検討済み（{folded.length}）</summary>
+          <ul className="g-list">{folded.map((r) => <RiskItem key={r.id} risk={r} files={files} />)}</ul>
+        </details>
+      )}
+    </details>
+  );
+}
+
+/**
+ * 全体の把握。Why / What / How は開いて出し、Key Decisions / Tests は
+ * （各グループの refs にも出るので）件数だけ見出しに出して畳む。
+ * Risks は畳まないもの（考慮済みでも影響 小でもないもの）があれば開いて出す
+ */
+export function GuideOverview({ guide, files }: { guide: Guide; files: readonly DiffFile[] }) {
   const diagram = (id: string | undefined) => guide.diagrams.find((d) => d.id === id);
   return (
     <>
@@ -162,12 +230,7 @@ export function GuideOverview({ guide }: { guide: Guide }) {
           <ol className="g-list">{guide.decisions.map((d) => <DecisionItem key={d.id} d={d} />)}</ol>
         </details>
       )}
-      {guide.risks.length > 0 && (
-        <details className="g-fold">
-          <summary>Risks（{guide.risks.length}）</summary>
-          <ul className="g-list">{guide.risks.map((r) => <RiskItem key={r.id} risk={r} />)}</ul>
-        </details>
-      )}
+      {guide.risks.length > 0 && <RiskSection risks={guide.risks} files={files} />}
       {guide.tests.length > 0 && (
         <details className="g-fold">
           <summary>Tests（{guide.tests.length}）</summary>
@@ -204,7 +267,7 @@ export function GuidePanel({ guide, files, truncated, partial, onJump }: {
           このガイドはブランチ全体の変更を説明しています。前回レビュー以降だけを見ている間は、ガイドが指す箇所が画面に無いことがあります
         </p>
       )}
-      <GuideOverview guide={guide} />
+      <GuideOverview guide={guide} files={files} />
       <section className="g-sec" style={sec(3)}>
         <h3>Reading Order</h3>
         <ol className="g-order">

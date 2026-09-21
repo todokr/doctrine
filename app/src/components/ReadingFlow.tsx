@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { readingFlow, risksAt, type FlowChunk, type FlowGroup } from "../flow";
+import { sortRisks } from "../guide";
 import type { DiffView } from "../model";
 import type { DiffFile, Guide, Task } from "../types";
 import { DiagramView } from "./Diagrams";
@@ -84,7 +85,7 @@ export function ReadingFlow({ t, guide, view }: { t: Task; guide: Guide; view: D
   const groupView = (g: FlowGroup) => {
     const { refs } = g.group;
     const decisions = guide.decisions.filter((d) => refs.decisions.includes(d.id));
-    const riskItems = guide.risks.filter((r) => refs.risks.includes(r.id));
+    const riskItems = sortRisks(guide.risks.filter((r) => refs.risks.includes(r.id)));
     const tests = guide.tests.filter((x) => refs.tests.includes(x.id));
     const diagrams = guide.diagrams.filter((d) => refs.diagrams.includes(d.id));
     return (
@@ -100,7 +101,7 @@ export function ReadingFlow({ t, guide, view }: { t: Task; guide: Guide; view: D
             <div><b>判断</b><ol className="g-list">{decisions.map((d) => <DecisionItem key={d.id} d={d} />)}</ol></div>
           )}
           {riskItems.length > 0 && (
-            <div><b>リスク</b><ul className="g-list">{riskItems.map((r) => <RiskItem key={r.id} risk={r} />)}</ul></div>
+            <div><b>リスク</b><ul className="g-list">{riskItems.map((r) => <RiskItem key={r.id} risk={r} files={files} />)}</ul></div>
           )}
           {tests.length > 0 && (
             <div>
@@ -155,7 +156,7 @@ export function ReadingFlow({ t, guide, view }: { t: Task; guide: Guide; view: D
       <div className="flow">
         <section className="flow-sec" id={flowSectionAnchor("overview")} aria-label="全体の把握">
           <header className="flow-head"><h2>全体の把握</h2></header>
-          <div className="flow-overview"><GuideOverview guide={guide} /></div>
+          <div className="flow-overview"><GuideOverview guide={guide} files={files} /></div>
         </section>
         {flow.groups.map(groupView)}
         <section className="flow-sec" id={flowSectionAnchor("unguided")} aria-label={heading}>
