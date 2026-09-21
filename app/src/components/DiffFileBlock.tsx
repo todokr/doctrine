@@ -14,7 +14,7 @@ export function fileStat(f: DiffFile): ReactNode {
 }
 
 const STATUS_LABEL: Record<DiffFile["status"], string> = {
-  A: "追加", M: "変更", D: "削除", R: "移動",
+  A: "追加", M: "変更", D: "削除", R: "移動", C: "コピー",
 };
 
 function LineComments({ t, path, line }: { t: Task; path: string; line: number }) {
@@ -119,7 +119,9 @@ export function DiffFileBlock({ t, file }: { t: Task; file: DiffFile }) {
     <section className="file" id={fileAnchor(file.path)}>
       <header>
         <span className="nm">{file.path}</span>
-        {file.status === "R" && <span className="hint mono">← {file.old_path}</span>}
+        {(file.status === "R" || file.status === "C") && (
+          <span className="hint mono">← {file.status === "C" ? "コピー元: " : ""}{file.old_path}</span>
+        )}
         <span className="hint">{STATUS_LABEL[file.status]}</span>
         {fileStat(file)}
       </header>
