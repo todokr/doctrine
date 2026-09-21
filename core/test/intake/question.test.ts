@@ -1,0 +1,367 @@
+import { test } from "@std/testing/bdd";
+import assert from "node:assert/strict";
+import { validateAnswers, validateQuestions } from "../../../shared/intake/validateQuestion.ts";
+
+type Obj = Record<string, unknown>;
+
+const tableIndex = 1;
+
+function q1Materials(): Obj[] {
+  return [
+    { kind: "text", body: "現状は **同期** で書き込んでいる" },
+    {
+      kind: "table",
+      caption: "案の比較",
+      columns: ["案", "利点", "欠点"],
+      rows: [["a", "単純", "遅い"], ["b", "速い", "複雑"]],
+    },
+    {
+      kind: "code",
+      caption: "いまの書き込み",
+      language: "ts",
+      path: "core/src/x.ts",
+      code: "await write(x);",
+    },
+    { kind: "code", caption: "案の疑似コード", language: "ts", path: null, code: "queue.push(x);" },
+    {
+      kind: "diagram",
+      caption: "書き込みの流れ",
+      diagram: {
+        id: "g1",
+        title: "流れ",
+        body: {
+          shape: "sequence",
+          actors: ["UI", "Core"],
+          messages: [{ from: "UI", to: "Core", label: "要求" }],
+        },
+      },
+    },
+  ];
+}
+
+function question1(over: Obj = {}): Obj {
+  return {
+    id: "q1",
+    prompt: "書き込みをどう扱うか",
+    kind: "single",
+    options: [
+      { id: "a", label: "同期", description: "呼び出しの中で書く" },
+      { id: "b", label: "非同期", description: "キューに積む" },
+    ],
+    recommendation: { optionIds: ["a"], text: null, reason: "単純で十分速い" },
+    materials: q1Materials(),
+    ...over,
+  };
+}
+
+function question2(over: Obj = {}): Obj {
+  return {
+    id: "q2",
+    prompt: "対象にするものを選ぶ",
+    kind: "multiple",
+    options: [
+      { id: "a", label: "A", description: "説明 A" },
+      { id: "b", label: "B", description: "説明 B" },
+      { id: "c", label: "C", description: "説明 C" },
+    ],
+    recommendation: { optionIds: ["a", "c"], text: null, reason: "使われているため" },
+    materials: [{
+      kind: "diagram",
+      caption: "状態",
+      diagram: {
+        id: "g2",
+        title: "状態遷移",
+        body: {
+          shape: "graph",
+          kind: "state",
+          nodes: [{ id: "n1", label: "開始" }, { id: "n2", label: "終了" }],
+          edges: [{ from: "n1", to: "n2", label: "完了" }],
+        },
+      },
+    }],
+    ...over,
+  };
+}
+
+function question3(over: Obj = {}): Obj {
+  return {
+    id: "q3",
+    prompt: "ほかに考慮すべきことは",
+    kind: "free",
+    options: [],
+    recommendation: { optionIds: [], text: "特に無い", reason: "範囲が小さいため" },
+    materials: [],
+    ...over,
+  };
+}
+
+function validQuestions(): Obj[] {
+  return [question1(), question2(), question3()];
+}
+
+function validAnswers(): Obj[] {
+  return [
+    { questionId: "q1", optionIds: ["a"], other: null, note: null },
+    { questionId: "q2", optionIds: ["b", "c"], other: null, note: "補足" },
+    { questionId: "q3", optionIds: [], other: "自由記述", note: null },
+  ];
+}
+
+function questionIssuesOf(input: unknown): string[] {
+  const result = validateQuestions(input);
+  assert.equal(result.ok, false);
+  return result.ok ? [] : result.issues;
+}
+
+function parsedQuestions() {
+  const result = validateQuestions(validQuestions());
+  assert.equal(result.ok, true);
+  return result.ok ? result.questions : [];
+}
+
+function answerIssuesOf(input: unknown): string[] {
+  const result = validateAnswers(parsedQuestions(), input);
+  assert.equal(result.ok, false);
+  return result.ok ? [] : result.issues;
+}
+
+function answersWith(index: number, over: Obj): Obj[] {
+  const answers = validAnswers();
+  answers[index] = { ...answers[index], ...over };
+  return answers;
+}
+
+// 質問の形
+
+test("spec の型に沿った質問のまとまりが ok になり、そのまま返る", () => {
+  const input = validQuestions();
+  const result = validateQuestions(input);
+  assert.equal(result.ok, true);
+  if (result.ok) assert.deepEqual(result.questions, input);
+});
+
+test("質問が無い空のまとまりは ok になる", () => {
+  assert.equal(validateQuestions([]).ok, true);
+});
+
+test("形が壊れた入力でも例外を投げずに落ちる", () => {
+  for (const input of [null, undefined, "質問", {}]) {
+    assert.ok(questionIssuesOf(input).length >= 1);
+  }
+  assert.ok(questionIssuesOf({}).some((s) => s.startsWith("questions")));
+});
+
+test("知らないキーがあったら落ちる", () => {
+  const issues = questionIssuesOf([question1({ title: "x" })]);
+  assert.ok(issues.some((s) => s.startsWith("questions.0") && s.includes("title")));
+});
+
+test("kind が 3 つ以外なら落ちる", () => {
+  const issues = questionIssuesOf([question1({ kind: "choice" })]);
+  assert.ok(issues.some((s) => s.startsWith("questions.0.kind")));
+});
+
+test("判断材料の kind が 4 つ以外なら落ちる", () => {
+  const input = [question1({ materials: [{ kind: "image", caption: "x" }] })];
+  assert.equal(validateQuestions(input).ok, false);
+});
+
+test("推奨の text と code の path は null を書く必要があり、省けない", () => {
+  const withoutText = question1({ recommendation: { optionIds: ["a"], reason: "理由" } });
+  assert.equal(validateQuestions([withoutText]).ok, false);
+
+  const materials = q1Materials();
+  const { path: _path, ...codeWithoutPath } = materials[3];
+  materials[3] = codeWithoutPath;
+  assert.equal(validateQuestions([question1({ materials })]).ok, false);
+});
+
+test("図の材料は Review Guide の図の形だけを許す", () => {
+  const materials = q1Materials();
+  materials[4] = {
+    kind: "diagram",
+    caption: "x",
+    diagram: { id: "g1", title: "流れ", body: { shape: "flow" } },
+  };
+  assert.equal(validateQuestions([question1({ materials })]).ok, false);
+});
+
+// 質問の整合性
+
+test("選択肢が無い single は落ちる", () => {
+  const issues = questionIssuesOf([question1({ options: [], recommendation: null })]);
+  assert.ok(issues.some((s) => s.startsWith("questions.0.options")));
+});
+
+test("選択肢が無い multiple は落ちる", () => {
+  const issues = questionIssuesOf([question1(), question2({ options: [], recommendation: null })]);
+  assert.ok(issues.some((s) => s.startsWith("questions.1.options")));
+});
+
+test("free が選択肢を持っていたら落ちる", () => {
+  const options = [{ id: "a", label: "A", description: "説明" }];
+  const issues = questionIssuesOf([question1(), question2(), question3({ options })]);
+  assert.ok(issues.some((s) => s.startsWith("questions.2.options")));
+});
+
+test("推奨が選択肢に無ければ落ちる", () => {
+  const recommendation = { optionIds: ["z"], text: null, reason: "理由" };
+  const issues = questionIssuesOf([question1({ recommendation })]);
+  assert.ok(
+    issues.some((s) => s.startsWith("questions.0.recommendation.optionIds.0") && s.includes("z")),
+  );
+});
+
+test("single の推奨が 2 つなら落ちる", () => {
+  const recommendation = { optionIds: ["a", "b"], text: null, reason: "理由" };
+  const issues = questionIssuesOf([question1({ recommendation })]);
+  assert.ok(issues.some((s) => s.startsWith("questions.0.recommendation.optionIds")));
+});
+
+test("multiple の推奨に選択肢が無ければ落ちる", () => {
+  const recommendation = { optionIds: [], text: null, reason: "理由" };
+  const issues = questionIssuesOf([question1(), question2({ recommendation })]);
+  assert.ok(issues.some((s) => s.startsWith("questions.1.recommendation.optionIds")));
+});
+
+test("推奨の選択肢 id が重複したら落ちる", () => {
+  const recommendation = { optionIds: ["a", "a"], text: null, reason: "理由" };
+  const issues = questionIssuesOf([question1(), question2({ recommendation })]);
+  assert.ok(
+    issues.some((s) =>
+      s.startsWith("questions.1.recommendation.optionIds.1") && s.includes("重複")
+    ),
+  );
+});
+
+test("free の推奨に text が無ければ落ちる", () => {
+  const recommendation = { optionIds: [], text: null, reason: "理由" };
+  const issues = questionIssuesOf([question1(), question2(), question3({ recommendation })]);
+  assert.ok(issues.some((s) => s.startsWith("questions.2.recommendation.text")));
+});
+
+test("推奨が null なら推奨の規則を検査しない", () => {
+  const input = validQuestions().map((q) => ({ ...q, recommendation: null }));
+  assert.equal(validateQuestions(input).ok, true);
+});
+
+test("質問 id が重複したら落ちる", () => {
+  const issues = questionIssuesOf([question1(), question2({ id: "q1" })]);
+  assert.ok(issues.some((s) => s.startsWith("questions.1.id") && s.includes("重複")));
+});
+
+test("質問の中で選択肢 id が重複したら落ちる", () => {
+  const options = [
+    { id: "a", label: "同期", description: "呼び出しの中で書く" },
+    { id: "a", label: "非同期", description: "キューに積む" },
+  ];
+  const issues = questionIssuesOf([question1({ options })]);
+  assert.ok(issues.some((s) => s.startsWith("questions.0.options.1.id")));
+});
+
+test("表の行の列数が columns と違えば落ちる", () => {
+  const materials = q1Materials();
+  materials[tableIndex] = {
+    kind: "table",
+    caption: "案の比較",
+    columns: ["案", "利点", "欠点"],
+    rows: [["a", "単純", "遅い"], ["b", "速い"]],
+  };
+  const issues = questionIssuesOf([question1({ materials })]);
+  assert.ok(issues.some((s) => s.startsWith(`questions.0.materials.${tableIndex}.rows.1`)));
+});
+
+test("違反が複数あればすべて返す", () => {
+  const recommendation = { optionIds: ["z"], text: null, reason: "理由" };
+  const issues = questionIssuesOf([question1({ recommendation }), question2({ id: "q1" })]);
+  assert.ok(issues.length >= 2);
+  assert.ok(issues.some((s) => s.startsWith("questions.0.recommendation.optionIds.0")));
+  assert.ok(issues.some((s) => s.startsWith("questions.1.id")));
+});
+
+// 回答
+
+test("すべての質問に正しく答えた回答が ok になり、そのまま返る", () => {
+  const input = validAnswers();
+  const result = validateAnswers(parsedQuestions(), input);
+  assert.equal(result.ok, true);
+  if (result.ok) assert.deepEqual(result.answers, input);
+});
+
+test("single は選択肢の代わりに other で答えられる", () => {
+  const result = validateAnswers(
+    parsedQuestions(),
+    answersWith(0, { optionIds: [], other: "別案" }),
+  );
+  assert.equal(result.ok, true);
+});
+
+test("multiple は選択と other を併せて答えられる", () => {
+  const result = validateAnswers(
+    parsedQuestions(),
+    answersWith(1, { optionIds: ["a"], other: "別案" }),
+  );
+  assert.equal(result.ok, true);
+});
+
+test("形が壊れた回答は例外を投げずに落ちる", () => {
+  assert.ok(answerIssuesOf(null).length >= 1);
+  const issues = answerIssuesOf([{ questionId: "q1" }]);
+  assert.ok(issues.some((s) => s.startsWith("answers.0")));
+});
+
+test("答えていない質問があれば落ちる", () => {
+  const issues = answerIssuesOf(validAnswers().slice(0, 2));
+  assert.ok(issues.some((s) => s.includes("q3")));
+});
+
+test("存在しない質問への回答は落ちる", () => {
+  const extra = { questionId: "q9", optionIds: [], other: "x", note: null };
+  const issues = answerIssuesOf([...validAnswers(), extra]);
+  assert.ok(issues.some((s) => s.startsWith("answers.3.questionId") && s.includes("q9")));
+});
+
+test("同じ質問への回答が重複したら落ちる", () => {
+  const issues = answerIssuesOf([...validAnswers(), validAnswers()[0]]);
+  assert.ok(issues.some((s) => s.includes("重複") && s.includes("q1")));
+});
+
+test("存在しない選択肢を選んだら落ちる", () => {
+  const issues = answerIssuesOf(answersWith(0, { optionIds: ["z"] }));
+  assert.ok(issues.some((s) => s.startsWith("answers.0.optionIds.0") && s.includes("z")));
+});
+
+test("回答の選択肢 id が重複したら落ちる", () => {
+  const issues = answerIssuesOf(answersWith(1, { optionIds: ["a", "a"] }));
+  assert.ok(issues.some((s) => s.startsWith("answers.1.optionIds.1") && s.includes("重複")));
+});
+
+test("single で 2 つ選んだら落ちる", () => {
+  const issues = answerIssuesOf(answersWith(0, { optionIds: ["a", "b"] }));
+  assert.ok(issues.some((s) => s.startsWith("answers.0")));
+});
+
+test("single で選択と other の両方を書いたら落ちる", () => {
+  const issues = answerIssuesOf(answersWith(0, { optionIds: ["a"], other: "別案" }));
+  assert.ok(issues.some((s) => s.startsWith("answers.0")));
+});
+
+test("single で選択も other も無ければ落ちる", () => {
+  const issues = answerIssuesOf(answersWith(0, { optionIds: [], other: null }));
+  assert.ok(issues.some((s) => s.startsWith("answers.0")));
+});
+
+test("multiple で選択も other も無ければ落ちる", () => {
+  const issues = answerIssuesOf(answersWith(1, { optionIds: [], other: null }));
+  assert.ok(issues.some((s) => s.startsWith("answers.1")));
+});
+
+test("free で other が無ければ落ちる", () => {
+  const issues = answerIssuesOf(answersWith(2, { other: null }));
+  assert.ok(issues.some((s) => s.startsWith("answers.2")));
+});
+
+test("free で選択肢を選んだら落ちる", () => {
+  const issues = answerIssuesOf(answersWith(2, { optionIds: ["a"], other: "x" }));
+  assert.ok(issues.some((s) => s.startsWith("answers.2")));
+});
