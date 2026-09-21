@@ -213,13 +213,47 @@ th{color:var(--ink-3);font-size:11px;font-weight:500;border-top:0;background:var
 .sd-actor{font-family:var(--mono);font-size:10px;fill:var(--ink-2)}
 .sd-life{stroke:var(--line);stroke-width:1}
 .sd-lbl{font-family:var(--sans);font-size:9.5px;fill:var(--ink-3)}
-.sd-arrow{stroke:var(--run);stroke-width:1.6;stroke-dasharray:280;stroke-dashoffset:280;animation:sd-draw .5s ease forwards;animation-delay:var(--d)}
-@keyframes sd-draw{to{stroke-dashoffset:0}}
-@media (prefers-reduced-motion:reduce){.sd-arrow{animation:none;stroke-dashoffset:0}}
+/* 図。見た目（変更の印）と動きは分ける。動きは media の中にだけ書くので、
+   再生前・reduced-motion のときも要素は最終の状態で見える */
+.sd-arrow{stroke:var(--run);stroke-width:1.6}
 .sd-arrowhead{fill:var(--run)}
 .sd-arrow.added{stroke:var(--ok)}
 .sd-arrow.changed{stroke:var(--accent)}
-.sd-arrow.removed{stroke:var(--danger)}
+/* 線には pathLength=1 を付けているので、破線の寸法も 1 を単位にする */
+.sd-arrow.removed{stroke:var(--danger);stroke-dasharray:.05 .04}
+.graphd{width:100%;height:auto;display:block;margin-top:4px}
+.gn rect{fill:var(--surface-2);stroke:var(--line);stroke-width:1.2}
+.gn text{font-family:var(--mono);font-size:10.5px;fill:var(--ink-2)}
+.gn.added rect{stroke:var(--ok);stroke-width:1.8;fill:var(--ok-bg)}
+.gn.added text{fill:var(--ok)}
+.gn.changed rect{stroke:var(--accent);stroke-width:1.8;fill:var(--accent-soft)}
+.gn.removed rect{stroke:var(--danger);stroke-width:1.4;stroke-dasharray:4 3;fill:var(--danger-bg)}
+.gn.removed text{fill:var(--danger);text-decoration:line-through}
+.ge-line{stroke:var(--ink-3);stroke-width:1.4}
+.ge.added .ge-line{stroke:var(--ok);stroke-width:1.8}
+.ge.changed .ge-line{stroke:var(--accent);stroke-width:1.8}
+.ge.removed .ge-line{stroke:var(--danger);stroke-dasharray:.05 .04}
+.gd-arrowhead{fill:var(--ink-3)}
+.gd-lbl{font-family:var(--sans);font-size:9.5px;fill:var(--ink-3);paint-order:stroke;stroke:var(--surface);stroke-width:3px}
+.ge.removed .gd-lbl{text-decoration:line-through}
+@keyframes sd-draw{from{stroke-dashoffset:1}to{stroke-dashoffset:0}}
+@keyframes dg-in{from{opacity:0}to{opacity:1}}
+@keyframes dg-fade{to{opacity:.55}}
+@media (prefers-reduced-motion:no-preference){
+  .play .sd-arrow{stroke-dasharray:1;stroke-dashoffset:1;animation:sd-draw .5s ease forwards;animation-delay:var(--d)}
+  /* 削除の線は破線のまま。引くのではなく現れる */
+  .play .sd-arrow.removed{stroke-dasharray:.05 .04;stroke-dashoffset:0;animation:dg-in .4s ease both;animation-delay:var(--d)}
+  .play .gn,.play .ge{animation:dg-in .4s ease both;animation-delay:calc(var(--step) * 280ms)}
+  .play .ge-line{stroke-dasharray:1;stroke-dashoffset:1;animation:sd-draw .5s ease forwards;animation-delay:calc(var(--step) * 280ms)}
+  .play .ge.removed .ge-line{stroke-dasharray:.05 .04;stroke-dashoffset:0;animation:none}
+  /* 削除されたものは最初から出しておき、段 3 で薄くする（先の dg-in の完了を上書きしないよう forwards だけ） */
+  .play .gn.removed,.play .ge.removed{animation:dg-in .4s ease both,dg-fade .4s ease forwards;animation-delay:calc(var(--step) * 280ms),840ms}
+}
+@media (prefers-reduced-motion:reduce){.dg-replay{display:none}}
+.dg-kind{margin-left:8px;font-size:10.5px;border:1px solid var(--line);border-radius:999px;padding:0 6px}
+.dg-foot{display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-size:11px;color:var(--ink-3)}
+.dg-legend{display:flex;gap:8px;align-items:center}
+.dg-text > summary{cursor:pointer;font-size:11px;color:var(--ink-3)}
 .diagram{margin:0;display:grid;gap:4px}
 .graphl{display:grid;gap:6px}
 .g-change{font-size:11px;font-weight:700;margin-right:4px}
