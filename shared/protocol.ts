@@ -403,6 +403,12 @@ export type Methods = {
     params: { intake_id: string; draft_id: number; hash: string };
     result: IntakeSummary;
   };
+  "intake.draft": { params: { intake_id: string; draft_id: number }; result: PfdDraft };
+  /** 承認前でも呼べる。入力の決定や人の完了が無ければ、投入と同じ理由で失敗する（R-3）。 */
+  "intake.processPrompt": {
+    params: { intake_id: string; draft_id: number; process_id: string };
+    result: { prompt: string };
+  };
   "intake.cancel": {
     params: { intake_id: string; mode: "leave" | "stop" };
     result: IntakeSummary;

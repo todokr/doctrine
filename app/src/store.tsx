@@ -19,7 +19,8 @@ import {
 import { receiveGuide } from "./guide";
 import { buildDiff } from "./patch";
 import type { GhStatus, IssueDetail } from "../../shared/intake/github.ts";
-import type { GithubIssue, IntakeSummary } from "../../shared/protocol.ts";
+import type { Answer } from "../../shared/intake/question.ts";
+import type { GithubIssue, IntakeSummary, NewComment, PfdDraft } from "../../shared/protocol.ts";
 import {
   contextOf,
   diffOf,
@@ -67,6 +68,7 @@ function initialState(): State {
     intakeDetails: {},
     intakeGen: {},
     drafts: {},
+    intakeDrafts: {},
     draftsLoaded: false,
     editing: null,
     modal: null,
@@ -106,9 +108,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           // 空欄にしないために DB の直近の行で埋める。これが落ちても一覧は出す
           rpc("ratelimit.recent", {}).catch(() => []),
           // 「すべて」で出した終了分を取り直しで消さないよう、今の切り替えを渡す。
-          // これが落ちてもタスクの一覧は出す
+          // これが落ちてもタスクの一覧は出す。落ちたときは null にして、前の一覧と
+          // Intake の下書きを残す（空の一覧で sync すると下書きが全部消える）
           rpc("intake.list", { include_closed: latest.current.showClosedIntakes }).catch(
-            (): IntakeSummary[] => [],
+            (): IntakeSummary[] | null => null,
           ),
         ]);
         if (!alive || !refreshGate.isLatest(token)) return;
@@ -126,7 +129,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           tasks: tasks.map((row) => toTask(row, projects, known.find((t) => t.id === row.id))),
           now: Date.now(),
         });
-        dispatch({ type: "intakes.sync", intakes });
+        if (intakes) dispatch({ type: "intakes.sync", intakes });
       } catch (e) {
         // 切断中は失敗して当然。理由はバナーが出している。
         // ただし接続中に失敗するのは、ソケットは開いているが dctld が固まっている
@@ -228,7 +231,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         // 理由が分からないと不審なので、その場で伝える
         if (!alive) return;
         console.warn("下書きを読めませんでした", e);
-        dispatch({ type: "drafts.loaded", drafts: {} });
+        dispatch({ type: "drafts.loaded", drafts: { tasks: {}, intakes: {} } });
         dispatch({ type: "toast", message: `下書きを読めませんでした（${errorMessage(e)}）` });
       },
     );
@@ -240,8 +243,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     // 読み終える前に書くと、まだ空の drafts でファイルを潰してしまう
     if (!s.draftsLoaded) return;
-    void saveDrafts(s.drafts).catch((e) => console.warn("下書きを保存できませんでした", e));
-  }, [s.drafts, s.draftsLoaded]);
+    void saveDrafts({ tasks: s.drafts, intakes: s.intakeDrafts }).catch((e) =>
+      console.warn("下書きを保存できませんでした", e)
+    );
+  }, [s.drafts, s.intakeDrafts, s.draftsLoaded]);
 
   // レビュー画面が要る diff と経緯を取る。選ばれていて、まだ取っていないものだけ。
   // worktree は suspended の間は凍っているので、15 秒ごとの取り直しには乗せない
@@ -380,6 +385,20 @@ export function useIntakeRpc() {
       issueUrl: string,
     ): Promise<IntakeSummary & { alreadyActive: boolean }> =>
       rpc("intake.start", { project: projectPath, issue_url: issueUrl }),
+    answer: (intakeId: string, questionSetId: number, answers: Answer[]): Promise<IntakeSummary> =>
+      rpc("intake.answer", { intake_id: intakeId, question_set_id: questionSetId, answers }),
+    reject: (intakeId: string, draftId: number, comments: NewComment[]): Promise<IntakeSummary> =>
+      rpc("intake.reject", { intake_id: intakeId, draft_id: draftId, comments }),
+    approve: (intakeId: string, draftId: number, hash: string): Promise<IntakeSummary> =>
+      rpc("intake.approve", { intake_id: intakeId, draft_id: draftId, hash }),
+    draft: (intakeId: string, draftId: number): Promise<PfdDraft> =>
+      rpc("intake.draft", { intake_id: intakeId, draft_id: draftId }),
+    processPrompt: async (intakeId: string, draftId: number, processId: string): Promise<string> =>
+      (await rpc("intake.processPrompt", {
+        intake_id: intakeId,
+        draft_id: draftId,
+        process_id: processId,
+      })).prompt,
   };
 }
 

@@ -3,7 +3,9 @@ import { INTAKE_STATE, intakeFace, issueNumber } from "../intake";
 import { intakeDetailOf, selectedIntake } from "../model";
 import { useStore } from "../store";
 import type { Project } from "../types";
+import { AnswerFace } from "./AnswerFace";
 import { IssuePicker } from "./IssuePicker";
+import { PlanReview } from "./PlanReview";
 
 /** 改訂中の帯。面の中身に関係なく、どの面の上にも出す */
 export function RevisingBand({ intake }: { intake: IntakeSummary }) {
@@ -58,12 +60,36 @@ export function IntakeView() {
       </div>
     );
   }
+  const heading = <IntakeHeading intake={intake} project={s.projects.find((p) => p.daemonId === intake.project_id)} />;
+  const detail = intakeDetailOf(s, intake.id);
+  if (detail?.kind !== "ok") {
+    return (
+      <>
+        <RevisingBand intake={intake} />
+        <div className="pad">
+          {heading}
+          <p className="hint">{detail?.kind === "error" ? detail.message : "読み込み中"}</p>
+        </div>
+      </>
+    );
+  }
+  const face = intakeFace(detail.value.state);
+  // 判断の欄は面の外（main の下端）に置くので、レビュー待ちの面は自分で .pad を持つ。
+  // 案が変わったら、選択と prompt のローカルな状態を捨てる
+  if (face === "review") {
+    return (
+      <>
+        <RevisingBand intake={intake} />
+        <PlanReview key={detail.value.latest_draft?.id} detail={detail.value} heading={heading} />
+      </>
+    );
+  }
   return (
     <>
       <RevisingBand intake={intake} />
       <div className="pad">
-        <IntakeHeading intake={intake} project={s.projects.find((p) => p.daemonId === intake.project_id)} />
-        <IntakeFacePlaceholder intake={intake} />
+        {heading}
+        {face === "questions" ? <AnswerFace detail={detail.value} /> : <IntakeFacePlaceholder intake={detail.value} />}
       </div>
     </>
   );

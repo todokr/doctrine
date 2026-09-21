@@ -1,8 +1,18 @@
+import type { CommentReply } from "../../shared/intake/decomposer.ts";
+import { buildFeedback } from "../../shared/intake/feedback.ts";
 import type { GhStatus } from "../../shared/intake/github.ts";
+import type { Pfd } from "../../shared/intake/pfd.ts";
 import type { Answer, Question } from "../../shared/intake/question.ts";
 import type { IntakeState } from "../../shared/intake/state.ts";
 import { answerChoiceIssue } from "../../shared/intake/validateQuestion.ts";
-import type { IntakeSummary } from "../../shared/protocol.ts";
+import type {
+  IntakeComment,
+  IntakeDetail,
+  IntakeQuestionSet,
+  IntakeSummary,
+  NewComment,
+} from "../../shared/protocol.ts";
+import { parsePfdKey, pfdKey } from "./pfd";
 import type { Project } from "./types";
 
 export type AnswerIssue = { questionId: string; message: string };
@@ -156,6 +166,143 @@ export function intakeFace(state: IntakeState): IntakeFace {
     case "canceled":
       return "progress";
   }
+}
+
+/** UI spec 11 章。comments には whole も入る */
+export type IntakeDraft = {
+  comments: NewComment[];
+  /** 回答中の答え。questionSetId が今の未回答のまとまりと違えば使わない */
+  answers: { questionSetId: number; answers: Answer[] } | null;
+  /** 人のプロセスの「決めた内容」。この作業では使わない */
+  notes: Record<string, string>;
+};
+
+export const EMPTY_INTAKE_DRAFT: IntakeDraft = { comments: [], answers: null, notes: {} };
+
+/** 回答待ちの面が出す、未回答のまとまり。無ければ null */
+export function openQuestionSet(detail: IntakeDetail): IntakeQuestionSet | null {
+  const open = detail.question_sets.filter((q) => q.answers === null);
+  return open[open.length - 1] ?? null;
+}
+
+/** 下書きの答え。まとまりが違えば空配列 */
+export function draftAnswers(draft: IntakeDraft, questionSetId: number): Answer[] {
+  return draft.answers?.questionSetId === questionSetId ? draft.answers.answers : [];
+}
+
+/** 図で選んだ要素のキー（a:<id> / p:<id>）を、コメントの対象にする */
+export function commentTarget(key: string): Pick<NewComment, "target_kind" | "target_id"> | null {
+  const parsed = parsePfdKey(key);
+  return parsed ? { target_kind: parsed.kind, target_id: parsed.id } : null;
+}
+
+/** 要素ごとのコメント数。キーは PfdNode.key。whole は数えない */
+export function commentCounts(comments: NewComment[]): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const c of comments) {
+    if (c.target_kind === "whole" || c.target_id === null) continue;
+    const key = pfdKey(c.target_kind, c.target_id);
+    counts[key] = (counts[key] ?? 0) + 1;
+  }
+  return counts;
+}
+
+/** その要素へのコメントと、comments の中の位置（消すときに使う） */
+export function commentsOn(comments: NewComment[], key: string): { index: number; comment: NewComment }[] {
+  const target = commentTarget(key);
+  if (!target) return [];
+  return comments.flatMap((comment, index) =>
+    comment.target_kind === target.target_kind && comment.target_id === target.target_id ? [{ index, comment }] : [],
+  );
+}
+
+const isWhole = (c: NewComment) => c.target_kind === "whole";
+
+/** whole のコメントの本文。無ければ空文字 */
+export function wholeComment(comments: NewComment[]): string {
+  return comments.find(isWhole)?.body ?? "";
+}
+
+/** whole の本文を書き換える。空白だけなら消し、無ければ末尾に足す。本文は入力のまま持つ（打てなくなるので trim しない） */
+export function setWholeComment(comments: NewComment[], body: string): NewComment[] {
+  if (body.trim() === "") return comments.filter((c) => !isWhole(c));
+  if (!comments.some(isWhole)) return [...comments, { target_kind: "whole", target_id: null, body }];
+  return comments.map((c) => (isWhole(c) ? { ...c, body } : c));
+}
+
+/** 差し戻せるか。コメントが 1 つ以上あるとき（whole を含む） */
+export function canRejectIntake(draft: IntakeDraft): boolean {
+  return draft.comments.length > 0;
+}
+
+/** 差し戻しで送る文面。画面で見せる文面とデーモンに届く文面を、同じ関数で作る */
+export function rejectionText(pfd: Pfd, draft: IntakeDraft): string {
+  return buildFeedback(pfd, draft.comments);
+}
+
+/** 「計画全体」「成果物 <id>「名前」」「プロセス <id>「名前」」。pfd に無ければ id だけ */
+export function commentTargetLabel(c: NewComment, pfd: Pfd | null): string {
+  if (c.target_kind === "whole") return "計画全体";
+  const kind = c.target_kind === "artifact" ? "成果物" : "プロセス";
+  const id = c.target_id ?? "";
+  const list: { id: string; name: string }[] = (c.target_kind === "artifact" ? pfd?.artifacts : pfd?.processes) ?? [];
+  const found = list.find((e) => e.id === id);
+  return found ? `${kind} ${id}「${found.name}」` : `${kind} ${id}`;
+}
+
+/** 前の案へのコメントと、この案の返答の組。返答はコメントの DB の id で引く */
+export function commentReplies(
+  comments: IntakeComment[],
+  replies: CommentReply[],
+): { comment: IntakeComment; reply: string | null }[] {
+  return comments.map((comment) => ({
+    comment,
+    reply: replies.find((r) => r.commentId === comment.id)?.reply ?? null,
+  }));
+}
+
+export type IntakeHistoryEntry =
+  | { kind: "questions"; at: string; set: IntakeQuestionSet }
+  | {
+      kind: "draft";
+      at: string;
+      draftId: number;
+      seq: number;
+      /** 1 つ前の案へのコメント。返答はこの案の replies にある */
+      previousComments: IntakeComment[];
+      /** この案へのコメントで、まだ次の案が届いていないもの */
+      pendingComments: IntakeComment[];
+    }
+  | { kind: "approval"; at: string; draftId: number; seq: number };
+
+/** 回答済みの質問のまとまり・各回の案・承認を、起きた順（created_at / approved_at の昇順）に並べる。未回答のまとまりは回答待ちの面そのものなので入れない */
+export function intakeHistory(detail: IntakeDetail): IntakeHistoryEntry[] {
+  const seqOf = (draftId: number) => detail.drafts.find((d) => d.id === draftId)?.seq ?? 0;
+  const drafts = [...detail.drafts].sort((a, b) => a.seq - b.seq);
+  const last = drafts[drafts.length - 1];
+
+  const entries: IntakeHistoryEntry[] = [
+    ...detail.question_sets
+      .filter((set) => set.answers !== null)
+      .map((set): IntakeHistoryEntry => ({ kind: "questions", at: set.created_at, set })),
+    ...drafts.map((d, i): IntakeHistoryEntry => ({
+      kind: "draft",
+      at: d.created_at,
+      draftId: d.id,
+      seq: d.seq,
+      previousComments: i === 0 ? [] : detail.comments.filter((c) => c.draft_id === drafts[i - 1].id),
+      pendingComments: d === last ? detail.comments.filter((c) => c.draft_id === d.id) : [],
+    })),
+  ];
+  if (detail.approval) {
+    entries.push({
+      kind: "approval",
+      at: detail.approval.approved_at,
+      draftId: detail.approval.draft_id,
+      seq: seqOf(detail.approval.draft_id),
+    });
+  }
+  return entries.sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
 }
 
 /** `#123`・`123`・Issue の URL を、そのリポジトリの Issue の URL にする。読めなければ null */

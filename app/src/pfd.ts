@@ -1,6 +1,8 @@
 // PFD の図の配置と見た目の導出。副作用を持たない（テストは pfd.test.ts）
-import type { Pfd } from "../../shared/intake/pfd.ts";
+import { decisionTexts } from "../../shared/intake/answerText.ts";
+import type { Artifact, Pfd, Process } from "../../shared/intake/pfd.ts";
 import type { ProcessStatus } from "../../shared/intake/processStatus.ts";
+import type { Answer, Question } from "../../shared/intake/question.ts";
 import { layoutGraph, type Change } from "./diagram";
 
 export type PfdNodeKind = "artifact" | "process";
@@ -174,5 +176,63 @@ export function buildPfdView(
     nodes,
     edges: layout.edges.map((e) => ({ from: e.from, to: e.to, d: e.d })),
     removed: [],
+  };
+}
+
+/** pfdKey の逆。形が違えば null */
+export function parsePfdKey(key: string): { kind: PfdNodeKind; id: string } | null {
+  const head = key.slice(0, 2);
+  if (head !== "a:" && head !== "p:") return null;
+  return { kind: head === "a:" ? "artifact" : "process", id: key.slice(2) };
+}
+
+export type PfdElementInfo =
+  | {
+      kind: "artifact";
+      key: string;
+      artifact: Artifact;
+      goal: boolean;
+      /** この成果物を出すプロセス（前段） */
+      producers: Process[];
+      /** この成果物を入力に取るプロセス（後続） */
+      consumers: Process[];
+      /** 決定の成果物なら、その質問の文と回答の文。回答が無ければ answer は null */
+      decision: { questionId: string; prompt: string | null; answer: string | null } | null;
+    }
+  | { kind: "process"; key: string; process: Process; stage: number; inputs: Artifact[]; outputs: Artifact[] };
+
+/** 選んだ要素の欄に出すもの。キーが案に無ければ null */
+export function pfdElement(
+  pfd: Pfd,
+  key: string,
+  questionSets: readonly { questions: Question[]; answers: Answer[] | null }[] = [],
+): PfdElementInfo | null {
+  const parsed = parsePfdKey(key);
+  if (!parsed) return null;
+  const artifactsById = (ids: string[]) => ids.flatMap((id) => pfd.artifacts.filter((a) => a.id === id));
+
+  if (parsed.kind === "process") {
+    const process = pfd.processes.find((p) => p.id === parsed.id);
+    if (!process) return null;
+    const stage = processStages(pfd).findIndex((ids) => ids.includes(process.id)) + 1;
+    return { kind: "process", key, process, stage, inputs: artifactsById(process.inputs), outputs: artifactsById(process.outputs) };
+  }
+
+  const artifact = pfd.artifacts.find((a) => a.id === parsed.id);
+  if (!artifact) return null;
+  let decision: Extract<PfdElementInfo, { kind: "artifact" }>["decision"] = null;
+  if (artifact.decision !== undefined) {
+    const questionId = artifact.decision;
+    const asked = questionSets.flatMap((s) => s.questions).find((q) => q.id === questionId);
+    decision = { questionId, prompt: asked?.prompt ?? null, answer: decisionTexts(questionSets)[questionId] ?? null };
+  }
+  return {
+    kind: "artifact",
+    key,
+    artifact,
+    goal: pfd.goal.includes(artifact.id),
+    producers: pfd.processes.filter((p) => p.outputs.includes(artifact.id)),
+    consumers: pfd.processes.filter((p) => p.inputs.includes(artifact.id)),
+    decision,
   };
 }

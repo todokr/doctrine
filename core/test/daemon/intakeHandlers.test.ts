@@ -782,3 +782,70 @@ test("intake.list は project で絞る", async () => {
     await rm(otherRoot, { recursive: true, force: true });
   }
 });
+
+test("intake.draft は案 1 件を中身込みで返す", async () => {
+  const { ctx, call } = await setup();
+  const detail = await toReviewing(ctx, call);
+
+  const draft = await call("intake.draft", {
+    intake_id: detail.id,
+    draft_id: detail.latest_draft!.id,
+  });
+  assert.deepEqual(draft, detail.latest_draft);
+});
+
+test("intake.draft は別の Intake の案を返さない", async () => {
+  const { ctx, call } = await setup();
+  const detail = await toReviewing(ctx, call);
+  const draft_id = detail.latest_draft!.id;
+
+  await assert.rejects(
+    () => call("intake.draft", { intake_id: detail.id, draft_id: draft_id + 1000 }),
+    /案がありません/,
+  );
+  await assert.rejects(() => call("intake.draft", { intake_id: "nope", draft_id }));
+});
+
+test("intake.processPrompt は投入と同じ関数で prompt を作る", async () => {
+  const { ctx, call } = await setup();
+  const detail = await toReviewing(ctx, call);
+
+  const { prompt } = await call<{ prompt: string }>("intake.processPrompt", {
+    intake_id: detail.id,
+    draft_id: detail.latest_draft!.id,
+    process_id: "1",
+  });
+  assert.ok(prompt.includes(ISSUE));
+  assert.ok(prompt.includes("## 目的\n集計結果を置く場所を用意する"));
+  assert.ok(!prompt.includes("この作業の sub-issue"));
+});
+
+test("intake.processPrompt は人の完了が要るプロセスで失敗する", async () => {
+  const { ctx, call } = await setup();
+  const detail = await toReviewing(ctx, call);
+
+  await assert.rejects(
+    () =>
+      call("intake.processPrompt", {
+        intake_id: detail.id,
+        draft_id: detail.latest_draft!.id,
+        process_id: "2",
+      }),
+    /プロセス 3 の完了が記録されていません/,
+  );
+});
+
+test("intake.processPrompt は人のプロセスと案に無いプロセスを断る", async () => {
+  const { ctx, call } = await setup();
+  const detail = await toReviewing(ctx, call);
+  const params = { intake_id: detail.id, draft_id: detail.latest_draft!.id };
+
+  await assert.rejects(
+    () => call("intake.processPrompt", { ...params, process_id: "3" }),
+    /人のプロセス/,
+  );
+  await assert.rejects(
+    () => call("intake.processPrompt", { ...params, process_id: "99" }),
+    /案にありません/,
+  );
+});

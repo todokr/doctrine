@@ -15,7 +15,7 @@ import { branchNameFor } from "../domain/worktree.ts";
 import { sha256Hex } from "./pfd/hash.ts";
 import { buildTaskPrompt } from "./pfd/prompt.ts";
 import { computeProcessStatuses, type ProcessProgress } from "./pfd/status.ts";
-import { processProgressOf } from "./view.ts";
+import { intakeDraft, processProgressOf } from "./view.ts";
 
 export type ApprovedPlan = { pfd: Pfd; draftId: number };
 
@@ -91,6 +91,32 @@ async function loadDispatchSource(db: Db, intake: IntakeRow, pfd: Pfd): Promise<
     })),
   );
   return { intake, project, pfd, rows, humanNotes, decisions };
+}
+
+/**
+ * 案のプロセスがタスクになったときの prompt（R-3）。承認の前でも組める。
+ * 決定の回答や人の完了が無ければ、投入と同じ理由で投げる。
+ */
+export async function previewTaskPrompt(
+  db: Db,
+  o: { intakeId: string; draftId: number; processId: string },
+): Promise<string> {
+  const intake = await getIntake(db, o.intakeId);
+  if (!intake) throw new Error(`Intake がありません: ${o.intakeId}`);
+  const { pfd } = await intakeDraft(db, o.intakeId, o.draftId);
+  const process = pfd.processes.find((p) => p.id === o.processId);
+  if (!process) throw new Error(`プロセス ${o.processId} は案にありません`);
+  if (process.actor === "human") throw new Error("人のプロセスはタスクになりません");
+
+  const src = await loadDispatchSource(db, intake, pfd);
+  return buildTaskPrompt({
+    pfd,
+    processId: o.processId,
+    parentIssue: { url: intake.issue_url, title: intake.issue_title },
+    subIssueUrl: src.rows.get(o.processId)?.sub_issue_url ?? null,
+    humanNotes: src.humanNotes,
+    decisions: src.decisions,
+  });
 }
 
 function statusesOf(src: DispatchSource, progress: ReadonlyMap<string, ProcessProgress>) {

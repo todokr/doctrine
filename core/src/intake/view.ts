@@ -9,7 +9,7 @@ import {
   listProcesses,
   listQuestionSets,
 } from "../db/intakes.ts";
-import type { Db, IntakeRow } from "../db/schema.ts";
+import type { Db, IntakeDraftRow, IntakeRow } from "../db/schema.ts";
 import { getProject, getTask } from "../db/tasks.ts";
 import type { AttentionReason, CommentReply } from "../../../shared/intake/decomposer.ts";
 import type { Pfd } from "../../../shared/intake/pfd.ts";
@@ -20,6 +20,7 @@ import type {
   IntakeDetail,
   IntakeProcessView,
   IntakeSummary,
+  PfdDraft,
   StepRunDenials,
   WatchHealth,
 } from "../../../shared/protocol.ts";
@@ -126,6 +127,24 @@ export async function toIntakeSummary(
   return summaryOf(row, await processStatusesOf(db, row), watch);
 }
 
+export function toPfdDraft(row: IntakeDraftRow): PfdDraft {
+  return {
+    id: row.id,
+    seq: row.seq,
+    pfd: JSON.parse(row.pfd) as Pfd,
+    hash: row.hash,
+    replies: JSON.parse(row.replies) as CommentReply[],
+    created_at: row.created_at,
+  };
+}
+
+/** 案 1 件を中身込みで読む。別の Intake の案は「案がありません」にする。 */
+export async function intakeDraft(db: Db, intakeId: string, draftId: number): Promise<PfdDraft> {
+  const row = await getDraft(db, draftId);
+  if (!row || row.intake_id !== intakeId) throw new Error(`案がありません: ${draftId}`);
+  return toPfdDraft(row);
+}
+
 export async function toIntakeDetail(
   db: Db,
   row: IntakeRow,
@@ -150,16 +169,7 @@ export async function toIntakeDetail(
       seq: d.seq,
       created_at: d.created_at,
     })),
-    latest_draft: latest
-      ? {
-        id: latest.id,
-        seq: latest.seq,
-        pfd: JSON.parse(latest.pfd) as Pfd,
-        hash: latest.hash,
-        replies: JSON.parse(latest.replies) as CommentReply[],
-        created_at: latest.created_at,
-      }
-      : null,
+    latest_draft: latest ? toPfdDraft(latest) : null,
     approval: approval
       ? {
         id: approval.id,
