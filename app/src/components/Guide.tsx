@@ -1,6 +1,6 @@
 import { useEffect, useRef, type CSSProperties, type ReactNode } from "react";
 import { groupPaths, locationPaths, type GuideView } from "../guide";
-import { clock, unguidedFiles, type Loaded, type Scope } from "../model";
+import { clock, unguidedFiles, type Loaded } from "../model";
 import { useStore } from "../store";
 import type { DiffFile, Guide, Task } from "../types";
 import { DiffFileBlock } from "./DiffFileBlock";
@@ -19,7 +19,7 @@ const RISK_LABEL: Record<Risk["kind"], string> = {
   considered: "検討済み",
 };
 
-const prose = (src: string) => <div className="md"><Markdown src={src} /></div>;
+const prose = (src: string) => <div className="g-md"><Markdown src={src} /></div>;
 
 const sourceLabel = (s: NonNullable<Decision["source"]>) => (s.kind === "step" ? `ステップ ${s.value}` : s.value);
 
@@ -111,12 +111,9 @@ function DecisionItem({ d }: { d: Decision }) {
 }
 
 /** レビュー画面の右に置く Review Guide */
-export function GuidePanel({ guide, files, scope }: { guide: Guide; files: DiffFile[]; scope: Scope }) {
+export function GuidePanel({ guide, files, partial }: { guide: Guide; files: DiffFile[]; partial: boolean }) {
   const { dispatch } = useStore();
   const diagram = (id: string | undefined) => guide.diagrams.find((d) => d.id === id);
-  // 箇所は merge-base から tree までの diff に対して検証されているので、前回レビュー以降だけを見ている間は
-  // 指す箇所が画面に無いことが正常に起こる
-  const partial = scope === "since";
   return (
     <aside className="guide" aria-label="Review Guide">
       <div className="guide-head"><b>Review Guide</b></div>

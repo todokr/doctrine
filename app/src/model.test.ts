@@ -20,6 +20,7 @@ import {
   groupOf,
   guideOf,
   hasSince,
+  isPartial,
   isTerminal,
   LIMIT_DANGER_UTILIZATION,
   LIMIT_WARN_UTILIZATION,
@@ -803,6 +804,40 @@ describe("取ってきたガイド", () => {
       expect(currentStep(s, task(s, "t-2b91"))).toBeNull();
     }
     expect(currentStep(base(), task(base(), "t-2b91"))).toBeNull();
+  });
+
+  describe("前回レビュー以降を見ている間", () => {
+    const since = (sinceStepRunId: number | null) => {
+      const value: DiffView = { meta: { ...SAMPLE_DIFF, since_step_run_id: sinceStepRunId }, files: [] };
+      return base({
+        scope: { "t-2b91": "since" },
+        diffs: { "t-2b91": { since: { kind: "ok", value } } },
+        guides: { "t-2b91": loaded(okView) },
+      });
+    };
+
+    test("ステップモードにせず、[ ] や step でも位置を動かさない", () => {
+      const s = since(7);
+      expect(currentStep(s, task(s, "t-2b91"))).toBeNull();
+      expect(reduce(s, { type: "step", idx: 1 })).toBe(s);
+    });
+
+    test("取得前もステップモードにしない", () => {
+      const s = { ...since(7), diffs: {} };
+      expect(currentStep(s, task(s, "t-2b91"))).toBeNull();
+    });
+
+    test("前回が無くて全体が返ってきたときは、全体を見ているのでステップモードのまま", () => {
+      const s = since(null);
+      expect(currentStep(s, task(s, "t-2b91"))).toBe(0);
+    });
+
+    test("isPartial は since で前回が基準になっているときだけ true", () => {
+      const view = (id: number | null): DiffView => ({ meta: { ...SAMPLE_DIFF, since_step_run_id: id }, files: [] });
+      expect(isPartial(view(7), "since")).toBe(true);
+      expect(isPartial(view(null), "since")).toBe(false);
+      expect(isPartial(view(7), "all")).toBe(false);
+    });
   });
 
   test("ガイドがあればステップを進められる", () => {

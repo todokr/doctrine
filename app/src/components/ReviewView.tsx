@@ -11,6 +11,7 @@ import {
   fellBackToAll,
   guideOf,
   hasSince,
+  isPartial,
   rejections,
   reviewRound,
   scopeOf,
@@ -154,8 +155,8 @@ function Diff({ t, scope, loaded }: { t: Task; scope: Scope; loaded: Loaded<Diff
   // ステップモードでは古いガイドの注意書きが一度も出ない）
   const notice = <GuideNotice view={guideView} />;
   const guide = guideView?.kind === "ok" && guideView.value.kind === "ok" ? guideView.value.guide : null;
-  // 前回レビュー以降を見ている間は、ガイドが指す箇所が画面に無いのでステップモードにしない
-  if (guide && step !== null && scope === "all") {
+  // 前回レビュー以降を見ている間は currentStep が null を返す（ステップモードにならない）
+  if (guide && step !== null) {
     return <>{notice}<StepView t={t} guide={guide} files={files} idx={step} /></>;
   }
 
@@ -182,7 +183,7 @@ function Diff({ t, scope, loaded }: { t: Task; scope: Scope; loaded: Loaded<Diff
           ))}
         </nav>
         <div className="diffs">{files.map((f) => <DiffFileBlock key={f.path} t={t} file={f} />)}</div>
-        {guide && <GuidePanel guide={guide} files={files} scope={scope} />}
+        {guide && <GuidePanel guide={guide} files={files} partial={isPartial(loaded.value, scope)} />}
       </div>
     </>
   );

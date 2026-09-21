@@ -127,6 +127,13 @@ export type DiffView = { meta: TaskDiff; files: DiffFile[] };
 export const fellBackToAll = (d: DiffView, scope: Scope) =>
   scope === "since" && d.meta.since_step_run_id === null;
 
+/**
+ * 前回レビュー以降だけを見ている状態。ガイドの箇所は merge-base から tree までの diff に対して
+ * 検証されているので、このとき指す箇所が画面に無いことが正常に起こる。
+ * 前回が無くて全体に倒れているとき（fellBackToAll）は全体を見ているので含めない。
+ */
+export const isPartial = (d: DiffView, scope: Scope) => scope === "since" && !fellBackToAll(d, scope);
+
 export type DiffLine = { kind: "a" | "d" | ""; text: string; old: number | null; new: number | null; line: number };
 
 /** hunk の本文を行に分け、旧・新の行番号を振る。コメントは削除行なら旧、それ以外は新の行番号に付ける */
@@ -499,10 +506,17 @@ export const scopeOf = (s: State, id: string): Scope => s.scope[id] ?? "all";
 export const genOf = (s: State, id: string): number => s.gen[id] ?? 0;
 export const selectedTask = (s: State) => s.tasks.find((t) => t.id === s.sel) ?? null;
 
-/** ガイドに読む順のグループがあるときのその数。ガイドを出せないタスクは 0。 */
+/**
+ * ガイドに沿って読めるステップの数。ガイドを出せないタスクと、前回レビュー以降を見ている間
+ * （diff が取れるまでを含む）は 0。ステップ位置を動かす経路（[ ] キーと reduce）はここを通る。
+ */
 function stepCount(s: State, id: string): number {
   const g = guideOf(s, id);
-  return g?.kind === "ok" && g.value.kind === "ok" ? g.value.guide.readingOrder.length : 0;
+  if (g?.kind !== "ok" || g.value.kind !== "ok") return 0;
+  const scope = scopeOf(s, id);
+  const d = diffOf(s, id, scope);
+  if (scope === "since" && (d?.kind !== "ok" || isPartial(d.value, scope))) return 0;
+  return g.value.guide.readingOrder.length;
 }
 
 export function currentStep(s: State, t: Task): number | null {

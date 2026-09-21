@@ -162,7 +162,13 @@ th{color:var(--ink-3);font-size:11px;font-weight:500;border-top:0;background:var
 .md h2{font-size:13.5px;margin:14px 0 2px}
 .md ul,.md ol{margin:4px 0;padding-left:22px}
 .md p{margin:4px 0}
-.md code{font-family:var(--mono);font-size:11.5px;background:var(--surface-2);padding:0 4px;border-radius:3px}
+.md code,.g-md code{font-family:var(--mono);font-size:11.5px;background:var(--surface-2);padding:0 4px;border-radius:3px}
+/* ガイドの散文。幅の狭い箱の中に置くので、.md の余白と幅の上限は持たない */
+.g-md{line-height:1.75;min-width:0;overflow-wrap:anywhere}
+.g-md h1{font-size:13px;margin:8px 0 2px}
+.g-md h2{font-size:12.5px;margin:8px 0 2px}
+.g-md ul,.g-md ol{margin:4px 0;padding-left:20px}
+.g-md p{margin:4px 0}
 .rv-body{display:grid;grid-template-columns:232px minmax(0,1fr);gap:14px;align-items:start}
 @media (max-width:1150px){.rv-body{grid-template-columns:1fr}}
 .rv-body.has-guide{grid-template-columns:220px minmax(0,1fr) 360px}

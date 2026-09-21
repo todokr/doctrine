@@ -2070,8 +2070,9 @@ const GUIDE_WORKFLOW =
   "name: feature\nsteps:\n  - id: write-guide\n    type: guide\n    session: guide\n" +
   "  - id: review\n    type: approval\n    title: 見て\n";
 
-// worktree が用意された承認待ちのタスクを作る。.doctrine-out/ の exclude は worktree 作成時に済んでいる
-// （済んでいないと guide.json 自身がツリーに混ざり、何をしても stale に見える）。
+// worktree が用意された承認待ちのタスクを作る。.doctrine-out/ の exclude は createWorktree が済ませているが、
+// 済んでいないと guide.json 自身がツリーに混ざって何をしても stale に見えるので、
+// ツリーを取るテストは captureTree の前に ensureDoctrineOutExcluded を明示的に呼ぶ。
 async function guidableTask(
   ctx: DaemonContext,
   h: ReturnType<typeof createHandler>,
