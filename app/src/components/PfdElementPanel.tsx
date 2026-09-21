@@ -161,7 +161,8 @@ export function PfdElementPanel(p: {
             <Links title="入力" kind="artifact" items={info.inputs} onSelect={p.onSelect} />
             <Links title="出力" kind="artifact" items={info.outputs} onSelect={p.onSelect} />
             {info.process.actor === "agent" && p.onOpenPrompt && (
-              <PromptSec prompt={p.prompt} onOpen={p.onOpenPrompt} />
+              // 別のプロセスを選んだら閉じ直す（開いたままだと onToggle が来ず、prompt を取りに行かない）
+              <PromptSec key={info.key} prompt={p.prompt} onOpen={p.onOpenPrompt} />
             )}
           </>
         )}
