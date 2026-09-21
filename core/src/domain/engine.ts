@@ -412,7 +412,7 @@ export async function runTask(
       });
     } else {
       outcome = await runAgentStep(
-        { ...step, prompt: pendingFeed ?? step.prompt },
+        step,
         ctx,
         {
           cwd: task.worktree_path!,
@@ -420,6 +420,7 @@ export async function runTask(
           attempt,
           sessionId,
           resume: isResume,
+          feed: pendingFeed,
           deps: runnerDeps,
         },
       );
