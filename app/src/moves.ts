@@ -1,6 +1,6 @@
 // hunk の行のうち、移動として畳める範囲を求める。描画時のグルーピングだけで、行番号付けは変えない
-import type { DiffLine } from "./model";
-import type { MovedBlock } from "./types";
+import { diffLines, type DiffLine } from "./model";
+import type { DiffFile, MovedBlock } from "./types";
 
 /** 畳む範囲。start / end は diffLines の結果の添字（end を含む） */
 export type MoveGroup = {
@@ -46,6 +46,18 @@ export function moveLabel(g: MoveGroup): { lead: string; path: string; range: st
     range: other.startLine === other.endLine ? `${other.startLine}` : `${other.startLine}-${other.endLine}`,
     tail: `${side === "to" ? "から" : "へ"}移動（${notes.join("・")}）`,
   };
+}
+
+/** 移動の相手側の先頭行を含む hunk の id。流れでもファイル順でも、そこへ飛べば相手が見える */
+export function moveTarget(files: DiffFile[], g: MoveGroup): string | null {
+  const other = g.side === "to" ? g.move.from : g.move.to;
+  // 移動元は削除行を旧い行番号で、移動先は追加行を新しい行番号で探す
+  const kind = g.side === "to" ? "d" : "a";
+  const file = files.find((f) => f.path === other.path);
+  const hunk = file?.hunks.find((h) =>
+    diffLines(h).some((l) => l.kind === kind && (g.side === "to" ? l.old : l.new) === other.startLine)
+  );
+  return hunk?.id ?? null;
 }
 
 function collect(

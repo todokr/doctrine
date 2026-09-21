@@ -1,7 +1,7 @@
 import { Fragment, useMemo, type ReactNode } from "react";
 import { highlightHunk, languageOf } from "../highlight";
 import { diffLines, draftOf, type DiffLine } from "../model";
-import { moveGroups, moveLabel } from "../moves";
+import { moveGroups, moveLabel, moveTarget } from "../moves";
 import { useStore } from "../store";
 import type { DiffFile, DiffHunk, MovedBlock, Task } from "../types";
 
@@ -47,7 +47,15 @@ function LineComments({ t, path, line }: { t: Task; path: string; line: number }
   );
 }
 
-function Hunk({ t, path, hunk, language, moves }: { t: Task; path: string; hunk: DiffHunk; language: string | null; moves: MovedBlock[] }) {
+function Hunk({ t, files, path, hunk, language, moves, note }: {
+  t: Task;
+  files: DiffFile[];
+  path: string;
+  hunk: DiffHunk;
+  language: string | null;
+  moves: MovedBlock[];
+  note?: ReactNode;
+}) {
   const { s, dispatch } = useStore();
   // hunk 1つをまとめて解析する。行ごとに呼ぶと、行をまたぐトークンが解けない
   const lines = useMemo(() => diffLines(hunk), [hunk]);
@@ -92,7 +100,9 @@ function Hunk({ t, path, hunk, language, moves }: { t: Task; path: string; hunk:
               // summary の中なので、押しても畳みが開閉しないようにする
               e.preventDefault();
               e.stopPropagation();
-              document.getElementById(fileAnchor(label.path))?.scrollIntoView({ block: "start", behavior: "smooth" });
+              // 相手側の行を含む hunk へ飛ぶ。流れの表示にはファイルの id が無い
+              const target = moveTarget(files, g);
+              document.getElementById(target ? hunkAnchor(target) : fileAnchor(label.path))?.scrollIntoView({ block: "start", behavior: "smooth" });
             }}
           >
             {label.path}:{label.range}
@@ -108,32 +118,55 @@ function Hunk({ t, path, hunk, language, moves }: { t: Task; path: string; hunk:
 
   return (
     <>
+      {note}
       <div className="hunk" id={hunkAnchor(hunk.id)} data-anchor={hunk.id}>@@ -{hunk.old} +{hunk.new} @@</div>
       {out}
     </>
   );
 }
 
-export function DiffFileBlock({ t, file }: { t: Task; file: DiffFile }) {
+export function DiffFileBlock({ t, files, file, only, anchored = true, head, note, hunkNote }: {
+  t: Task;
+  /** 移動の相手側の hunk を探すための、diff の全ファイル */
+  files: DiffFile[];
+  file: DiffFile;
+  /** 出す hunk の添字、出す順。省くと全部 */
+  only?: number[];
+  /** fileAnchor の id を付けるか。流れでは同じファイルが何度も出るので false */
+  anchored?: boolean;
+  /** 見出しの右に添えるもの（「続き」「hunk 2, 3 / 5」） */
+  head?: ReactNode;
+  /** 見出しの下に出すもの（パスに紐づくリスク） */
+  note?: ReactNode;
+  /** hunk ごとに、その hunk の真上に出すもの（hunk に紐づくリスク） */
+  hunkNote?: (h: DiffHunk) => ReactNode;
+}) {
   const language = useMemo(() => languageOf(file.path), [file.path]);
+  const idx = only ?? file.hunks.map((_, i) => i);
+  const empty = file.hunks.length === 0;
   return (
-    <section className="file" id={fileAnchor(file.path)}>
-      <header>
+    <section className="file" id={anchored ? fileAnchor(file.path) : undefined}>
+      <header data-anchor={empty ? `file:${file.path}` : undefined}>
         <span className="nm">{file.path}</span>
         {(file.status === "R" || file.status === "C") && (
           <span className="hint mono">← {file.status === "C" ? "コピー元: " : ""}{file.old_path}</span>
         )}
         <span className="hint">{STATUS_LABEL[file.status]}</span>
         {fileStat(file)}
+        {head}
       </header>
+      {note}
       <div className="code">
-        {file.binary
-          ? <p className="hint" style={{ padding: "8px 12px" }}>バイナリファイルのため中身は表示しません</p>
-          : file.cutOff
-            ? <p className="hint" style={{ padding: "8px 12px" }}>diff が打ち切られたため、このファイルの中身は届いていません</p>
-            : file.hunks.length === 0
-              ? <p className="hint" style={{ padding: "8px 12px" }}>中身の変更はありません（モードや名前だけの変更）</p>
-              : file.hunks.map((h) => <Hunk key={h.id} t={t} path={file.path} hunk={h} language={language} moves={file.moves} />)}
+        {empty
+          ? file.binary
+            ? <p className="hint" style={{ padding: "8px 12px" }}>バイナリファイルのため中身は表示しません</p>
+            : file.cutOff
+              ? <p className="hint" style={{ padding: "8px 12px" }}>diff が打ち切られたため、このファイルの中身は届いていません</p>
+              : <p className="hint" style={{ padding: "8px 12px" }}>中身の変更はありません（モードや名前だけの変更）</p>
+          : idx.map((i) => {
+            const h = file.hunks[i];
+            return <Hunk key={h.id} t={t} files={files} path={file.path} hunk={h} language={language} moves={file.moves} note={hunkNote?.(h)} />;
+          })}
       </div>
     </section>
   );

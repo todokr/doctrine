@@ -1,26 +1,23 @@
-import { useEffect, useRef, type CSSProperties, type ReactNode } from "react";
-import { groupPaths, locationPaths, type GuideView } from "../guide";
+import type { CSSProperties, ReactNode } from "react";
 import { findUnguided } from "../flow";
+import { groupPaths, locationPaths, type GuideView } from "../guide";
 import { clock, type Loaded } from "../model";
-import { useStore } from "../store";
-import type { DiffFile, Guide, Task } from "../types";
-import { DiffFileBlock } from "./DiffFileBlock";
+import type { DiffFile, Guide, Risk } from "../types";
 import { DiagramView } from "./Diagrams";
 import { Markdown } from "./text";
 
 const sec = (i: number) => ({ "--gi": i }) as CSSProperties;
 
-type Risk = Guide["risks"][number];
 type Decision = Guide["decisions"][number];
 
-const RISK_LABEL: Record<Risk["kind"], string> = {
+export const RISK_LABEL: Record<Risk["kind"], string> = {
   breaks: "壊しうるもの",
   assumption: "置いた前提",
   unknown: "分かっていないこと",
   considered: "検討済み",
 };
 
-const prose = (src: string) => <div className="g-md"><Markdown src={src} /></div>;
+export const prose = (src: string) => <div className="g-md"><Markdown src={src} /></div>;
 
 const sourceLabel = (s: NonNullable<Decision["source"]>) => (s.kind === "step" ? `ステップ ${s.value}` : s.value);
 
@@ -90,7 +87,7 @@ function UnguidedNote({ files, guide, truncated }: { files: DiffFile[]; guide: G
   );
 }
 
-function RiskItem({ risk }: { risk: Risk }) {
+export function RiskItem({ risk }: { risk: Risk }) {
   return (
     <li>
       <b>{RISK_LABEL[risk.kind]}</b>
@@ -100,7 +97,7 @@ function RiskItem({ risk }: { risk: Risk }) {
   );
 }
 
-function DecisionItem({ d }: { d: Decision }) {
+export function DecisionItem({ d }: { d: Decision }) {
   return (
     <li>
       <b>{d.decision}</b>
@@ -110,18 +107,29 @@ function DecisionItem({ d }: { d: Decision }) {
   );
 }
 
-/** レビュー画面の右に置く Review Guide */
-export function GuidePanel({ guide, files, truncated, partial }: { guide: Guide; files: DiffFile[]; truncated: boolean; partial: boolean }) {
-  const { dispatch } = useStore();
+/** hunk の真上（またはファイル見出しの下）に出す、その箇所に紐づくリスク */
+export function RiskNote({ risks }: { risks: Risk[] | undefined }): ReactNode {
+  if (!risks?.length) return null;
+  return (
+    <div className="hunk-risk" role="note">
+      {risks.map((r) => (
+        <div key={r.id}>
+          <b>{RISK_LABEL[r.kind]}</b>
+          {prose(r.body)}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * 全体の把握。Why / What / How は開いて出し、Key Decisions / Risks / Tests は
+ * （各グループの refs にも出るので）件数だけ見出しに出して畳む
+ */
+export function GuideOverview({ guide }: { guide: Guide }) {
   const diagram = (id: string | undefined) => guide.diagrams.find((d) => d.id === id);
   return (
-    <aside className="guide" aria-label="Review Guide">
-      <div className="guide-head"><b>Review Guide</b></div>
-      {partial && (
-        <p className="g-warn">
-          このガイドはブランチ全体の変更を説明しています。前回レビュー以降だけを見ている間は、ガイドが指す箇所が画面に無いことがあります
-        </p>
-      )}
+    <>
       <section className="g-sec" style={sec(0)}><h3>Why</h3>{prose(guide.why)}</section>
       {guide.what.length > 0 && (
         <section className="g-sec" style={sec(1)}>
@@ -148,42 +156,21 @@ export function GuidePanel({ guide, files, truncated, partial }: { guide: Guide;
           })}
         </section>
       )}
-      <section className="g-sec" style={sec(3)}>
-        <h3>Reading Order</h3>
-        {!partial && guide.readingOrder.length > 0 && (
-          <button className="g-start" onClick={() => dispatch({ type: "step", idx: 0 })}>ガイドに沿って読む（{guide.readingOrder.length}ステップ）▸</button>
-        )}
-        <ol className="g-order">
-          {guide.readingOrder.map((r, i) => (
-            <li key={i}>
-              {partial ? (
-                <div className="g-order-item"><span>{r.title}</span><span className="nm hint">{groupPaths(r).join(", ")}</span></div>
-              ) : (
-                <button onClick={() => dispatch({ type: "step", idx: i })}>
-                  <span>{r.title}</span>
-                  <span className="nm hint">{groupPaths(r).join(", ")}</span>
-                </button>
-              )}
-            </li>
-          ))}
-        </ol>
-        <UnguidedNote files={files} guide={guide} truncated={truncated} />
-      </section>
       {guide.decisions.length > 0 && (
-        <section className="g-sec" style={sec(4)}>
-          <h3>Key Decisions</h3>
+        <details className="g-fold">
+          <summary>Key Decisions（{guide.decisions.length}）</summary>
           <ol className="g-list">{guide.decisions.map((d) => <DecisionItem key={d.id} d={d} />)}</ol>
-        </section>
+        </details>
       )}
       {guide.risks.length > 0 && (
-        <section className="g-sec" style={sec(5)}>
-          <h3>Risks</h3>
+        <details className="g-fold">
+          <summary>Risks（{guide.risks.length}）</summary>
           <ul className="g-list">{guide.risks.map((r) => <RiskItem key={r.id} risk={r} />)}</ul>
-        </section>
+        </details>
       )}
       {guide.tests.length > 0 && (
-        <section className="g-sec" style={sec(6)}>
-          <h3>Tests</h3>
+        <details className="g-fold">
+          <summary>Tests（{guide.tests.length}）</summary>
           <table className="g-table">
             <thead><tr><th>振る舞い</th><th>テスト</th></tr></thead>
             <tbody>
@@ -192,100 +179,50 @@ export function GuidePanel({ guide, files, truncated, partial }: { guide: Guide;
               ))}
             </tbody>
           </table>
-        </section>
+        </details>
       )}
-    </aside>
+    </>
   );
 }
 
-/** ガイドの Reading Order を1グループずつ読む表示 */
-export function StepView({ t, guide, files: all, truncated, idx }: { t: Task; guide: Guide; files: DiffFile[]; truncated: boolean; idx: number }) {
-  const { dispatch } = useStore();
-  const ref = useRef<HTMLDivElement>(null);
-  const steps = guide.readingOrder;
-  const step = steps[idx];
-  const paths = groupPaths(step);
-  const files = paths.flatMap((p) => all.filter((f) => f.path === p));
-  const absent = paths.filter((p) => !all.some((f) => f.path === p));
-  const last = idx === steps.length - 1;
-  const missing = findUnguided(all, guide, truncated).items.map((i) => i.file).filter((f, k, a) => a.indexOf(f) === k);
-
-  // グループが束ねる節。ガイド全体を探し直さなくても、そのステップの中で読める
-  const decisions = guide.decisions.filter((d) => step.refs.decisions.includes(d.id));
-  const risks = guide.risks.filter((r) => step.refs.risks.includes(r.id));
-  const tests = guide.tests.filter((x) => step.refs.tests.includes(x.id));
-  const diagrams = guide.diagrams.filter((d) => step.refs.diagrams.includes(d.id));
-
-  // ステップを移ったときだけ先頭へ送る。タスクを開いた直後は経緯から読めるようにそのまま
-  const shown = useRef({ task: t.id, idx });
-  useEffect(() => {
-    const prev = shown.current;
-    shown.current = { task: t.id, idx };
-    if (prev.task === t.id && prev.idx !== idx) ref.current?.scrollIntoView({ block: "start" });
-  }, [t.id, idx]);
-
+/**
+ * ファイル順の表示で、diff の右に置く Review Guide。onJump があるとき（ガイドの順に並べられるとき）は、
+ * Reading Order の各項目が「ガイドの順へ切り替えてそのグループへ飛ぶ」ボタンになる
+ */
+export function GuidePanel({ guide, files, truncated, partial, onJump }: {
+  guide: Guide;
+  files: DiffFile[];
+  truncated: boolean;
+  partial: boolean;
+  onJump?: (group: number) => void;
+}) {
   return (
-    <div className="stepmode" ref={ref}>
-      <div className="step-bar">
-        <b>ガイドに沿って読む</b>
-        <span className="step-pills" role="group" aria-label="読むステップ">
-          {steps.map((x, i) => (
-            <button key={i} className={`step-pill ${i < idx ? "done" : ""}`} title={x.title} aria-current={i === idx ? "step" : undefined} onClick={() => dispatch({ type: "step", idx: i })}>
-              {i + 1}
-            </button>
-          ))}
-        </span>
-        <span className="spacer" />
-        <button className="btn sm" onClick={() => dispatch({ type: "step", idx: null })}>全体表示に戻る</button>
-      </div>
-      <section className="stepcard" aria-live="polite" key={idx}>
-        <span className="eyebrow">STEP {idx + 1} / {steps.length}</span>
-        <h2>{step.title}</h2>
-        {prose(step.body)}
-        {diagrams.map((d) => <div key={d.id} className="dg"><DiagramView diagram={d} /></div>)}
-        {decisions.length > 0 && (
-          <div><b>判断</b><ol className="g-list">{decisions.map((d) => <DecisionItem key={d.id} d={d} />)}</ol></div>
-        )}
-        {risks.length > 0 && (
-          <div><b>リスク</b><ul className="g-list">{risks.map((r) => <RiskItem key={r.id} risk={r} />)}</ul></div>
-        )}
-        {tests.length > 0 && (
-          <div>
-            <b>テスト</b>
-            <ul className="g-list">{tests.map((x) => <li key={x.id}>{x.behavior}<span className="mono">{x.path} · {x.name}</span></li>)}</ul>
-          </div>
-        )}
-      </section>
-      {absent.length > 0 && (
+    <aside className="guide" aria-label="Review Guide">
+      <div className="guide-head"><b>Review Guide</b></div>
+      {partial && (
         <p className="g-warn">
-          この箇所は今の diff にありません:{" "}
-          {absent.map((p, i) => <span key={p}>{i > 0 && "、"}<span className="mono">{p}</span></span>)}
+          このガイドはブランチ全体の変更を説明しています。前回レビュー以降だけを見ている間は、ガイドが指す箇所が画面に無いことがあります
         </p>
       )}
-      <div className="diffs">{files.map((f) => <DiffFileBlock key={f.path} t={t} file={f} />)}</div>
-      {last && (
-        <section className="step-done">
-          <b>ガイドのステップはここまでです</b>
-          {missing.length ? (
-            <>
-              <p className="g-warn">⚠ diff に含まれるがガイドが触れていないファイルが{missing.length}件あります。判断の前に目を通してください。</p>
-              <div className="diffs">{missing.map((f) => <DiffFileBlock key={f.path} t={t} file={f} />)}</div>
-            </>
-          ) : (
-            <p className="g-ok">✓ diff の全ファイルをガイドのステップで読みました</p>
-          )}
-          <p className="hint">説明がコードと一致していたかを振り返ってから、下で承認か差し戻しを決めてください。</p>
-        </section>
-      )}
-      <div className="step-foot">
-        <button className="btn" disabled={idx === 0} onClick={() => dispatch({ type: "step", idx: idx - 1 })}>← 前のステップ</button>
-        {!last && (
-          <button className="btn" style={{ borderColor: "var(--accent)" }} onClick={() => dispatch({ type: "step", idx: idx + 1 })}>
-            次のステップ: {steps[idx + 1].title} →
-          </button>
-        )}
-        <span className="hint"><kbd className="mono">[</kbd> <kbd className="mono">]</kbd> でも移動できます</span>
-      </div>
-    </div>
+      <GuideOverview guide={guide} />
+      <section className="g-sec" style={sec(3)}>
+        <h3>Reading Order</h3>
+        <ol className="g-order">
+          {guide.readingOrder.map((r, i) => (
+            <li key={i}>
+              {onJump ? (
+                <button onClick={() => onJump(i)}>
+                  <span>{r.title}</span>
+                  <span className="nm hint">{groupPaths(r).join(", ")}</span>
+                </button>
+              ) : (
+                <div className="g-order-item"><span>{r.title}</span><span className="nm hint">{groupPaths(r).join(", ")}</span></div>
+              )}
+            </li>
+          ))}
+        </ol>
+        <UnguidedNote files={files} guide={guide} truncated={truncated} />
+      </section>
+    </aside>
   );
 }

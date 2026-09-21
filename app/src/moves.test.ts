@@ -1,6 +1,8 @@
 import { describe, expect, test } from "vitest";
-import { moveGroups, moveLabel, type MoveGroup } from "./moves";
+import { SAMPLE_MOVE_DIFF } from "./fixtures";
+import { moveGroups, moveLabel, moveTarget, type MoveGroup } from "./moves";
 import { diffLines } from "./model";
+import { buildDiff } from "./patch";
 import type { MovedBlock } from "./types";
 
 const block = (
@@ -69,6 +71,26 @@ describe("moveGroups", () => {
 
   test("移動が無ければ空配列", () => {
     expect(moveGroups(hunk(1, 1, "+a"), "b.ts", [])).toEqual([]);
+  });
+});
+
+describe("moveTarget", () => {
+  const files = buildDiff(SAMPLE_MOVE_DIFF);
+  const [a, b] = files;
+  const firstGroup = (f: typeof a) => moveGroups(diffLines(f.hunks[0]), f.path, f.moves)[0];
+
+  test("移動先の hunk から見た相手は、移動元の行を含む hunk", () => {
+    expect(firstGroup(b).side).toBe("to");
+    expect(moveTarget(files, firstGroup(b))).toBe(a.hunks[0].id);
+  });
+
+  test("移動元の hunk から見た相手は、移動先の行を含む hunk", () => {
+    expect(firstGroup(a).side).toBe("from");
+    expect(moveTarget(files, firstGroup(a))).toBe(b.hunks[0].id);
+  });
+
+  test("相手側のファイルが diff に無ければ null", () => {
+    expect(moveTarget([b], firstGroup(b))).toBeNull();
   });
 });
 

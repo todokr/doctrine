@@ -52,7 +52,7 @@ function initialState(): State {
     project: "all",
     sel: null,
     scope: {},
-    step: {},
+    layout: {},
     diffs: {},
     contexts: {},
     guides: {},

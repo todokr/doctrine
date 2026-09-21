@@ -454,6 +454,9 @@ export type Loaded<T> =
   | { kind: "ok"; value: T }
   | { kind: "error"; message: string };
 
+/** レビュー画面の diff の並べ方。flow はガイドの読む順、files はファイル順 */
+export type Layout = "flow" | "files";
+
 export type State = {
   tasks: Task[];
   projects: Project[];
@@ -480,8 +483,8 @@ export type State = {
   gen: Record<string, number>;
   /** データディレクトリから下書きを読み終えたか。読む前に書くと空で上書きしてしまう */
   draftsLoaded: boolean;
-  /** ガイドに沿って読むステップ。未設定ならガイドのあるタスクは最初のステップから、null は全体表示 */
-  step: Record<string, number | null>;
+  /** タスクごとに選んだ並べ方。未設定なら layoutOf が既定を決める */
+  layout: Record<string, Layout>;
   drafts: Record<string, Draft>;
   editing: Editing | null;
   modal: "reject-preview" | null;
@@ -500,24 +503,25 @@ export const genOf = (s: State, id: string): number => s.gen[id] ?? 0;
 export const selectedTask = (s: State) => s.tasks.find((t) => t.id === s.sel) ?? null;
 
 /**
- * ガイドに沿って読めるステップの数。ガイドを出せないタスクと、前回レビュー以降を見ている間
- * （diff が取れるまでを含む）は 0。ステップ位置を動かす経路（[ ] キーと reduce）はここを通る。
+ * ガイドの読む順で diff を並べられるか。ガイドが ok で、前回レビュー以降を見ていない
+ * （diff が取れるまでを含む）とき。since の diff では hunk が変わり、ガイドの id が
+ * ほとんど合わないので並べない。並べ方を動かす経路（切り替えと reduce）はここを通る。
  */
-function stepCount(s: State, id: string): number {
+export function canFlow(s: State, id: string): boolean {
   const g = guideOf(s, id);
-  if (g?.kind !== "ok" || g.value.kind !== "ok") return 0;
+  if (g?.kind !== "ok" || g.value.kind !== "ok") return false;
   const scope = scopeOf(s, id);
   const d = diffOf(s, id, scope);
-  if (scope === "since" && (d?.kind !== "ok" || isPartial(d.value, scope))) return 0;
-  return g.value.guide.readingOrder.length;
+  return !(scope === "since" && (d?.kind !== "ok" || isPartial(d.value, scope)));
 }
 
-export function currentStep(s: State, t: Task): number | null {
-  const count = stepCount(s, t.id);
-  if (count === 0) return null;
-  const v = s.step[t.id];
-  // 差し戻しのあとにガイドが作り直されると、前のガイドで選んだ位置が範囲を外れうる
-  return v === undefined ? 0 : v === null ? null : Math.min(v, count - 1);
+/** 今の並べ方。canFlow でなければ files。選んでいなければ、stale でないガイドは flow、stale は files */
+export function layoutOf(s: State, id: string): Layout {
+  if (!canFlow(s, id)) return "files";
+  const chosen = s.layout[id];
+  if (chosen) return chosen;
+  const g = guideOf(s, id);
+  return g?.kind === "ok" && g.value.kind === "ok" && !g.value.stale ? "flow" : "files";
 }
 
 export type Action =
@@ -526,7 +530,7 @@ export type Action =
   | { type: "select"; id: string }
   | { type: "move"; delta: 1 | -1 }
   | { type: "scope"; scope: Scope }
-  | { type: "step"; idx: number | null }
+  | { type: "layout"; layout: Layout }
   | { type: "comment.new"; path: string; line: number; quote: string }
   | { type: "comment.text"; text: string }
   | { type: "comment.save" }
@@ -619,13 +623,9 @@ export function reduce(s: State, a: Action): State {
     }
     case "scope":
       return t ? { ...s, scope: { ...s.scope, [t.id]: a.scope } } : s;
-    case "step": {
-      if (!t) return s;
-      const count = stepCount(s, t.id);
-      if (count === 0) return s;
-      if (a.idx !== null && (a.idx < 0 || a.idx >= count)) return s;
-      return { ...s, step: { ...s.step, [t.id]: a.idx }, editing: null };
-    }
+    case "layout":
+      // editing は消さない。書きかけのコメントは、どちらの並びでも同じ行に出る
+      return t && canFlow(s, t.id) ? { ...s, layout: { ...s.layout, [t.id]: a.layout } } : s;
     case "comment.new":
       return t ? { ...s, editing: { task: t.id, path: a.path, line: a.line, quote: a.quote, text: "" } } : s;
     case "comment.text":
@@ -717,6 +717,7 @@ export function reduce(s: State, a: Action): State {
         diffs: keep(s.diffs),
         contexts: keep(s.contexts),
         guides: keep(s.guides),
+        layout: keep(s.layout),
         gen: keep(s.gen),
       };
       if (s.sel !== null && ids.has(s.sel)) return next;
