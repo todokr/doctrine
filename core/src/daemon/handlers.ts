@@ -31,10 +31,14 @@ import {
   answerIntake,
   approveIntake,
   cancelIntake,
+  closeParentIssue,
+  completeHumanProcess,
   type IntakeTransition,
   rejectIntake,
+  setDispatchPaused,
   startIntake,
 } from "../intake/commands.ts";
+import { redispatchProcess } from "../intake/dispatch.ts";
 import { toIntakeDetail, toIntakeSummary } from "../intake/view.ts";
 import type { IntakeWatcher } from "../intake/watch.ts";
 import type { Tracker } from "../github/tracker.ts";
@@ -134,6 +138,12 @@ function broadcastIntakeTransition(ctx: DaemonContext, t: IntakeTransition): voi
     to: t.to,
     revising: t.revising,
   });
+}
+
+/** 行を読み直して IntakeDetail にする。 */
+async function intakeDetailOf(ctx: DaemonContext, intakeId: string) {
+  const row = (await getIntake(ctx.db, intakeId))!;
+  return await toIntakeDetail(ctx.db, row, ctx.intakeWatcher.health(row.project_id));
 }
 
 /** 操作が返した遷移をイベントにして配り、読み直した行の要約を返す。 */
@@ -620,6 +630,51 @@ export function createHandler(ctx: DaemonContext): Handler {
         }
         for (const message of outcome.problems) ctx.warnings.push(message);
         return await settleIntakeCommand(ctx, outcome);
+      }
+      case "intake.completeHumanProcess": {
+        const intakeId = req(params, "intake_id");
+        // note は req で取らない。空白だけの判定と文言を completeHumanProcess に寄せる
+        await completeHumanProcess(ctx.db, {
+          intakeId,
+          processId: req(params, "process_id"),
+          note: params.note,
+        });
+        ctx.broadcast({ event: "intake.updated", intake_id: intakeId });
+        const row = (await getIntake(ctx.db, intakeId))!;
+        // sub-issue を閉じ、下流を投入し、goal が揃えば completed へ移す
+        await ctx.intakeWatcher.request(row.project_id);
+        return await intakeDetailOf(ctx, intakeId);
+      }
+      case "intake.redispatch": {
+        const intakeId = req(params, "intake_id");
+        await redispatchProcess(ctx.db, { intakeId, processId: req(params, "process_id") });
+        ctx.broadcast({ event: "intake.updated", intake_id: intakeId });
+        return await intakeDetailOf(ctx, intakeId);
+      }
+      case "intake.refresh": {
+        const intakeId = req(params, "intake_id");
+        const intake = await getIntake(ctx.db, intakeId);
+        if (!intake) throw new Error("Intake がありません");
+        await ctx.intakeWatcher.request(intake.project_id);
+        return await intakeDetailOf(ctx, intakeId);
+      }
+      case "intake.setDispatchPaused": {
+        const intakeId = req(params, "intake_id");
+        if (typeof params.paused !== "boolean") throw new Error("paused は必須です");
+        const row = await setDispatchPaused(ctx.db, { intakeId, paused: params.paused });
+        ctx.broadcast({ event: "intake.updated", intake_id: intakeId });
+        if (!params.paused) void ctx.intakeWatcher.request(row.project_id);
+        return await toIntakeSummary(ctx.db, row, ctx.intakeWatcher.health(row.project_id));
+      }
+      case "intake.closeIssue": {
+        const intake = await getIntake(ctx.db, req(params, "intake_id"));
+        if (!intake) throw new Error("Intake がありません");
+        const project = (await getProject(ctx.db, intake.project_id))!;
+        const row = await closeParentIssue(ctx.db, ctx.tracker, {
+          intakeId: intake.id,
+          projectPath: project.path,
+        });
+        return await toIntakeSummary(ctx.db, row, ctx.intakeWatcher.health(row.project_id));
       }
 
       default:

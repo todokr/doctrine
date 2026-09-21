@@ -4,12 +4,13 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openDb } from "../../src/db/migrate.ts";
-import { getIntake, listIntakeRuns } from "../../src/db/intakes.ts";
+import { getIntake, listIntakeRuns, listProcesses, updateIntake } from "../../src/db/intakes.ts";
 import { createHandler, type DaemonContext, tick } from "../../src/daemon/handlers.ts";
 import { createMockAdapter } from "../../src/adapter/mock.ts";
 import type { AgentAdapter } from "../../src/adapter/types.ts";
 import { createWarningLog } from "../../src/daemon/warnings.ts";
 import type { IntakeDetail, IntakeSummary, ServerEvent } from "../../../shared/protocol.ts";
+import type { PrFact } from "../../../shared/intake/github.ts";
 import type { IntakeState } from "../../../shared/intake/state.ts";
 import type { PrWatcher, Tracker } from "../../src/github/tracker.ts";
 import { createIntakeWatcher } from "../../src/intake/watch.ts";
@@ -455,6 +456,280 @@ test("gh が使えないとき github.issues は理由を返して失敗する",
     () => call("github.issues", { project: repo }),
     /not_logged_in.*gh auth login を/,
   );
+});
+
+const MERGED: PrFact = {
+  number: 7,
+  url: "https://github.com/o/r/pull/7",
+  state: "MERGED",
+  baseRef: "main",
+  mergedAt: "2026-09-21T00:00:00.000Z",
+  mergeCommit: "abc",
+};
+
+type TaskListItem = {
+  id: string;
+  branch: string;
+  prompt: string;
+  state: string;
+  intake_process_id: string | null;
+  issue_url: string | null;
+};
+
+const processOf = (d: IntakeDetail, id: string) => d.processes.find((p) => p.id === id)!;
+
+/** 承認して、見張りの 1 周（sub-issue の作成とプロセス 1 の投入）が終わるまで進める。 */
+async function toActive() {
+  const ft = statefulTracker();
+  const pw = fakePrWatcher();
+  const s = await setup({ tracker: ft.tracker, prWatcher: pw.prWatcher });
+  const reviewing = await toReviewing(s.ctx, s.call);
+  await s.call("intake.approve", {
+    intake_id: reviewing.id,
+    draft_id: reviewing.latest_draft!.id,
+    hash: reviewing.latest_draft!.hash,
+  });
+  await until(() => s.ctx.intakeWatcher.idle());
+  return { ...s, ft, pw, id: reviewing.id };
+}
+
+async function tasksOf(call: Call): Promise<TaskListItem[]> {
+  return await call<TaskListItem[]>("task.list");
+}
+
+test("人のプロセスの完了の記録は、下流のタスクの prompt に載り、sub-issue を completed で閉じる", async () => {
+  const { ctx, events, call, ft, pw, id } = await toActive();
+  const [first] = await tasksOf(call);
+  pw.prs.set(first.branch, [MERGED]);
+
+  const note = "ログイン 1 回を 1 利用と数える";
+  const detail = await call<IntakeDetail>("intake.completeHumanProcess", {
+    intake_id: id,
+    process_id: "3",
+    note,
+  });
+
+  const three = processOf(detail, "3");
+  assert.equal(three.state, "done");
+  assert.equal((three as { note: string }).note, note);
+  const second = (await tasksOf(call)).find((t) => t.intake_process_id === "2")!;
+  assert.ok(second.prompt.includes(`- 集計の定義: ${note}`));
+  assert.equal(processOf(detail, "2").state, "running");
+  const issue = ft.issues.find((i) => i.ref.url === three.sub_issue_url)!;
+  assert.equal(issue.state, "CLOSED");
+  assert.equal(issue.closeReason, "completed");
+  assert.ok(events.some((e) => e.event === "intake.updated" && e.intake_id === id));
+  assert.equal(
+    (await listProcesses(ctx.db, id)).find((r) => r.process_id === "3")!.sub_issue_closed,
+    1,
+  );
+});
+
+test("内容の無い完了の記録は拒まれる", async () => {
+  const { ctx, call, ft, id } = await toActive();
+  for (const note of ["", "  \n", undefined, 123]) {
+    await assert.rejects(
+      () => call("intake.completeHumanProcess", { intake_id: id, process_id: "3", note }),
+      /完了の内容は必須です/,
+    );
+  }
+  const row = (await listProcesses(ctx.db, id)).find((r) => r.process_id === "3")!;
+  assert.equal(row.human_done_at, null);
+  assert.equal(ft.calls.some((c) => c.op === "closeIssue"), false);
+});
+
+test("完了の記録は人のプロセスで、あなたの番のときだけ", async () => {
+  const { call, id } = await toActive();
+  for (const process_id of ["1", "2"]) {
+    await assert.rejects(
+      () => call("intake.completeHumanProcess", { intake_id: id, process_id, note: "x" }),
+      /人のプロセスではありません/,
+    );
+  }
+  await call("intake.completeHumanProcess", { intake_id: id, process_id: "3", note: "x" });
+  await assert.rejects(
+    () => call("intake.completeHumanProcess", { intake_id: id, process_id: "3", note: "y" }),
+    /すでに完了が記録されています/,
+  );
+});
+
+test("完了の記録は active でない Intake では拒まれる", async () => {
+  const { ctx, call } = await setup();
+  const reviewing = await toReviewing(ctx, call);
+  await assert.rejects(
+    () =>
+      call("intake.completeHumanProcess", {
+        intake_id: reviewing.id,
+        process_id: "3",
+        note: "x",
+      }),
+    /完了を記録できる状態ではありません/,
+  );
+});
+
+test("要確認のプロセスを再投入すると、新しいタスクが同じプロセスと sub-issue に紐づく", async () => {
+  const { call, id } = await toActive();
+  const [old] = await tasksOf(call);
+  await call("task.cancel", { task_id: old.id });
+
+  const detail = await call<IntakeDetail>("intake.redispatch", {
+    intake_id: id,
+    process_id: "1",
+  });
+
+  const one = processOf(detail, "1");
+  assert.equal(one.state, "running");
+  const tasks = await tasksOf(call);
+  const fresh = tasks.find((t) => t.id !== old.id)!;
+  assert.deepEqual(one.task_ids, [old.id, fresh.id]);
+  assert.equal(fresh.intake_process_id, "1");
+  assert.equal(fresh.issue_url, old.issue_url);
+  assert.equal(fresh.issue_url, one.sub_issue_url);
+  assert.equal(tasks.find((t) => t.id === old.id)!.state, "canceled");
+});
+
+test("要確認でないプロセスは再投入できない", async () => {
+  const { call, id } = await toActive();
+  await assert.rejects(
+    () => call("intake.redispatch", { intake_id: id, process_id: "1" }),
+    /要確認のプロセスだけ/,
+  );
+  assert.equal((await tasksOf(call)).length, 1);
+});
+
+test("中止（leave）はタスクと sub-issue をそのままにする", async () => {
+  const { call, ft, id } = await toActive();
+  const canceled = await call<IntakeSummary>("intake.cancel", { intake_id: id, mode: "leave" });
+  assert.equal(canceled.state, "canceled");
+  assert.equal((await tasksOf(call))[0].state, "queued");
+  assert.ok(ft.issues.length > 0);
+  assert.ok(ft.issues.every((i) => i.state === "OPEN"));
+  assert.equal(ft.calls.some((c) => c.op === "closeIssue"), false);
+});
+
+test("中止（stop）はタスクを止め、sub-issue を取りやめとして閉じる", async () => {
+  const { ctx, events, call, ft, id } = await toActive();
+  const detail = await call<IntakeDetail>("intake.completeHumanProcess", {
+    intake_id: id,
+    process_id: "3",
+    note: "x",
+  });
+  const [first] = await tasksOf(call);
+
+  const canceled = await call<IntakeSummary>("intake.cancel", { intake_id: id, mode: "stop" });
+
+  assert.equal(canceled.state, "canceled");
+  assert.equal((await tasksOf(call))[0].state, "canceled");
+  assert.ok(
+    events.some((e) =>
+      e.event === "task.stateChanged" && e.task_id === first.id && e.from === "queued" &&
+      e.to === "canceled"
+    ),
+  );
+  const issueOf = (processId: string) =>
+    ft.issues.find((i) => i.ref.url === processOf(detail, processId).sub_issue_url)!;
+  for (const processId of ["1", "2", "4"]) {
+    assert.equal(issueOf(processId).state, "CLOSED");
+    assert.equal(issueOf(processId).closeReason, "not_planned");
+  }
+  assert.equal(issueOf("3").state, "CLOSED");
+  assert.equal(issueOf("3").closeReason, "completed");
+  const rows = (await listProcesses(ctx.db, id)).filter((r) => r.retired_at === null);
+  assert.ok(rows.every((r) => r.sub_issue_closed === 1));
+});
+
+test("中止（stop）で sub-issue を閉じられなくても中止は成功し、警告に残る", async () => {
+  const { ctx, call, ft, id } = await toActive();
+  ft.failWhen((c) => c.op === "closeIssue");
+  const canceled = await call<IntakeSummary>("intake.cancel", { intake_id: id, mode: "stop" });
+  assert.equal(canceled.state, "canceled");
+  assert.ok(ctx.warnings.recent().some((w) => /sub-issue を閉じられませんでした/.test(w.message)));
+});
+
+test("いま確認すると見張りの 1 周が回り、マージされた下流を投入する", async () => {
+  const { call, pw, id } = await toActive();
+  await call("intake.completeHumanProcess", { intake_id: id, process_id: "3", note: "x" });
+  const [first] = await tasksOf(call);
+  pw.prs.set(first.branch, [MERGED]);
+  const before = pw.calls.length;
+
+  const detail = await call<IntakeDetail>("intake.refresh", { intake_id: id });
+
+  assert.equal(processOf(detail, "1").state, "merged");
+  assert.equal(processOf(detail, "2").state, "running");
+  assert.ok(pw.calls.length > before);
+});
+
+test("自動 dispatch を一時停止すると投入されず、再開すると投入される", async () => {
+  const { ctx, events, call, pw, id } = await toActive();
+  const paused = await call<IntakeSummary>("intake.setDispatchPaused", {
+    intake_id: id,
+    paused: true,
+  });
+  assert.equal(paused.dispatch_paused, true);
+  const [first] = await tasksOf(call);
+  pw.prs.set(first.branch, [MERGED]);
+
+  const detail = await call<IntakeDetail>("intake.completeHumanProcess", {
+    intake_id: id,
+    process_id: "3",
+    note: "x",
+  });
+
+  const two = processOf(detail, "2");
+  assert.equal(two.state, "ready");
+  assert.equal((two as { blockedBy: string | null }).blockedBy, "paused");
+  assert.equal((await tasksOf(call)).some((t) => t.intake_process_id === "2"), false);
+
+  const resumed = await call<IntakeSummary>("intake.setDispatchPaused", {
+    intake_id: id,
+    paused: false,
+  });
+  assert.equal(resumed.dispatch_paused, false);
+  await until(async () => (await tasksOf(call)).some((t) => t.intake_process_id === "2"));
+  assert.ok(events.some((e) => e.event === "intake.updated" && e.intake_id === id));
+  assert.equal((await getIntake(ctx.db, id))!.dispatch_paused, 0);
+});
+
+test("自動 dispatch の切り替えは承認前と終端では拒まれる", async () => {
+  const { ctx, call } = await setup();
+  const started = await toAnswering(ctx, call);
+  await assert.rejects(
+    () => call("intake.setDispatchPaused", { intake_id: started.id, paused: true }),
+    /切り替えられる状態ではありません/,
+  );
+  await call("intake.cancel", { intake_id: started.id, mode: "leave" });
+  await assert.rejects(
+    () => call("intake.setDispatchPaused", { intake_id: started.id, paused: false }),
+    /切り替えられる状態ではありません/,
+  );
+  await assert.rejects(
+    () => call("intake.setDispatchPaused", { intake_id: started.id }),
+    /paused は必須です/,
+  );
+});
+
+test("完了した Intake の親 Issue を閉じる", async () => {
+  const tracker = fakeTracker();
+  const { ctx, call } = await setup({ tracker });
+  const started = await call<IntakeSummary>("intake.start", { project: repo, issue_url: ISSUE });
+  await updateIntake(ctx.db, started.id, { state: "completed" });
+
+  const closed = await call<IntakeSummary>("intake.closeIssue", { intake_id: started.id });
+
+  assert.deepEqual(tracker.closes, [{ url: ISSUE, reason: "completed" }]);
+  assert.equal(closed.state, "completed");
+});
+
+test("完了していない Intake の親 Issue は閉じられない", async () => {
+  const tracker = fakeTracker();
+  const { call } = await setup({ tracker });
+  const started = await call<IntakeSummary>("intake.start", { project: repo, issue_url: ISSUE });
+  await assert.rejects(
+    () => call("intake.closeIssue", { intake_id: started.id }),
+    /完了した Intake だけ/,
+  );
+  assert.deepEqual(tracker.closes, []);
 });
 
 test("github.status は tracker の結果を返す", async () => {
