@@ -10,6 +10,10 @@ export type NewTask = {
   workflow_name: string;
   branch: string;
   priority: number;
+  intake_id?: string | null;
+  intake_process_id?: string | null;
+  issue_url?: string | null;
+  parent_issue_url?: string | null;
 };
 
 export async function insertProject(db: Db, p: Omit<ProjectRow, "id">): Promise<number> {

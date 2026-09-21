@@ -206,6 +206,10 @@ const COLUMNS = {
     resumed: true,
     created_at: true,
     updated_at: true,
+    intake_id: true,
+    intake_process_id: true,
+    issue_url: true,
+    parent_issue_url: true,
   },
   step_runs: {
     id: true,
@@ -232,6 +236,92 @@ const COLUMNS = {
     window: true,
     utilization: true,
     resets_at: true,
+  },
+  intakes: {
+    id: true,
+    project_id: true,
+    issue_url: true,
+    issue_node_id: true,
+    issue_title: true,
+    state: true,
+    revising: true,
+    attention_reason: true,
+    dispatch_paused: true,
+    worktree_path: true,
+    claude_session_id: true,
+    child_pid: true,
+    child_started_at: true,
+    rate_limited_until: true,
+    created_at: true,
+    updated_at: true,
+    ended_at: true,
+  },
+  intake_runs: {
+    id: true,
+    intake_id: true,
+    purpose: true,
+    attempt: true,
+    status: true,
+    started_at: true,
+    ended_at: true,
+    log_path: true,
+    cost_usd: true,
+    num_turns: true,
+    duration_ms: true,
+    output: true,
+    issues: true,
+    permission_denials: true,
+  },
+  intake_question_sets: {
+    id: true,
+    intake_id: true,
+    run_id: true,
+    questions: true,
+    answers: true,
+    created_at: true,
+    answered_at: true,
+  },
+  intake_drafts: {
+    id: true,
+    intake_id: true,
+    seq: true,
+    run_id: true,
+    pfd: true,
+    hash: true,
+    replies: true,
+    created_at: true,
+  },
+  intake_comments: {
+    id: true,
+    intake_id: true,
+    draft_id: true,
+    target_kind: true,
+    target_id: true,
+    body: true,
+    created_at: true,
+  },
+  intake_approvals: { id: true, intake_id: true, draft_id: true, hash: true, approved_at: true },
+  intake_processes: {
+    intake_id: true,
+    process_id: true,
+    sub_issue_url: true,
+    sub_issue_node_id: true,
+    sub_issue_hash: true,
+    sub_issue_closed: true,
+    current_task_id: true,
+    human_note: true,
+    human_done_at: true,
+    retired_at: true,
+  },
+  pr_observations: {
+    task_id: true,
+    pr_number: true,
+    pr_url: true,
+    state: true,
+    base_ref: true,
+    merged_at: true,
+    merge_commit: true,
+    observed_at: true,
   },
 } satisfies { [T in keyof Database]: { [C in keyof Database[T]]: true } };
 
@@ -264,7 +354,7 @@ async function appliedMigrations(d: Db): Promise<string[]> {
   return rows.map((r) => r.name);
 }
 
-test("マイグレーションで6つのテーブルができる", async () => {
+test("マイグレーションで14のテーブルができる", async () => {
   const d = await db();
   const { rows } = await sql<
     { name: string }
@@ -273,6 +363,14 @@ test("マイグレーションで6つのテーブルができる", async () => {
   const names = rows.map((r) => r.name);
   for (
     const t of [
+      "intake_approvals",
+      "intake_comments",
+      "intake_drafts",
+      "intake_processes",
+      "intake_question_sets",
+      "intake_runs",
+      "intakes",
+      "pr_observations",
       "projects",
       "rate_limit_samples",
       "step_outputs",
@@ -398,6 +496,7 @@ test("開き直してもマイグレーションは二度流れず、データ�
     "0006_step_run_bounced",
     "0007_step_run_permission_denials",
     "0008_step_run_drop_degraded",
+    "0009_intake",
   ]);
   await first.destroy();
 
@@ -412,6 +511,7 @@ test("開き直してもマイグレーションは二度流れず、データ�
       "0006_step_run_bounced",
       "0007_step_run_permission_denials",
       "0008_step_run_drop_degraded",
+      "0009_intake",
     ]);
     assert.equal((await second.selectFrom("projects").selectAll().execute()).length, 1);
   } finally {
@@ -446,6 +546,7 @@ test("pending_feed を足す前に作られたDBファイルは、行を保っ�
       "0006_step_run_bounced",
       "0007_step_run_permission_denials",
       "0008_step_run_drop_degraded",
+      "0009_intake",
     ]);
     const old = await getTask(d, "old");
     assert.equal(old?.state, "suspended", "既存の行は残る");
@@ -918,4 +1019,170 @@ test("0004: step_outputs の列が last_stdout / last_stderr に改名され、�
   assert.equal(rows[0].last_stdout, "直して");
   assert.equal(rows[0].last_stderr, "warn");
   assert.equal(rows[0].exit_code, 1);
+});
+
+function insertIntakeRow(
+  d: Db,
+  projectId: number,
+  id: string,
+  issueUrl: string,
+  state: Database["intakes"]["state"] = "investigating",
+) {
+  return d.insertInto("intakes").values({
+    id,
+    project_id: projectId,
+    issue_url: issueUrl,
+    issue_node_id: `I_${id}`,
+    issue_title: "T",
+    state,
+    created_at: "2026-09-21T00:00:00.000Z",
+    updated_at: "2026-09-21T00:00:00.000Z",
+  }).execute();
+}
+
+function newTask(id: string) {
+  return {
+    id,
+    title: "T",
+    prompt: "P",
+    workflow_name: "feature",
+    branch: `doctrine/${id}`,
+    priority: 2,
+  };
+}
+
+test("0009: tasks の intake_id と intake_process_id は両方 null か両方非 null でなければならない", async () => {
+  const d = await db();
+  const pid = await seed(d);
+  await insertIntakeRow(d, pid, "i1", "https://github.com/o/r/issues/1");
+
+  await assert.rejects(
+    () => insertTask(d, { ...newTask("t1"), project_id: pid, intake_id: "i1" }),
+    /CHECK/,
+  );
+  await assert.rejects(
+    () => insertTask(d, { ...newTask("t2"), project_id: pid, intake_process_id: "p1" }),
+    /CHECK/,
+  );
+
+  const linked = await insertTask(d, {
+    ...newTask("t3"),
+    project_id: pid,
+    intake_id: "i1",
+    intake_process_id: "p1",
+    issue_url: "https://github.com/o/r/issues/2",
+    parent_issue_url: "https://github.com/o/r/issues/1",
+  });
+  assert.equal(linked.intake_id, "i1");
+  assert.equal(linked.intake_process_id, "p1");
+  assert.equal(linked.issue_url, "https://github.com/o/r/issues/2");
+  assert.equal(linked.parent_issue_url, "https://github.com/o/r/issues/1");
+
+  const plain = await insertTask(d, { ...newTask("t4"), project_id: pid });
+  assert.equal(plain.intake_id, null);
+  assert.equal(plain.intake_process_id, null);
+  assert.equal(plain.issue_url, null);
+  assert.equal(plain.parent_issue_url, null);
+});
+
+test("0009: tasks.intake_id は存在しない Intake を指せない", async () => {
+  const d = await db();
+  const pid = await seed(d);
+  await assert.rejects(
+    () =>
+      insertTask(d, {
+        ...newTask("t1"),
+        project_id: pid,
+        intake_id: "nope",
+        intake_process_id: "p1",
+      }),
+    /FOREIGN KEY/,
+  );
+});
+
+test("0009: 移行前からあるタスクは紐づけ列が null のまま残る", async () => {
+  const d = await openDbOn(legacyWithChildren());
+  const t = (await getTask(d, "t1"))!;
+  assert.equal(t.state, "running");
+  assert.equal(t.current_step_id, "implement");
+  assert.equal(t.intake_id, null);
+  assert.equal(t.intake_process_id, null);
+  assert.equal(t.issue_url, null);
+  assert.equal(t.parent_issue_url, null);
+
+  const violations = await sql<{ table: string }>`PRAGMA foreign_key_check`.execute(d);
+  assert.deepEqual(violations.rows, [], "外部キーが壊れていない");
+});
+
+test("0009: 終わっていない Intake は同じ Issue に 1 つだけ", async () => {
+  const d = await db();
+  const pid = await seed(d);
+  const url = "https://github.com/o/r/issues/1";
+  await insertIntakeRow(d, pid, "i1", url);
+  await assert.rejects(() => insertIntakeRow(d, pid, "i2", url), /UNIQUE/);
+
+  await d.updateTable("intakes").set({ state: "canceled" }).where("id", "=", "i1").execute();
+  await insertIntakeRow(d, pid, "i2", url);
+
+  await d.updateTable("intakes").set({ state: "completed" }).where("id", "=", "i2").execute();
+  await insertIntakeRow(d, pid, "i3", url);
+
+  await insertIntakeRow(d, pid, "i4", "https://github.com/o/r/issues/2");
+  const open = await d.selectFrom("intakes").select("id")
+    .where("state", "not in", ["completed", "canceled"]).orderBy("id").execute();
+  assert.deepEqual(open.map((r) => r.id), ["i3", "i4"]);
+});
+
+test("0009: intakes.state は 8 値だけを受け付ける", async () => {
+  const d = await db();
+  const pid = await seed(d);
+  await insertIntakeRow(d, pid, "i1", "https://github.com/o/r/issues/1");
+  for (
+    const state of [
+      "investigating",
+      "answering",
+      "decomposing",
+      "reviewing",
+      "active",
+      "needs_attention",
+      "completed",
+      "canceled",
+    ] as const
+  ) {
+    await d.updateTable("intakes").set({ state }).where("id", "=", "i1").execute();
+    assert.equal(
+      (await d.selectFrom("intakes").select("state").executeTakeFirstOrThrow()).state,
+      state,
+    );
+  }
+  await assert.rejects(
+    () =>
+      d.updateTable("intakes")
+        // deno-lint-ignore no-explicit-any
+        .set({ state: "bogus" as any }).where("id", "=", "i1").execute(),
+    /CHECK/,
+  );
+});
+
+test("0009: intake_runs の purpose と status は CHECK で固められている", async () => {
+  const d = await db();
+  const pid = await seed(d);
+  await insertIntakeRow(d, pid, "i1", "https://github.com/o/r/issues/1");
+  const run = { intake_id: "i1", attempt: 1, log_path: "" };
+  await d.insertInto("intake_runs").values({ ...run, purpose: "investigate", status: "queued" })
+    .execute();
+  await assert.rejects(
+    () =>
+      d.insertInto("intake_runs")
+        // deno-lint-ignore no-explicit-any
+        .values({ ...run, purpose: "bogus" as any, status: "queued" }).execute(),
+    /CHECK/,
+  );
+  await assert.rejects(
+    () =>
+      d.insertInto("intake_runs")
+        // deno-lint-ignore no-explicit-any
+        .values({ ...run, purpose: "decompose", status: "bogus" as any }).execute(),
+    /CHECK/,
+  );
 });
