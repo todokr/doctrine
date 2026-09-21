@@ -12,6 +12,8 @@ import type {
   TaskState,
 } from "./types";
 import type {
+  IntakeDetail,
+  IntakeSummary,
   ProjectSummary,
   RateLimitSample,
   ServerEvent,
@@ -23,6 +25,7 @@ import type {
 import { toolInputParts } from "../../shared/toolInput.ts";
 import type { GuideView } from "./guide";
 import type { ConnectionStatus } from "./daemon/client";
+import { intakeOrder } from "./intake";
 
 export const MIN = 60000;
 
@@ -482,6 +485,13 @@ export type State = {
    * （そうしないと、承認で捨てた直後に1つ前の diff が復活する）。
    */
   gen: Record<string, number>;
+  intakes: IntakeSummary[];
+  /** "new" は Issue の選択の面 */
+  intakeSel: string | "new" | null;
+  showClosedIntakes: boolean;
+  /** intake.get の結果。選んだ Intake ぶんだけ持つ */
+  intakeDetails: Record<string, Loaded<IntakeDetail>>;
+  intakeGen: Record<string, number>;
   /** データディレクトリから下書きを読み終えたか。読む前に書くと空で上書きしてしまう */
   draftsLoaded: boolean;
   /** タスクごとに選んだ並べ方。未設定なら layoutOf が既定を決める */
@@ -502,6 +512,18 @@ export const guideOf = (s: State, id: string): Loaded<GuideView> | undefined => 
 export const scopeOf = (s: State, id: string): Scope => s.scope[id] ?? "all";
 export const genOf = (s: State, id: string): number => s.gen[id] ?? 0;
 export const selectedTask = (s: State) => s.tasks.find((t) => t.id === s.sel) ?? null;
+export const intakeGenOf = (s: State, id: string): number => s.intakeGen[id] ?? 0;
+export const intakeDetailOf = (s: State, id: string): Loaded<IntakeDetail> | undefined =>
+  s.intakeDetails[id];
+
+/** 一覧の行。一覧から消えていれば、取ってある詳細を代わりに返す */
+export function selectedIntake(s: State): IntakeSummary | null {
+  if (s.intakeSel === null || s.intakeSel === "new") return null;
+  const row = s.intakes.find((i) => i.id === s.intakeSel);
+  if (row) return row;
+  const d = intakeDetailOf(s, s.intakeSel);
+  return d?.kind === "ok" ? d.value : null;
+}
 
 /**
  * ガイドの読む順で diff を並べられるか。ガイドが ok で、前回レビュー以降を見ていない
@@ -542,6 +564,11 @@ export type Action =
   | { type: "diff"; id: string; scope: Scope; gen: number; loaded: Loaded<DiffView> }
   | { type: "context"; id: string; gen: number; loaded: Loaded<TaskContext> }
   | { type: "guide"; id: string; gen: number; loaded: Loaded<GuideView> }
+  | { type: "intake.select"; id: string | "new" }
+  | { type: "intake.showClosed"; show: boolean }
+  | { type: "intakes.sync"; intakes: IntakeSummary[] }
+  | { type: "intake.started"; intake: IntakeSummary }
+  | { type: "intake.detail"; id: string; gen: number; loaded: Loaded<IntakeDetail> }
   // approve / reject.confirm / cancel は判断そのものではない。ボタン側が rpc を
   // 送って成功したときにだけ dispatch される。ここでの役目は後片付け
   // （下書きを消す・次のレビュー待ちを選ぶ・トーストを出す）だけで、
@@ -596,6 +623,12 @@ function invalidate(s: State, id: string): Pick<State, "diffs" | "contexts" | "g
   return { diffs, contexts, guides, gen: { ...s.gen, [id]: genOf(s, id) + 1 } };
 }
 
+/** invalidate の Intake 版。取ってある詳細を捨て、世代を上げる */
+function invalidateIntake(s: State, id: string): Pick<State, "intakeDetails" | "intakeGen"> {
+  const { [id]: _, ...intakeDetails } = s.intakeDetails;
+  return { intakeDetails, intakeGen: { ...s.intakeGen, [id]: intakeGenOf(s, id) + 1 } };
+}
+
 /** 判断の後は、次のレビュー待ちを選んだ状態にする（spec 6章） */
 function selectNextReview(s: State, except: string): string | null {
   const next = sidebarOrder(s.tasks, s.view, s.project).find((x) => groupOf(x) === "review" && x.id !== except);
@@ -606,6 +639,7 @@ export function reduce(s: State, a: Action): State {
   const t = selectedTask(s);
   switch (a.type) {
     case "view": {
+      if (a.view === "intake") return { ...s, view: "intake", editing: null };
       const next = { ...s, view: a.view };
       const leaving = a.view === "done" || (t !== null && groupOf(t) === "done");
       const first = sidebarOrder(s.tasks, a.view, s.project)[0];
@@ -616,6 +650,13 @@ export function reduce(s: State, a: Action): State {
     case "select":
       return { ...s, sel: a.id, editing: null };
     case "move": {
+      if (s.view === "intake") {
+        const rows = intakeOrder(s.intakes, s.projects, s.project, s.showClosedIntakes);
+        if (!rows.length) return s;
+        const i = rows.findIndex((x) => x.id === s.intakeSel);
+        const n = i < 0 ? rows[0] : rows[Math.max(0, Math.min(rows.length - 1, i + a.delta))];
+        return { ...s, intakeSel: n.id };
+      }
       const order = sidebarOrder(s.tasks, s.view, s.project);
       if (!order.length) return s;
       const i = order.findIndex((x) => x.id === s.sel);
@@ -663,6 +704,34 @@ export function reduce(s: State, a: Action): State {
     case "guide":
       if (a.gen !== genOf(s, a.id)) return s;
       return { ...s, guides: { ...s.guides, [a.id]: a.loaded } };
+    case "intake.select":
+      return { ...s, intakeSel: a.id };
+    case "intake.showClosed":
+      return { ...s, showClosedIntakes: a.show };
+    case "intakes.sync": {
+      // 選んでいる Intake は、完了・中止で一覧から消えても外さない。面は取ってある詳細で描く
+      const ids = new Set(a.intakes.map((i) => i.id));
+      const keep = <T,>(r: Record<string, T>) =>
+        Object.fromEntries(
+          Object.entries(r).filter(([id]) => ids.has(id) || id === s.intakeSel),
+        );
+      return {
+        ...s,
+        intakes: a.intakes,
+        intakeDetails: keep(s.intakeDetails),
+        intakeGen: keep(s.intakeGen),
+      };
+    }
+    case "intake.started": {
+      const has = s.intakes.some((i) => i.id === a.intake.id);
+      const intakes = has
+        ? s.intakes.map((i) => (i.id === a.intake.id ? a.intake : i))
+        : [a.intake, ...s.intakes];
+      return { ...s, intakes, intakeSel: a.intake.id };
+    }
+    case "intake.detail":
+      if (a.gen !== intakeGenOf(s, a.id)) return s;
+      return { ...s, intakeDetails: { ...s.intakeDetails, [a.id]: a.loaded } };
     case "approve": {
       // rpc("task.approve") はもう成功している（呼び出し側が判定済み）。ここでの
       // 仕事は後片付けだけ。task.stateChanged は RPC の応答より先に届くことがあるので、
@@ -756,6 +825,18 @@ export function reduce(s: State, a: Action): State {
           ...invalidate(s, ev.task_id),
         };
       }
+      if (ev.event === "intake.stateChanged") {
+        return {
+          ...s,
+          intakes: s.intakes.map((i) =>
+            i.id === ev.intake_id ? { ...i, state: ev.to, revising: ev.revising } : i
+          ),
+          ...invalidateIntake(s, ev.intake_id),
+        };
+      }
+      if (ev.event === "intake.updated") {
+        return { ...s, ...invalidateIntake(s, ev.intake_id) };
+      }
       if (ev.event === "stepRun.started") {
         if (!s.tasks.some((x) => x.id === ev.task_id)) return s;
         return { ...s, now: a.now, tasks: updateTask(s, ev.task_id, { step: ev.step_id }) };
@@ -818,6 +899,7 @@ export function reduce(s: State, a: Action): State {
         diffs: drop(s.diffs, (byScope) => Object.values(byScope).every((v) => v?.kind === "error")),
         contexts: drop(s.contexts, (v) => v.kind === "error"),
         guides: drop(s.guides, (v) => v.kind === "error"),
+        intakeDetails: drop(s.intakeDetails, (v) => v.kind === "error"),
       };
     }
   }

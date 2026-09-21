@@ -1,5 +1,6 @@
 import { describe, expect, test, vi } from "vitest";
 import {
+  INTAKES,
   NOW,
   PROJECTS,
   RATELIMIT_NEAR_SATURATION,
@@ -34,6 +35,7 @@ import {
   rejections,
   remaining,
   reviewRound,
+  selectedIntake,
   sidebarOrder,
   stepRunHistory,
   stopReasons,
@@ -46,9 +48,11 @@ import {
   type State,
 } from "./model";
 import type { GuideView } from "./guide";
+import { intakeOrder } from "./intake";
 import { buildDiff } from "./patch";
 import type { Guide, RateLimitWindow, ReviewEntry, Task, TaskContext } from "./types";
 import type {
+  IntakeDetail,
   ProjectSummary,
   ServerEvent,
   StepRun,
@@ -72,6 +76,11 @@ const base = (overrides: Partial<State> = {}): State => ({
   contexts: {},
   guides: {},
   gen: {},
+  intakes: [],
+  intakeSel: null,
+  showClosedIntakes: false,
+  intakeDetails: {},
+  intakeGen: {},
   drafts: {},
   draftsLoaded: true,
   editing: null,
@@ -1183,5 +1192,150 @@ describe("利用上限の表示", () => {
 
   test("標本が無ければ行も無い", () => {
     expect(rateLimitViews(base())).toEqual([]);
+  });
+});
+
+const detailOk = (id: string): Loaded<IntakeDetail> => ({
+  kind: "ok",
+  value: { ...INTAKES[0], id } as unknown as IntakeDetail,
+});
+const intakeEv = (ev: ServerEvent, s: State) => reduce(s, { type: "daemon", ev, now: NOW });
+
+describe("Intake のビュー", () => {
+  const order = () => intakeOrder(INTAKES, PROJECTS, "all", false);
+
+  test("intake ビューへ移ってもタスクの選択は消えない", () => {
+    const s = reduce(base({ sel: "t-0a77" }), { type: "view", view: "intake" });
+    expect(s.view).toBe("intake");
+    expect(s.sel).toBe("t-0a77");
+  });
+
+  test("intake ビューで j/k は Intake の一覧を動く", () => {
+    let s = base({ intakes: INTAKES, view: "intake", intakeSel: null });
+    s = reduce(s, { type: "move", delta: 1 });
+    expect(s.intakeSel).toBe(order()[0].id);
+    s = reduce(s, { type: "move", delta: 1 });
+    expect(s.intakeSel).toBe(order()[1].id);
+    expect(s.sel).toBe("t-2b91");
+  });
+
+  test("Issue の選択の面から j で先頭へ", () => {
+    const s = reduce(base({ intakes: INTAKES, view: "intake", intakeSel: "new" }), {
+      type: "move",
+      delta: 1,
+    });
+    expect(s.intakeSel).toBe(order()[0].id);
+  });
+
+  test("一覧が空なら j/k は何もしない", () => {
+    const s = base({ view: "intake" });
+    expect(reduce(s, { type: "move", delta: 1 })).toBe(s);
+  });
+});
+
+describe("Intake の一覧の取り直し", () => {
+  test("intakes.sync は消えた Intake の詳細を捨て、選択中のものは残す", () => {
+    const s = base({
+      intakeSel: "c",
+      intakeDetails: { a: detailOk("a"), b: detailOk("b"), c: detailOk("c") },
+      intakeGen: { a: 1, b: 1, c: 1 },
+    });
+    const after = reduce(s, { type: "intakes.sync", intakes: [{ ...INTAKES[0], id: "a" }] });
+    expect(Object.keys(after.intakeDetails).sort()).toEqual(["a", "c"]);
+    expect(Object.keys(after.intakeGen).sort()).toEqual(["a", "c"]);
+    expect(after.intakeSel).toBe("c");
+  });
+
+  test("intake.started は一覧に足して開く", () => {
+    const s = reduce(base({ intakes: [INTAKES[1]], intakeSel: "new" }), {
+      type: "intake.started",
+      intake: INTAKES[0],
+    });
+    expect(s.intakes.map((i) => i.id)).toEqual([INTAKES[0].id, INTAKES[1].id]);
+    expect(s.intakeSel).toBe(INTAKES[0].id);
+  });
+
+  test("intake.started は同じ id があれば置き換える", () => {
+    const changed = { ...INTAKES[0], state: "answering" as const };
+    const s = reduce(base({ intakes: INTAKES, intakeSel: "new" }), {
+      type: "intake.started",
+      intake: changed,
+    });
+    expect(s.intakes).toHaveLength(INTAKES.length);
+    expect(s.intakes.find((i) => i.id === changed.id)?.state).toBe("answering");
+    expect(s.intakeSel).toBe(changed.id);
+  });
+
+  test("intake.detail は古い世代の応答を捨てる", () => {
+    const s = base({ intakeGen: { a: 2 } });
+    const stale = reduce(s, { type: "intake.detail", id: "a", gen: 1, loaded: detailOk("a") });
+    expect(stale.intakeDetails).toEqual({});
+    const fresh = reduce(s, { type: "intake.detail", id: "a", gen: 2, loaded: detailOk("a") });
+    expect(fresh.intakeDetails.a).toEqual(detailOk("a"));
+  });
+
+  test("intake.select と intake.showClosed は値を書く", () => {
+    expect(reduce(base(), { type: "intake.select", id: "new" }).intakeSel).toBe("new");
+    expect(reduce(base(), { type: "intake.showClosed", show: true }).showClosedIntakes).toBe(true);
+  });
+});
+
+describe("Intake のイベント", () => {
+  const row = { ...INTAKES[0], id: "a", state: "investigating" as const };
+  const withRow = () =>
+    base({ intakes: [row], intakeDetails: { a: detailOk("a") }, intakeGen: { a: 3 } });
+
+  test("intake.stateChanged で一覧の状態を書き換え、詳細を捨てる", () => {
+    const after = intakeEv({
+      event: "intake.stateChanged",
+      intake_id: "a",
+      from: "investigating",
+      to: "answering",
+      revising: true,
+    }, withRow());
+    expect(after.intakes[0]).toMatchObject({ state: "answering", revising: true });
+    expect(after.intakeDetails.a).toBeUndefined();
+    expect(after.intakeGen.a).toBe(4);
+  });
+
+  test("一覧に無い Intake でも詳細は捨てる", () => {
+    const s = base({ intakeDetails: { z: detailOk("z") } });
+    const after = intakeEv({
+      event: "intake.stateChanged",
+      intake_id: "z",
+      from: "active",
+      to: "completed",
+      revising: false,
+    }, s);
+    expect(after.intakes).toEqual([]);
+    expect(after.intakeDetails.z).toBeUndefined();
+    expect(after.intakeGen.z).toBe(1);
+  });
+
+  test("intake.updated で詳細を捨てる", () => {
+    const s = withRow();
+    const after = intakeEv({ event: "intake.updated", intake_id: "a" }, s);
+    expect(after.intakeDetails.a).toBeUndefined();
+    expect(after.intakeGen.a).toBe(4);
+    expect(after.intakes).toEqual(s.intakes);
+  });
+
+  test("繋ぎ直すと取れなかった詳細を捨てる", () => {
+    const s = base({
+      intakeDetails: { a: { kind: "error", message: "x" }, b: detailOk("b") },
+    });
+    const after = reduce(s, { type: "connection", conn: { status: "connected" } });
+    expect(Object.keys(after.intakeDetails)).toEqual(["b"]);
+  });
+});
+
+describe("selectedIntake", () => {
+  test("一覧の行を返し、無ければ取ってある詳細を返す", () => {
+    const s = base({ intakes: INTAKES, intakeSel: INTAKES[0].id });
+    expect(selectedIntake(s)).toBe(INTAKES[0]);
+    const gone = base({ intakeSel: "z", intakeDetails: { z: detailOk("z") } });
+    expect(selectedIntake(gone)?.id).toBe("z");
+    expect(selectedIntake(base({ intakeSel: "new" }))).toBeNull();
+    expect(selectedIntake(base({ intakeSel: "z" }))).toBeNull();
   });
 });
