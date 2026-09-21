@@ -26,6 +26,7 @@ import {
   listProcesses,
   listQuestionSets,
   replaceCurrentTask,
+  retireProcesses,
   updateIntake,
   updateIntakeRun,
   updateProcess,
@@ -306,13 +307,13 @@ test("コメントの target_id は whole のときだけ null", async () => {
   const { d, runId } = await fixture();
   const draft = await insertDraft(d, newDraft(runId));
 
-  await insertComments(d, "i1", draft.id, []);
+  await insertComments(d, "i1", draft.id, [], null);
   assert.deepEqual(await listComments(d, "i1"), []);
 
   await insertComments(d, "i1", draft.id, [
     { target_kind: "whole", target_id: null, body: "全体" },
     { target_kind: "process", target_id: "p1", body: "p1 へ" },
-  ]);
+  ], null);
   const rows = await listComments(d, "i1");
   assert.deepEqual(rows.map((r) => [r.target_kind, r.target_id, r.body, r.draft_id]), [
     ["whole", null, "全体", draft.id],
@@ -320,15 +321,57 @@ test("コメントの target_id は whole のときだけ null", async () => {
   ]);
 
   await assert.rejects(
-    () => insertComments(d, "i1", draft.id, [{ target_kind: "whole", target_id: "p1", body: "x" }]),
+    () =>
+      insertComments(
+        d,
+        "i1",
+        draft.id,
+        [{ target_kind: "whole", target_id: "p1", body: "x" }],
+        null,
+      ),
     /CHECK/,
   );
   await assert.rejects(
     () =>
-      insertComments(d, "i1", draft.id, [{ target_kind: "artifact", target_id: null, body: "x" }]),
+      insertComments(
+        d,
+        "i1",
+        draft.id,
+        [{ target_kind: "artifact", target_id: null, body: "x" }],
+        null,
+      ),
     /CHECK/,
   );
   assert.equal((await listComments(d, "i1")).length, 2, "落ちた挿入は何も残さない");
+});
+
+test("insertComments: runId を各行の run_id に入れる", async () => {
+  const { d, runId } = await fixture();
+  const draft = await insertDraft(d, newDraft(runId));
+  const two = [
+    { target_kind: "whole" as const, target_id: null, body: "a" },
+    { target_kind: "whole" as const, target_id: null, body: "b" },
+  ];
+  await insertComments(d, "i1", draft.id, two, runId);
+  assert.deepEqual((await listComments(d, "i1")).map((r) => r.run_id), [runId, runId]);
+
+  await insertComments(d, "i1", draft.id, two, null);
+  assert.deepEqual((await listComments(d, "i1")).slice(2).map((r) => r.run_id), [null, null]);
+});
+
+test("retireProcesses: 生きた行だけに retired_at を入れる", async () => {
+  const { d } = await fixture();
+  await insertProcesses(d, "i1", ["1", "2", "3"]);
+  await updateProcess(d, "i1", "2", { retired_at: "t0" });
+
+  await retireProcesses(d, "i1", [], "tx");
+  await retireProcesses(d, "i1", ["2", "3"], "t1");
+  const rows = await listProcesses(d, "i1");
+  assert.deepEqual(rows.map((r) => [r.process_id, r.retired_at]), [
+    ["1", null],
+    ["2", "t0"],
+    ["3", "t1"],
+  ]);
 });
 
 test("latestApproval は最後の承認を返す", async () => {

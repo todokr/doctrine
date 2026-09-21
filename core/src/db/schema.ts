@@ -153,6 +153,8 @@ export interface IntakesTable {
   child_pid: number | null;
   child_started_at: string | null;
   rate_limited_until: string | null;
+  /** 今の改訂の最初の revise 実行。改訂中でなければ null。 */
+  revision_run_id: number | null;
   created_at: string;
   updated_at: string;
   ended_at: string | null;
@@ -212,6 +214,8 @@ export interface IntakeCommentsTable {
   /** whole のときだけ null（0009 の CHECK）。 */
   target_id: string | null;
   body: string;
+  /** 改訂の開始コメントだけが、その改訂の最初の実行を指す。差し戻しのコメントは null。 */
+  run_id: number | null;
   created_at: string;
 }
 

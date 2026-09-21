@@ -163,7 +163,7 @@ export async function rejectIntake(
   const comments = checkComments(o.comments, JSON.parse(latest.pfd) as Pfd);
 
   await db.transaction().execute(async (trx) => {
-    await insertComments(trx, intake.id, latest.id, comments);
+    await insertComments(trx, intake.id, latest.id, comments, null);
     await updateIntake(trx, intake.id, { state: "decomposing" }, { requireState: "reviewing" });
     await enqueueIntakeRun(trx, intake.id, "decompose", { logRoot: o.logRoot, resume: false });
   });

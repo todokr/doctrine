@@ -252,6 +252,7 @@ const COLUMNS = {
     child_pid: true,
     child_started_at: true,
     rate_limited_until: true,
+    revision_run_id: true,
     created_at: true,
     updated_at: true,
     ended_at: true,
@@ -298,6 +299,7 @@ const COLUMNS = {
     target_kind: true,
     target_id: true,
     body: true,
+    run_id: true,
     created_at: true,
   },
   intake_approvals: { id: true, intake_id: true, draft_id: true, hash: true, approved_at: true },
@@ -497,6 +499,7 @@ test("開き直してもマイグレーションは二度流れず、データ�
     "0007_step_run_permission_denials",
     "0008_step_run_drop_degraded",
     "0009_intake",
+    "0010_intake_revision",
   ]);
   await first.destroy();
 
@@ -512,6 +515,7 @@ test("開き直してもマイグレーションは二度流れず、データ�
       "0007_step_run_permission_denials",
       "0008_step_run_drop_degraded",
       "0009_intake",
+      "0010_intake_revision",
     ]);
     assert.equal((await second.selectFrom("projects").selectAll().execute()).length, 1);
   } finally {
@@ -547,6 +551,7 @@ test("pending_feed を足す前に作られたDBファイルは、行を保っ�
       "0007_step_run_permission_denials",
       "0008_step_run_drop_degraded",
       "0009_intake",
+      "0010_intake_revision",
     ]);
     const old = await getTask(d, "old");
     assert.equal(old?.state, "suspended", "既存の行は残る");
@@ -1184,5 +1189,53 @@ test("0009: intake_runs の purpose と status は CHECK で固められてい�
         // deno-lint-ignore no-explicit-any
         .values({ ...run, purpose: "decompose", status: "bogus" as any }).execute(),
     /CHECK/,
+  );
+});
+
+test("0010: 改訂の範囲の列は null で足される", async () => {
+  const d = await db();
+  const pid = await seed(d);
+  await insertIntakeRow(d, pid, "i1", "https://github.com/o/r/issues/1");
+  const run = await d.insertInto("intake_runs")
+    .values({ intake_id: "i1", attempt: 1, log_path: "", purpose: "decompose", status: "queued" })
+    .executeTakeFirstOrThrow();
+  const runId = Number(run.insertId);
+  const draft = await d.insertInto("intake_drafts")
+    .values({
+      intake_id: "i1",
+      seq: 1,
+      run_id: runId,
+      pfd: "{}",
+      hash: "h",
+      replies: "[]",
+      created_at: "2026-09-21T00:00:00.000Z",
+    })
+    .executeTakeFirstOrThrow();
+  await d.insertInto("intake_comments")
+    .values({
+      intake_id: "i1",
+      draft_id: Number(draft.insertId),
+      target_kind: "whole",
+      target_id: null,
+      body: "b",
+      created_at: "2026-09-21T00:00:00.000Z",
+    })
+    .execute();
+
+  const intake = await d.selectFrom("intakes").selectAll().executeTakeFirstOrThrow();
+  assert.equal(intake.revision_run_id, null);
+  const comment = await d.selectFrom("intake_comments").selectAll().executeTakeFirstOrThrow();
+  assert.equal(comment.run_id, null);
+
+  await d.updateTable("intakes").set({ revision_run_id: runId }).execute();
+  await d.updateTable("intake_comments").set({ run_id: runId }).execute();
+  assert.equal(
+    (await d.selectFrom("intakes").select("revision_run_id").executeTakeFirstOrThrow())
+      .revision_run_id,
+    runId,
+  );
+  await assert.rejects(
+    () => d.updateTable("intakes").set({ revision_run_id: 999 }).execute(),
+    /FOREIGN KEY/,
   );
 });

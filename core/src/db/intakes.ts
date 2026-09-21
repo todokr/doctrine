@@ -94,6 +94,7 @@ export type IntakePatch = Partial<
     | "child_pid"
     | "child_started_at"
     | "rate_limited_until"
+    | "revision_run_id"
     | "ended_at"
   >
 >;
@@ -247,18 +248,28 @@ export type NewIntakeComment = {
   body: string;
 };
 
-/** 差し戻し 1 回ぶんのコメントを 1 文でまとめて挿入する。空配列なら何もしない。 */
+/**
+ * 差し戻し 1 回ぶんのコメントを 1 文でまとめて挿入する。空配列なら何もしない。
+ * runId は改訂の開始コメントのときだけ、その改訂の最初の実行の id を渡す。
+ */
 export async function insertComments(
   db: Db,
   intakeId: string,
   draftId: number,
   comments: NewIntakeComment[],
+  runId: number | null,
 ): Promise<void> {
   if (comments.length === 0) return;
   const now = new Date().toISOString();
   await db.insertInto("intake_comments")
     .values(
-      comments.map((c) => ({ ...c, intake_id: intakeId, draft_id: draftId, created_at: now })),
+      comments.map((c) => ({
+        ...c,
+        intake_id: intakeId,
+        draft_id: draftId,
+        run_id: runId,
+        created_at: now,
+      })),
     )
     .execute();
 }
@@ -295,6 +306,21 @@ export async function insertProcesses(
   if (processIds.length === 0) return;
   await db.insertInto("intake_processes")
     .values(processIds.map((process_id) => ({ intake_id: intakeId, process_id })))
+    .execute();
+}
+
+/** 改訂で案から消えたプロセスの行に retired_at を入れる。生きた行だけ。空配列なら何もしない。 */
+export async function retireProcesses(
+  db: Db,
+  intakeId: string,
+  processIds: string[],
+  at: string,
+): Promise<void> {
+  if (processIds.length === 0) return;
+  await db.updateTable("intake_processes").set({ retired_at: at })
+    .where("intake_id", "=", intakeId)
+    .where("process_id", "in", processIds)
+    .where("retired_at", "is", null)
     .execute();
 }
 
