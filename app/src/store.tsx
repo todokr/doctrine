@@ -174,7 +174,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             }
             dispatch({ type: "daemon", ev, now: Date.now() });
             // needs_human と progress はイベントに載らないので、一覧を取り直す
-            // あなたの番が生じた・完了を記録したのは intake.updated で届くので、それでも取り直す
+            // intake_id を持つイベントは stateChanged と updated だけ。あなたの番が生じた・完了を記録したのは updated で届く
             void refresh();
             return;
           }
