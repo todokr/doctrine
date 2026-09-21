@@ -34,7 +34,9 @@ describe("PfdDiagram", () => {
     expect(artifact).toContain('rx="4"');
     const process = block(html, "プロセス", "スキーマを設計する");
     expect(openTag(process)).toContain("pfd-process");
-    expect(process).toContain('rx="14"');
+    // プロセスは両端の丸い形（rx = 高さの半分）。高さは行数で変わる
+    const [, h, rx] = process.match(/height="([\d.]+)" rx="([\d.]+)"/)!;
+    expect(Number(rx)).toBe(Number(h) / 2);
   });
 
   test("人・既存・goal・決定の印", () => {

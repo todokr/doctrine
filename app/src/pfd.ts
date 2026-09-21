@@ -39,6 +39,10 @@ export type PfdNode = {
   change: Change | null;
   /** 改訂で変えられない */
   frozen: boolean;
+  /** 箱の中に描くラベルの行。幅に収まるよう折り返し、3 行を超える分は … で切る */
+  lines: string[];
+  /** 種類の印（◎・既存・決定・人・🔒）。ラベルの上の小さな行に描く */
+  marks: string[];
 };
 /** from / to は PfdNode.key */
 export type PfdEdge = { from: string; to: string; d: string };
@@ -114,8 +118,59 @@ export const LOOK: Record<PfdLook, { word: string; mark: string; cls: string }> 
   needs_attention: { word: "要確認", mark: "!", cls: "pfd-needs_attention" },
 };
 
-// 状態の印（PR など）の分の空き。状態で幅が変わると承認の前後で図が動くので、印の文字ではなく固定の空白で取る
-const LOOK_SPACE = "   ";
+// 箱の寸法。幅は種類ごとに固定し、長いラベルは行を増やして収める
+const BOX_W = { artifact: 168, process: 188 } as const;
+const BOX_PAD_X = 8;
+const BOX_PAD_Y = 7;
+const LINE_H = 13;
+const MARK_H = 12;
+const MAX_LINES = 3;
+const COL_GAP = 44;
+const ROW_GAP = 14;
+const PAD = 12;
+/** 段の数字（プロセスの上に出す）の分の上の余白 */
+const PAD_TOP = 22;
+
+/** ラベルの描画幅の見積もり（px）。10.5px の文字で、ASCII は 6、それ以外は 10.5 */
+export function textWidth(s: string): number {
+  let w = 0;
+  for (const ch of s) w += ch.charCodeAt(0) < 128 ? 6 : 10.5;
+  return w;
+}
+
+/** 幅 max に収まるよう 1 文字ずつ折り返す。ASCII の語はなるべく途中で割らない */
+function wrap(label: string, max: number): string[] {
+  const tokens = label.match(/[\x21-\x7e]+|\s+|[^\x00-\x7f]/gu) ?? [];
+  const lines: string[] = [];
+  let cur = "";
+  const push = () => {
+    if (cur.trim() !== "") lines.push(cur.trim());
+    cur = "";
+  };
+  for (const t of tokens) {
+    if (/^\s+$/.test(t)) {
+      if (cur !== "") cur += " ";
+      continue;
+    }
+    if (textWidth(cur + t) <= max) {
+      cur += t;
+      continue;
+    }
+    if (cur.trim() !== "") push();
+    // 1 行に収まらない語は文字で割る
+    for (const ch of t) {
+      if (textWidth(cur + ch) > max) push();
+      cur += ch;
+    }
+  }
+  push();
+  if (lines.length <= MAX_LINES) return lines;
+  const kept = lines.slice(0, MAX_LINES);
+  let last = kept[MAX_LINES - 1];
+  while (last.length > 0 && textWidth(last + "…") > max) last = [...last].slice(0, -1).join("");
+  kept[MAX_LINES - 1] = last + "…";
+  return kept;
+}
 
 export function buildPfdView(
   pfd: Pfd,
@@ -146,30 +201,105 @@ export function buildPfdView(
     ...pfd.artifacts.map((a) => ({ kind: "artifact" as const, id: a.id, name: a.name, human: false, given: a.given, goal: goal.has(a.id), decision: a.decision !== undefined })),
     ...pfd.processes.map((p) => ({ kind: "process" as const, id: p.id, name: p.name, human: p.actor === "human", given: false, goal: false, decision: false })),
   ];
-  const marks = (s: (typeof sources)[number]) => `${s.goal ? "◎ " : ""}${s.given ? "既存 " : ""}${s.decision ? "決定 " : ""}${s.human ? "人 " : ""}`;
+  const keys = sources.map((s) => pfdKey(s.kind, s.id));
+  const edges = pfd.processes.flatMap((p) => [
+    ...p.inputs.map((a) => ({ from: pfdKey("artifact", a), to: pfdKey("process", p.id) })),
+    ...p.outputs.map((a) => ({ from: pfdKey("process", p.id), to: pfdKey("artifact", a) })),
+  ]);
 
-  const layout = layoutGraph({
+  // 層は layoutGraph に任せる（最長路）。座標は PFD の箱の大きさで自分で置く
+  const graph = layoutGraph({
     shape: "graph",
     kind: "dependency",
-    nodes: sources.map((s) => ({ id: pfdKey(s.kind, s.id), label: `${LOOK_SPACE}${marks(s)}${s.name}` })),
-    edges: pfd.processes.flatMap((p) => [
-      ...p.inputs.map((a) => ({ from: pfdKey("artifact", a), to: pfdKey("process", p.id), label: "" })),
-      ...p.outputs.map((a) => ({ from: pfdKey("process", p.id), to: pfdKey("artifact", a), label: "" })),
-    ]),
+    nodes: keys.map((id) => ({ id, label: id })),
+    edges: edges.map((e) => ({ ...e, label: "" })),
+  });
+  const layer = new Map(graph.nodes.map((n) => [n.id, n.layer]));
+  const succ = new Map<string, string[]>(keys.map((k) => [k, []]));
+  const pred = new Map<string, string[]>(keys.map((k) => [k, []]));
+  for (const e of edges) {
+    if (!layer.has(e.from) || !layer.has(e.to)) continue;
+    succ.get(e.from)!.push(e.to);
+    pred.get(e.to)!.push(e.from);
+  }
+  // 作り手の無い成果物（given・決定）は、最初の使い手の直前の列へ寄せる。左端に積むと辺が途中の列を横切る
+  for (const k of keys) {
+    if (pred.get(k)!.length > 0) continue;
+    const users = succ.get(k)!.map((u) => layer.get(u)!);
+    if (users.length > 0) layer.set(k, Math.min(...users) - 1);
+  }
+
+  const layerCount = Math.max(0, ...keys.map((k) => layer.get(k)! + 1));
+  const columns: string[][] = Array.from({ length: layerCount }, () => []);
+  for (const k of keys) columns[layer.get(k)!].push(k);
+
+  // 列の中の順は、隣の列の位置の平均（重心）で並べ直して辺の交差を減らす。同点は nodes の順を保つ
+  const pos = new Map<string, number>();
+  const index = () => columns.forEach((col) => col.forEach((k, i) => pos.set(k, col.length > 1 ? i / (col.length - 1) : 0.5)));
+  index();
+  const reorder = (l: number, neighbors: (k: string) => string[]) => {
+    const keyOf = (k: string) => {
+      const ns = neighbors(k).filter((n) => pos.has(n));
+      return ns.length ? ns.reduce((m, n) => m + pos.get(n)!, 0) / ns.length : pos.get(k)!;
+    };
+    const order = columns[l].map((k, i) => ({ k, i, v: keyOf(k) }));
+    order.sort((a, b) => a.v - b.v || a.i - b.i);
+    columns[l] = order.map((x) => x.k);
+    index();
+  };
+  for (let sweep = 0; sweep < 2; sweep++) {
+    for (let l = 1; l < layerCount; l++) reorder(l, (k) => pred.get(k)!);
+    for (let l = layerCount - 2; l >= 0; l--) reorder(l, (k) => succ.get(k)!);
+  }
+
+  const marksOf = (s: (typeof sources)[number]): string[] =>
+    [
+      o.frozen?.has(pfdKey(s.kind, s.id)) && "🔒",
+      s.goal && "◎",
+      s.given && !s.decision && "既存",
+      s.decision && "決定",
+      s.human && "人",
+    ].filter((m): m is string => typeof m === "string");
+
+  const byKey = new Map(sources.map((s, i) => [keys[i], s]));
+  const sized = new Map(keys.map((k) => {
+    const s = byKey.get(k)!;
+    const w = BOX_W[s.kind];
+    const lines = wrap(s.name, w - BOX_PAD_X * 2);
+    const marks = marksOf(s);
+    // 印の行は、印が無くても取る。状態の印（承認）や 🔒（改訂）が付いたときに箱の高さが変わらないように
+    const h = BOX_PAD_Y * 2 + MARK_H + lines.length * LINE_H;
+    return [k, { w, h, lines, marks }];
+  }));
+
+  const colW = columns.map((col) => Math.max(0, ...col.map((k) => sized.get(k)!.w)));
+  const colH = columns.map((col) => col.reduce((m, k) => m + sized.get(k)!.h, 0) + Math.max(0, col.length - 1) * ROW_GAP);
+  const innerH = Math.max(0, ...colH);
+  const xy = new Map<string, { x: number; y: number }>();
+  let cx = PAD;
+  columns.forEach((col, l) => {
+    let cy = PAD_TOP + (innerH - colH[l]) / 2;
+    for (const k of col) {
+      const { w, h } = sized.get(k)!;
+      xy.set(k, { x: cx + (colW[l] - w) / 2, y: cy });
+      cy += h + ROW_GAP;
+    }
+    cx += colW[l] + COL_GAP;
   });
 
-  const nodes: PfdNode[] = layout.nodes.map((placed, i) => {
-    const s = sources[i];
-    const key = placed.id;
+  const nodes: PfdNode[] = sources.map((s, i) => {
+    const key = keys[i];
+    const { x, y } = xy.get(key)!;
+    const { w, h, lines, marks } = sized.get(key)!;
     return {
       key,
       id: s.id,
       kind: s.kind,
       label: s.name,
-      x: placed.x,
-      y: placed.y,
-      w: placed.w,
-      h: placed.h,
+      x,
+      y,
+      w,
+      h,
       human: s.human,
       given: s.given,
       goal: s.goal,
@@ -180,14 +310,26 @@ export function buildPfdView(
       comments: o.comments?.[key] ?? 0,
       change: null,
       frozen: o.frozen?.has(key) ?? false,
+      lines,
+      marks,
     };
   });
 
+  const box = new Map(nodes.map((n) => [n.key, n]));
   return {
-    width: layout.width,
-    height: layout.height,
+    width: Math.max(PAD * 2, cx - COL_GAP + PAD),
+    height: PAD_TOP + innerH + PAD,
     nodes,
-    edges: layout.edges.map((e) => ({ from: e.from, to: e.to, d: e.d })),
+    edges: edges.filter((e) => box.has(e.from) && box.has(e.to)).map((e) => {
+      const a = box.get(e.from)!;
+      const b = box.get(e.to)!;
+      const x1 = a.x + a.w;
+      const y1 = a.y + a.h / 2;
+      const x2 = b.x;
+      const y2 = b.y + b.h / 2;
+      const dx = Math.max(16, (x2 - x1) / 2);
+      return { from: e.from, to: e.to, d: `M${x1},${y1} C${x1 + dx},${y1} ${x2 - dx},${y2} ${x2},${y2}` };
+    }),
     removed: [],
   };
 }
