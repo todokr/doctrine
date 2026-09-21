@@ -599,14 +599,27 @@ export function createHandler(ctx: DaemonContext): Handler {
       }
       case "intake.cancel": {
         const intakeId = req(params, "intake_id");
-        // leave / stop のどちらも今は同じ動き。stop の、タスクを止めて sub-issue を閉じる部分は別の作業が足す。
         if (params.mode !== "leave" && params.mode !== "stop") {
           throw new Error("mode は leave か stop のどちらかです");
         }
-        return await settleIntakeCommand(
-          ctx,
-          await cancelIntake(ctx.db, defaultProbe(), { intakeId }),
+        const intake = await getIntake(ctx.db, intakeId);
+        if (!intake) throw new Error("Intake がありません");
+        const project = (await getProject(ctx.db, intake.project_id))!;
+        const outcome = await cancelIntake(
+          ctx.db,
+          { probe: defaultProbe(), tracker: ctx.tracker },
+          { intakeId, mode: params.mode, projectPath: project.path },
         );
+        for (const t of outcome.stoppedTasks) {
+          ctx.broadcast({
+            event: "task.stateChanged",
+            task_id: t.taskId,
+            from: t.from,
+            to: "canceled",
+          });
+        }
+        for (const message of outcome.problems) ctx.warnings.push(message);
+        return await settleIntakeCommand(ctx, outcome);
       }
 
       default:

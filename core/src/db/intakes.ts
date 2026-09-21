@@ -13,6 +13,7 @@ import type {
   IntakeRunStatus,
   IntakeState,
   PrObservationRow,
+  TaskRow,
 } from "./schema.ts";
 
 export type {
@@ -366,6 +367,13 @@ export async function replaceCurrentTask(
     .where("current_task_id", expected === null ? "is" : "=", expected)
     .executeTakeFirstOrThrow();
   return updated.numUpdatedRows > 0n;
+}
+
+/** その Intake から投入されたタスクのうち、終端でないもの。再投入で current_task_id から外れたタスクも含む。 */
+export function listLiveIntakeTasks(db: Db, intakeId: string): Promise<TaskRow[]> {
+  return db.selectFrom("tasks").selectAll().where("intake_id", "=", intakeId)
+    .where("state", "not in", ["completed", "failed", "canceled"])
+    .orderBy("created_at").execute();
 }
 
 /** task_id ごとに最新の事実だけを持つ。observed_at は関数の中で入れる。 */

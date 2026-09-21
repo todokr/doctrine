@@ -8,9 +8,10 @@ import {
   updateProcess,
   upsertPrObservation,
 } from "../../src/db/intakes.ts";
+import { commitStepBoundary } from "../../src/db/boundary.ts";
 import type { Db } from "../../src/db/schema.ts";
 import { getTask, insertTask, listTasks, type NewTask } from "../../src/db/tasks.ts";
-import { commitDispatch, dispatchIntake } from "../../src/intake/dispatch.ts";
+import { commitDispatch, dispatchIntake, redispatchProcess } from "../../src/intake/dispatch.ts";
 import { example, withDecision } from "./pfd/fixture.ts";
 import { question } from "./runnerHelper.ts";
 import { PARENT_URL, seedActive } from "./watchFixture.ts";
@@ -138,4 +139,64 @@ test("example() の分解では、承認直後に投入できるのはプロセ�
   await giveSubIssues(db);
   const report = await dispatchIntake(db, "i1");
   assert.deepEqual(report.created.map((c) => c.processId), ["1"]);
+});
+
+/** プロセス 1 を投入して、そのタスクを failed にする。 */
+async function failProcess1(db: Db): Promise<string> {
+  await giveSubIssues(db);
+  const report = await dispatchIntake(db, "i1");
+  const taskId = report.created[0].taskId;
+  await commitStepBoundary(db, { taskId, taskPatch: { state: "failed" } });
+  return taskId;
+}
+
+test("要確認のプロセスを再投入すると、同じプロセスと sub-issue に紐づく新しいタスクができ、古いタスクは残る", async () => {
+  const { db } = await seedActive();
+  const oldId = await failProcess1(db);
+
+  const { taskId } = await redispatchProcess(db, { intakeId: "i1", processId: "1" });
+
+  const tasks = await listTasks(db);
+  assert.equal(tasks.length, 2);
+  for (const t of tasks) {
+    assert.equal(t.intake_process_id, "1");
+    assert.equal(t.issue_url, SUB(1));
+  }
+  const row = await db.selectFrom("intake_processes").select("current_task_id")
+    .where("process_id", "=", "1").executeTakeFirstOrThrow();
+  assert.equal(row.current_task_id, taskId);
+  assert.notEqual(taskId, oldId);
+  assert.equal((await getTask(db, oldId))!.state, "failed");
+});
+
+test("要確認でないプロセスは再投入できない", async () => {
+  const { db } = await seedActive();
+  await giveSubIssues(db);
+  await dispatchIntake(db, "i1");
+  for (const processId of ["1", "2", "3"]) {
+    await assert.rejects(
+      redispatchProcess(db, { intakeId: "i1", processId }),
+      /要確認のプロセスだけ/,
+    );
+  }
+  assert.equal((await listTasks(db)).length, 1);
+});
+
+test("一時停止中でも再投入できる", async () => {
+  const { db } = await seedActive();
+  await failProcess1(db);
+  await updateIntake(db, "i1", { dispatch_paused: 1 });
+  await redispatchProcess(db, { intakeId: "i1", processId: "1" });
+  assert.equal((await listTasks(db)).length, 2);
+});
+
+test("active でない Intake では再投入できない", async () => {
+  const { db } = await seedActive();
+  await failProcess1(db);
+  await updateIntake(db, "i1", { state: "canceled" });
+  await assert.rejects(
+    redispatchProcess(db, { intakeId: "i1", processId: "1" }),
+    /再投入できる状態ではありません/,
+  );
+  assert.equal((await listTasks(db)).length, 1);
 });
