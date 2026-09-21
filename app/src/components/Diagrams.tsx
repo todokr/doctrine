@@ -92,7 +92,7 @@ export function SequenceSvg({ body }: { body: Body<"sequence"> }) {
   const xs = actors.map((_, i) => (actors.length > 1 ? 26 + i * gap : W / 2));
   const H = top + rowH * messages.length + 14;
   return (
-    <svg className="seqd" viewBox={`0 0 ${W} ${H}`} style={{ maxWidth: W * 1.4 }} role="img" aria-label={`シーケンス図: ${actors.join(" → ")}`}>
+    <svg className="seqd" viewBox={`0 0 ${W} ${H}`} style={{ maxWidth: W * 1.2 }} role="img" aria-label={`シーケンス図: ${actors.join(" → ")}`}>
       <defs>
         <marker id={arrowId} viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
           <path d="M0,0 L10,5 L0,10 z" className="sd-arrowhead" />
