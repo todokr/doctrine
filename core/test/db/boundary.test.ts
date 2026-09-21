@@ -365,7 +365,7 @@ async function closeWithDenials(denials: PermissionDenial[] | undefined): Promis
     taskPatch: {},
     stepRunUpdate: {
       id: id!,
-      status: "degraded",
+      status: "success",
       exit_code: 0,
       ended_at: "b",
       ...(denials === undefined ? {} : { permission_denials: denials }),

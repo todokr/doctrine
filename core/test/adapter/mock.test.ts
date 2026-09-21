@@ -27,10 +27,10 @@ test("sequence は通算呼び出し回数で結果を切り替える", async ()
 });
 
 test("result は DEFAULT にスクリプトの部分指定をマージしたもの", async () => {
-  const adapter = createMockAdapter({ result: { degraded: true } });
+  const adapter = createMockAdapter({ result: { numTurns: 3 } });
   const r = await adapter.start("x", { cwd: "/wt", sessionId: "s1" }).result;
   assert.equal(r.ok, true); // DEFAULT 由来
-  assert.equal(r.degraded, true); // スクリプト由来
+  assert.equal(r.numTurns, 3); // スクリプト由来
   assert.equal(r.costUsd, 0); // DEFAULT 由来
 });
 

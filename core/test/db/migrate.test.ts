@@ -397,6 +397,7 @@ test("開き直してもマイグレーションは二度流れず、データ�
     "0005_rate_limited",
     "0006_step_run_bounced",
     "0007_step_run_permission_denials",
+    "0008_step_run_drop_degraded",
   ]);
   await first.destroy();
 
@@ -410,6 +411,7 @@ test("開き直してもマイグレーションは二度流れず、データ�
       "0005_rate_limited",
       "0006_step_run_bounced",
       "0007_step_run_permission_denials",
+      "0008_step_run_drop_degraded",
     ]);
     assert.equal((await second.selectFrom("projects").selectAll().execute()).length, 1);
   } finally {
@@ -443,6 +445,7 @@ test("pending_feed を足す前に作られたDBファイルは、行を保っ�
       "0005_rate_limited",
       "0006_step_run_bounced",
       "0007_step_run_permission_denials",
+      "0008_step_run_drop_degraded",
     ]);
     const old = await getTask(d, "old");
     assert.equal(old?.state, "suspended", "既存の行は残る");
@@ -476,6 +479,30 @@ test('claude_session_id を持つ既存タスクは role "default" として tas
       rows.map((r) => ({ task_id: r.task_id, role: r.role, session_id: r.session_id })),
       [{ task_id: "old", role: "default", session_id: "sess-1" }],
     );
+  } finally {
+    await d.destroy();
+  }
+});
+
+test("degraded だった既存の step_run は success になる", async () => {
+  const path = await tempDbPath();
+  const legacy = new DatabaseSync(path);
+  legacy.exec(LEGACY_DDL);
+  legacy.prepare("INSERT INTO projects (path, default_workflow) VALUES ('/repo', 'feature')").run();
+  legacy.prepare(
+    `INSERT INTO tasks (id, project_id, title, prompt, workflow_name, state, branch, created_at, updated_at)
+     VALUES ('old', 1, 'T', 'P', 'feature', 'completed', 'b', 'x', 'x')`,
+  ).run();
+  legacy.prepare(
+    `INSERT INTO step_runs (task_id, step_id, attempt, status, started_at, log_path)
+     VALUES ('old', 'plan', 1, 'degraded', 'x', '')`,
+  ).run();
+  legacy.close();
+
+  const d = await openDb(path);
+  try {
+    const rows = await d.selectFrom("step_runs").selectAll().where("task_id", "=", "old").execute();
+    assert.deepEqual(rows.map((r) => r.status), ["success"]);
   } finally {
     await d.destroy();
   }
@@ -533,7 +560,7 @@ test("step_runs は awaiting と interrupted を受け付ける", async () => {
   assert.deepEqual(rows.map((r) => r.status).sort(), ["awaiting", "interrupted"]);
 });
 
-test("未知の status は CHECK 制約で落ちる", async () => {
+test("未知の status と、もう使わない degraded は CHECK 制約で落ちる", async () => {
   const d = await db();
   const pid = await seed(d);
   await insertTask(d, {
@@ -545,21 +572,26 @@ test("未知の status は CHECK 制約で落ちる", async () => {
     branch: "b",
     priority: 2,
   });
-  await assert.rejects(() =>
-    d.insertInto("step_runs").values({
-      task_id: "t1",
-      step_id: "review",
-      attempt: 1,
-      // deno-lint-ignore no-explicit-any
-      status: "bogus" as any,
-      exit_code: null,
-      started_at: "2026-09-18T00:00:00.000Z",
-      ended_at: null,
-      log_path: "",
-      review_tree: null,
-      goto_step_id: null,
-    }).execute()
-  );
+  for (const status of ["bogus", "degraded"]) {
+    await assert.rejects(
+      () =>
+        d.insertInto("step_runs").values({
+          task_id: "t1",
+          step_id: "review",
+          attempt: 1,
+          // deno-lint-ignore no-explicit-any
+          status: status as any,
+          exit_code: null,
+          started_at: "2026-09-18T00:00:00.000Z",
+          ended_at: null,
+          log_path: "",
+          review_tree: null,
+          goto_step_id: null,
+        }).execute(),
+      Error,
+      status,
+    );
+  }
 });
 
 test("step_runs は bounced を受け付け、差し戻し先を goto_step_id に持つ", async () => {

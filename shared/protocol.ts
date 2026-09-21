@@ -69,9 +69,6 @@ export type TaskSummary = {
   updated_at: string;
 };
 
-/** task.list だけが has_degraded を持つ（approve / reject / cancel は行をそのまま返す）。 */
-export type TaskListEntry = TaskSummary & { has_degraded: boolean };
-
 /**
  * 権限で拒否された操作1件。
  * 形は Claude Agent SDK の型定義（tool_name / tool_use_id / tool_input）に
@@ -97,7 +94,6 @@ export type StepRun = {
     | "awaiting"
     | "success"
     | "failed"
-    | "degraded"
     | "interrupted"
     | "bounced"
     | "rate_limited";
@@ -105,7 +101,8 @@ export type StepRun = {
   started_at: string;
   ended_at: string | null;
   /**
-   * 権限で拒否された操作。拒否が無かった実行は null。degraded の行だけとは限らない。
+   * 権限で拒否された操作。拒否が無かった実行は null。
+   * success / failed / rate_limited のどの行にも入り得る。
    * この列だけはデーモンが JSON をパースして返す（他の列は DB の生値）。
    */
   permission_denials: StepRunDenials | null;
@@ -221,7 +218,7 @@ export type TaskContext = {
  * （method を素通しするだけ）。
  */
 export type Methods = {
-  "task.list": { params: { project?: string; state?: TaskState }; result: TaskListEntry[] };
+  "task.list": { params: { project?: string; state?: TaskState }; result: TaskSummary[] };
   "project.list": { params: Record<string, never>; result: ProjectSummary[] };
   "task.diff": { params: { task_id: string; since?: "last_review" }; result: TaskDiff };
   "task.context": { params: { task_id: string }; result: TaskContext };

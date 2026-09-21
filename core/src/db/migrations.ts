@@ -451,6 +451,83 @@ const migrations: Record<string, Migration> = {
       await db.schema.alterTable("step_runs").addColumn("permission_denials", "text").execute();
     },
   },
+
+  /**
+   * status から 'degraded' を落とす。権限で拒否された操作があっても実行の成否は
+   * 変わらないので、拒否の有無は permission_denials だけが持つ。
+   * 既存の degraded 行は success に直してから CHECK 制約を張り直す。
+   *
+   * 0006 と同じ理由で step_outputs を退避してから step_runs を作り直す。
+   */
+  "0008_step_run_drop_degraded": {
+    // deno-lint-ignore no-explicit-any
+    async up(db: Kysely<any>) {
+      await sql`UPDATE step_runs SET status = 'success' WHERE status = 'degraded'`.execute(db);
+
+      // --- 1. step_outputs を外部キーの無い一時テーブルへ退避する ---
+      await sql`CREATE TABLE step_outputs_backup AS SELECT * FROM step_outputs`.execute(db);
+      await db.schema.dropTable("step_outputs").execute();
+
+      // --- 2. step_runs の再構築（status から degraded を外す） ---
+      await db.schema.createTable("step_runs_new")
+        .addColumn("id", "integer", (c) => c.primaryKey().autoIncrement())
+        .addColumn("task_id", "text", (c) => c.notNull().references("tasks.id"))
+        .addColumn("step_id", "text", (c) => c.notNull())
+        .addColumn("attempt", "integer", (c) => c.notNull())
+        .addColumn("status", "text", (c) =>
+          c.notNull().check(
+            sql`status IN ('running','awaiting','success','failed','interrupted','rate_limited','bounced')`,
+          ))
+        .addColumn("exit_code", "integer")
+        .addColumn("started_at", "text", (c) => c.notNull())
+        .addColumn("ended_at", "text")
+        .addColumn("log_path", "text", (c) => c.notNull())
+        .addColumn("cost_usd", "real")
+        .addColumn("num_turns", "integer")
+        .addColumn("duration_ms", "integer")
+        .addColumn("review_tree", "text")
+        .addColumn("goto_step_id", "text")
+        .addColumn("permission_denials", "text")
+        .addCheckConstraint(
+          "step_runs_goto_step_id_bounced",
+          sql`(status = 'bounced') = (goto_step_id IS NOT NULL)`,
+        )
+        .execute();
+      // id を含めてコピーする。step_outputs の参照がこの id を使う。
+      await sql`
+        INSERT INTO step_runs_new
+          (id, task_id, step_id, attempt, status, exit_code, started_at, ended_at,
+           log_path, cost_usd, num_turns, duration_ms, review_tree, goto_step_id, permission_denials)
+        SELECT id, task_id, step_id, attempt, status, exit_code, started_at, ended_at,
+               log_path, cost_usd, num_turns, duration_ms, review_tree, goto_step_id, permission_denials
+        FROM step_runs
+      `.execute(db);
+      await db.schema.dropTable("step_runs").execute();
+      await db.schema.alterTable("step_runs_new").renameTo("step_runs").execute();
+      await db.schema.createIndex("idx_step_runs_task")
+        .on("step_runs").columns(["task_id", "id"]).execute();
+
+      // --- 3. step_outputs を作り直して退避した行を戻す ---
+      await db.schema.createTable("step_outputs")
+        .addColumn("step_run_id", "integer", (c) => c.primaryKey().references("step_runs.id"))
+        .addColumn("last_stdout", "text", (c) => c.notNull())
+        .addColumn("last_stderr", "text", (c) => c.notNull())
+        .addColumn("exit_code", "integer")
+        .execute();
+      await sql`
+        INSERT INTO step_outputs (step_run_id, last_stdout, last_stderr, exit_code)
+        SELECT step_run_id, last_stdout, last_stderr, exit_code FROM step_outputs_backup
+      `.execute(db);
+      await db.schema.dropTable("step_outputs_backup").execute();
+
+      const violations = await sql<{ table: string }>`PRAGMA foreign_key_check`.execute(db);
+      if (violations.rows.length > 0) {
+        throw new Error(
+          `外部キーが壊れています: ${violations.rows.map((r) => r.table).join(", ")}`,
+        );
+      }
+    },
+  },
 };
 
 /** ファイルを動的 import しない（権限も要らず、deno check で型検査される）。 */

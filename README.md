@@ -20,7 +20,7 @@
   - [`setup` は予約されたステップid](#setup-は予約されたステップid)
 - [3. `command` ステップは再実行安全でなければならない](#3-command-ステップは再実行安全でなければならない)
 - [4. worktree は失敗・中止時に残る](#4-worktree-は失敗中止時に残る)
-- [5. `degraded` の意味](#5-degraded-の意味)
+- [5. 権限で拒否された操作を読む](#5-権限で拒否された操作を読む)
   - [ステップ実行の状態](#ステップ実行の状態)
 - [6. ステップ間で成果物を渡す](#6-ステップ間で成果物を渡す)
 - [7. 大きな Issue を PFD で分解してから流す](#7-大きな-issue-を-pfd-で分解してから流す)
@@ -303,28 +303,14 @@ doctrine が張っているもので、worktree が無くなれば使う相手�
 worktree」だけであり、`failed` タスクの（対応するタスクが存在する）worktreeは
 ここには出てこない。上記のとおり `dctl ls --state failed` → `dctl get` の経路で探す。
 
-## 5. `degraded` の意味
+## 5. 権限で拒否された操作を読む
 
 Claude Code は `--permission-prompts none` で headless 実行するため、
 権限で操作を拒否されても**プロセスとしては正常終了する**（終了コード0、
-`is_error: false`）。つまり「エージェントが何もできないまま終わった」ケースが、
-何もしなければ「成功」に見えてしまう。
+`is_error: false`）。拒否があっても実行の成否は変わらないので、
+ステップ実行の状態は `success` のままで、ワークフローも止まらない。
 
-エージェントの応答に権限拒否（`permission_denials`）が含まれていた場合、
-そのステップ実行の状態は `success` ではなく `degraded` として記録される。
-ワークフロー自体は止まらない（判断材料を出すところまでがdoctrineの責務）。
-
-確認するには:
-
-```bash
-dctl get <task-id>
-# => .stepRuns[].status が "degraded" になっている実行を探す
-```
-
-`degraded` を見逃すと、「成功した」と思って進めたタスクが実質何も達成していない、
-という気づきにくい失敗を踏む。
-
-何が拒否されたかは、同じ行の `permission_denials` に入る。ツール名と入力
+何が拒否されたかは、その行の `permission_denials` に入る。ツール名と入力
 （Bash ならコマンド）が読める。
 
 ```bash
@@ -351,12 +337,12 @@ dctl get <task-id> | jq '.stepRuns[] | {step_id, attempt, status, goto_step_id}'
 
 - `running` — 実行中
 - `awaiting` — `approval` ステップが人の承認・却下を待っている（1行＝レビュー1回）
-- `success` — 終わった
+- `success` — 終わった。権限で拒否された操作があっても成功は成功で、
+  拒否の中身は同じ行の `permission_denials` に入る（5章）
 - `bounced` — 非0で終わった（または却下された）が、`onFailure` / `onReject` の `goto` で
   前のステップへ戻った。タスクは失敗していない。戻り先は同じ行の `goto_step_id`、
   差し戻しが何回目かは同じ行の `attempt`
 - `failed` — 分岐先が無い、または `maxAttempts` を使い切って、そこでタスクが止まった
-- `degraded` — 成功扱いだが権限拒否があった（5章）。拒否の中身は同じ行の `permission_denials`
 - `interrupted` — デーモンのクラッシュで中断され、復帰時に閉じられた
 - `rate_limited` — Claude の利用上限で打ち切られた。枠が明けたら同じ会話で再開されるので失敗ではない
 

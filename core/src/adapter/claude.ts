@@ -138,7 +138,6 @@ export function resultFrom(
   if (typeof resultLine !== "object" || resultLine === null) {
     return {
       ok: false,
-      degraded: false,
       text: "",
       costUsd: null,
       numTurns: null,
@@ -153,7 +152,6 @@ export function resultFrom(
   const denials = Array.isArray(o.permission_denials) ? o.permission_denials : [];
   return {
     ok: o.is_error !== true,
-    degraded: denials.length > 0,
     text: typeof o.result === "string" ? o.result : "",
     costUsd: typeof o.total_cost_usd === "number" ? o.total_cost_usd : null,
     numTurns: typeof o.num_turns === "number" ? o.num_turns : null,
@@ -167,8 +165,7 @@ export function resultFrom(
 
 /**
  * result 行の permission_denials を1要素1件で構造化する。要素は捨てない —
- * degraded は生配列の長さで決まるので、欠けた項目で落とすと「degraded なのに
- * 拒否が0件」になる。読めない項目は空の既定値で埋める。
+ * 読めない項目があっても件数が減らないように、空の既定値で埋める。
  *
  * 未実測。要素の形（tool_name / tool_use_id / tool_input）は Claude Agent SDK の
  * 型定義（SDKPermissionDenial）に拠る。実際の result 行を見て直すこと。

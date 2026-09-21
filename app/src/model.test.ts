@@ -12,7 +12,6 @@ import {
   canReject,
   composeRejection,
   countReview,
-  DEGRADED_UNKNOWN,
   denialLines,
   diffLines,
   diffOf,
@@ -49,7 +48,7 @@ import type {
   ServerEvent,
   StepRun,
   TaskDetail,
-  TaskListEntry,
+  TaskSummary,
 } from "../../shared/protocol.ts";
 
 const base = (overrides: Partial<State> = {}): State => ({
@@ -84,10 +83,9 @@ describe("groupOf", () => {
   test("suspended はレビュー待ち", () => {
     expect(groupOf(t({ state: "suspended" }))).toBe("review");
   });
-  test("worktree の残っている failed、削除拒否の completed、degraded な非終端タスクは要確認", () => {
+  test("worktree の残っている failed と、削除拒否の completed は要確認", () => {
     expect(groupOf(t({ state: "failed", worktree: "/w" }))).toBe("check");
     expect(groupOf(t({ state: "completed", refused: true, worktree: "/w" }))).toBe("check");
-    expect(groupOf(t({ state: "running", degraded: "fix" }))).toBe("check");
   });
   test("gc 済み（worktree が無い）の failed は要確認から外れる", () => {
     expect(groupOf(t({ state: "failed", worktree: null }))).toBe("done");
@@ -96,13 +94,9 @@ describe("groupOf", () => {
     // failed と同じ規則で動いていることを固定する
     expect(groupOf(t({ state: "completed", refused: false, worktree: null }))).toBe("done");
   });
-  test("degraded でも終端状態になれば要確認から外れる", () => {
-    expect(groupOf(t({ state: "canceled", degraded: "fix" }))).toBe("done");
-  });
   test("上限待ちは要確認ではなく専用の区分に入る", () => {
-    // 人が何かする必要は無い。degraded が付いていても要確認へは寄せない
+    // 人が何かする必要は無く、枠が明ければ自分で再開する
     expect(groupOf(t({ state: "rate_limited" }))).toBe("limited");
-    expect(groupOf(t({ state: "rate_limited", degraded: "implement" }))).toBe("limited");
   });
   test("それ以外は状態のとおり", () => {
     expect(groupOf(t({ state: "running" }))).toBe("running");
@@ -378,7 +372,7 @@ describe("reduce", () => {
   });
 });
 
-const row = (o: Partial<TaskListEntry> = {}): TaskListEntry => ({
+const row = (o: Partial<TaskSummary> = {}): TaskSummary => ({
   id: "t-1",
   project_id: 1,
   title: "タイトル",
@@ -392,7 +386,6 @@ const row = (o: Partial<TaskListEntry> = {}): TaskListEntry => ({
   priority: 2,
   created_at: "2026-09-18T00:00:00.000Z",
   updated_at: "2026-09-18T00:10:00.000Z",
-  has_degraded: false,
   ...o,
 });
 
@@ -407,7 +400,7 @@ const summary = (o: Partial<ProjectSummary> = {}): ProjectSummary => ({
 });
 
 const PJ = [summary()];
-const t1 = (o: Partial<TaskListEntry> = {}) => toTask(row(o), PJ);
+const t1 = (o: Partial<TaskSummary> = {}) => toTask(row(o), PJ);
 
 describe("toProject / toTask", () => {
   test("プロジェクトの表示名はパスの末尾", () => {
@@ -441,18 +434,6 @@ describe("toProject / toTask", () => {
     expect(groupOf(t1({ state: "failed", worktree_path: null }))).toBe("done");
   });
 
-  test("has_degraded は degraded に写し、要確認に入る", () => {
-    // 空文字にすると groupOf の `t.degraded &&` をすり抜けて要確認から落ちる
-    expect(t1({ has_degraded: true }).degraded).toBe(DEGRADED_UNKNOWN);
-    expect(groupOf(t1({ has_degraded: true, state: "running" }))).toBe("check");
-    expect(t1({ has_degraded: false }).degraded).toBeUndefined();
-  });
-
-  test("イベントで分かったステップ名は取り直しで消えない", () => {
-    const before = { ...t1({ has_degraded: true }), degraded: "implement" };
-    expect(toTask(row({ has_degraded: true }), PJ, before).degraded).toBe("implement");
-  });
-
   test("差し戻しの通知は 15 秒ごとの取り直しで消えない", () => {
     const bounce = { step: "test", goto: "implement", attempt: 1 };
     const before = { ...t1({ state: "running" }), bounce };
@@ -467,9 +448,9 @@ describe("toProject / toTask", () => {
   });
 
   test("知らない state 文字列はタスクを消さず unknown にする（版のずれ対策）", () => {
-    // TaskListEntry#state は protocol.ts 上は TaskState だが、それはコンパイル時の
+    // TaskSummary#state は protocol.ts 上は TaskState だが、それはコンパイル時の
     // 注釈にすぎない。JSON で来る実行時の値は保証されないので、あえて型をはみ出させる
-    const weird = row({ state: "half-migrated" as unknown as TaskListEntry["state"] });
+    const weird = row({ state: "half-migrated" as unknown as TaskSummary["state"] });
     const task = toTask(weird, PJ);
     expect(task.state).toBe("unknown");
     expect(task.id).toBe(weird.id);
@@ -485,7 +466,7 @@ describe("toProject / toTask", () => {
   test("知らない state の警告は同じ値では1回だけ出す（15秒ごとの取り直しでコンソールを埋めない）", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
-      const weird = { state: "never-seen-before" as unknown as TaskListEntry["state"] };
+      const weird = { state: "never-seen-before" as unknown as TaskSummary["state"] };
       toTask(row(weird), PJ);
       toTask(row(weird), PJ);
       expect(warn).toHaveBeenCalledTimes(1);
@@ -565,19 +546,6 @@ describe("daemon イベント", () => {
     expect(after.tasks[0].step).toBe("test");
   });
 
-  test("stepRun.finished の degraded は要確認に入れる", () => {
-    const after = reduce(withTask(), {
-      type: "daemon",
-      ev: {
-        event: "stepRun.finished", task_id: "a", step_run_id: 1,
-        step_id: "implement", status: "degraded", goto_step_id: null, attempt: 1,
-      },
-      now: 999,
-    });
-    expect(after.tasks[0].degraded).toBe("implement");
-    expect(groupOf(after.tasks[0])).toBe("check");
-  });
-
   const bounceEvent = (o: Partial<{ step_id: string; status: string; goto_step_id: string | null; attempt: number }> = {}) => ({
     event: "stepRun.finished" as const, task_id: "a", step_run_id: 1,
     step_id: "test", status: "bounced", goto_step_id: "implement", attempt: 1,
@@ -617,18 +585,6 @@ describe("daemon イベント", () => {
       ev: bounceEvent({ step_id: "implement", status: "success", goto_step_id: null, attempt: 2 }),
       now: 1000,
     });
-    expect(after.tasks[0].bounce).toEqual({ step: "test", goto: "implement", attempt: 1 });
-  });
-
-  test("差し戻しの後に degraded が来ても、両方が立つ", () => {
-    // onFailure 付きの agent ステップが一度差し戻され、やり直しで degraded で終わる筋書き。
-    const bounced = reduce(withTask(), { type: "daemon", ev: bounceEvent(), now: 999 });
-    const after = reduce(bounced, {
-      type: "daemon",
-      ev: bounceEvent({ step_id: "implement", status: "degraded", goto_step_id: null }),
-      now: 1000,
-    });
-    expect(after.tasks[0].degraded).toBe("implement");
     expect(after.tasks[0].bounce).toEqual({ step: "test", goto: "implement", attempt: 1 });
   });
 
@@ -866,19 +822,9 @@ describe("止まった理由と実行履歴", () => {
     expect(stopReasons([task], task)).toEqual([{ kind: "failed", step: "test" }]);
   });
 
-  test("degraded は stepRuns から、どのステップかを重複なく出す", () => {
-    const task = t({ state: "running", degraded: DEGRADED_UNKNOWN });
-    const d = detail([
-      stepRun({ id: 1, step_id: "fix", status: "degraded" }),
-      stepRun({ id: 2, step_id: "fix", status: "degraded" }),
-      stepRun({ id: 3, step_id: "test" }),
-    ]);
-    expect(stopReasons([task], task, d)).toEqual([{ kind: "degraded", steps: ["fix"] }]);
-  });
-
-  test("止まった理由は failed → 削除拒否 → degraded → queued の順に並ぶ", () => {
-    const task = t({ state: "failed", worktree: "/w", refused: true, degraded: "fix" });
-    expect(stopReasons([task], task).map((r) => r.kind)).toEqual(["failed", "refused", "degraded"]);
+  test("止まった理由は failed → 削除拒否 → queued の順に並ぶ", () => {
+    const task = t({ state: "failed", worktree: "/w", refused: true });
+    expect(stopReasons([task], task).map((r) => r.kind)).toEqual(["failed", "refused"]);
   });
 
   test("queued は行列の何番目かを持つ", () => {
@@ -889,7 +835,7 @@ describe("止まった理由と実行履歴", () => {
   });
 
   test("動いているタスクには止まった理由が無い", () => {
-    const task = t({ state: "running", degraded: undefined, refused: false });
+    const task = t({ state: "running", refused: false });
     expect(stopReasons([task], task, detail([stepRun()]))).toEqual([]);
   });
 

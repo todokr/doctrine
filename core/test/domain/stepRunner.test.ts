@@ -170,8 +170,8 @@ test("再開でも組み込みのシステムプロンプトが渡る", async ()
   assert.equal(adapter.calls[0].opts.appendSystemPrompt, BUILTIN_APPEND_SYSTEM_PROMPT);
 });
 
-test("permission_denials があれば degraded として返る", async () => {
-  const adapter = createMockAdapter({ result: { ok: true, degraded: true, text: "何もできず" } });
+test("権限で拒否された操作があっても success として返る", async () => {
+  const adapter = createMockAdapter({ result: { ok: true, text: "何もできず" } });
   const out = await runAgentStep(
     { id: "a", type: "agent", prompt: "p" },
     ctx,
@@ -184,13 +184,13 @@ test("permission_denials があれば degraded として返る", async () => {
       deps: await deps({ adapter }),
     },
   );
-  assert.equal(out.status, "degraded", "成功に見えるが何もできていない実行を区別する");
+  assert.equal(out.status, "success", "拒否の有無は成否を変えない");
 });
 
 test("アダプタの permission_denials が StepOutcome に載る", async () => {
   const denial = { tool_name: "Bash", tool_use_id: "tu_1", input: { command: "rm -rf /" } };
   const adapter = createMockAdapter({
-    result: { ok: true, degraded: true, permissionDenials: [denial] },
+    result: { ok: true, permissionDenials: [denial] },
   });
   const out = await runAgentStep(
     { id: "a", type: "agent", prompt: "p" },
@@ -204,7 +204,7 @@ test("アダプタの permission_denials が StepOutcome に載る", async () =>
       deps: await deps({ adapter }),
     },
   );
-  assert.equal(out.status, "degraded");
+  assert.equal(out.status, "success");
   assert.deepEqual(out.permissionDenials, [denial]);
 });
 

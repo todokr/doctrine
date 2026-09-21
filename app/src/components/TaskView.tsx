@@ -37,7 +37,6 @@ const RUN_PILL: Record<StepRun["status"], [string, string]> = {
   awaiting: ["レビュー待ち", "p-attn"],
   success: ["成功", "p-ok"],
   failed: ["失敗", "p-danger"],
-  degraded: ["degraded", "p-deg"],
   interrupted: ["中断", "p-muted"],
   bounced: ["差し戻し", "p-muted"],
   rate_limited: ["上限待ち", "p-muted"],
@@ -66,7 +65,7 @@ function useTaskDetail(t: Task) {
     return () => {
       alive = false;
     };
-  }, [t.id, t.state, t.step, t.degraded, dispatch]);
+  }, [t.id, t.state, t.step, dispatch]);
 }
 
 /**
@@ -181,21 +180,6 @@ export function TaskView({ t }: { t: Task }) {
             <section className="box danger" key="refused">
               <h2>worktree の削除を拒否しました</h2>
               <p>完了時に未コミットの変更が残っていました。ワークフローの最終ステップがコミットしていない可能性があります。中を確認してから <span className="mono">dctl gc {t.id}</span> で削除してください。</p>
-            </section>
-          );
-        }
-        if (r.kind === "degraded") {
-          return (
-            <section className="box deg" key="degraded">
-              <h2>
-                {r.steps.map((x, i) => (
-                  <span key={x}>
-                    {i > 0 && "、"}
-                    <span className="mono">{x}</span>
-                  </span>
-                ))} が、権限で拒否された操作を含んだまま成功扱いで終わりました
-              </h2>
-              <p>後続のステップは進んでいますが、エージェントが意図した操作はされていません。</p>
             </section>
           );
         }

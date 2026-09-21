@@ -98,7 +98,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           type: "limits.recent",
           samples: samples.map(toRateLimitWindow).filter((w) => w !== null),
         });
-        // previous を渡さないと、stepRun.finished で付いた degraded のステップ名が
+        // previous を渡さないと、stepRun.finished で立てた差し戻しの通知が
         // 15 秒ごとの取り直しのたびに消える
         const known = latest.current.tasks;
         dispatch({
