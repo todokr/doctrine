@@ -174,3 +174,41 @@ rename to src/renamed.ts
 `,
   truncated: false,
 };
+
+/**
+ * 関数を src/a.ts から src/b.ts へ移しただけの task.diff の応答。
+ * files[] の並びと patch の区画の並びは揃えてあり、additions / deletions も patch の中身と合っている。
+ */
+export const SAMPLE_MOVE_DIFF: TaskDiff = {
+  base: { branch: "develop", merge_base: "3efbc75f70aeae7989a3dc4db95bdfc52b6c504a" },
+  since_step_run_id: null,
+  files: [
+    { path: "src/a.ts", status: "M", binary: false, additions: 0, deletions: 5 },
+    { path: "src/b.ts", status: "A", binary: false, additions: 5, deletions: 0 },
+  ],
+  patch: `diff --git a/src/a.ts b/src/a.ts
+index 104f954..967f419 100644
+--- a/src/a.ts
++++ b/src/a.ts
+@@ -1,7 +1,2 @@
+ import { Item } from "./item";
+-export function total(items: Item[]) {
+-  let sum = 0;
+-  for (const i of items) sum += i.price;
+-  return sum;
+-}
+ export {};
+diff --git a/src/b.ts b/src/b.ts
+new file mode 100644
+index 0000000..fa49b07
+--- /dev/null
++++ b/src/b.ts
+@@ -0,0 +1,5 @@
++export function total(items: Item[]) {
++  let sum = 0;
++  for (const i of items) sum += i.price;
++  return sum;
++}
+`,
+  truncated: false,
+};

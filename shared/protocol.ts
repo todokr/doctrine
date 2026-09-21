@@ -150,13 +150,13 @@ export type ProjectSummary = {
 
 /**
  * task.diff が返すファイル1件（core/src/domain/diff.ts の DiffFile と同じ形）。
- * リネームだけが old_path を持ち、バイナリだけが行数を持たない。
- * どちらも交差型で表すので、「R でないのに old_path」「バイナリなのに additions」
+ * リネーム（R）とコピー（C）だけが old_path を持ち、バイナリだけが行数を持たない。
+ * どちらも交差型で表すので、「R / C でないのに old_path」「バイナリなのに additions」
  * という読み方を型が許さない。
  */
 export type DiffFileMeta =
   & { path: string }
-  & ({ status: "R"; old_path: string } | { status: "A" | "M" | "D" })
+  & ({ status: "R" | "C"; old_path: string } | { status: "A" | "M" | "D" })
   & ({ binary: false; additions: number; deletions: number } | { binary: true });
 
 /** task.diff の応答（core/src/domain/diff.ts の TaskDiff）。 */
