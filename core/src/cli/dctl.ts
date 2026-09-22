@@ -1,14 +1,12 @@
 #!/usr/bin/env -S deno run --allow-all
 import { socketPath } from "../daemon/server.ts";
-import type { Response, ServerEvent } from "../../../shared/protocol.ts";
+import type { Response, ServerEvent, TaskLogs } from "../../../shared/protocol.ts";
 
 const NUMERIC = new Set(["priority", "limit", "tail", "step_run_id"]);
 const BOOLEAN = new Set(["force", "follow", "include_closed"]);
 
-/** リクエストが応答を待つ最大時間。`--follow` で接続を張りっぱなしにする
- * ストリーミングモードを将来追加するときは、この一律タイムアウトは使えない
- * （待ち続けること自体が正しい動作になるため）。その場合は follow 専用の
- * 経路を別に用意すること。 */
+/** 最初の応答を待つ最大時間。`followLogs` は末尾の応答を受け取った後は
+ * タイムアウトしない（log.line を待ち続けること自体が正しい動作のため）。 */
 const REQUEST_TIMEOUT_MS = 30_000;
 
 /**
@@ -59,7 +57,7 @@ export const USAGE = `使い方: dctl <コマンド> [引数]
   approve <task-id>
   reject <task-id> --comment <text>
   pause | resume | cancel <task-id>
-  logs <task-id> [--tail <n>] [--step_run_id <n>]
+  logs <task-id> [--tail <n>] [--step_run_id <n>] [--follow]
   diff <task-id> [--since last_review]
 
 プロジェクト
@@ -149,6 +147,60 @@ function isEvent(msg: Response | ServerEvent): msg is ServerEvent {
   return "event" in msg;
 }
 
+/** ソケットに繋ぐ。無ければデーモン未起動のメッセージで投げる。 */
+async function connect(path: string): Promise<Deno.UnixConn> {
+  try {
+    return await Deno.connect({ transport: "unix", path });
+  } catch (err) {
+    if (err instanceof Deno.errors.NotFound) {
+      throw new Error(`デーモンが起動していないようです（ソケットが見つかりません: ${path}）`);
+    }
+    throw err;
+  }
+}
+
+/** リクエストを 1 行 JSON で書き切る。 */
+async function send(
+  conn: Deno.UnixConn,
+  id: number,
+  method: string,
+  params: Record<string, unknown>,
+): Promise<void> {
+  const request = new TextEncoder().encode(JSON.stringify({ id, method, params }) + "\n");
+  let offset = 0;
+  while (offset < request.length) offset += await conn.write(request.subarray(offset));
+}
+
+/**
+ * 受信バイト列を改行で切って JSON.parse し、1 件ずつ返す。
+ * 相手が閉じたら（read が null）終わる。JSON として読めない行は抜粋付きで投げる。
+ */
+async function* readMessages(conn: Deno.UnixConn): AsyncGenerator<Response | ServerEvent> {
+  const decoder = new TextDecoder();
+  const bytes = new Uint8Array(64 * 1024);
+  let buf = "";
+  while (true) {
+    const n = await conn.read(bytes);
+    if (n === null) return;
+    buf += decoder.decode(bytes.subarray(0, n), { stream: true });
+    let i: number;
+    while ((i = buf.indexOf("\n")) !== -1) {
+      const line = buf.slice(0, i);
+      buf = buf.slice(i + 1);
+      if (line.trim() === "") continue;
+
+      let msg: Response | ServerEvent;
+      try {
+        msg = JSON.parse(line) as Response | ServerEvent;
+      } catch {
+        const excerpt = line.length > 200 ? `${line.slice(0, 200)}…` : line;
+        throw new Error(`デーモンからの応答がJSONとして読めません: ${excerpt}`);
+      }
+      yield msg;
+    }
+  }
+}
+
 export async function call(
   path: string,
   method: string,
@@ -167,54 +219,23 @@ export async function call(
   });
 
   const exchange = (async (): Promise<unknown> => {
-    try {
-      state.conn = await Deno.connect({ transport: "unix", path });
-    } catch (err) {
-      if (err instanceof Deno.errors.NotFound) {
-        throw new Error(`デーモンが起動していないようです（ソケットが見つかりません: ${path}）`);
-      }
-      throw err;
-    }
+    state.conn = await connect(path);
     const conn = state.conn;
-    const request = new TextEncoder().encode(
-      JSON.stringify({ id: requestId, method, params }) + "\n",
-    );
-    let offset = 0;
-    while (offset < request.length) offset += await conn.write(request.subarray(offset));
+    await send(conn, requestId, method, params);
 
-    const decoder = new TextDecoder();
-    const bytes = new Uint8Array(64 * 1024);
-    let buf = "";
-    while (true) {
-      const n = await conn.read(bytes);
-      if (n === null) throw new Error("デーモンが応答を返す前に接続を閉じました");
-      buf += decoder.decode(bytes.subarray(0, n), { stream: true });
-      let i: number;
-      while ((i = buf.indexOf("\n")) !== -1) {
-        const line = buf.slice(0, i);
-        buf = buf.slice(i + 1);
-        if (line.trim() === "") continue;
-
-        let msg: Response | ServerEvent;
-        try {
-          msg = JSON.parse(line) as Response | ServerEvent;
-        } catch {
-          const excerpt = line.length > 200 ? `${line.slice(0, 200)}…` : line;
-          throw new Error(`デーモンからの応答がJSONとして読めません: ${excerpt}`);
-        }
-
-        if (isEvent(msg)) continue; // このコマンドはイベント購読をしないので無視
-        if (msg.id === null) {
-          // id が null ということは、デーモンがリクエスト自体を JSON として
-          // 読めなかったということ。この接続でこれ以上まともな応答は来ないので、
-          // 無視して待ち続けるのではなく、ここで確定的に失敗させる。
-          throw new Error(msg.ok ? "不明なプロトコルエラーです" : msg.error);
-        }
-        if (msg.id !== requestId) continue;
-        if (msg.ok) return msg.result;
-        throw new Error(msg.error);
+    for await (const msg of readMessages(conn)) {
+      if (isEvent(msg)) continue; // このコマンドはイベント購読をしないので無視
+      if (msg.id === null) {
+        // id が null ということは、デーモンがリクエスト自体を JSON として
+        // 読めなかったということ。この接続でこれ以上まともな応答は来ないので、
+        // 無視して待ち続けるのではなく、ここで確定的に失敗させる。
+        throw new Error(msg.ok ? "不明なプロトコルエラーです" : msg.error);
       }
+      if (msg.id !== requestId) continue;
+      if (msg.ok) return msg.result;
+      throw new Error(msg.error);
     }
+    throw new Error("デーモンが応答を返す前に接続を閉じました");
   })();
   // タイムアウトが先に確定した後、閉じた接続の読み取りが reject しても未処理にしない。
   exchange.catch(() => {});
@@ -229,10 +250,99 @@ export async function call(
   }
 }
 
+function closeQuietly(conn: Deno.UnixConn): void {
+  try {
+    conn.close();
+  } catch { /* 既に閉じている */ }
+}
+
+/**
+ * task.logs を follow: true で送り、返ってきた末尾を 1 行ずつ out に渡した後、
+ * 同じ接続に届く、このタスクの log.line を 1 行ずつ out に渡し続ける。
+ * signal が中断されたら接続を閉じて resolve する。デーモンが接続を閉じたら reject する。
+ */
+export async function followLogs(
+  path: string,
+  params: Record<string, unknown>,
+  out: (line: string) => void,
+  signal: AbortSignal,
+  timeoutMs = REQUEST_TIMEOUT_MS,
+): Promise<void> {
+  if (signal.aborted) return;
+  const requestId = 1;
+  const conn = await connect(path);
+  const onAbort = () => closeQuietly(conn);
+  signal.addEventListener("abort", onAbort);
+  // 接続を待つ間に中断されていたら、リスナーを付ける前の abort は拾えない。
+  if (signal.aborted) onAbort();
+
+  let timedOut = false;
+  // 最初の応答を待つ間だけ張る。応答が来たら追従に入るので解除する。
+  let timer: ReturnType<typeof setTimeout> | undefined = setTimeout(() => {
+    timedOut = true;
+    closeQuietly(conn);
+  }, timeoutMs);
+  const timeoutError = () =>
+    new Error(`デーモンからの応答がありません（${timeoutMs}ミリ秒待ちました）`);
+
+  let answered = false;
+  try {
+    if (signal.aborted) return;
+    await send(conn, requestId, "task.logs", params);
+    for await (const msg of readMessages(conn)) {
+      if (signal.aborted) return;
+      if (answered) {
+        if (isEvent(msg) && msg.event === "log.line" && msg.task_id === params.task_id) {
+          out(msg.line);
+        }
+        continue;
+      }
+      // 応答より前の log.line は捨てる（末尾と重なるため）
+      if (isEvent(msg)) continue;
+      if (msg.id === null) throw new Error(msg.ok ? "不明なプロトコルエラーです" : msg.error);
+      if (msg.id !== requestId) continue;
+      clearTimeout(timer);
+      timer = undefined;
+      if (!msg.ok) throw new Error(msg.error);
+      answered = true;
+      const lines = (msg.result as TaskLogs).lines;
+      // ファイルが改行で終わると split で末尾に空要素が 1 つ付く
+      const tail = lines.at(-1) === "" ? lines.slice(0, -1) : lines;
+      for (const line of tail) out(line);
+    }
+    if (signal.aborted) return;
+    if (timedOut) throw timeoutError();
+    throw new Error(
+      answered ? "デーモンが接続を閉じました" : "デーモンが応答を返す前に接続を閉じました",
+    );
+  } catch (err) {
+    // 外から接続を閉じると保留中の read が reject する
+    if (signal.aborted) return;
+    if (timedOut) throw timeoutError();
+    throw err;
+  } finally {
+    clearTimeout(timer);
+    signal.removeEventListener("abort", onAbort);
+    closeQuietly(conn);
+  }
+}
+
 export async function main(argv: string[]): Promise<number> {
   try {
     const { method, params } = parseArgv(argv);
-    const result = await call(Deno.env.get("DOCTRINE_SOCKET") ?? socketPath(), method, params);
+    const path = Deno.env.get("DOCTRINE_SOCKET") ?? socketPath();
+    if (method === "task.logs" && params.follow === true) {
+      const controller = new AbortController();
+      const onSigint = () => controller.abort();
+      Deno.addSignalListener("SIGINT", onSigint);
+      try {
+        await followLogs(path, params, (line) => console.log(line), controller.signal);
+      } finally {
+        Deno.removeSignalListener("SIGINT", onSigint);
+      }
+      return 0;
+    }
+    const result = await call(path, method, params);
     console.log(JSON.stringify(result, null, 2));
     return 0;
   } catch (e) {
