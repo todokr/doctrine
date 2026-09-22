@@ -11,6 +11,7 @@ const STATUS_CLASS: Record<RailStatus, string> = {
   interrupted: "wr-muted",
   bounced: "wr-muted",
   rate_limited: "wr-muted",
+  waiting: "wr-muted",
   pending: "wr-muted",
 };
 

@@ -239,6 +239,7 @@ export const RUN_PILL: Record<StepRun["status"], [string, string]> = {
   interrupted: ["中断", "p-muted"],
   bounced: ["差し戻し", "p-muted"],
   rate_limited: ["上限待ち", "p-muted"],
+  waiting: ["マージ待ち", "p-muted"],
 };
 
 /** 拒否1件を「ツール名 + 主要引数」の並びにする。引数は切り詰めない（コマンドを読むため）。 */
@@ -274,7 +275,7 @@ export const hasSince = (c: TaskContext) =>
 
 // ---------------------------------------------------------------- デーモンの state 文字列の検証
 const TASK_STATES: ReadonlySet<Exclude<TaskState, "unknown">> = new Set([
-  "queued", "running", "suspended", "paused", "rate_limited", "completed", "failed", "canceled",
+  "queued", "running", "suspended", "paused", "rate_limited", "waiting", "completed", "failed", "canceled",
 ]);
 /**
  * protocol.ts の TaskState / ServerEvent#to は、デーモンから来る JSON に対する

@@ -11,9 +11,12 @@ const TRANSITIONS: Record<TaskState, readonly TaskState[]> = {
     "canceled",
     "queued",
     "rate_limited",
+    "waiting",
   ],
   /** 解放（tick）と task.resume が queued へ戻す。paused / canceled は人の操作、failed は tick の例外経路。 */
   rate_limited: ["queued", "paused", "canceled", "failed"],
+  /** poll ステップが「まだ」と答えた。解放（tick）と task.resume が queued へ戻す。 */
+  waiting: ["queued", "paused", "canceled", "failed"],
   /** 最後のステップが approval で、承認されて次のステップが無いとき completed になる。
       queued を経由させて次に何も無いことをスケジューラに発見させるのは、
       待つ理由が無いのに一瞬枠を再取得させ、実態のない queued を記録することになる。 */
@@ -46,10 +49,11 @@ export function holdsGlobalSlot(s: TaskState): boolean {
 
 /**
  * プロジェクト枠の理由は同一リポジトリでのマージ困難。
- * suspended / paused / rate_limited のタスクは worktree とブランチを生かしたままなので、理由が消えていない。
+ * suspended / paused / rate_limited / waiting のタスクは worktree とブランチを生かしたままなので、理由が消えていない。
  */
 export function holdsProjectSlot(s: TaskState): boolean {
-  return s === "running" || s === "suspended" || s === "paused" || s === "rate_limited";
+  return s === "running" || s === "suspended" || s === "paused" || s === "rate_limited" ||
+    s === "waiting";
 }
 
 export function isTerminal(s: TaskState): boolean {

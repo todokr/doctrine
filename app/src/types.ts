@@ -17,7 +17,7 @@ export type { CommandResult, Diagram, Guide, GuideLocation, MovedBlock, Risk, Re
  * デーモンが知らない状態を返したとき用。版のずれ（新しい dctld ＋ 古い画面）で起こりうる。
  * 捨てると画面から消えるか「終了」に紛れるので、見える状態として持つ。
  */
-export type TaskState = "queued" | "running" | "suspended" | "paused" | "rate_limited"
+export type TaskState = "queued" | "running" | "suspended" | "paused" | "rate_limited" | "waiting"
   | "completed" | "failed" | "canceled" | "unknown";
 
 export type Project = { id: string; daemonId: number; color: string; path: string; def: string };

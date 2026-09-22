@@ -29,6 +29,7 @@ export const STATE_PILL: Record<TaskState, [string, string]> = {
   queued: ["待ち", "p-muted"],
   paused: ["一時停止", "p-muted"],
   rate_limited: ["上限待ち", "p-muted"],
+  waiting: ["マージ待ち", "p-muted"],
   failed: ["失敗", "p-danger"],
   completed: ["完了", "p-ok"],
   canceled: ["中止", "p-muted"],

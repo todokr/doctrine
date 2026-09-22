@@ -154,7 +154,7 @@ describe("canPause / canResume", () => {
   test("再開は paused のときだけ", () => {
     expect(canResume("paused")).toBe(true);
     for (
-      const s of ["queued", "running", "rate_limited", "suspended", "completed", "failed", "canceled", "unknown"] as const
+      const s of ["queued", "running", "rate_limited", "waiting", "suspended", "completed", "failed", "canceled", "unknown"] as const
     ) {
       expect(canResume(s)).toBe(false);
     }
@@ -422,6 +422,7 @@ const row = (o: Partial<TaskSummary> = {}): TaskSummary => ({
   branch: "doctrine/t-1",
   worktree_path: null,
   rate_limited_until: null,
+  waiting_until: null,
   priority: 2,
   created_at: "2026-09-18T00:00:00.000Z",
   updated_at: "2026-09-18T00:10:00.000Z",
@@ -511,7 +512,7 @@ describe("toProject / toTask", () => {
 
   test("知っている状態はそのまま通す", () => {
     // 「全部 unknown にする」という壊し方を、既存のテストは捕まえられない
-    for (const state of ["queued", "running", "suspended", "paused", "rate_limited", "completed", "failed", "canceled"] as const) {
+    for (const state of ["queued", "running", "suspended", "paused", "rate_limited", "waiting", "completed", "failed", "canceled"] as const) {
       expect(t1({ state }).state).toBe(state);
     }
   });

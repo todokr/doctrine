@@ -17,6 +17,33 @@ import { type Kysely, type Migration, type MigrationProvider, Migrator, sql } fr
  *   PRAGMA foreign_key_check で整合を確かめてから終える。
  *   https://www.sqlite.org/lang_altertable.html#otheralter
  */
+/**
+ * 今の CREATE 文の CHECK の値の並びだけを差し替えて、表を作り直す。
+ * 列の定義を書き写さないので、前のマイグレーションで ALTER が足した列や CHECK を落とさない。
+ * 呼ぶ前に外部キーの検査を止めておくこと（0005 と同じ理由）。
+ */
+// deno-lint-ignore no-explicit-any
+async function rebuildWithCheck(db: Kysely<any>, table: string, from: string, to: string) {
+  const { rows } = await sql<{ sql: string }>`
+    SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ${table}
+  `.execute(db);
+  const ddl = rows[0]?.sql;
+  if (!ddl || !ddl.includes(from)) {
+    throw new Error(`${table} の CHECK が想定と違います: ${ddl}`);
+  }
+  const indexes = (await sql<{ sql: string }>`
+    SELECT sql FROM sqlite_master WHERE type = 'index' AND tbl_name = ${table} AND sql IS NOT NULL
+  `.execute(db)).rows.map((r) => r.sql);
+
+  const created = ddl.replace(from, to)
+    .replace(/^CREATE TABLE\s+("?)\w+\1/, `CREATE TABLE "${table}_new"`);
+  await sql.raw(created).execute(db);
+  await sql.raw(`INSERT INTO "${table}_new" SELECT * FROM "${table}"`).execute(db);
+  await sql.raw(`DROP TABLE "${table}"`).execute(db);
+  await sql.raw(`ALTER TABLE "${table}_new" RENAME TO "${table}"`).execute(db);
+  for (const index of indexes) await sql.raw(index).execute(db);
+}
+
 const migrations: Record<string, Migration> = {
   /**
    * 手書き DDL（`CREATE TABLE IF NOT EXISTS`）時代の最終形。
@@ -722,6 +749,36 @@ const migrations: Record<string, Migration> = {
     async up(db: Kysely<any>) {
       await db.schema.alterTable("tasks").addColumn("workflow_yaml", "text").execute();
       await db.schema.alterTable("tasks").addColumn("workflow_setup", "text").execute();
+    },
+  },
+
+  /**
+   * マージ待ち（spec 2026-09-22-merge-wait-design.md 3 章）。tasks.state と step_runs.status に
+   * 'waiting' を足し、次に確かめる時刻を tasks.waiting_until に持つ。
+   * 外部キーの止め方と確かめ方は 0005 と同じ。
+   */
+  "0012_waiting": {
+    // deno-lint-ignore no-explicit-any
+    async up(db: Kysely<any>) {
+      await sql`PRAGMA foreign_keys = OFF`.execute(db);
+      await sql`PRAGMA defer_foreign_keys = ON`.execute(db);
+
+      await rebuildWithCheck(db, "tasks", "'paused','rate_limited'", "'paused','rate_limited','waiting'");
+      await rebuildWithCheck(
+        db,
+        "step_runs",
+        "'rate_limited','bounced'",
+        "'rate_limited','bounced','waiting'",
+      );
+      await db.schema.alterTable("tasks").addColumn("waiting_until", "text").execute();
+
+      const violations = await sql<{ table: string }>`PRAGMA foreign_key_check`.execute(db);
+      await sql`PRAGMA foreign_keys = ON`.execute(db);
+      if (violations.rows.length > 0) {
+        throw new Error(
+          `外部キーが壊れています: ${violations.rows.map((r) => r.table).join(", ")}`,
+        );
+      }
     },
   },
 };

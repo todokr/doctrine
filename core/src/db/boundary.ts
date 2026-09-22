@@ -34,6 +34,7 @@ export type StepBoundary = {
       | "resumed"
       | "pending_feed"
       | "rate_limited_until"
+      | "waiting_until"
     >
   >;
   /** ステップ開始時: status "running" / ended_at null で挿入し、返り値の id を持っておく。 */

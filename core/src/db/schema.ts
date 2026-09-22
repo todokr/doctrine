@@ -20,6 +20,8 @@ export type TaskState =
   | "paused"
   /** 利用上限に当たり、resetsAt まで待っている（2026-09-19-rate-limit-wait-design.md）。 */
   | "rate_limited"
+  /** PR のマージを待っている（2026-09-22-merge-wait-design.md 3章）。 */
+  | "waiting"
   | "completed"
   | "failed"
   | "canceled";
@@ -32,6 +34,8 @@ export type StepRunStatus =
   | "interrupted"
   /** 利用上限で打ち切られた実行。同じ会話で再開されるので失敗ではない。 */
   | "rate_limited"
+  /** poll ステップが「まだ」と答えた待ちの1周（2026-09-22-merge-wait-design.md 3章）。 */
+  | "waiting"
   /** 非0で終わった（却下された）が onFailure / onReject の goto で前のステップへ戻った。 */
   | "bounced";
 
@@ -67,6 +71,8 @@ export interface TasksTable {
   pending_feed: string | null;
   /** state が rate_limited の間だけ入る、再開してよい時刻（ISO 8601）。 */
   rate_limited_until: string | null;
+  /** state が waiting の間だけ入る、次に確かめる時刻（ISO 8601）。 */
+  waiting_until: string | null;
   priority: Generated<number>;
   resumed: Generated<number>;
   created_at: string;

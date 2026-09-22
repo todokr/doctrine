@@ -1525,6 +1525,7 @@ const TASK_SUMMARY_SHAPE: Record<keyof TaskSummary, (v: unknown) => boolean> = {
   branch: isString,
   worktree_path: nullable(isString),
   rate_limited_until: nullable(isString),
+  waiting_until: nullable(isString),
   priority: isNumber,
   created_at: isString,
   updated_at: isString,
