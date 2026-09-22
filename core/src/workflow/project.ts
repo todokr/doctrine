@@ -7,6 +7,7 @@ import {
   type Workflow,
   WorkflowValidationError,
 } from "./schema.ts";
+import { writeTextFileAtomic } from "../util/atomicWrite.ts";
 
 export type ProjectConfig = {
   setup?: string;
@@ -73,16 +74,7 @@ export function applyProjectConfig(
 
 /** project.yaml を一時ファイル経由で作業ツリーに書く。書き込みか rename に失敗したら一時ファイルを消して投げ直す。 */
 export async function writeProjectYaml(projectPath: string, text: string): Promise<void> {
-  const dir = join(projectPath, ".doctrine");
-  const target = join(dir, "project.yaml");
-  const tmp = join(dir, `project.yaml.${crypto.randomUUID()}.tmp`);
-  try {
-    await Deno.writeTextFile(tmp, text);
-    await Deno.rename(tmp, target);
-  } catch (e) {
-    await Deno.remove(tmp).catch(() => {});
-    throw e;
-  }
+  await writeTextFileAtomic(join(projectPath, ".doctrine", "project.yaml"), text);
 }
 
 /** setup は新しい概念ではなく、ただの command ステップに名前が付いたもの。 */
