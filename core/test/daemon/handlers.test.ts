@@ -31,6 +31,8 @@ import type {
   ServerEvent,
   TaskGuide,
   TaskSummary,
+  WorkflowDetail,
+  WorkflowListEntry,
   WorktreeEntry,
 } from "../../../shared/protocol.ts";
 import { branchNameFor } from "../../src/domain/worktree.ts";
@@ -2756,6 +2758,250 @@ test("worktree.list は Intake の worktree を孤児にしない", async () => 
   await updateIntake(ctx.db, "i1", { worktree_path: worktree });
   const after = await h("worktree.list", {}, NOOP_CONN) as WorktreeEntry[];
   assert.deepEqual(pick(after), [{ path: worktree, task_id: null, intake_id: "i1" }]);
+});
+
+// --- workflow.list / workflow.get ---
+
+async function repoDefaultYaml(): Promise<string> {
+  return await readFile(
+    new URL("../../../.doctrine/workflows/default.yaml", import.meta.url),
+    "utf8",
+  );
+}
+
+const BROKEN_SYNTAX = "name: x\nsteps: [\n";
+const BROKEN_SCHEMA = "name: bad\nsteps:\n  - id: a\n    type: bogus\n";
+const BROKEN_GOTO =
+  'name: g\nsteps:\n  - id: a\n    type: command\n    run: "true"\n    onFailure:\n      goto: nowhere\n      maxAttempts: 1\n';
+
+test("workflow.list: .doctrine/workflows の YAML を名前順に、検証の可否とともに返す", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  await h("project.add", { path: repo }, NOOP_CONN);
+  await writeFile(join(repo, ".doctrine/workflows/default.yaml"), await repoDefaultYaml());
+  await writeFile(join(repo, ".doctrine/workflows/broken.yaml"), BROKEN_SCHEMA);
+  await writeFile(join(repo, ".doctrine/workflows/notes.txt"), "not a workflow");
+
+  const list = await h("workflow.list", { project: repo }, NOOP_CONN) as WorkflowListEntry[];
+  assert.deepEqual(list.map((e) => e.name), ["broken", "default", "feature"]);
+  assert.deepEqual(list.find((e) => e.name === "default"), { name: "default", ok: true });
+  assert.deepEqual(list.find((e) => e.name === "feature"), { name: "feature", ok: true });
+  const broken = list.find((e) => e.name === "broken");
+  assert.equal(broken?.ok, false);
+  assert.ok(
+    !broken?.ok && broken.issues.some((i) => i.includes("type は次のいずれか")),
+  );
+});
+
+test("workflow.list: workflows ディレクトリが無ければ空を返す", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  await h("project.add", { path: repo }, NOOP_CONN);
+  await rm(join(repo, ".doctrine", "workflows"), { recursive: true });
+
+  const list = await h("workflow.list", { project: repo }, NOOP_CONN) as WorkflowListEntry[];
+  assert.deepEqual(list, []);
+});
+
+test("workflow.list: 未登録のプロジェクトは失敗する", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  await assert.rejects(
+    h("workflow.list", { project: repo }, NOOP_CONN),
+    /未登録のプロジェクトです/,
+  );
+});
+
+test("workflow.get: default.yaml の 10 ステップの設定と分岐を返す", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  await h("project.add", { path: repo }, NOOP_CONN);
+  await writeFile(join(repo, ".doctrine/workflows/default.yaml"), await repoDefaultYaml());
+
+  const detail = await h(
+    "workflow.get",
+    { project: repo, name: "default" },
+    NOOP_CONN,
+  ) as WorkflowDetail;
+  assert.ok(detail.ok);
+  if (!detail.ok) return;
+
+  assert.deepEqual(
+    detail.steps.map((s) => [s.id, s.type]),
+    [
+      ["plan", "agent"],
+      ["plan-review", "agent"],
+      ["plan-gate", "command"],
+      ["implement", "agent"],
+      ["verify", "command"],
+      ["agent-review", "agent"],
+      ["review-gate", "command"],
+      ["guide", "guide"],
+      ["review", "approval"],
+      ["open-pr", "command"],
+    ],
+  );
+
+  const byId = (id: string) => detail.steps.find((s) => s.id === id)!;
+
+  const plan = byId("plan");
+  assert.ok(plan.type === "agent");
+  if (plan.type === "agent") {
+    assert.equal(plan.session, "planner");
+    assert.equal(plan.model, "claude-opus-5");
+    assert.equal(plan.permissionMode, "acceptEdits");
+    assert.equal(plan.allowedTools?.[0], "Bash(git status:*)");
+    assert.ok(plan.prompt.includes("次のタスクの実装計画を立ててください。"));
+  }
+  assert.equal(plan.branch, null);
+
+  const implement = byId("implement");
+  assert.ok(implement.type === "agent");
+  if (implement.type === "agent") {
+    assert.equal(implement.model, "claude-sonnet-5");
+    assert.equal(implement.session, "implementer");
+  }
+
+  const planGate = byId("plan-gate");
+  assert.ok(planGate.type === "command");
+  if (planGate.type === "command") {
+    assert.ok(planGate.run.includes("grep -q '^verdict: approve'"));
+  }
+  assert.deepEqual(planGate.branch?.goto, "plan");
+  assert.equal(planGate.branch?.maxAttempts, 3);
+  assert.ok(planGate.branch?.feed?.includes("{{ steps.plan-gate.last_stdout }}"));
+  assert.equal(planGate.branch?.implicit, false);
+
+  assert.equal(byId("verify").branch?.goto, "implement");
+  assert.equal(byId("verify").branch?.maxAttempts, 3);
+  assert.equal(byId("review-gate").branch?.goto, "implement");
+  assert.equal(byId("review-gate").branch?.maxAttempts, 3);
+
+  const guide = byId("guide");
+  assert.ok(guide.type === "guide");
+  if (guide.type === "guide") assert.equal(guide.session, "guide");
+  assert.deepEqual(guide.branch, {
+    goto: "guide",
+    maxAttempts: 3,
+    feed: "{{ steps.guide.last_stderr }}",
+    implicit: true,
+  });
+
+  const review = byId("review");
+  assert.ok(review.type === "approval");
+  if (review.type === "approval") {
+    assert.equal(review.title, "変更を確認してください");
+    assert.deepEqual(review.reviewFiles, [
+      ".doctrine-out/review.md",
+      ".doctrine-out/implement-notes.md",
+      ".doctrine-out/plan.md",
+    ]);
+  }
+  assert.equal(review.branch?.goto, "implement");
+  assert.equal(review.branch?.maxAttempts, 5);
+  assert.equal(review.branch?.implicit, false);
+
+  const openPr = byId("open-pr");
+  assert.ok(openPr.type === "command");
+  if (openPr.type === "command") assert.ok(openPr.run.includes("gh pr create"));
+  assert.equal(openPr.branch, null);
+
+  assert.ok(detail.warnings.length > 0);
+  assert.deepEqual(ctx.warnings.recent(), []);
+});
+
+test("workflow.get: 書かれていない任意の欄は null で返す", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  await h("project.add", { path: repo }, NOOP_CONN);
+
+  const detail = await h(
+    "workflow.get",
+    { project: repo, name: "feature" },
+    NOOP_CONN,
+  ) as WorkflowDetail;
+  assert.ok(detail.ok);
+  if (!detail.ok) return;
+  assert.deepEqual(detail.steps[0], {
+    id: "review",
+    type: "approval",
+    title: "見て",
+    reviewFiles: null,
+    branch: null,
+  });
+});
+
+test("workflow.get: 壊れた YAML は検証エラーの内容を返す", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  await h("project.add", { path: repo }, NOOP_CONN);
+  await writeFile(join(repo, ".doctrine/workflows/syntax.yaml"), BROKEN_SYNTAX);
+  await writeFile(join(repo, ".doctrine/workflows/schema.yaml"), BROKEN_SCHEMA);
+  await writeFile(join(repo, ".doctrine/workflows/goto.yaml"), BROKEN_GOTO);
+
+  const syntax = await h(
+    "workflow.get",
+    { project: repo, name: "syntax" },
+    NOOP_CONN,
+  ) as WorkflowDetail;
+  assert.equal(syntax.ok, false);
+  if (!syntax.ok) assert.match(syntax.issues[0], /^YAMLとして読めません/);
+
+  const schema = await h(
+    "workflow.get",
+    { project: repo, name: "schema" },
+    NOOP_CONN,
+  ) as WorkflowDetail;
+  assert.equal(schema.ok, false);
+  if (!schema.ok) {
+    assert.ok(
+      schema.issues.some((i) => i.includes("steps.0.type") && i.includes("type は次のいずれか")),
+    );
+  }
+
+  const goto = await h(
+    "workflow.get",
+    { project: repo, name: "goto" },
+    NOOP_CONN,
+  ) as WorkflowDetail;
+  assert.equal(goto.ok, false);
+  if (!goto.ok) {
+    assert.deepEqual(goto.issues, [
+      'ステップ "a" の goto が存在しないステップを指しています: nowhere',
+    ]);
+  }
+});
+
+test("workflow.get: 無いワークフローや不正な名前は失敗する", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  await h("project.add", { path: repo }, NOOP_CONN);
+
+  await assert.rejects(h("workflow.get", { project: repo, name: "nonexistent" }, NOOP_CONN));
+  await assert.rejects(
+    h("workflow.get", { project: repo, name: "../project" }, NOOP_CONN),
+    /ワークフロー名が不正です/,
+  );
+});
+
+test("workflow.get: 一覧に出た名前はそのまま引ける", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  await h("project.add", { path: repo }, NOOP_CONN);
+  await writeFile(
+    join(repo, ".doctrine/workflows/my.flow.yaml"),
+    "name: feature\nsteps:\n  - id: review\n    type: approval\n    title: 見て\n",
+  );
+
+  const list = await h("workflow.list", { project: repo }, NOOP_CONN) as WorkflowListEntry[];
+  assert.deepEqual(list.find((e) => e.name === "my.flow"), { name: "my.flow", ok: true });
+
+  const detail = await h(
+    "workflow.get",
+    { project: repo, name: "my.flow" },
+    NOOP_CONN,
+  ) as WorkflowDetail;
+  assert.ok(detail.ok);
 });
 
 // --- daemon.slots / daemon.setGlobalLimit ---------------------------------
