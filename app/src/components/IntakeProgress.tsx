@@ -167,7 +167,7 @@ export function ProgressActions(p: {
   if (!ops.refresh && !ops.pause && !ops.revise && !ops.closeIssue) return null;
   return (
     <div className="actions">
-      {ops.refresh && <button className="btn" disabled={p.pending} onClick={p.onRefresh}>いま確認する</button>}
+      {ops.refresh && <button className="btn" disabled={p.pending} onClick={p.onRefresh}>更新する</button>}
       {ops.pause && (
         <button className="btn" disabled={p.pending} onClick={p.onTogglePause}>
           {p.paused ? "自動投入を再開" : "自動投入を一時停止"}

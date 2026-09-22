@@ -108,7 +108,7 @@ const actions = (o: Partial<Parameters<typeof ProgressActions>[0]> & { state?: "
 describe("ProgressActions", () => {
   test("進行中は確認・一時停止・改訂", () => {
     const html = actions();
-    for (const text of ["いま確認する", "自動投入を一時停止", "改訂に入る…"]) expect(html).toContain(text);
+    for (const text of ["更新する", "自動投入を一時停止", "改訂に入る…"]) expect(html).toContain(text);
     expect(html).not.toContain("Issue を閉じる");
     expect(actions({ paused: true })).toContain("自動投入を再開");
   });
@@ -116,7 +116,7 @@ describe("ProgressActions", () => {
   test("完了は Issue を閉じるだけ", () => {
     const html = actions({ state: "completed" });
     expect(html).toContain("Issue を閉じる");
-    for (const text of ["いま確認する", "自動投入", "改訂に入る"]) expect(html).not.toContain(text);
+    for (const text of ["更新する", "自動投入", "改訂に入る"]) expect(html).not.toContain(text);
   });
 
   test("中止した Intake は操作を出さない", () => {

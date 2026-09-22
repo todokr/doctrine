@@ -648,7 +648,7 @@ test("中止（stop）で sub-issue を閉じられなくても中止は成功�
   assert.ok(ctx.warnings.recent().some((w) => /sub-issue を閉じられませんでした/.test(w.message)));
 });
 
-test("いま確認すると見張りの 1 周が回り、マージされた下流を投入する", async () => {
+test("更新すると見張りの 1 周が回り、マージされた下流を投入する", async () => {
   const { call, pw, id } = await toActive();
   await call("intake.completeHumanProcess", { intake_id: id, process_id: "3", note: "x" });
   const [first] = await tasksOf(call);
