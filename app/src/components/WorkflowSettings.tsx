@@ -22,7 +22,6 @@ export function WorkflowList(props: {
         <div key={e.name}>
           <button
             type="button"
-            className="seg"
             aria-pressed={selected === e.name}
             disabled={!e.ok}
             onClick={() => onSelect(e.name)}
@@ -46,7 +45,12 @@ const BRANCH_HEADING: Record<WorkflowStepDetail["type"], string> = {
 
 function BranchSettings({ kind, branch }: { kind: WorkflowStepDetail["type"]; branch: WorkflowBranchDetail | null }) {
   if (!branch) {
-    return <p className="hint">分岐なし</p>;
+    return (
+      <>
+        <dt>分岐</dt>
+        <dd>分岐なし</dd>
+      </>
+    );
   }
   return (
     <>
@@ -164,10 +168,11 @@ export function WorkflowDefinitionView(props: {
 /** 設定画面の節。プロジェクトを選び、workflow.list / workflow.get を取りに行く */
 export function WorkflowSettings() {
   const { s } = useStore();
-  const [path, setPath] = useState<string | null>(() => {
-    const current = s.projects.find((p) => p.id === s.project);
-    return (current ?? s.projects[0])?.path ?? null;
-  });
+  const [chosenPath, setChosenPath] = useState<string | null>(null);
+  // 選んだ path がまだ projects に無ければ（未選択、または切り替え直後）、s.project に合わせて選び直す。
+  const path = chosenPath && s.projects.some((p) => p.path === chosenPath)
+    ? chosenPath
+    : (s.projects.find((p) => p.id === s.project) ?? s.projects[0])?.path ?? null;
   const [list, setList] = useState<Loaded<WorkflowListEntry[]>>({ kind: "loading" });
   const [name, setName] = useState<string | null>(null);
   const [detail, setDetail] = useState<Loaded<WorkflowDetail>>({ kind: "loading" });
@@ -225,8 +230,8 @@ export function WorkflowSettings() {
   return (
     <div className="pad">
       <h2>ワークフロー</h2>
-      <select aria-label="ワークフローを見るプロジェクト" value={path ?? ""} onChange={(e) => setPath(e.target.value)}>
-        {s.projects.map((p) => <option key={p.id} value={p.path}>{p.id}</option>)}
+      <select aria-label="ワークフローを見るプロジェクト" value={path ?? ""} onChange={(e) => setChosenPath(e.target.value)}>
+        {s.projects.map((p) => <option key={p.path} value={p.path}>{p.id}</option>)}
       </select>
       {list.kind === "loading" && <p className="hint">読み込んでいます…</p>}
       {list.kind === "error" && <div className="box danger"><p>{list.message}</p></div>}
