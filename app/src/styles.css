@@ -469,7 +469,8 @@ tr.wt-stale{background:var(--accent-soft)}
 .wf-step.gate .nm,.wf-step.tone-human .nm{color:var(--human-text)}
 .wf-step.unknown .bar{background:repeating-linear-gradient(90deg,var(--ink-3) 0 6px,transparent 6px 10px)}
 .wf-step.now .bar{box-shadow:0 0 0 3px var(--tone-soft)}
-.wf-step.now .nm{color:var(--ink);font-weight:500}
+.wf-step.now .nm{font-weight:500}
+.wf-step.now:not(.tone-danger):not(.tone-human):not(.gate) .nm{color:var(--ink)}
 .wf-legend{display:flex;gap:14px;flex-wrap:wrap;font-size:11.5px;color:var(--ink-3)}
 .wf-legend span{display:inline-flex;align-items:center;gap:6px}
 .wf-legend i{width:14px;height:4px;border-radius:2px;background:var(--tone)}
