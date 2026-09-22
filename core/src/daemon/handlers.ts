@@ -718,7 +718,11 @@ export function createHandler(ctx: DaemonContext): Handler {
       }
       case "intake.redispatch": {
         const intakeId = req(params, "intake_id");
-        await redispatchProcess(ctx.db, { intakeId, processId: req(params, "process_id") });
+        const { replacedTaskId } = await redispatchProcess(ctx.db, {
+          intakeId,
+          processId: req(params, "process_id"),
+        });
+        if (replacedTaskId !== null) await cleanupReplacedTask(ctx, replacedTaskId);
         ctx.broadcast({ event: "intake.updated", intake_id: intakeId });
         return await intakeDetailOf(ctx, intakeId);
       }
@@ -888,7 +892,38 @@ async function resolveRemoveTarget(
 export async function cleanupAfterRun(ctx: DaemonContext, taskId: string): Promise<void> {
   const task = await getTask(ctx.db, taskId);
   if (!task || task.state !== "completed" || !task.worktree_path) return;
-  const worktreePath = task.worktree_path;
+  await removeTaskWorktree(
+    ctx,
+    task,
+    task.worktree_path,
+    "完了時に未コミットの変更が残っているため worktree を削除しませんでした",
+  );
+}
+
+/**
+ * Intake の再投入で置き換えた古いタスクの worktree を消す。failed / canceled を証拠として残すのは、
+ * そのプロセスをまだ誰も引き継いでいないからで、新しいタスクが引き継いだ後は残す理由が無い。
+ * タスクの記録とブランチは残す。未コミットの変更があれば消さない。投げない（再投入そのものは済んでいる）。
+ */
+async function cleanupReplacedTask(ctx: DaemonContext, taskId: string): Promise<void> {
+  const task = await getTask(ctx.db, taskId);
+  if (!task || !isTerminal(task.state) || !task.worktree_path) return;
+  await removeTaskWorktree(
+    ctx,
+    task,
+    task.worktree_path,
+    "再投入で置き換えた古いタスクの worktree に未コミットの変更があるため削除しませんでした",
+  );
+}
+
+/** worktree を消し、消したか残したかを task.cleanedUp で伝える。未コミットの変更があれば残す。投げない。 */
+async function removeTaskWorktree(
+  ctx: DaemonContext,
+  task: TaskRow,
+  worktreePath: string,
+  dirtyWarning: string,
+): Promise<void> {
+  const taskId = task.id;
   const refuse = (warning: string) => {
     ctx.warnings.push(warning, taskId);
     ctx.broadcast({
@@ -916,11 +951,8 @@ export async function cleanupAfterRun(ctx: DaemonContext, taskId: string): Promi
     });
   } catch (e) {
     if (e instanceof UncommittedChangesError) {
-      // ワークフローの書き方のバグ。黙って消してよいものではない。
-      refuse(
-        `完了時に未コミットの変更が残っているため worktree を削除しませんでした ` +
-          `(${worktreePath}): ${e.message}`,
-      );
+      // 黙って消してよいものではない。人が中身を見て、force で消す
+      refuse(`${dirtyWarning} (${worktreePath}): ${e.message}`);
     } else {
       // git worktree remove 自体が失敗した場合など（原因不明）。未コミットの
       // 変更の話にすり替えず、そのまま見せる。

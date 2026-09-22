@@ -209,7 +209,7 @@ export async function dispatchIntake(db: Db, intakeId: string): Promise<Dispatch
 export async function redispatchProcess(
   db: Db,
   o: { intakeId: string; processId: string },
-): Promise<{ taskId: string }> {
+): Promise<{ taskId: string; replacedTaskId: string | null }> {
   const intake = await getIntake(db, o.intakeId);
   if (!intake) throw new Error("Intake がありません");
   if (intake.state !== "active") {
@@ -228,5 +228,5 @@ export async function redispatchProcess(
   }
   const taskId = await dispatchProcess(db, src, row);
   if (taskId === null) throw new Error("ほかの操作が先にタスクを置き換えました");
-  return { taskId };
+  return { taskId, replacedTaskId: row.current_task_id };
 }

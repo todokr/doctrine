@@ -1,12 +1,16 @@
 import { fakeBaseSync } from "../helpers/watcher.ts";
 import { afterEach, beforeEach, test } from "@std/testing/bdd";
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openDb } from "../../src/db/migrate.ts";
 import { getIntake, listIntakeRuns, listProcesses, updateIntake } from "../../src/db/intakes.ts";
 import { createHandler, type DaemonContext, tick } from "../../src/daemon/handlers.ts";
+import { commitStepBoundary } from "../../src/db/boundary.ts";
+import { getTask } from "../../src/db/tasks.ts";
+import { createWorktree, worktreePathFor } from "../../src/domain/worktree.ts";
 import { createMockAdapter } from "../../src/adapter/mock.ts";
 import type { AgentAdapter } from "../../src/adapter/types.ts";
 import { createWarningLog } from "../../src/daemon/warnings.ts";
@@ -590,6 +594,52 @@ test("要確認のプロセスを再投入すると、新しいタスクが同�
   assert.equal(tasks.find((t) => t.id === old.id)!.state, "canceled");
 });
 
+/** 古いタスクに worktree を持たせる（走らせずに、tick が作るのと同じ置き場へ作る）。 */
+async function giveWorktree(ctx: DaemonContext, taskId: string, branch: string): Promise<string> {
+  const path = await createWorktree({
+    repoPath: repo,
+    worktreePath: worktreePathFor(repo, taskId),
+    branch,
+    baseBranch: "main",
+  });
+  await commitStepBoundary(ctx.db, { taskId, taskPatch: { worktree_path: path } });
+  return path;
+}
+
+test("再投入すると、置き換えた古いタスクの worktree を消し、タスクの記録は残す", async () => {
+  const { ctx, events, call, id } = await toActive();
+  const [old] = await tasksOf(call);
+  const path = await giveWorktree(ctx, old.id, old.branch);
+  await call("task.cancel", { task_id: old.id });
+
+  await call("intake.redispatch", { intake_id: id, process_id: "1" });
+
+  assert.equal(existsSync(path), false);
+  const kept = (await getTask(ctx.db, old.id))!;
+  assert.equal(kept.state, "canceled");
+  assert.equal(kept.worktree_path, null);
+  assert.ok(
+    events.some((e) =>
+      e.event === "task.cleanedUp" && e.task_id === old.id && e.outcome === "removed"
+    ),
+  );
+});
+
+test("置き換えた古いタスクの worktree に未コミットの変更があれば、消さずに警告を残す", async () => {
+  const { ctx, call, id } = await toActive();
+  const [old] = await tasksOf(call);
+  const path = await giveWorktree(ctx, old.id, old.branch);
+  await writeFile(join(path, "wip.txt"), "作りかけ\n");
+  await call("task.cancel", { task_id: old.id });
+
+  await call("intake.redispatch", { intake_id: id, process_id: "1" });
+
+  assert.equal(existsSync(join(path, "wip.txt")), true);
+  assert.equal((await getTask(ctx.db, old.id))!.worktree_path, path);
+  assert.ok(ctx.warnings.recent().some((w) => w.message.includes("未コミットの変更")));
+  assert.equal((await tasksOf(call)).length, 2, "再投入そのものは成功する");
+});
+
 test("要確認でないプロセスは再投入できない", async () => {
   const { call, id } = await toActive();
   await assert.rejects(
@@ -648,7 +698,7 @@ test("中止（stop）で sub-issue を閉じられなくても中止は成功�
   assert.ok(ctx.warnings.recent().some((w) => /sub-issue を閉じられませんでした/.test(w.message)));
 });
 
-test("いま確認すると見張りの 1 周が回り、マージされた下流を投入する", async () => {
+test("更新すると見張りの 1 周が回り、マージされた下流を投入する", async () => {
   const { call, pw, id } = await toActive();
   await call("intake.completeHumanProcess", { intake_id: id, process_id: "3", note: "x" });
   const [first] = await tasksOf(call);
