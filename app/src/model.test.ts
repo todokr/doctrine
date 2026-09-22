@@ -38,7 +38,7 @@ import {
   rejections,
   remaining,
   reviewRound,
-  RUN_PILL,
+  RUN_WORD,
   selectedIntake,
   sidebarOrder,
   stepRunHistory,
@@ -52,6 +52,7 @@ import {
   type Loaded,
   type State,
 } from "./model";
+import { RUN_TONE } from "./tone";
 import type { GuideView } from "./guide";
 import { countIntakeAttention, EMPTY_INTAKE_DRAFT, type IntakeDraft, intakeOrder } from "./intake";
 import { buildDiff } from "./patch";
@@ -1299,10 +1300,9 @@ describe("止まった理由と実行履歴", () => {
   });
 
   test("中断（interrupted）の実行は失敗と別の表示になる", () => {
-    expect(RUN_PILL.interrupted).toEqual(["中断", "p-muted"]);
-    expect(RUN_PILL.failed).toEqual(["失敗", "p-danger"]);
-    expect(RUN_PILL.interrupted[0]).not.toBe(RUN_PILL.failed[0]);
-    expect(RUN_PILL.interrupted[1]).not.toBe(RUN_PILL.failed[1]);
+    expect(RUN_WORD.interrupted).toBe("中断");
+    expect(RUN_WORD.failed).toBe("失敗");
+    expect(RUN_TONE.interrupted).not.toBe(RUN_TONE.failed);
   });
 
   test("一時停止したタスクの中断した実行は、止まった理由（失敗）に出ない", () => {

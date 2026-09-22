@@ -23,6 +23,7 @@ import { useIntakeRpc, useStore } from "../store";
 import { IntakeHistory } from "./IntakeHistory";
 import { PfdDiagram } from "./PfdDiagram";
 import { PfdElementPanel } from "./PfdElementPanel";
+import { StatusDot } from "./StatusDot";
 import { Markdown } from "./text";
 
 const errorMessage = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -50,7 +51,7 @@ export function ActionNeeded(p: {
           <div key={process.id} className="need">
             <div className="headrow">
               <b>{process.name}</b>
-              <span className="pill p-attn">あなたの番</span>
+              <StatusDot tone="human" word="あなたの番" />
             </div>
             {process.purpose && <Markdown src={process.purpose} />}
             {process.done_when && <Markdown src={process.done_when} />}
@@ -76,7 +77,7 @@ export function ActionNeeded(p: {
         <div key={process.id} className="need">
           <div className="headrow">
             <b>{process.name}</b>
-            <span className="pill p-danger">{statusText(view)}</span>
+            <StatusDot tone="danger" word={statusText(view)} />
             <button className="el-link mono" onClick={() => p.onOpenTask(view.taskId)}>{view.taskId}</button>
           </div>
           <div className="actions">

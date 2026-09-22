@@ -1,7 +1,7 @@
 import type { IntakeSummary } from "../../../shared/protocol.ts";
 import {
   INTAKE_SECTIONS,
-  INTAKE_STATE,
+  INTAKE_WORD,
   countIntakeAttention,
   intakeOrder,
   intakeProgress,
@@ -110,7 +110,6 @@ function IntakeItem({ i }: { i: IntakeSummary }) {
   const { s, dispatch } = useStore();
   const p = s.projects.find((x) => x.daemonId === i.project_id);
   const num = issueNumber(i.issue_url);
-  const state = INTAKE_STATE[i.state];
   const progress = intakeProgress(i);
   return (
     <button className="it" aria-current={s.intakeSel === i.id} onClick={() => dispatch({ type: "intake.select", id: i.id })}>
@@ -121,7 +120,7 @@ function IntakeItem({ i }: { i: IntakeSummary }) {
       </span>
       <span className="m">
         <span className="pjdot" style={{ background: p?.color ?? "#666" }} />
-        <span className={`pill ${state.cls}`} style={{ lineHeight: "16px", fontSize: "10.5px" }}>{state.word}</span>
+        <span>{INTAKE_WORD[i.state]}</span>
         {progress && <span className="prog">{progress}</span>}
         {i.revising && <span className="tag rev">改訂中</span>}
         {i.rate_limited_until && <span>{`${hm(Date.parse(i.rate_limited_until))} 再開`}</span>}

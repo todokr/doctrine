@@ -28,6 +28,7 @@ import type { ReviewFile, Task, TaskContext } from "../types";
 import { DiffFileBlock, fileAnchor, fileStat } from "./DiffFileBlock";
 import { GuideNotice, GuidePanel, RiskNote } from "./Guide";
 import { flowSectionAnchor, ReadingFlow } from "./ReadingFlow";
+import { StatusDot } from "./StatusDot";
 import { Markdown } from "./text";
 
 /**
@@ -286,8 +287,9 @@ export function ReviewView({ t }: { t: Task }) {
         <Crumbs t={t} />
         <h1>{t.title}</h1>
         <div className="headrow">
-          <span className="pill p-attn">◆ {t.step ?? "レビュー待ち"}</span>
-          {c && reviewRound(c) > 1 && <span className="pill p-muted">{reviewRound(c)}回目のレビュー</span>}
+          <StatusDot tone="human" word="レビュー待ち" />
+          {t.step && <span>ステップ <span className="mono">{t.step}</span></span>}
+          {c && reviewRound(c) > 1 && <span>{reviewRound(c)} 回目のレビュー</span>}
           <span className="hint">{ago(t.since, s.now)}から待っています</span>
           <span className="mono hint">{t.branch}</span>
           <span className="spacer" />

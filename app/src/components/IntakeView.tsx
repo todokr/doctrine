@@ -1,14 +1,16 @@
 import { useState } from "react";
 import type { IntakeSummary } from "../../../shared/protocol.ts";
 import { sendDecision } from "../decision";
-import { INTAKE_STATE, intakeFace, isClosedIntake, issueNumber } from "../intake";
+import { INTAKE_WORD, intakeFace, isClosedIntake, issueNumber } from "../intake";
 import { intakeDetailOf, selectedIntake } from "../model";
 import { useIntakeRpc, useStore } from "../store";
+import { INTAKE_TONE } from "../tone";
 import type { Project } from "../types";
 import { AnswerFace } from "./AnswerFace";
 import { IntakeProgress, CancelDialog } from "./IntakeProgress";
 import { IssuePicker } from "./IssuePicker";
 import { PlanReview } from "./PlanReview";
+import { StatusDot } from "./StatusDot";
 
 /** 改訂中の帯。面の中身に関係なく、どの面の上にも出す */
 export function RevisingBand(p: { intake: IntakeSummary; pending: boolean; onAbandon: () => void }) {
@@ -26,7 +28,6 @@ export function IntakeHeading(
   { intake, project, onCancel }: { intake: IntakeSummary; project: Project | undefined; onCancel?: () => void },
 ) {
   const num = issueNumber(intake.issue_url);
-  const state = INTAKE_STATE[intake.state];
   return (
     <>
       <div className="crumbs">
@@ -40,7 +41,7 @@ export function IntakeHeading(
           {num !== null && <span className="num">{`#${num}`}</span>}
           {intake.issue_title}
         </h1>
-        <span className={`pill ${state.cls}`}>{state.word}</span>
+        <StatusDot tone={INTAKE_TONE[intake.state]} word={INTAKE_WORD[intake.state]} />
         <span className="mono hint">{intake.issue_url}</span>
         {onCancel && !isClosedIntake(intake.state) && <button className="btn sm danger" onClick={onCancel}>中止…</button>}
       </div>
@@ -52,7 +53,7 @@ export function IntakeHeading(
 export function IntakeFacePlaceholder({ intake }: { intake: IntakeSummary }) {
   return (
     <div className="box quiet" data-face={intakeFace(intake.state)}>
-      {INTAKE_STATE[intake.state].word}
+      {INTAKE_WORD[intake.state]}
     </div>
   );
 }
