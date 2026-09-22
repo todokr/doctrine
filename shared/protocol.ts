@@ -196,6 +196,40 @@ export type WorkflowDetail =
   | { name: string; ok: true; steps: WorkflowStepDetail[]; warnings: string[] }
   | { name: string; ok: false; issues: string[] };
 
+/** workflow.save の分岐の変更。undefined の項目は触らない。feed が null なら feed のキーを消す。 */
+export type WorkflowBranchChange = {
+  goto?: string;
+  maxAttempts?: number;
+  /** 複数行なら末尾の改行を含めて渡す（YAML の `|` を保つため）。 */
+  feed?: string | null;
+};
+
+/**
+ * workflow.save に渡すステップ1つ分の変更。id で対象のステップを指す（id と type は変えられない）。
+ * undefined の項目は触らず、null の項目はキーを消す。
+ * reviewFiles が null なら review ごと、branch が null なら onFailure / onReject ごと消す。
+ */
+export type WorkflowStepChange = {
+  id: string;
+  /** 末尾の改行を含めて渡す（YAML の `|` を保つため）。 */
+  prompt?: string;
+  run?: string;
+  model?: string | null;
+  permissionMode?: string | null;
+  session?: string | null;
+  allowedTools?: string[] | null;
+  reviewFiles?: string[] | null;
+  branch?: WorkflowBranchChange | null;
+};
+
+/** 保存しなかった理由1件。stepId・field は分かるときだけ入る。field は WorkflowStepChange の項目名（branch は "branch.goto" のように下の項目まで）。 */
+export type WorkflowSaveIssue = { stepId: string | null; field: string | null; message: string };
+
+/** workflow.save の応答。ok: false のときはファイルに書いていない。warnings は parseWorkflow の警告。 */
+export type WorkflowSaveResult =
+  | { ok: true; warnings: string[] }
+  | { ok: false; issues: WorkflowSaveIssue[] };
+
 export type TaskLogs = { step_run_id: number | null; log_path: string | null; lines: string[] };
 
 /** daemon.warnings が返す1件。イベントの daemon.warning と同じ形。 */
@@ -463,6 +497,11 @@ export type Methods = {
   "workflow.list": { params: { project: string }; result: WorkflowListEntry[] };
   /** 検証に落ちたときは例外ではなく ok: false で返す。ファイルが無ければ失敗する。 */
   "workflow.get": { params: { project: string; name: string }; result: WorkflowDetail };
+  /** 変更を当てて検証し、通れば作業ツリーのファイルに書く。コミットはしない。検証に落ちたら書かずに ok: false。 */
+  "workflow.save": {
+    params: { project: string; name: string; changes: WorkflowStepChange[] };
+    result: WorkflowSaveResult;
+  };
   "project.config.get": { params: { project: string }; result: ProjectConfig };
   "project.config.save": {
     params: { project: string; config: ProjectConfigInput };

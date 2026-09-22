@@ -32,3 +32,11 @@ export function checkSettingsForm(f: SettingsForm): SettingsCheck {
   if (Object.keys(errors).length > 0) return { ok: false, errors };
   return { ok: true, value: { editorCommand, terminalCommand, staleDays } };
 }
+
+export type GlobalLimitCheck = { ok: true; value: number } | { ok: false; error: string };
+
+export function checkGlobalLimit(text: string): GlobalLimitCheck {
+  const trimmed = text.trim();
+  if (!/^[1-9][0-9]*$/.test(trimmed)) return { ok: false, error: "1 以上の整数を入れてください" };
+  return { ok: true, value: Number(trimmed) };
+}

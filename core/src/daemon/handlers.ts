@@ -8,6 +8,7 @@ import {
   type ProjectConfigInput,
   writeProjectYaml,
 } from "../workflow/project.ts";
+import { applyWorkflowChanges, writeWorkflowYaml } from "../workflow/save.ts";
 import { ensureProjectScaffold } from "../workflow/scaffold.ts";
 import { pinOf, type WorkflowLoader } from "../workflow/load.ts";
 import {
@@ -94,6 +95,8 @@ import type {
   TaskLogs,
   WorkflowDetail,
   WorkflowListEntry,
+  WorkflowSaveResult,
+  WorkflowStepChange,
   WorkflowStepDetail,
   WorktreeEntry,
 } from "../../../shared/protocol.ts";
@@ -213,6 +216,30 @@ async function reqProject(ctx: DaemonContext, params: Record<string, unknown>) {
   const project = await getProjectByPath(ctx.db, path);
   if (!project) throw new Error(`未登録のプロジェクトです: ${path}`);
   return project;
+}
+
+/** ワークフロー名。`/` `\` を含むものはパスとして不正なので拒む。 */
+function reqWorkflowName(params: Record<string, unknown>): string {
+  const name = req(params, "name");
+  if (name.includes("/") || name.includes("\\")) {
+    throw new Error(`ワークフロー名が不正です: ${name}`);
+  }
+  return name;
+}
+
+/** params.changes を取り出す。配列でない、または id を持たない要素があれば投げる。値の型検証は applyWorkflowChanges に任せる。 */
+function readWorkflowChanges(params: Record<string, unknown>): WorkflowStepChange[] {
+  const changes = params.changes;
+  if (!Array.isArray(changes)) throw new Error("changes は必須です");
+  for (const c of changes) {
+    if (
+      typeof c !== "object" || c === null || typeof (c as { id: unknown }).id !== "string" ||
+      (c as { id: string }).id === ""
+    ) {
+      throw new Error("changes は必須です");
+    }
+  }
+  return changes as WorkflowStepChange[];
 }
 
 /** project.yaml から読んだ設定を projects の行へ写す。 */
@@ -356,10 +383,7 @@ export function createHandler(ctx: DaemonContext): Handler {
       }
       case "workflow.get": {
         const project = await reqProject(ctx, params);
-        const name = req(params, "name");
-        if (name.includes("/") || name.includes("\\")) {
-          throw new Error(`ワークフロー名が不正です: ${name}`);
-        }
+        const name = reqWorkflowName(params);
         // warnings はこの応答に載せるだけで ctx.warnings には積まない。設定画面が
         // 何度も呼ぶ経路であり、積む出口は task.create の1箇所だけにする。
         try {
@@ -376,6 +400,20 @@ export function createHandler(ctx: DaemonContext): Handler {
           }
           throw e;
         }
+      }
+      case "workflow.save": {
+        const project = await reqProject(ctx, params);
+        const name = reqWorkflowName(params);
+        const changes = readWorkflowChanges(params);
+        const path = join(project.path, ".doctrine", "workflows", `${name}.yaml`);
+        const yamlText = await Deno.readTextFile(path).catch(() => {
+          throw new Error(`ワークフローがありません: ${path}`);
+        });
+        const result = applyWorkflowChanges(yamlText, changes);
+        if (!result.ok) return result satisfies WorkflowSaveResult;
+        await writeWorkflowYaml(project.path, name, result.text);
+        // warnings はこの応答に載せるだけで ctx.warnings には積まない（workflow.get と同じ理由）。
+        return { ok: true, warnings: result.warnings } satisfies WorkflowSaveResult;
       }
 
       case "task.create": {

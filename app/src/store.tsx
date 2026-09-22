@@ -24,6 +24,7 @@ import { buildDiff } from "./patch";
 import type { GhStatus, IssueDetail } from "../../shared/intake/github.ts";
 import type { Answer } from "../../shared/intake/question.ts";
 import type {
+  DaemonSlots,
   GithubIssue,
   IntakeDetail,
   IntakeSummary,
@@ -503,6 +504,17 @@ export function useProjectConfigRpc(): ProjectConfigRpc {
     get: (project: string) => rpc("project.config.get", { project }),
     workflows: (project: string) => rpc("workflow.list", { project }),
     save: (project: string, config: ProjectConfigInput) => rpc("project.config.save", { project, config }),
+  };
+}
+
+/** 全体の実行枠の読み書き。成否の判定は呼び出し側で行う */
+export function useSlotsRpc(): {
+  load: () => Promise<DaemonSlots>;
+  setGlobalLimit: (globalLimit: number) => Promise<DaemonSlots>;
+} {
+  return {
+    load: () => rpc("daemon.slots", {}),
+    setGlobalLimit: (globalLimit: number) => rpc("daemon.setGlobalLimit", { global_limit: globalLimit }),
   };
 }
 
