@@ -17,6 +17,7 @@ import { dispatchIntake, loadApprovedPlan } from "./dispatch.ts";
 import { computeProcessStatuses, goalReached } from "./pfd/status.ts";
 import { syncSubIssues } from "./subIssueSync.ts";
 import { processProgressOf } from "./view.ts";
+import type { WorkflowLoader } from "../workflow/load.ts";
 
 export const WATCH_INTERVAL_MS = 120_000;
 
@@ -157,7 +158,12 @@ export type ProjectWatchReport = {
 /** 1 プロジェクトの 1 周。投げない（想定外の例外も errors に入れる）。 */
 export async function watchProject(
   db: Db,
-  deps: { tracker: Tracker; prWatcher: PrWatcher; baseSync: BaseSync },
+  deps: {
+    tracker: Tracker;
+    prWatcher: PrWatcher;
+    baseSync: BaseSync;
+    loadWorkflow: WorkflowLoader;
+  },
   projectId: number,
 ): Promise<ProjectWatchReport> {
   const report: ProjectWatchReport = {
@@ -221,7 +227,7 @@ export async function watchProject(
       try {
         // GitHub がマージを返しても、fetch に載るのが遅れることがある。載るまで次の周へ延ばす
         if (!await mergesArrived(db, deps.baseSync, project, intake.id)) continue;
-        const dispatched = await dispatchIntake(db, intake.id);
+        const dispatched = await dispatchIntake(db, intake.id, { loadWorkflow: deps.loadWorkflow });
         if (dispatched.created.length > 0) report.updated.add(intake.id);
         for (const f of dispatched.errors) {
           report.errors.push(`${intake.issue_url} プロセス ${f.processId} の投入: ${f.message}`);
@@ -281,6 +287,7 @@ export function createIntakeWatcher(deps: {
   tracker: Tracker;
   prWatcher: PrWatcher;
   baseSync: BaseSync;
+  loadWorkflow: WorkflowLoader;
   onStateChanged(t: IntakeTransition): void;
   onUpdated(intakeId: string): void;
   now?: () => Date;

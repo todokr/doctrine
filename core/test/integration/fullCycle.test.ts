@@ -8,13 +8,9 @@ import { join } from "node:path";
 import { openDb } from "../../src/db/migrate.ts";
 import { getTask } from "../../src/db/tasks.ts";
 import { listStepRuns } from "../../src/db/stepRuns.ts";
-import {
-  createHandler,
-  type DaemonContext,
-  loadWorkflowFromDisk,
-  tick,
-} from "../../src/daemon/handlers.ts";
+import { createHandler, type DaemonContext, tick } from "../../src/daemon/handlers.ts";
 import { createWarningLog } from "../../src/daemon/warnings.ts";
+import { loadWorkflowFromDisk, taskWorkflow } from "../../src/workflow/load.ts";
 import { createMockAdapter } from "../../src/adapter/mock.ts";
 import type { ServerEvent, TaskDetail } from "../../../shared/protocol.ts";
 import { makeRepo, tickWhenIdle, until } from "../helpers/repo.ts";
@@ -83,6 +79,7 @@ async function context(adapter = createMockAdapter({ result: { ok: true, text: "
     configPath: join(root, "config.json"),
     broadcast: (ev) => events.push(ev),
     loadWorkflow: loadWorkflowFromDisk,
+    workflowOf: (t, p) => taskWorkflow(t, p, loadWorkflowFromDisk),
     running: new Set(),
     tracker: fakeTracker(),
     runningIntakeRuns: new Set(),

@@ -14,6 +14,8 @@ export type NewTask = {
   intake_process_id?: string | null;
   issue_url?: string | null;
   parent_issue_url?: string | null;
+  workflow_yaml?: string | null;
+  workflow_setup?: string | null;
 };
 
 export async function insertProject(db: Db, p: Omit<ProjectRow, "id">): Promise<number> {

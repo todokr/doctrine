@@ -1,15 +1,15 @@
 import { isAbsolute, join } from "@std/path";
 import { computeDiff, mergeBase, type TaskDiff } from "../domain/diff.ts";
-import { branchOf, parseWorkflow, type Workflow } from "../workflow/schema.ts";
+import { branchOf, type Workflow } from "../workflow/schema.ts";
 import {
   applyProjectConfig,
   parseProjectConfig,
   type ProjectConfig,
   type ProjectConfigInput,
-  withSetupStep,
   writeProjectYaml,
 } from "../workflow/project.ts";
 import { ensureProjectScaffold } from "../workflow/scaffold.ts";
+import { pinOf, type WorkflowLoader } from "../workflow/load.ts";
 import {
   getProject,
   getProjectByPath,
@@ -102,10 +102,10 @@ export type DaemonContext = {
   logRoot: string;
   globalLimit: number;
   broadcast(ev: ServerEvent, opts?: { taskId?: string; followersOnly?: boolean }): void;
-  loadWorkflow(
-    projectPath: string,
-    name: string,
-  ): Promise<{ workflow: Workflow; warnings: string[] }>;
+  /** 作成時（task.create）と、作成時の定義を持たない行の読み込みに使う。 */
+  loadWorkflow: WorkflowLoader;
+  /** タスクが従うワークフロー（setup を差し込んだ後）。tick・承認・読み取りの経路はすべてここを通る。 */
+  workflowOf(task: TaskRow, project: ProjectRow): Promise<Workflow>;
   running: Set<string>;
   /** Issue の読み込み。調査・分解の prompt に本文とコメントを載せるのに使う。 */
   tracker: Tracker;
@@ -218,17 +218,6 @@ async function settleIntakeCommand(ctx: DaemonContext, t: IntakeTransition) {
   return await toIntakeSummary(ctx.db, row, ctx.intakeWatcher.health(row.project_id));
 }
 
-export async function loadWorkflowFromDisk(
-  projectPath: string,
-  name: string,
-): Promise<{ workflow: Workflow; warnings: string[] }> {
-  const path = join(projectPath, ".doctrine", "workflows", `${name}.yaml`);
-  const text = await Deno.readTextFile(path).catch(() => {
-    throw new Error(`ワークフローがありません: ${path}`);
-  });
-  return parseWorkflow(text);
-}
-
 /**
  * Intake 由来のタスクの worktree の起点（spec 11.3）。見張りは投入の前に取り込んでいるが、
  * 画面からの再投入は見張りを通らないので、ここでも取り込む。取り込めなくても、前に取り込んだ origin 側から切る。
@@ -312,7 +301,7 @@ export function createHandler(ctx: DaemonContext): Handler {
           ? params.workflow
           : project.default_workflow;
         // 不正な定義はタスク作成時に落とす
-        const { warnings } = await ctx.loadWorkflow(projectPath, workflowName);
+        const loaded = await ctx.loadWorkflow(projectPath, workflowName);
         const id = crypto.randomUUID();
         const task = await insertTask(ctx.db, {
           id,
@@ -322,15 +311,14 @@ export function createHandler(ctx: DaemonContext): Handler {
           workflow_name: workflowName,
           branch: branchNameFor(id, title),
           priority: typeof params.priority === "number" ? params.priority : 2,
+          ...pinOf(loaded, project),
         });
-        // タスク作成時だけがこの warnings の出口。task.approve/reject や tick も
-        // 同じ loadWorkflow を通るが、そちらは既存タスクを毎回再読込するので、
-        // ここで積むと同じ警告が tick のたびに ctx.warnings に溜まり続ける
-        // （デーモンのstderrを埋め尽くす）。作成時の1回だけに絞る。
-        for (const w of warnings) ctx.warnings.push(`作成時の検証: ${w}`, id);
+        // タスク作成時だけがこの warnings の出口。以後 tick・承認は保存した
+        // 作成時の中身を読み直すだけで、ディスクを読まないので警告は積まない。
+        for (const w of loaded.warnings) ctx.warnings.push(`作成時の検証: ${w}`, id);
         // dctl add はレスポンスをそのまま表示するCLIなので、ここに乗せておけば
         // ログを探しに行かなくてもユーザーの目の前に出る。
-        return { ...task, warnings };
+        return { ...task, warnings: loaded.warnings };
       }
       case "task.list": {
         const filter: { projectId?: number; state?: TaskState } = {};
@@ -351,9 +339,7 @@ export function createHandler(ctx: DaemonContext): Handler {
         const project = (await getProject(ctx.db, task.project_id))!;
         // 読み取り専用の経路なので、ワークフローが読めないことで失敗させない（task.context と同じ）。
         // 画面には setup を差し込んだ後の、実際に走る列を渡す。
-        const workflow = await ctx.loadWorkflow(project.path, task.workflow_name)
-          .then(({ workflow }) => withSetupStep(workflow, project.setup ?? undefined))
-          .catch(() => null);
+        const workflow = await ctx.workflowOf(task, project).catch(() => null);
         return { task, stepRuns, steps: workflow && toStepViews(workflow) };
       }
 
@@ -363,9 +349,7 @@ export function createHandler(ctx: DaemonContext): Handler {
         const project = (await getProject(ctx.db, task.project_id))!;
         // 読み取り専用の経路なので、ワークフローが読めないことで失敗させない。
         // 定義が引けないと分かるのは種別が要るものだけ（buildTaskContext が扱う）。
-        const workflow = await ctx.loadWorkflow(project.path, task.workflow_name)
-          .then(({ workflow }) => withSetupStep(workflow, project.setup ?? undefined))
-          .catch(() => null);
+        const workflow = await ctx.workflowOf(task, project).catch(() => null);
         return await buildTaskContext(ctx.db, task, workflow);
       }
 
@@ -378,12 +362,9 @@ export function createHandler(ctx: DaemonContext): Handler {
         // 却下はコメント必須。理由の無い却下はエージェントが次にどう動けばいいか分からない。
         const comment = approved ? "" : req(params, "comment");
         const project = (await getProject(ctx.db, task.project_id))!;
-        // warnings は意図的に読み捨てる。このワークフローは task.create で
-        // 既に検証済みであり、ここで再び ctx.warnings に積むと、却下ループ
-        // （onReject.goto で最大 maxAttempts 回まで繰り返され得る）のたびに
-        // 同じ警告が積み上がって溢れる。警告の出口は task.create の1箇所だけ。
-        const { workflow: loaded } = await ctx.loadWorkflow(project.path, task.workflow_name);
-        const workflow = withSetupStep(loaded, project.setup ?? undefined);
+        // このワークフローは task.create で既に検証済みの、作成時に保存した中身を
+        // 読み直すだけ（ディスクは読まない）。warnings の出口は task.create の1箇所だけ。
+        const workflow = await ctx.workflowOf(task, project);
         await applyApproval(ctx.db, taskId, { approved, comment }, workflow);
         const after = (await getTask(ctx.db, taskId))!;
         ctx.broadcast({
@@ -542,9 +523,7 @@ export function createHandler(ctx: DaemonContext): Handler {
         const read = await readGuideFile(task.worktree_path);
         if (read.status === "missing") {
           const project = (await getProject(ctx.db, task.project_id))!;
-          const workflow = await ctx.loadWorkflow(project.path, task.workflow_name)
-            .then(({ workflow }) => workflow)
-            .catch(() => null);
+          const workflow = await ctx.workflowOf(task, project).catch(() => null);
           const hasGuideStep = workflow?.steps.some((s) => s.type === "guide") ?? true;
           return { status: hasGuideStep ? "missing" : "none" } satisfies TaskGuide;
         }
@@ -799,7 +778,7 @@ export function createHandler(ctx: DaemonContext): Handler {
         const { replacedTaskId } = await redispatchProcess(ctx.db, {
           intakeId,
           processId: req(params, "process_id"),
-        });
+        }, { loadWorkflow: ctx.loadWorkflow });
         if (replacedTaskId !== null) await cleanupReplacedTask(ctx, replacedTaskId);
         ctx.broadcast({ event: "intake.updated", intake_id: intakeId });
         return await intakeDetailOf(ctx, intakeId);
@@ -1102,7 +1081,7 @@ const ticking = new WeakSet<DaemonContext>();
  *    前の周が終わる前に次の周が始まる。前の周が飛行中なら何もせずに返る。
  *    ガードは finally で必ず解放する。解放を落とすと、デーモンは何も
  *    言わずに永久にスケジュールしなくなり、直そうとしたバグより悪い。
- * 2. **枠の先取り** — 遅い処理（loadWorkflow / createWorktree — git の
+ * 2. **枠の先取り** — 遅い処理（ワークフローの解決 / createWorktree — git の
  *    サブプロセスは大きなリポジトリで数秒かかる）に入る前に `running` を
  *    書く。同時に走る currentUsage から枠が埋まって見えるので、ガードが
  *    無い経路が将来増えても不変条件は DB 側で保たれる。
@@ -1230,11 +1209,8 @@ async function tickOnce(ctx: DaemonContext): Promise<void> {
     let worktreePath: string;
     try {
       const project = (await getProject(ctx.db, task.project_id))!;
-      // warnings は意図的に読み捨てる（task.create の警告と同じ理由）。
-      // tick は同じタスクを何周期にもわたって読み直すので、ここで積むと
-      // 起動している間ずっと同じ警告が ctx.warnings に積み上がり続ける。
-      const { workflow: loaded } = await ctx.loadWorkflow(project.path, task.workflow_name);
-      workflow = withSetupStep(loaded, project.setup ?? undefined);
+      // 作成時に保存した中身を読み直すだけ（ディスクは読まない）。
+      workflow = await ctx.workflowOf(task, project);
 
       // worktree はタスク作成時ではなく、実行枠が取れた瞬間に作る
       // DB には createWorktree が返す実パスを保存する（worktree.list が返す表記と揃える）

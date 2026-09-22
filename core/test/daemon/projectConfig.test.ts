@@ -11,7 +11,8 @@ import { createHandler, type DaemonContext } from "../../src/daemon/handlers.ts"
 import { createMockAdapter } from "../../src/adapter/mock.ts";
 import { createWarningLog } from "../../src/daemon/warnings.ts";
 import { parseProjectConfig } from "../../src/workflow/project.ts";
-import { parseWorkflow, WorkflowValidationError } from "../../src/workflow/schema.ts";
+import { loadWorkflowFromDisk, taskWorkflow } from "../../src/workflow/load.ts";
+import { WorkflowValidationError } from "../../src/workflow/schema.ts";
 import type { ProjectConfig, ProjectSummary, ServerEvent } from "../../../shared/protocol.ts";
 import { makeRepo } from "../helpers/repo.ts";
 import { fakeTracker } from "../helpers/tracker.ts";
@@ -50,14 +51,11 @@ async function context(events: ServerEvent[] = []): Promise<DaemonContext> {
     adapter: createMockAdapter({ result: { ok: true, text: "done" } }),
     logRoot: join(root, "logs"),
     globalLimit: 4,
+    configPath: join(root, "state", "config.json"),
     broadcast: (ev) => events.push(ev),
     warnings: createWarningLog({ broadcast: (ev) => events.push(ev), write: () => {} }),
-    loadWorkflow: async (projectPath, name) => {
-      const { readFile: rf } = await import("node:fs/promises");
-      return parseWorkflow(
-        await rf(join(projectPath, ".doctrine", "workflows", `${name}.yaml`), "utf8"),
-      );
-    },
+    loadWorkflow: loadWorkflowFromDisk,
+    workflowOf: (t, p) => taskWorkflow(t, p, loadWorkflowFromDisk),
     running: new Set(),
     tracker: fakeTracker(),
     runningIntakeRuns: new Set(),

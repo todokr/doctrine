@@ -19,6 +19,7 @@ import {
 } from "../../src/intake/revision.ts";
 import { example, revised } from "./pfd/fixture.ts";
 import { seedActive } from "./watchFixture.ts";
+import { fakeWorkflowLoader } from "../helpers/watcher.ts";
 
 const SUB = (n: number) => `https://github.com/o/r/issues/${n + 1}`;
 
@@ -27,7 +28,7 @@ async function freeze(db: Awaited<ReturnType<typeof seedActive>>["db"]): Promise
   for (const id of ["1", "2", "3", "4"]) {
     await updateProcess(db, "i1", id, { sub_issue_url: SUB(Number(id)) });
   }
-  const report = await dispatchIntake(db, "i1");
+  const report = await dispatchIntake(db, "i1", { loadWorkflow: fakeWorkflowLoader() });
   assert.deepEqual(report.created.map((c) => c.processId), ["1"]);
   await updateProcess(db, "i1", "3", { human_done_at: "2026-09-21T00:00:00.000Z" });
 }

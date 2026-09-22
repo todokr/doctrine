@@ -15,6 +15,9 @@ import { commitDispatch, dispatchIntake, redispatchProcess } from "../../src/int
 import { example, withDecision } from "./pfd/fixture.ts";
 import { question } from "./runnerHelper.ts";
 import { PARENT_URL, seedActive } from "./watchFixture.ts";
+import { fakeWorkflowLoader } from "../helpers/watcher.ts";
+
+const DEPS = { loadWorkflow: fakeWorkflowLoader() };
 
 const SUB = (n: number) => `https://github.com/o/r/issues/${100 + n}`;
 
@@ -74,9 +77,9 @@ test("二重投入: 同じ期待値で 2 回コミットすると 2 回目は巻
 test("投入の直後に落ちた想定で dispatchIntake を再実行しても、同じプロセスのタスクは 1 つ", async () => {
   const { db } = await seedActive();
   await giveSubIssues(db);
-  const first = await dispatchIntake(db, "i1");
+  const first = await dispatchIntake(db, "i1", DEPS);
   assert.deepEqual(first.created.map((c) => c.processId), ["1"]);
-  const second = await dispatchIntake(db, "i1");
+  const second = await dispatchIntake(db, "i1", DEPS);
   assert.deepEqual(second.created, []);
   const tasks = (await listTasks(db)).filter((t) => t.intake_process_id === "1");
   assert.equal(tasks.length, 1);
@@ -84,7 +87,7 @@ test("投入の直後に落ちた想定で dispatchIntake を再実行しても�
 
 test("sub-issue の無いプロセスは投入しない", async () => {
   const { db } = await seedActive();
-  const report = await dispatchIntake(db, "i1");
+  const report = await dispatchIntake(db, "i1", DEPS);
   assert.deepEqual(report.created, []);
   assert.equal((await listTasks(db)).length, 0);
 });
@@ -93,7 +96,7 @@ test("承認の後に案の本文が書き換わっていれば投入しない",
   const { db } = await seedActive();
   await giveSubIssues(db);
   await db.updateTable("intake_drafts").set({ pfd: "{}" }).execute();
-  await assert.rejects(dispatchIntake(db, "i1"), /承認/);
+  await assert.rejects(dispatchIntake(db, "i1", DEPS), /承認/);
   assert.equal((await listTasks(db)).length, 0);
 });
 
@@ -101,7 +104,7 @@ test("active でない Intake は投入しない", async () => {
   const { db } = await seedActive();
   await giveSubIssues(db);
   await updateIntake(db, "i1", { state: "reviewing" });
-  const report = await dispatchIntake(db, "i1");
+  const report = await dispatchIntake(db, "i1", DEPS);
   assert.deepEqual(report.created, []);
 });
 
@@ -118,7 +121,7 @@ test("決定の成果物の回答を prompt に載せる", async () => {
     JSON.stringify([{ questionId: "q1", optionIds: ["a"], other: null, note: null }]),
   );
   await makeProcess2Ready(db, projectId);
-  const report = await dispatchIntake(db, "i1");
+  const report = await dispatchIntake(db, "i1", DEPS);
   assert.deepEqual(report.created.map((c) => c.processId), ["2"]);
   const task = (await getTask(db, report.created[0].taskId))!;
   assert.match(task.prompt, /集計の方針: 選んだ選択肢: 案A（a）/);
@@ -127,7 +130,7 @@ test("決定の成果物の回答を prompt に載せる", async () => {
 test("prompt を組めないプロセスは見送り、ほかのプロセスは投入する", async () => {
   const { db, projectId } = await seedActive(withDecision());
   await makeProcess2Ready(db, projectId);
-  const report = await dispatchIntake(db, "i1");
+  const report = await dispatchIntake(db, "i1", DEPS);
   assert.equal(report.created.some((c) => c.processId === "2"), false);
   assert.equal(report.errors.length, 1);
   assert.equal(report.errors[0].processId, "2");
@@ -137,14 +140,14 @@ test("prompt を組めないプロセスは見送り、ほかのプロセスは�
 test("example() の分解では、承認直後に投入できるのはプロセス 1 だけ", async () => {
   const { db } = await seedActive(example());
   await giveSubIssues(db);
-  const report = await dispatchIntake(db, "i1");
+  const report = await dispatchIntake(db, "i1", DEPS);
   assert.deepEqual(report.created.map((c) => c.processId), ["1"]);
 });
 
 /** プロセス 1 を投入して、そのタスクを failed にする。 */
 async function failProcess1(db: Db): Promise<string> {
   await giveSubIssues(db);
-  const report = await dispatchIntake(db, "i1");
+  const report = await dispatchIntake(db, "i1", DEPS);
   const taskId = report.created[0].taskId;
   await commitStepBoundary(db, { taskId, taskPatch: { state: "failed" } });
   return taskId;
@@ -154,7 +157,7 @@ test("要確認のプロセスを再投入すると、同じプロセスと sub-
   const { db } = await seedActive();
   const oldId = await failProcess1(db);
 
-  const { taskId } = await redispatchProcess(db, { intakeId: "i1", processId: "1" });
+  const { taskId } = await redispatchProcess(db, { intakeId: "i1", processId: "1" }, DEPS);
 
   const tasks = await listTasks(db);
   assert.equal(tasks.length, 2);
@@ -172,10 +175,10 @@ test("要確認のプロセスを再投入すると、同じプロセスと sub-
 test("要確認でないプロセスは再投入できない", async () => {
   const { db } = await seedActive();
   await giveSubIssues(db);
-  await dispatchIntake(db, "i1");
+  await dispatchIntake(db, "i1", DEPS);
   for (const processId of ["1", "2", "3"]) {
     await assert.rejects(
-      redispatchProcess(db, { intakeId: "i1", processId }),
+      redispatchProcess(db, { intakeId: "i1", processId }, DEPS),
       /要確認のプロセスだけ/,
     );
   }
@@ -186,7 +189,7 @@ test("一時停止中でも再投入できる", async () => {
   const { db } = await seedActive();
   await failProcess1(db);
   await updateIntake(db, "i1", { dispatch_paused: 1 });
-  await redispatchProcess(db, { intakeId: "i1", processId: "1" });
+  await redispatchProcess(db, { intakeId: "i1", processId: "1" }, DEPS);
   assert.equal((await listTasks(db)).length, 2);
 });
 
@@ -195,8 +198,52 @@ test("active でない Intake では再投入できない", async () => {
   await failProcess1(db);
   await updateIntake(db, "i1", { state: "canceled" });
   await assert.rejects(
-    redispatchProcess(db, { intakeId: "i1", processId: "1" }),
+    redispatchProcess(db, { intakeId: "i1", processId: "1" }, DEPS),
     /再投入できる状態ではありません/,
   );
   assert.equal((await listTasks(db)).length, 1);
+});
+
+test("投入したタスクは既定のワークフローの YAML の中身と project の setup を保存する", async () => {
+  const Y = 'name: y\nsteps:\n  - id: a\n    type: command\n    run: "true"\n';
+  {
+    const { db } = await seedActive();
+    await giveSubIssues(db);
+    const report = await dispatchIntake(db, "i1", { loadWorkflow: fakeWorkflowLoader(Y) });
+    const task = (await getTask(db, report.created[0].taskId))!;
+    assert.equal(task.workflow_yaml, Y);
+    assert.equal(task.workflow_setup, null);
+  }
+  {
+    const { db, projectId } = await seedActive();
+    await db.updateTable("projects").set({ setup: "echo hi" }).where("id", "=", projectId)
+      .execute();
+    await giveSubIssues(db);
+    const report = await dispatchIntake(db, "i1", { loadWorkflow: fakeWorkflowLoader(Y) });
+    const task = (await getTask(db, report.created[0].taskId))!;
+    assert.equal(task.workflow_setup, "echo hi");
+  }
+});
+
+test("再投入したタスクも作成時の定義を保存する", async () => {
+  const { db } = await seedActive();
+  const oldId = await failProcess1(db);
+  const Y2 = 'name: y2\nsteps:\n  - id: b\n    type: command\n    run: "true"\n';
+  const { taskId } = await redispatchProcess(db, { intakeId: "i1", processId: "1" }, {
+    loadWorkflow: fakeWorkflowLoader(Y2),
+  });
+  assert.equal((await getTask(db, taskId))!.workflow_yaml, Y2);
+  assert.notEqual((await getTask(db, oldId))!.workflow_yaml, Y2);
+});
+
+test("ワークフローが読めなければ投入せず、タスクを作らない", async () => {
+  const { db } = await seedActive();
+  await giveSubIssues(db);
+  await assert.rejects(
+    dispatchIntake(db, "i1", {
+      loadWorkflow: () => Promise.reject(new Error("ワークフローがありません: x")),
+    }),
+    /ワークフロー/,
+  );
+  assert.equal((await listTasks(db)).length, 0);
 });
