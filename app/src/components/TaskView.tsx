@@ -20,6 +20,7 @@ import { useDecide, useNotYet, useStore } from "../store";
 import { isAtBottom } from "../tailStick";
 import type { Task, TaskState } from "../types";
 import { Crumbs, OpenInEditor } from "./ReviewView";
+import { RemoveWorktreeButton } from "./WorktreeView";
 import { WorkflowRail } from "./WorkflowRail";
 
 export const STATE_PILL: Record<TaskState, [string, string]> = {
@@ -174,6 +175,12 @@ export function TaskView({ t }: { t: Task }) {
   const [stateName, stateCls] = STATE_PILL[t.state];
   // 今のステップが何回目か。履歴の先頭が今の（または最後の）実行にあたる
   const attempt = history[0]?.attempt ?? 1;
+  // t.worktree（DB の worktree_path）と worktree.list の path は文字列として一致するとは
+  // 限らない（デーモンは canonical() で比べている）ので、task_id で引く
+  const worktreeEntry = s.worktrees.find((e) => e.task_id === t.id);
+  const removePath = worktreeEntry?.path ?? t.worktree;
+  // 削除拒否は「完了時に未コミットの変更が残っていた」ので、行が見つからなくても true とみなす
+  const removeDirty = worktreeEntry?.dirty ?? (t.refused ? true : null);
 
   return (
     <div className="pad">
@@ -204,10 +211,13 @@ export function TaskView({ t }: { t: Task }) {
               </h2>
               {t.worktree
                 ? (
-                  <p>
-                    worktree は証拠として残しています。中を確認してから、<span className="mono">dctl add</span> で同じ内容を投入し直すか、
-                    <span className="mono">dctl gc {t.id}</span> で片付けてください（UIでの「同じ内容で投入し直す」は第2段階です）。
-                  </p>
+                  <>
+                    <p>
+                      worktree は証拠として残しています。中を確認してから、<span className="mono">dctl add</span> で同じ内容を投入し直すか、
+                      削除してください（UIでの「同じ内容で投入し直す」は第2段階です）。
+                    </p>
+                    <RemoveWorktreeButton path={removePath!} dirty={removeDirty} />
+                  </>
                 )
                 : (
                   <p>
@@ -222,7 +232,8 @@ export function TaskView({ t }: { t: Task }) {
           return (
             <section className="box danger" key="refused">
               <h2>worktree の削除を拒否しました</h2>
-              <p>完了時に未コミットの変更が残っていました。ワークフローの最終ステップがコミットしていない可能性があります。中を確認してから <span className="mono">dctl gc {t.id}</span> で削除してください。</p>
+              <p>完了時に未コミットの変更が残っていました。ワークフローの最終ステップがコミットしていない可能性があります。中を確認してから削除してください。</p>
+              <RemoveWorktreeButton path={removePath!} dirty={removeDirty} />
             </section>
           );
         }
