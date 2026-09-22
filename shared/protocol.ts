@@ -394,6 +394,11 @@ export type Methods = {
   };
   "worktree.list": { params: Record<string, never>; result: WorktreeEntry[] };
   "daemon.warnings": { params: Record<string, never>; result: Warning[] };
+  /** task_id か path のどちらか一方。非終端のタスクと終わっていない Intake の worktree は force でも拒否される。 */
+  "worktree.remove": {
+    params: { task_id: string; force?: boolean } | { path: string; force?: boolean };
+    result: { removed: string };
+  };
   "ratelimit.recent": { params: { limit?: number }; result: RateLimitSample[] };
   "github.status": { params: { project: string }; result: GhStatus };
   "github.issues": {
