@@ -1,9 +1,11 @@
-import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Fragment, type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { rpc } from "../daemon/client";
 import { sendDecision } from "../decision";
 import {
   ago,
   bounceNotice,
+  canPause,
+  canResume,
   clock,
   denialLines,
   elapsed,
@@ -85,12 +87,41 @@ function useTaskLogs(t: Task) {
   }, [t.id, follow, dispatch]);
 }
 
+/** 送信中の操作。送っている間は一時停止・再開・中止を押せない */
+type Pending = "pause" | "resume" | "cancel" | null;
+
+/** worktree の操作（開く・コピー）は children で受け、送信中でも止めない */
+export function TaskActions(props: {
+  t: Task;
+  pending: Pending;
+  onPause: () => void;
+  onResume: () => void;
+  onCancel: () => void;
+  children?: ReactNode;
+}) {
+  const { t, pending } = props;
+  return (
+    <div className="actions">
+      {canPause(t.state) && (
+        <button className="btn" disabled={pending !== null} onClick={props.onPause}>一時停止</button>
+      )}
+      {canResume(t.state) && (
+        <button className="btn primary" disabled={pending !== null} onClick={props.onResume}>再開</button>
+      )}
+      {!isTerminal(t.state) && (
+        <button className="btn danger" disabled={pending !== null} onClick={props.onCancel}>中止</button>
+      )}
+      {props.children}
+    </div>
+  );
+}
+
 export function TaskView({ t }: { t: Task }) {
   const { s, dispatch } = useStore();
   const decide = useDecide();
   const notYet = useNotYet();
   // 送信中だけ止める。失敗したら「中止しました」は出さず、もう一度押せる
-  const [canceling, setCanceling] = useState(false);
+  const [pending, setPending] = useState<Pending>(null);
   // 実行履歴で拒否の一覧を開いている行（step_runs.id）
   const [openDenials, setOpenDenials] = useState<number | null>(null);
   const logRef = useRef<HTMLPreElement>(null);
@@ -99,6 +130,28 @@ export function TaskView({ t }: { t: Task }) {
 
   useTaskDetail(t);
   useTaskLogs(t);
+
+  // 状態の書き換えは task.stateChanged と取り直しに任せる。ここでは成否のトーストだけ出す
+  async function send(
+    kind: NonNullable<Pending>,
+    request: Promise<unknown>,
+    failed: string,
+    done: string | null,
+    onSent?: () => void,
+  ) {
+    setPending(kind);
+    try {
+      const r = await sendDecision(request, failed);
+      if (!r.ok) dispatch({ type: "toast", message: r.message });
+      else if (onSent) {
+        // cancel も「送れたときの後片付け」。task.stateChanged が先に届いて
+        // t.state が canceled になっていても、送信自体が成功していればトーストは出す
+        onSent();
+      } else if (done) dispatch({ type: "toast", message: done });
+    } finally {
+      setPending(null);
+    }
+  }
 
   const detail = s.detail[t.id];
   const history = stepRunHistory(detail);
@@ -195,37 +248,25 @@ export function TaskView({ t }: { t: Task }) {
         </section>
       )}
       {t.state === "paused" && (
-        <section className="box quiet"><p><span className="mono">dctl resume {t.id}</span> で再開できます（UIからの一時停止・再開は第2段階です）。</p></section>
+        <section className="box quiet"><p>一時停止しています。「再開」を押すと行列の先頭に戻り、実行枠が空いたら続きを実行します。</p></section>
       )}
 
-      <div className="actions">
-        {!isTerminal(t.state) && (
-          <button
-            className="btn danger"
-            disabled={canceling}
-            onClick={async () => {
-              setCanceling(true);
-              try {
-                const r = await sendDecision(decide.cancel(t.id), "中止を送れませんでした");
-                // cancel も「送れたときの後片付け」。task.stateChanged が先に届いて
-                // t.state が canceled になっていても、送信自体が成功していればトーストは出す
-                if (r.ok) dispatch({ type: "cancel" });
-                else dispatch({ type: "toast", message: r.message });
-              } finally {
-                setCanceling(false);
-              }
-            }}
-          >
-            中止
-          </button>
-        )}
+      <TaskActions
+        t={t}
+        pending={pending}
+        onPause={() => void send("pause", decide.pause(t.id), "一時停止を送れませんでした", "一時停止しました")}
+        onResume={() =>
+          void send("resume", decide.resume(t.id), "再開を送れませんでした", "再開しました。行列の先頭に戻します")}
+        onCancel={() =>
+          void send("cancel", decide.cancel(t.id), "中止を送れませんでした", null, () => dispatch({ type: "cancel" }))}
+      >
         {t.worktree && (
           <>
             <OpenInEditor />
             <button className="btn sm" onClick={() => notYet("パスのコピーは第2段階です")}>パスをコピー</button>
           </>
         )}
-      </div>
+      </TaskActions>
       {t.worktree && <p className="mono hint">{t.worktree}</p>}
 
       {detail && <WorkflowRail detail={detail} />}
