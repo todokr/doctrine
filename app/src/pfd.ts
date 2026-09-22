@@ -107,15 +107,15 @@ export function frozenIds(pfd: Pfd, processes: readonly IntakeProcessView[]): Se
   return frozen;
 }
 
-export const LOOK: Record<PfdLook, { word: string; mark: string; cls: string }> = {
-  waiting: { word: "入力待ち", mark: "", cls: "pfd-waiting" },
-  ready: { word: "着手可能", mark: "▷", cls: "pfd-ready" },
-  running: { word: "実行中", mark: "⟳", cls: "pfd-running" },
-  pr_open: { word: "PR レビュー中", mark: "PR", cls: "pfd-pr_open" },
-  merged: { word: "マージ済み", mark: "✓", cls: "pfd-merged" },
-  your_turn: { word: "あなたの番", mark: "◆", cls: "pfd-your_turn" },
-  done: { word: "完了（人）", mark: "✓", cls: "pfd-done" },
-  needs_attention: { word: "要確認", mark: "!", cls: "pfd-needs_attention" },
+export const LOOK: Record<PfdLook, { word: string }> = {
+  waiting: { word: "入力待ち" },
+  ready: { word: "着手可能" },
+  running: { word: "実行中" },
+  pr_open: { word: "PR レビュー中" },
+  merged: { word: "マージ済み" },
+  your_turn: { word: "あなたの番" },
+  done: { word: "完了（人）" },
+  needs_attention: { word: "要確認" },
 };
 
 // 箱の寸法。幅は種類ごとに固定し、長いラベルは行を増やして収める
@@ -390,4 +390,19 @@ export function pfdElement(
     consumers: pfd.processes.filter((p) => p.inputs.includes(artifact.id)),
     decision,
   };
+}
+
+export type StatusCount = { look: PfdLook; word: string; count: number };
+
+/**
+ * 進行中の面の状態ごとの件数（spec 3.5）。凡例を兼ねるので件数 0 も返す。
+ * merged は counts に入れず、merged / total として返す
+ */
+export function statusCounts(view: PfdView): { counts: StatusCount[]; merged: number; total: number } {
+  const processes = view.nodes.filter((n) => n.kind === "process");
+  const count = (look: PfdLook) => processes.filter((n) => n.look === look).length;
+  const counts = (Object.keys(LOOK) as PfdLook[])
+    .filter((look) => look !== "merged")
+    .map((look) => ({ look, word: LOOK[look].word, count: count(look) }));
+  return { counts, merged: count("merged"), total: processes.length };
 }

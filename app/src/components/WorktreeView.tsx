@@ -4,8 +4,10 @@ import { ago, clock, projectKey, staleDaysOf } from "../model";
 import { sendDecision } from "../decision";
 import { useDecide, useRefresh, useStore } from "../store";
 import type { Project, Task } from "../types";
+import { TASK_TONE } from "../tone";
 import { canRemoveWorktree, isStaleWorktree, removeConfirmText, sortWarnings } from "../worktrees";
-import { STATE_PILL } from "./TaskView";
+import { StatusDot } from "./StatusDot";
+import { STATE_WORD } from "./TaskView";
 
 function findTask(tasks: readonly Task[], id: string): Task | undefined {
   return tasks.find((t) => t.id === id);
@@ -40,7 +42,7 @@ export function WorktreeRow(p: {
                 <button className="btn sm" onClick={() => p.onOpenTask(e.task_id!)}>
                   {task.title}
                   {" "}
-                  <span className={`pill ${STATE_PILL[task.state][1]}`}>{STATE_PILL[task.state][0]}</span>
+                  <StatusDot tone={TASK_TONE[task.state]} word={STATE_WORD[task.state]} />
                 </button>
               )
               : <span className="mono">{e.task_id}</span>
@@ -49,9 +51,9 @@ export function WorktreeRow(p: {
           ? <button className="btn sm" onClick={() => p.onOpenIntake(e.intake_id!)}>Intake</button>
           : <span className="hint">孤児</span>}
       </td>
-      <td>{e.dirty && <span className="pill p-attn">未コミットの変更あり</span>}</td>
+      <td>{e.dirty && <StatusDot tone="human" word="未コミットの変更あり" />}</td>
       <td>
-        {stale && <span className="pill p-attn">古い</span>}
+        {stale && <StatusDot tone="human" word="古い" />}
         {" "}
         {ago(Date.parse(e.age_basis), p.now)}
       </td>

@@ -1,5 +1,6 @@
 import { useId, type KeyboardEvent } from "react";
 import { LOOK, type PfdNode, type PfdView } from "../pfd";
+import { PROCESS_TONE, toneClass } from "../tone";
 
 /** `useId()` の記号（«r0» など）は url(#…) の中で WebKit が解決しないことがあるので、英数字だけにする */
 const useSvgId = (name: string) => `${name}-${useId().replace(/[^A-Za-z0-9_-]/g, "")}`;
@@ -15,7 +16,6 @@ const nodeClass = (n: PfdNode, selected: boolean) =>
     n.available && "available",
     n.frozen && "frozen",
     selected && "selected",
-    n.look && LOOK[n.look].cls,
   ]
     .filter(Boolean)
     .join(" ");
@@ -50,7 +50,6 @@ export function PfdDiagram({ view, selected, onSelect }: { view: PfdView; select
           <path key={i} d={e.d} fill="none" className="pfd-edge" markerEnd={`url(#${arrowId})`} />
         ))}
         {view.nodes.map((n) => {
-          const mark = n.look ? LOOK[n.look].mark : "";
           const rx = n.kind === "process" ? n.h / 2 : 4;
           return (
             <g
@@ -66,8 +65,17 @@ export function PfdDiagram({ view, selected, onSelect }: { view: PfdView; select
               <title>{n.label}</title>
               <rect x={n.x} y={n.y} width={n.w} height={n.h} rx={rx} />
               {n.human && <rect className="pfd-inner" x={n.x + 3} y={n.y + 3} width={n.w - 6} height={n.h - 6} rx={rx - 3} />}
+              {n.look && (
+                <line
+                  className={`pfd-bar ${toneClass(PROCESS_TONE[n.look].tone)}${PROCESS_TONE[n.look].dashed ? " dashed" : ""}`}
+                  x1={n.x + rx}
+                  x2={n.x + n.w - rx}
+                  y1={n.y + 4}
+                  y2={n.y + 4}
+                />
+              )}
               <text x={n.x + 8} y={n.y + 16} className="pfd-mark">
-                {[mark, ...n.marks].filter(Boolean).join(" ")}
+                {n.marks.join(" ")}
               </text>
               <text x={n.x + n.w / 2} y={n.y + 31} textAnchor="middle" className="pfd-label">
                 {n.lines.map((line, i) => (

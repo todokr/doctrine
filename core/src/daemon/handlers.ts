@@ -135,13 +135,11 @@ function parseDenials(raw: string | null): StepRunDenials | null {
   }
 }
 
-/** 帯が描く分だけを残す。title は approval だけが持ち、branch の feed は画面へ流さない。 */
+/** 帯が描く分だけを残す。title は approval だけが持つ。 */
 function toStepViews(workflow: Workflow): StepView[] {
   return workflow.steps.map((step) => {
     const view: StepView = { id: step.id, type: step.type };
     if (step.type === "approval") view.title = step.title;
-    const branch = branchOf(step);
-    if (branch) view.branch = { goto: branch.goto, maxAttempts: branch.maxAttempts };
     return view;
   });
 }

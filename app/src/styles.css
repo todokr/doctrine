@@ -6,6 +6,7 @@
   --accent:#AD7625; --accent-ink:#20140A; --accent-soft:#F1E3C9; --accent-text:#20140A;  --run:#2E6CA4; --run-bg:#DEEAF5;
   --danger:#AA3A2C; --danger-bg:#F7E2DD;
   --ok:#296B49; --ok-bg:#DEEFE4;
+  --idle:#D3D9DF; --human-text:#8A5A17;
   --add-bg:#E1F0E5; --add-gutter:#C9E3D1; --del-bg:#F7E4E0; --del-gutter:#EFC9C2;
   --kw:#7A4AA0; --str:#2B7A4B; --com:#8B93A0; --num:#A05A22; --fn:#2A5DA8; --ty:#1F6F73;
   --shadow:0 12px 32px rgba(20,26,34,.18);
@@ -20,6 +21,7 @@
     --accent:#E0A857; --accent-ink:#241804; --accent-soft:#3A2E15; --accent-text:#E0A857;    --run:#7FB2E0; --run-bg:#1D2E3E;
     --danger:#E38B7B; --danger-bg:#3B211C;
     --ok:#7FCB9E; --ok-bg:#16301F;
+    --idle:#3A414B; --human-text:#E0A857;
     --add-bg:#173322; --add-gutter:#1F452E; --del-bg:#3A2019; --del-gutter:#4A2921;
     --kw:#C79EE8; --str:#8FDBA9; --com:#707A85; --num:#E0A067; --fn:#8FBCE8; --ty:#79C9CE;
     --shadow:0 12px 32px rgba(0,0,0,.55);
@@ -32,6 +34,7 @@
   --accent:#E0A857; --accent-ink:#241804; --accent-soft:#3A2E15; --accent-text:#E0A857;  --run:#7FB2E0; --run-bg:#1D2E3E;
   --danger:#E38B7B; --danger-bg:#3B211C;
   --ok:#7FCB9E; --ok-bg:#16301F;
+  --idle:#3A414B; --human-text:#E0A857;
   --add-bg:#173322; --add-gutter:#1F452E; --del-bg:#3A2019; --del-gutter:#4A2921;
   --kw:#C79EE8; --str:#8FDBA9; --com:#707A85; --num:#E0A067; --fn:#8FBCE8; --ty:#79C9CE;
   --shadow:0 12px 32px rgba(0,0,0,.55);
@@ -73,7 +76,6 @@ h1,h2,h3,h4,h5,h6,b,strong{font-weight:500}
 .limits-empty{margin:0;color:var(--ink-3)}
 .limit{display:grid;gap:3px;padding:4px 6px}
 .limit-head,.limit-meta{display:flex;justify-content:space-between;gap:8px;color:var(--ink-3);font-variant-numeric:tabular-nums}
-.limit-name{font-weight:500;color:var(--ink-2)}
 .limit-bar{display:block;height:6px;border-radius:3px;background:var(--sunken);overflow:hidden}
 .limit-bar span{display:block;height:100%;background:var(--ink-3)}
 .limit-pct{color:var(--ink)}
@@ -86,26 +88,15 @@ h1,h2,h3,h4,h5,h6,b,strong{font-weight:500}
 .grp{margin-top:8px}
 .grp h3{margin:0;padding:4px 8px;font-size:11.5px;font-weight:500;color:var(--ink-2);display:flex;gap:6px;align-items:center;letter-spacing:.02em}
 .grp h3 .count{color:var(--ink-3);font-weight:400;font-variant-numeric:tabular-nums}
-.it{width:100%;border:0;background:transparent;border-radius:6px;padding:6px 8px 6px 6px;display:grid;grid-template-columns:18px minmax(0,1fr);gap:2px 6px;text-align:left}
+.it{position:relative;width:100%;border:0;background:transparent;border-radius:6px;padding:6px 8px 6px 16px;display:grid;grid-template-columns:minmax(0,1fr);gap:1px;text-align:left}
+.it::before{content:"";position:absolute;left:6px;top:8px;bottom:8px;width:3px;border-radius:2px;background:var(--tone,var(--idle))}
 .it:hover{background:var(--surface-2)}
 .it[aria-current="true"]{background:var(--accent-soft);}
-.it .ico{grid-row:span 2;display:grid;place-items:center;height:20px}
 .it .t{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:500}
 .it .m{display:flex;gap:6px;align-items:center;color:var(--ink-3);font-size:11.5px;min-width:0}
 .it .m .pj{display:inline-flex;align-items:center;gap:5px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .it .m .tm{margin-left:auto;font-variant-numeric:tabular-nums;white-space:nowrap}
 .pjdot{width:7px;height:7px;border-radius:50%;flex:none;display:inline-block}
-.diamond{width:9px;height:9px;background:var(--accent);transform:rotate(45deg);border-radius:1.5px}
-.bang{width:12px;height:12px;border-radius:50%;background:var(--danger);color:var(--surface);font-size:9px;font-weight:500;display:grid;place-items:center;line-height:1}
-.spin{width:12px;height:12px;border-radius:50%;border:2px dotted var(--run);animation:spin 2.4s linear infinite}
-.ring{width:10px;height:10px;border-radius:50%;border:1.5px solid var(--ink-3)}
-.pause{width:10px;height:10px;border-left:3px solid var(--ink-2);border-right:3px solid var(--ink-2)}
-/* 上限待ち: 実行中（回る点線）でも一時停止（人が止めた）でもない、止まって待っている印 */
-.hourglass{width:10px;height:10px;border-top:3px solid var(--run);border-bottom:3px solid var(--run)}
-.check{width:12px;height:12px;border-radius:50%;background:var(--ok);position:relative}
-.xmark{width:12px;height:12px;border-radius:50%;background:var(--ink-3)}
-@keyframes spin{to{transform:rotate(360deg)}}
-@media (prefers-reduced-motion:reduce){.spin{animation:none}}
 
 /* main */
 .main{overflow-y:auto;min-height:0;display:flex;flex-direction:column}
@@ -113,12 +104,6 @@ h1,h2,h3,h4,h5,h6,b,strong{font-weight:500}
 .crumbs{display:flex;gap:8px;flex-wrap:wrap;align-items:center;color:var(--ink-3);font-size:11.5px}
 h1{margin:0;font-size:19px;line-height:1.35;text-wrap:balance}
 .headrow{display:flex;gap:8px 12px;flex-wrap:wrap;align-items:center}
-.pill{font-size:11px;font-weight:500;padding:0 7px;border-radius:4px;line-height:19px;white-space:nowrap;display:inline-flex;gap:5px;align-items:center}
-.p-attn{background:var(--accent-soft);color:var(--accent-text)}
-.p-danger{background:var(--danger-bg);color:var(--danger)}
-.p-run{background:var(--run-bg);color:var(--run)}
-.p-muted{background:var(--surface-2);color:var(--ink-2)}
-.p-ok{background:var(--ok-bg);color:var(--ok)}
 .btn{border:1px solid var(--line);background:var(--surface);border-radius:7px;padding:5px 12px;white-space:nowrap}
 .btn:hover{border-color:var(--ink-3)}
 .btn.sm{padding:3px 9px;font-size:12px}
@@ -146,7 +131,6 @@ details.ctx[open] summary::before{content:"▾ "}
 details.ctx[open] summary{margin-bottom:8px}
 details.runs summary{cursor:pointer;color:var(--ink-2);font-size:12px;font-weight:500}
 .runtable{overflow-x:auto;margin-top:8px}
-.runtable button.pill{border:0;font:inherit;cursor:pointer}
 .runtable td.denials{white-space:normal;background:var(--surface-2)}
 .denial{display:flex;gap:10px;padding:2px 0}
 .denial-detail{overflow-wrap:anywhere}
@@ -267,7 +251,6 @@ th{color:var(--ink-3);font-size:11px;font-weight:500;border-top:0;background:var
 .g-change.removed{color:var(--danger)}
 .g-order-item{border:1px solid var(--line);border-radius:7px;padding:6px 8px;display:grid;gap:1px}
 .g-order-item::before{content:counter(go) ". ";color:var(--accent-text);font-weight:500}
-.wr-scroll{overflow-x:auto}
 .pfd-scroll{overflow-x:auto}
 .pfd{display:block}
 .pfd-edge{fill:none;stroke:var(--ink-3);stroke-width:1.2}
@@ -278,13 +261,6 @@ th{color:var(--ink-3);font-size:11px;font-weight:500;border-top:0;background:var
 .pfd-node.given rect{fill:var(--surface-2)}
 .pfd-node.goal rect{stroke-width:2}
 .pfd-node.available rect{fill:var(--ok-bg)}
-.pfd-waiting rect{stroke:var(--line);stroke-dasharray:4 3}
-.pfd-ready rect{stroke:var(--ink-3)}
-.pfd-running rect{fill:var(--run-bg);stroke:var(--run)}
-.pfd-pr_open rect{fill:var(--run-bg);stroke:var(--run);stroke-width:2.2}
-.pfd-merged rect,.pfd-done rect{fill:var(--ok-bg);stroke:var(--ok)}
-.pfd-your_turn rect{fill:var(--accent-soft);stroke:var(--accent);stroke-width:2.2}
-.pfd-needs_attention rect{fill:var(--danger-bg);stroke:var(--danger)}
 .pfd-node.frozen rect{fill:var(--surface-2);opacity:.75}
 .pfd-node rect.pfd-inner{fill:none}
 .pfd-label{font-size:10.5px;fill:var(--ink)}
@@ -294,6 +270,7 @@ th{color:var(--ink-3);font-size:11px;font-weight:500;border-top:0;background:var
 .pfd-comments text{fill:var(--accent-ink);font-size:9px;font-weight:500}
 /* 選択は状態の枠より後に書き、選んだ要素の枠が状態の枠に負けないようにする */
 .pfd-node:focus-visible rect,.pfd-node.selected rect{stroke:var(--accent);stroke-width:2.5}
+/* ワークフローの定義の図（設定画面）。タスク画面の帯は .wf */
 .wr{display:block}
 .wr-edge{stroke:var(--line);stroke-width:1.4}
 .wr-back{fill:none;stroke:var(--ink-3);stroke-width:1.2}
@@ -322,26 +299,31 @@ th{color:var(--ink-3);font-size:11px;font-weight:500;border-top:0;background:var
 .flow{display:grid;gap:22px;min-width:0}
 .flow-sec{display:grid;gap:10px;min-width:0;scroll-margin-top:8px}
 .flow-head{display:grid;gap:2px}
-.flow-head .eyebrow{font-size:11px;letter-spacing:.04em;color:var(--accent-text);font-family:var(--mono)}
 .flow-head h2{margin:0;font-size:16px;text-wrap:balance}
-.flow-note{border:1px solid var(--accent);border-radius:9px;background:var(--accent-soft);padding:12px 14px;display:grid;gap:8px}
+.flow-note{border-left:3px solid var(--accent);padding:2px 0 2px 14px;display:grid;gap:8px}
 .flow-note p{margin:0;line-height:1.8;max-width:72ch}
 .flow-note .dg{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:10px;max-width:520px}
 .flow-overview{border:1px solid var(--line);border-radius:9px;background:var(--surface);padding:12px 14px;display:grid;gap:12px}
 .flow-end{border:1px dashed var(--line);border-radius:9px;padding:12px 14px;display:grid;gap:6px}
 .flow-cont{font-size:11px;font-weight:500;color:var(--accent-text);background:var(--accent-soft);border-radius:999px;padding:0 7px}
-.flowtoc{border:1px solid var(--line);border-radius:9px;overflow:hidden;position:sticky;top:0}
-.flowtoc header{padding:7px 10px;background:var(--surface-2);border-bottom:1px solid var(--line);font-size:11.5px;color:var(--ink-2)}
+.flowtoc{position:sticky;top:0;display:grid;gap:2px}
+.flowtoc header{padding:0 8px 6px}
+.flowtoc .fl{position:relative;border:0;background:transparent;border-radius:6px;padding:5px 8px 5px 16px}
+.flowtoc .fl::before{content:"";position:absolute;left:6px;top:7px;bottom:7px;width:3px;border-radius:2px;background:var(--idle)}
+.flowtoc .fl.passed::before{background:var(--ink-3)}
 .flowtoc .fl.passed .nm{color:var(--ink-3)}
-.flowtoc .fl.passed::before{content:"✓ ";color:var(--ok);font-size:10.5px}
+.flowtoc .fl[aria-current="true"]::before{background:var(--accent)}
 .hunk-risk{background:var(--surface-2);color:var(--ink);padding:5px 10px;font-family:var(--sans);font-size:11.5px;border-top:1px solid var(--line);display:grid;gap:4px}
+.hunk-risk.impact-high{background:var(--danger-bg)}
+.hunk-risk.impact-medium{background:var(--accent-soft)}
 .hunk-risk b{color:var(--ink-2);font-size:11px}
 .hunk-risk .g-md p{margin:2px 0}
 .risk-head{display:flex;gap:6px;align-items:center}
-.impact{font-size:11px;font-weight:500;padding:0 7px;border-radius:4px;line-height:19px;white-space:nowrap;display:inline-flex;align-items:center;border:1px solid transparent}
-.impact-high{background:var(--danger-bg);color:var(--danger);border:1px solid var(--danger)}
-.impact-medium{background:var(--accent-soft);color:var(--accent-text)}
-.impact-low{background:var(--surface-2);color:var(--ink-2);border:1px dashed var(--line)}
+span.impact{font-family:var(--mono);font-size:10px;letter-spacing:.1em;font-weight:500;white-space:nowrap;display:inline-flex;align-items:center;gap:6px}
+span.impact > i{width:14px;height:4px;border-radius:2px;background:currentColor}
+span.impact-high{color:var(--danger)}
+span.impact-medium{color:var(--human-text)}
+span.impact-low{color:var(--ink-3)}
 .risk-fold > summary{cursor:pointer;color:var(--ink-2)}
 .risk-locs{display:flex;flex-wrap:wrap;gap:4px 10px}
 .risk-loc{border:0;background:transparent;padding:0;font-size:11.5px;color:var(--accent);text-decoration:underline;cursor:pointer}
@@ -466,7 +448,7 @@ kbd{font-family:var(--mono);font-size:10.5px;border:1px solid var(--line);border
 @media (max-width:1150px){.el-panel{position:static;max-height:none}}
 .el-head{display:grid;gap:2px}
 .el-sec{display:grid;gap:6px}
-.el-sec h3,.el-sec-title{margin:0;font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:var(--ink-3)}
+.el-sec h3,.el-sec-title{margin:0;font-family:var(--mono);font-size:10px;font-weight:500;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3)}
 .el-links{display:flex;gap:6px;flex-wrap:wrap}
 .el-link{border:0;background:transparent;padding:0;color:var(--accent);text-decoration:underline;cursor:pointer;font-size:12.5px}
 .el-comment{display:grid;gap:2px;border-top:1px dashed var(--line);padding-top:6px;font-size:12.5px}
@@ -487,3 +469,54 @@ tr.wt-stale{background:var(--accent-soft)}
 /* 設定の画面 */
 .settings-field{display:grid;gap:4px}
 .hint.error{color:var(--danger)}
+
+/* 状態のトーン（spec 2 章）。バー・ドット・縦線は --tone を読む */
+.tone-ok{--tone:var(--ok);--tone-soft:var(--ok-bg);--tone-text:var(--ok)}
+.tone-run{--tone:var(--run);--tone-soft:var(--run-bg);--tone-text:var(--run)}
+.tone-danger{--tone:var(--danger);--tone-soft:var(--danger-bg);--tone-text:var(--danger)}
+.tone-human{--tone:var(--accent);--tone-soft:var(--accent-soft);--tone-text:var(--human-text)}
+.tone-idle{--tone:var(--idle);--tone-soft:var(--surface-2);--tone-text:var(--ink-3)}
+/* StatusDot は .st に必ず tone-* も付くので、その組で絞る。.fl .st（ファイル一覧・ガイド目次の件数）は無地の .st なので触らない */
+.st.tone-ok,.st.tone-run,.st.tone-danger,.st.tone-human,.st.tone-idle{display:inline-flex;align-items:center;gap:7px;font-weight:500;color:var(--tone-text);white-space:nowrap}
+.st > i{width:7px;height:7px;border-radius:50%;background:var(--tone);box-shadow:0 0 0 3px var(--tone-soft);flex:none}
+.lbl{font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3);font-weight:500}
+.lbl.human{color:var(--human-text)}
+.st-btn{border:0;background:transparent;padding:0;font:inherit;cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px}
+
+/* ワークフローの帯（spec 3.1）。枠で囲まず .pad の幅いっぱいに使う */
+.wf{display:grid;gap:10px;min-width:0}
+.wf-scroll{overflow-x:auto;padding-bottom:2px}
+.wf-steps{list-style:none;margin:0;padding:0;display:flex}
+.wf-step{flex:1 0 92px;display:grid;gap:6px;padding-right:8px;min-width:0}
+.wf-step .bar{height:6px;border-radius:3px;background:var(--tone)}
+.wf-step .nm{font-family:var(--mono);font-size:11.5px;color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.wf-step.tone-danger .nm{color:var(--danger)}
+.wf-step.gate .bar{background:repeating-linear-gradient(90deg,var(--accent) 0 6px,transparent 6px 10px);opacity:.65}
+.wf-step.gate .nm,.wf-step.tone-human .nm{color:var(--human-text)}
+.wf-step.unknown .bar{background:repeating-linear-gradient(90deg,var(--ink-3) 0 6px,transparent 6px 10px)}
+.wf-step.now .bar{box-shadow:0 0 0 3px var(--tone-soft)}
+.wf-step.now .nm{font-weight:500}
+.wf-step.now:not(.tone-danger):not(.tone-human):not(.gate) .nm{color:var(--ink)}
+.wf-legend{display:flex;gap:14px;flex-wrap:wrap;font-size:11.5px;color:var(--ink-3)}
+.wf-legend span{display:inline-flex;align-items:center;gap:6px}
+.wf-legend i{width:14px;height:4px;border-radius:2px;background:var(--tone)}
+
+.blk{display:grid;grid-template-columns:minmax(0,1fr);gap:8px;min-width:0}
+
+/* PFD のプロセスの状態（spec 3.4） */
+.pfd-bar{stroke:var(--tone);stroke-width:4;stroke-linecap:round}
+.pfd-bar.dashed{stroke-dasharray:5 3;stroke-linecap:butt}
+/* Intake の状態ごとの件数（spec 3.5）。.count はサイドバーの既存の件数表示と名前が被るので .counts 配下だけに絞る */
+.counts{display:flex;gap:18px;flex-wrap:wrap}
+.counts .count{display:grid;gap:3px;min-width:88px}
+.counts .count .v{font-family:var(--mono);font-size:12px}
+.counts .count .b{height:4px;border-radius:2px;background:var(--tone)}
+.counts .count.dashed .b{background:repeating-linear-gradient(90deg,var(--tone) 0 5px,transparent 5px 8px)}
+
+/* レビュー画面の指示とフィードバック（spec 3.6） */
+.ctx-row{display:grid;gap:6px;justify-items:start}
+.ctx-row > *{justify-self:stretch}
+.prompt{background:var(--sunken);border-radius:7px;padding:10px 12px;line-height:1.65;white-space:pre-wrap;overflow-wrap:anywhere}
+.prompt.clamp{display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}
+.toggle{justify-self:start !important;border:0;background:transparent;padding:0;color:var(--human-text);font-size:12px;text-decoration:underline;text-underline-offset:3px;cursor:pointer}
+.feedback{border-left:3px solid var(--accent);background:var(--accent-soft);border-radius:0 7px 7px 0;padding:10px 12px;line-height:1.65;white-space:pre-wrap;overflow-wrap:anywhere}

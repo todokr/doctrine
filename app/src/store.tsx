@@ -30,7 +30,11 @@ import type {
   IntakeSummary,
   NewComment,
   PfdDraft,
+  ProjectConfig,
+  ProjectConfigInput,
+  ProjectSummary,
   Warning,
+  WorkflowListEntry,
   WorktreeEntry,
 } from "../../shared/protocol.ts";
 import {
@@ -486,6 +490,21 @@ export function useIntakeRpc() {
 /** 設定を書く。成否の判定は呼び出し側が sendDecision で行う */
 export function useSettingsRpc(): { save: (settings: AppSettings) => Promise<void> } {
   return { save: (settings: AppSettings) => saveSettings(settings) };
+}
+
+/** project.yaml の読み書きとワークフローの一覧。useIntakeRpc と同じくここでは catch しない。project は Project.path */
+export type ProjectConfigRpc = {
+  get: (project: string) => Promise<ProjectConfig>;
+  workflows: (project: string) => Promise<WorkflowListEntry[]>;
+  save: (project: string, config: ProjectConfigInput) => Promise<ProjectSummary>;
+};
+
+export function useProjectConfigRpc(): ProjectConfigRpc {
+  return {
+    get: (project: string) => rpc("project.config.get", { project }),
+    workflows: (project: string) => rpc("workflow.list", { project }),
+    save: (project: string, config: ProjectConfigInput) => rpc("project.config.save", { project, config }),
+  };
 }
 
 /** 全体の実行枠の読み書き。成否の判定は呼び出し側で行う */

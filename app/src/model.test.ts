@@ -20,6 +20,7 @@ import {
   denialLines,
   diffLines,
   diffOf,
+  feedbackOf,
   fellBackToAll,
   groupOf,
   guideOf,
@@ -38,7 +39,7 @@ import {
   rejections,
   remaining,
   reviewRound,
-  RUN_PILL,
+  RUN_WORD,
   selectedIntake,
   sidebarOrder,
   stepRunHistory,
@@ -52,6 +53,7 @@ import {
   type Loaded,
   type State,
 } from "./model";
+import { RUN_TONE } from "./tone";
 import type { GuideView } from "./guide";
 import { countIntakeAttention, EMPTY_INTAKE_DRAFT, type IntakeDraft, intakeOrder } from "./intake";
 import { buildDiff } from "./patch";
@@ -1299,10 +1301,9 @@ describe("止まった理由と実行履歴", () => {
   });
 
   test("中断（interrupted）の実行は失敗と別の表示になる", () => {
-    expect(RUN_PILL.interrupted).toEqual(["中断", "p-muted"]);
-    expect(RUN_PILL.failed).toEqual(["失敗", "p-danger"]);
-    expect(RUN_PILL.interrupted[0]).not.toBe(RUN_PILL.failed[0]);
-    expect(RUN_PILL.interrupted[1]).not.toBe(RUN_PILL.failed[1]);
+    expect(RUN_WORD.interrupted).toBe("中断");
+    expect(RUN_WORD.failed).toBe("失敗");
+    expect(RUN_TONE.interrupted).not.toBe(RUN_TONE.failed);
   });
 
   test("一時停止したタスクの中断した実行は、止まった理由（失敗）に出ない", () => {
@@ -1701,5 +1702,27 @@ describe("selectedIntake", () => {
     expect(selectedIntake(gone)?.id).toBe("z");
     expect(selectedIntake(base({ intakeSel: "new" }))).toBeNull();
     expect(selectedIntake(base({ intakeSel: "z" }))).toBeNull();
+  });
+});
+
+describe("feedbackOf", () => {
+  const rejected = (stepRunId: number) => ({
+    stepRunId,
+    stepId: "review",
+    status: "rejected" as const,
+    endedAt: `2026-09-22T0${stepRunId}:00:00.000Z`,
+    comment: `c${stepRunId}`,
+  });
+  const ctx = (reviews: unknown[]) =>
+    ({ prompt: "p", reviews, lastCommand: null, lastAgentMessage: null, reviewFiles: [] }) as unknown as TaskContext;
+
+  test("差し戻しが無ければ latest は null", () => {
+    expect(feedbackOf(ctx([]))).toEqual({ latest: null, earlier: [] });
+  });
+
+  test("reviews は古い順に届くので、最後の差し戻しが latest", () => {
+    const got = feedbackOf(ctx([rejected(1), { stepRunId: 2, stepId: "review", status: "approved", endedAt: "x" }, rejected(3), rejected(5)]));
+    expect(got.latest?.stepRunId).toBe(5);
+    expect(got.earlier.map((r) => r.stepRunId)).toEqual([3, 1]);
   });
 });

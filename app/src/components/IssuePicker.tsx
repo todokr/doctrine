@@ -5,6 +5,7 @@ import { type Cached, ghCache, ghCacheKey, revalidate } from "../ghCache";
 import { ghGuidance, issueNumber, issueTarget, parseIssueInput, type IssueTarget } from "../intake";
 import { clock, type Loaded } from "../model";
 import { useIntakeRpc, useStore } from "../store";
+import { StatusDot } from "./StatusDot";
 import { Markdown } from "./text";
 
 const errorMessage = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -71,7 +72,7 @@ export function IssueList(
         >
           <span className="n">{`#${i.number}`}</span>
           <span>{i.title}</span>
-          {issueTarget(i.url, intakes).kind === "open" ? <span className="pill p-muted">Intake あり</span> : <span />}
+          {issueTarget(i.url, intakes).kind === "open" ? <StatusDot tone="idle" word="Intake あり" /> : <span />}
           <span className="sub">
             担当: {i.assignees.join("、") || "なし"}・更新 {clock(Date.parse(i.updatedAt))}
           </span>
