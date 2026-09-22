@@ -1,6 +1,12 @@
 import { isAbsolute, join } from "@std/path";
 import { computeDiff, mergeBase, type TaskDiff } from "../domain/diff.ts";
-import { branchOf, parseWorkflow, type Workflow } from "../workflow/schema.ts";
+import {
+  branchOf,
+  parseWorkflow,
+  type Step,
+  type Workflow,
+  WorkflowValidationError,
+} from "../workflow/schema.ts";
 import { parseProjectConfig, withSetupStep } from "../workflow/project.ts";
 import { ensureProjectScaffold } from "../workflow/scaffold.ts";
 import {
@@ -82,6 +88,9 @@ import type {
   StepView,
   TaskGuide,
   TaskLogs,
+  WorkflowDetail,
+  WorkflowListEntry,
+  WorkflowStepDetail,
   WorktreeEntry,
 } from "../../../shared/protocol.ts";
 import type { WarningLog } from "./warnings.ts";
@@ -126,6 +135,53 @@ function toStepViews(workflow: Workflow): StepView[] {
     if (branch) view.branch = { goto: branch.goto, maxAttempts: branch.maxAttempts };
     return view;
   });
+}
+
+/** workflow.get が返すステップ1件。branch は branchOf で分岐の種類を問わず取り出す。 */
+function toStepDetail(step: Step): WorkflowStepDetail {
+  const b = branchOf(step);
+  const branch = b
+    ? {
+      goto: b.goto,
+      maxAttempts: b.maxAttempts,
+      feed: b.feed ?? null,
+      implicit: step.type === "guide" && step.onFailure === undefined,
+    }
+    : null;
+
+  switch (step.type) {
+    case "command":
+      return { id: step.id, branch, type: "command", run: step.run };
+    case "agent":
+      return {
+        id: step.id,
+        branch,
+        type: "agent",
+        prompt: step.prompt,
+        session: step.session ?? null,
+        model: step.model ?? null,
+        permissionMode: step.permissionMode ?? null,
+        allowedTools: step.allowedTools ?? null,
+      };
+    case "approval":
+      return {
+        id: step.id,
+        branch,
+        type: "approval",
+        title: step.title,
+        reviewFiles: step.review?.files ?? null,
+      };
+    case "guide":
+      return {
+        id: step.id,
+        branch,
+        type: "guide",
+        session: step.session,
+        model: step.model ?? null,
+        permissionMode: step.permissionMode ?? null,
+        allowedTools: step.allowedTools ?? null,
+      };
+  }
 }
 
 function req(params: Record<string, unknown>, key: string): string {
@@ -242,6 +298,43 @@ export function createHandler(ctx: DaemonContext): Handler {
           .where("id", "=", project.id)
           .execute();
         return await getProject(ctx.db, project.id);
+      }
+
+      case "workflow.list": {
+        const project = await reqProject(ctx, params);
+        const names = await workflowNames(project.path);
+        return await Promise.all(names.map(async (name): Promise<WorkflowListEntry> => {
+          try {
+            await ctx.loadWorkflow(project.path, name);
+            return { name, ok: true };
+          } catch (e) {
+            if (e instanceof WorkflowValidationError) return { name, ok: false, issues: e.issues };
+            return { name, ok: false, issues: [(e as Error).message] };
+          }
+        }));
+      }
+      case "workflow.get": {
+        const project = await reqProject(ctx, params);
+        const name = req(params, "name");
+        if (name.includes("/") || name.includes("\\")) {
+          throw new Error(`ワークフロー名が不正です: ${name}`);
+        }
+        // warnings はこの応答に載せるだけで ctx.warnings には積まない。設定画面が
+        // 何度も呼ぶ経路であり、積む出口は task.create の1箇所だけにする。
+        try {
+          const { workflow, warnings } = await ctx.loadWorkflow(project.path, name);
+          return {
+            name,
+            ok: true,
+            steps: workflow.steps.map(toStepDetail),
+            warnings,
+          } satisfies WorkflowDetail;
+        } catch (e) {
+          if (e instanceof WorkflowValidationError) {
+            return { name, ok: false, issues: e.issues } satisfies WorkflowDetail;
+          }
+          throw e;
+        }
       }
 
       case "task.create": {
@@ -756,6 +849,23 @@ export function createHandler(ctx: DaemonContext): Handler {
         throw new Error(`未知のメソッドです: ${method}`);
     }
   };
+}
+
+/** <project>/.doctrine/workflows/*.yaml から拡張子を除いた名前を昇順で。ディレクトリが無ければ []。 */
+async function workflowNames(projectPath: string): Promise<string[]> {
+  const dir = join(projectPath, ".doctrine", "workflows");
+  const names: string[] = [];
+  try {
+    for await (const entry of Deno.readDir(dir)) {
+      if (entry.isFile && entry.name.endsWith(".yaml")) {
+        names.push(entry.name.slice(0, -".yaml".length));
+      }
+    }
+  } catch (e) {
+    if (e instanceof Deno.errors.NotFound) return [];
+    throw e;
+  }
+  return names.sort();
 }
 
 /** 全プロジェクトの worktree。並びはプロジェクトの id 順、その中は git worktree list の順。 */
