@@ -4,6 +4,7 @@ import { checkGlobalLimit, checkSettingsForm, toSettingsForm, type SettingsForm 
 import { sendDecision } from "../decision";
 import type { Action, Loaded } from "../model";
 import { useSettingsRpc, useSlotsRpc, useStore } from "../store";
+import { ProjectConfigSection } from "./ProjectConfigSection";
 import type { DaemonSlots } from "../../../shared/protocol.ts";
 import type { IntakeRunPurpose } from "../../../shared/intake/state.ts";
 
@@ -283,27 +284,28 @@ function SlotsSection(): React.JSX.Element {
   );
 }
 
-export function SettingsView(): React.JSX.Element {
+function AppSettingsSection(): React.JSX.Element {
   const { s } = useStore();
-  let body: React.JSX.Element;
-  if (s.settings.kind === "loading") {
-    body = <p className="hint">設定を読み込んでいます…</p>;
-  } else if (s.settings.kind === "error") {
-    body = (
+  if (s.settings.kind === "loading") return <p className="hint">設定を読み込んでいます…</p>;
+  if (s.settings.kind === "error") {
+    return (
       <div className="box danger">
         <p>設定を読めませんでした</p>
         <p className="mono">{s.settings.message}</p>
         <p className="hint">設定ファイルを直してから、アプリを開き直してください。</p>
       </div>
     );
-  } else {
-    body = <SettingsEditor key={JSON.stringify(s.settings.value)} initial={s.settings.value} />;
   }
+  return <SettingsEditor key={JSON.stringify(s.settings.value)} initial={s.settings.value} />;
+}
+
+export function SettingsView(): React.JSX.Element {
   return (
     <div className="pad">
       <h1>設定</h1>
-      {body}
+      <AppSettingsSection />
       <SlotsSection />
+      <ProjectConfigSection />
     </div>
   );
 }
