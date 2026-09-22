@@ -184,9 +184,6 @@ function ProjectConfigEditor({ path }: { path: string }): React.JSX.Element {
     }
   }
 
-  if (loaded.kind === "loading" || !form) {
-    return <p className="hint">プロジェクトの設定を読み込んでいます…</p>;
-  }
   if (loaded.kind === "error") {
     return (
       <div className="box danger">
@@ -197,6 +194,9 @@ function ProjectConfigEditor({ path }: { path: string }): React.JSX.Element {
         </div>
       </div>
     );
+  }
+  if (loaded.kind === "loading" || !form) {
+    return <p className="hint">プロジェクトの設定を読み込んでいます…</p>;
   }
 
   return (
