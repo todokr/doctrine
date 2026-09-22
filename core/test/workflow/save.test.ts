@@ -65,7 +65,7 @@ test("null を渡した項目はキーごと消える", async () => {
   const plan = workflow.steps.find((s) => s.id === "plan");
   assert.equal((plan as { model?: string }).model, undefined);
   const planReview = workflow.steps.find((s) => s.id === "plan-review");
-  assert.equal((planReview as { model?: string }).model, "claude-opus-5");
+  assert.equal((planReview as { model?: string }).model, "claude-opus-5-5");
   assert.deepEqual(commentLines(result.text), commentLines(original));
 });
 
