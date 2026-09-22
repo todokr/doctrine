@@ -1,7 +1,7 @@
 # doctrine ワークフローレール設計
 
 - 日付: 2026-09-20
-- 状態: 実装済み
+- 状態: 実装済み。見せ方（4 章の「見せ方」以降と戻り矢印の規則）は [状態の見せ方の統一設計](2026-09-22-status-visual-design.md) の 3.1 で置き換えた
 - 前提: [overview](../../overview.md)、[レビューアプリspec](2026-09-13-review-app-design.md)、[task.context spec](2026-09-19-task-context-design.md)
 
 ## 1. 何を作るか
@@ -36,14 +36,10 @@ export type StepView = {
   id: string;
   type: "command" | "agent" | "approval";
   title?: string;
-  branch?: { goto: string; maxAttempts: number };
 };
 
 export type TaskDetail = { task: TaskSummary; stepRuns: StepRun[]; steps: StepView[] | null };
 ```
-
-`branch` は `core/src/workflow/schema.ts` の `branchOf(step)` で取り出す
-（approval は `onReject`、command / agent は `onFailure`）。`feed` は含めない。
 
 `core/src/daemon/handlers.ts` の `task.get` は、同じファイルの `task.context`
 （`getProject` → `ctx.loadWorkflow` → `withSetupStep(..., project.setup ?? undefined)`
@@ -70,20 +66,8 @@ export type TaskDetail = { task: TaskSummary; stepRuns: StepRun[]; steps: StepVi
 - ノードの status は、その `step_id` の **最後の** `stepRun` の `status`。
   `core/src/db/stepRuns.ts` の `listStepRuns` は `orderBy("id")` の昇順なので末尾を取る。
   その `step_id` の run が 1 件も無ければ「まだ実行していない」状態にする。
-- ノードの試行回数は、その最後の run の `attempt`。1 のときはバッジを出さない。
-- 戻り矢印の使用回数は、始点ステップの run のうち `status === "bounced"` の件数。
-  矢印には `goto` 先と `使用回数 / maxAttempts` を出す。
-- 戻り矢印のレーンは、**またぐステップ数の昇順で内側から**割り当てる。
-  この規則だけで `.doctrine/workflows/default.yaml` の 4 本は 1 本も交差しない。
 
-見せ方:
-
-- 1 ステップ 1 ノード。差し戻しで複数回走ったステップもノードは 1 つにして、
-  回数はバッジに畳む。試行を展開した軌跡は履歴リストが既に持っている。
-- 状態の色は `app/src/styles.css` の既存のトークンとピルの割り当てに従う
-  （success→ok、running→run、awaiting→accent、failed→danger、degraded→degraded、
-  bounced / interrupted / rate_limited→muted）。新しい色を増やさない。
-- 帯は横幅が画面を超えるので、横スクロールできる入れ物に入れる。
+見せ方: [状態の見せ方の統一設計](2026-09-22-status-visual-design.md) の 3.1 を見ること。
 
 ## 5. YAML が編集されて列がずれたとき
 

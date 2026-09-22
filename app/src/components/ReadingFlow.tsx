@@ -91,21 +91,21 @@ export function ReadingFlow({ t, guide, view }: { t: Task; guide: Guide; view: D
     return (
       <section className="flow-sec" id={flowSectionAnchor(`g${g.index}`)} key={g.index} aria-label={g.group.title}>
         <header className="flow-head">
-          <span className="eyebrow">グループ {g.index + 1} / {flow.groups.length}</span>
+          <span className="lbl human">Group {g.index + 1} / {flow.groups.length}</span>
           <h2>{g.group.title}</h2>
         </header>
         <div className="flow-note">
           {prose(g.group.body)}
           {diagrams.map((d) => <div key={d.id} className="dg"><DiagramView diagram={d} /></div>)}
           {decisions.length > 0 && (
-            <div><b>判断</b><ol className="g-list">{decisions.map((d) => <DecisionItem key={d.id} d={d} />)}</ol></div>
+            <div><span className="lbl">判断</span><ol className="g-list">{decisions.map((d) => <DecisionItem key={d.id} d={d} />)}</ol></div>
           )}
           {riskItems.length > 0 && (
-            <div><b>リスク</b><ul className="g-list">{riskItems.map((r) => <RiskItem key={r.id} risk={r} files={files} />)}</ul></div>
+            <div><span className="lbl">リスク</span><ul className="g-list">{riskItems.map((r) => <RiskItem key={r.id} risk={r} files={files} />)}</ul></div>
           )}
           {tests.length > 0 && (
             <div>
-              <b>テスト</b>
+              <span className="lbl">テスト</span>
               <ul className="g-list">{tests.map((x) => <li key={x.id}>{x.behavior}<span className="mono">{x.path} · {x.name}</span></li>)}</ul>
             </div>
           )}
@@ -134,7 +134,7 @@ export function ReadingFlow({ t, guide, view }: { t: Task; guide: Guide; view: D
   return (
     <div className="rv-body" ref={rootRef}>
       <nav className="flowtoc" aria-label="ガイドの目次">
-        <header>ガイドの順</header>
+        <header className="lbl">Guide · ガイドの順</header>
         {keys.map((key, i) => {
           const at = keys.indexOf(current);
           const g = key.startsWith("g") ? flow.groups[Number(key.slice(1))] : null;
