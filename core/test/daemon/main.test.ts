@@ -160,6 +160,7 @@ test("スケジューリングの1周が失敗してもデーモンは落ちず�
     adapter: createMockAdapter({ result: { ok: true, text: "done" } }),
     logRoot: join(root, "logs"),
     globalLimit: 4,
+    configPath: join(root, "config.json"),
     broadcast: () => {},
     loadWorkflow: async () => {
       throw new Error("使わない");

@@ -84,6 +84,7 @@ async function context(events: ServerEvent[] = []): Promise<DaemonContext> {
     adapter: createMockAdapter({ result: { ok: true, text: "done" } }),
     logRoot: join(root, "logs"),
     globalLimit: 4,
+    configPath: join(root, "state", "config.json"),
     broadcast: (ev) => events.push(ev),
     // 警告もイベントとして流れる（daemon.warning）。stderr へは出さない。
     warnings: createWarningLog({ broadcast: (ev) => events.push(ev), write: () => {} }),

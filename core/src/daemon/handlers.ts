@@ -105,6 +105,8 @@ export type DaemonContext = {
   intakeWatcher: IntakeWatcher;
   /** 後始末を拒否したときなど、人に見せる必要のある警告 */
   warnings: WarningLog;
+  /** 全体の実行枠を保存する設定ファイル（daemon.setGlobalLimit が書く）。 */
+  configPath: string;
 };
 
 /** step_runs.permission_denials の JSON を読む。NULL も壊れた JSON も null（拒否なし扱い）。 */

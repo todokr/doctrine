@@ -75,6 +75,7 @@ async function context(events: ServerEvent[] = [], o: Options = {}): Promise<Dae
     adapter: o.adapter ?? standardAdapter(),
     logRoot: join(root, "logs"),
     globalLimit: 4,
+    configPath: join(root, "config.json"),
     broadcast: (ev) => events.push(ev),
     warnings: createWarningLog({ broadcast: (ev) => events.push(ev), write: () => {} }),
     loadWorkflow: () => Promise.reject(new Error("この試験では使わない")),

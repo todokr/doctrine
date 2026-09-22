@@ -10,7 +10,7 @@ import { ghPrWatcher } from "../github/ghPrWatcher.ts";
 import { ghTracker } from "../github/ghTracker.ts";
 import { createIntakeWatcher, gitBaseSync, WATCH_INTERVAL_MS } from "../intake/watch.ts";
 import type { Db } from "../db/schema.ts";
-import { DEFAULT_GLOBAL_LIMIT } from "../domain/scheduler.ts";
+import { defaultConfigPath, readDaemonConfig } from "./config.ts";
 import { parseWorkflow } from "../workflow/schema.ts";
 import { withSetupStep } from "../workflow/project.ts";
 import { createServer, socketPath } from "./server.ts";
@@ -113,7 +113,7 @@ export async function startDaemon(o: {
   dbPath?: string;
   socketPath?: string;
   logRoot?: string;
-  globalLimit?: number;
+  configPath?: string;
   tickMs?: number;
   watchMs?: number;
 } = {}): Promise<{ stop(): Promise<void> }> {
@@ -126,12 +126,16 @@ export async function startDaemon(o: {
   await Deno.mkdir(dirname(dbPath), { recursive: true, mode: 0o700 });
   const db = await openDb(dbPath);
 
+  const configPath = o.configPath ?? defaultConfigPath();
+  const { config, warning: configWarning } = await readDaemonConfig(configPath);
+
   const tracker = ghTracker();
   const ctx: DaemonContext = {
     db,
     adapter: createClaudeAdapter(),
     logRoot: o.logRoot ?? join(stateRoot(), "logs"),
-    globalLimit: o.globalLimit ?? DEFAULT_GLOBAL_LIMIT,
+    globalLimit: config.globalLimit,
+    configPath,
     broadcast: () => {},
     loadWorkflow: loadWorkflowFromDisk,
     running: new Set(),
@@ -160,6 +164,8 @@ export async function startDaemon(o: {
   const server = createServer(createHandler(ctx));
   ctx.broadcast = (ev, opts) => server.broadcast(ev, opts);
   await server.listen(resolvedSocketPath);
+
+  if (configWarning) ctx.warnings.push(configWarning);
 
   // 起動時: running のタスクはすべて古い。子を殺してから queued に戻す。
   // 復帰に失敗したタスクは failed になって返る — ここで漏らさず出力する。
