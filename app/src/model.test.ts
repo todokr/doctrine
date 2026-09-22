@@ -12,7 +12,9 @@ import {
 import {
   bounceNotice,
   canFlow,
+  canPause,
   canReject,
+  canResume,
   composeRejection,
   countReview,
   denialLines,
@@ -131,6 +133,25 @@ describe("groupOf", () => {
 describe("isTerminal", () => {
   test("unknown は終端ではない", () => {
     expect(isTerminal("unknown")).toBe(false);
+  });
+});
+
+describe("canPause / canResume", () => {
+  test("一時停止は queued・running・rate_limited のときだけ", () => {
+    for (const s of ["queued", "running", "rate_limited"] as const) {
+      expect(canPause(s)).toBe(true);
+    }
+    for (const s of ["suspended", "paused", "completed", "failed", "canceled", "unknown"] as const) {
+      expect(canPause(s)).toBe(false);
+    }
+  });
+  test("再開は paused のときだけ", () => {
+    expect(canResume("paused")).toBe(true);
+    for (
+      const s of ["queued", "running", "rate_limited", "suspended", "completed", "failed", "canceled", "unknown"] as const
+    ) {
+      expect(canResume(s)).toBe(false);
+    }
   });
 });
 

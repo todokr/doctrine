@@ -360,6 +360,8 @@ export function useDecide() {
     approve: (taskId: string) => rpc("task.approve", { task_id: taskId }),
     reject: (taskId: string, comment: string) => rpc("task.reject", { task_id: taskId, comment }),
     cancel: (taskId: string) => rpc("task.cancel", { task_id: taskId }),
+    pause: (taskId: string) => rpc("task.pause", { task_id: taskId }),
+    resume: (taskId: string) => rpc("task.resume", { task_id: taskId }),
   };
 }
 

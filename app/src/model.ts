@@ -74,6 +74,12 @@ export function ago(ms: number, now: number): string {
 // ---------------------------------------------------------------- サイドバーの区分
 export const isTerminal = (s: TaskState) => s === "completed" || s === "failed" || s === "canceled";
 
+// core/src/domain/states.ts の TRANSITIONS で paused に移れる状態。app からは import できないので写している
+export const canPause = (s: TaskState) => s === "queued" || s === "running" || s === "rate_limited";
+
+// デーモンは suspended / rate_limited の再開も受けるが、アプリは paused だけに出す（決定 q62-resume-scope）
+export const canResume = (s: TaskState) => s === "paused";
+
 export type Group = "review" | "check" | "running" | "limited" | "queued" | "paused" | "done";
 
 export function groupOf(t: Task): Group {

@@ -364,6 +364,8 @@ export type Methods = {
   "task.approve": { params: { task_id: string }; result: TaskSummary };
   "task.reject": { params: { task_id: string; comment: string }; result: TaskSummary };
   "task.cancel": { params: { task_id: string }; result: TaskSummary };
+  "task.pause": { params: { task_id: string }; result: TaskSummary };
+  "task.resume": { params: { task_id: string }; result: TaskSummary };
   "task.get": { params: { task_id: string }; result: TaskDetail };
   /**
    * step_run_id を省くと最新のステップ実行の末尾を返す。follow は接続の追従先を
