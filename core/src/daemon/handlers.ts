@@ -31,6 +31,7 @@ import {
   hasActiveRateLimit,
   releaseDueIntakeRateLimited,
   releaseDueRateLimited,
+  releaseDueWaiting,
   selectAdmissible,
   selectAdmissibleIntakeRuns,
   slotsSnapshot,
@@ -417,7 +418,7 @@ export function createHandler(ctx: DaemonContext): Handler {
         if (!task) throw new Error("タスクがありません");
         if (
           task.state !== "paused" && task.state !== "suspended" &&
-          task.state !== "rate_limited"
+          task.state !== "rate_limited" && task.state !== "waiting"
         ) {
           throw new Error(`再開できる状態ではありません: ${task.state}`);
         }
@@ -430,9 +431,9 @@ export function createHandler(ctx: DaemonContext): Handler {
         await commitStepBoundary(ctx.db, {
           taskId,
           requireState: task.state,
-          // 上限待ちからの再開は、人が「待たずに今やれ」と言ったということ。
+          // 上限待ち・マージ待ちからの再開は、人が「待たずに今やれ」と言ったということ。
           // 期限を消さないと、次の tick が同じ行をもう一度解放しようとする。
-          taskPatch: { state: "queued", resumed: 1, rate_limited_until: null },
+          taskPatch: { state: "queued", resumed: 1, rate_limited_until: null, waiting_until: null },
           stepRunUpdate: await closeAwaitingStepRun(ctx.db, task),
         });
         ctx.broadcast({
@@ -1169,6 +1170,9 @@ async function tickOnce(ctx: DaemonContext): Promise<void> {
     });
   }
   await releaseDueIntakeRateLimited(ctx.db, { logRoot: ctx.logRoot });
+  for (const taskId of await releaseDueWaiting(ctx.db)) {
+    ctx.broadcast({ event: "task.stateChanged", task_id: taskId, from: "waiting", to: "queued" });
+  }
   // 上限はアカウント全体に掛かるので、待っている間に新しいタスクを始めても
   // 同じように弾かれ、step_run と worktree だけが増える。既に running のタスクは
   // 止めない（自分で上限に当たれば同じ経路で待ちに入る）。

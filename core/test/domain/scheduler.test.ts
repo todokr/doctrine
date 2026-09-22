@@ -7,6 +7,7 @@ import {
   hasActiveRateLimit,
   releaseDueIntakeRateLimited,
   releaseDueRateLimited,
+  releaseDueWaiting,
   selectAdmissible,
   selectAdmissibleIntakeRuns,
 } from "../../src/domain/scheduler.ts";
@@ -179,6 +180,11 @@ async function addRateLimited(d: Db, p: number, id: string, until = UNTIL) {
     .where("id", "=", id).execute();
 }
 
+async function addWaiting(d: Db, p: number, id: string, until = "2026-09-22T03:20:00.000Z") {
+  await add(d, p, id, { state: "waiting" });
+  await d.updateTable("tasks").set({ waiting_until: until }).where("id", "=", id).execute();
+}
+
 test("rate_limited は全体枠を数えず、プロジェクト枠は数える", async () => {
   const { d, p } = await fixture(2);
   await addRateLimited(d, p, "waiting");
@@ -217,6 +223,26 @@ test("上限待ちがいるかどうかを状態から数える", async () => {
   assert.equal(await hasActiveRateLimit(d), true);
   await releaseDueRateLimited(d, new Date("2026-09-19T04:00:00.000Z"));
   assert.equal(await hasActiveRateLimit(d), false);
+});
+
+test("waiting は全体枠を数えず、プロジェクト枠は数える", async () => {
+  const { d, p } = await fixture(2);
+  await addWaiting(d, p, "w");
+  const usage = await currentUsage(d);
+  assert.equal(usage.global, 0);
+  assert.equal(usage.byProject.get(p), 1, "PR を開いたままの worktree を握っている");
+});
+
+test("期限の来た waiting だけを queued に戻す", async () => {
+  const { d, p } = await fixture(3);
+  await addWaiting(d, p, "late", "2026-09-22T05:00:00.000Z");
+  await addWaiting(d, p, "early", "2026-09-22T03:20:00.000Z");
+  assert.deepEqual(await releaseDueWaiting(d, new Date("2026-09-22T04:00:00.000Z")), ["early"]);
+  const t = (await getTask(d, "early"))!;
+  assert.equal(t.state, "queued");
+  assert.equal(t.waiting_until, null);
+  assert.equal(t.resumed, 1, "進行中の仕事として行列の先頭に入る");
+  assert.equal((await getTask(d, "late"))?.state, "waiting");
 });
 
 test("占有数はカウンタではなく running から導出する", async () => {

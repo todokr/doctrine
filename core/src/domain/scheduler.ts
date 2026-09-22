@@ -22,7 +22,7 @@ const RUNNING_INTAKE_STATES: IntakeState[] = ["investigating", "decomposing"];
  */
 export async function currentUsage(db: Db): Promise<SlotUsage> {
   const rows = await db.selectFrom("tasks").select(["project_id", "state"])
-    .where("state", "in", ["running", "suspended", "paused", "rate_limited"])
+    .where("state", "in", ["running", "suspended", "paused", "rate_limited", "waiting"])
     .execute();
 
   const usage: SlotUsage = { global: 0, byProject: new Map() };
@@ -70,6 +70,33 @@ export async function releaseDueRateLimited(
     } catch (e) {
       // 読んでから書くまでに人が pause / cancel した。新しい状態を所有しているのは
       // 先に書いた側なので、上書きせずに見送る。
+      if (!(e instanceof StateConflictError)) throw e;
+    }
+  }
+  return released;
+}
+
+/**
+ * 期限の来たマージ待ちを queued に戻す。戻したタスクのidを返す（配るのは呼び出し側）。
+ * 待ち方は releaseDueRateLimited と同じで、runTask の中では sleep しない。
+ */
+export async function releaseDueWaiting(db: Db, now: Date = new Date()): Promise<string[]> {
+  const due = await db.selectFrom("tasks").select("id")
+    .where("state", "=", "waiting")
+    .where("waiting_until", "<=", now.toISOString())
+    .orderBy("waiting_until", "asc")
+    .execute();
+
+  const released: string[] = [];
+  for (const { id } of due) {
+    try {
+      await commitStepBoundary(db, {
+        taskId: id,
+        requireState: "waiting",
+        taskPatch: { state: "queued", resumed: 1, waiting_until: null },
+      });
+      released.push(id);
+    } catch (e) {
       if (!(e instanceof StateConflictError)) throw e;
     }
   }
