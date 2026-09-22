@@ -50,6 +50,7 @@ async function context(events: ServerEvent[] = []): Promise<DaemonContext> {
     adapter: createMockAdapter({ result: { ok: true, text: "done" } }),
     logRoot: join(root, "logs"),
     globalLimit: 4,
+    configPath: join(root, "state", "config.json"),
     broadcast: (ev) => events.push(ev),
     warnings: createWarningLog({ broadcast: (ev) => events.push(ev), write: () => {} }),
     loadWorkflow: async (projectPath, name) => {
