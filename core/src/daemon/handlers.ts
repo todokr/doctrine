@@ -1,4 +1,4 @@
-import { join } from "@std/path";
+import { isAbsolute, join } from "@std/path";
 import { computeDiff, mergeBase, type TaskDiff } from "../domain/diff.ts";
 import { branchOf, parseWorkflow, type Workflow } from "../workflow/schema.ts";
 import { parseProjectConfig, withSetupStep } from "../workflow/project.ts";
@@ -11,11 +11,13 @@ import {
   insertTask,
   listProjects,
   listTasks,
+  type ProjectRow,
+  type TaskRow,
   type TaskState,
 } from "../db/tasks.ts";
 import { getStepRun, lastRejectedReview, lastStepRun, listStepRuns } from "../db/stepRuns.ts";
 import { commitStepBoundary, StateConflictError } from "../db/boundary.ts";
-import type { Db, IntakeRow, TaskRow } from "../db/schema.ts";
+import type { Db } from "../db/schema.ts";
 import { recentRateLimitSamples } from "../db/rateLimits.ts";
 import { normalizeResetsAt } from "../domain/rateLimit.ts";
 import {
@@ -25,7 +27,14 @@ import {
   selectAdmissible,
   selectAdmissibleIntakeRuns,
 } from "../domain/scheduler.ts";
-import { getIntake, listIntakes, updateIntake, updateIntakeRun } from "../db/intakes.ts";
+import {
+  getIntake,
+  type IntakeRow,
+  listIntakes,
+  updateIntake,
+  updateIntakeRun,
+} from "../db/intakes.ts";
+import { isIntakeTerminal } from "../domain/intakeStates.ts";
 import { claimIntakeRun, runIntakeRun } from "../intake/runner.ts";
 import {
   abandonRevision,
@@ -50,6 +59,7 @@ import {
   canonical,
   createWorktree,
   hasUncommittedChanges,
+  isUnderWorktreesDir,
   listWorktrees,
   removeWorktree,
   UncommittedChangesError,
@@ -120,6 +130,12 @@ function req(params: Record<string, unknown>, key: string): string {
   const v = params[key];
   if (typeof v !== "string" || v === "") throw new Error(`${key} は必須です`);
   return v;
+}
+
+/** 任意の文字列。キーが無いか空文字なら undefined。 */
+function opt(params: Record<string, unknown>, key: string): string | undefined {
+  const v = params[key];
+  return typeof v === "string" && v !== "" ? v : undefined;
 }
 
 function reqNumber(params: Record<string, unknown>, key: string): number {
@@ -474,20 +490,34 @@ export function createHandler(ctx: DaemonContext): Handler {
       case "worktree.list":
         return await worktreeEntries(ctx.db);
       case "worktree.remove": {
-        const taskId = req(params, "task_id");
-        const task = await getTask(ctx.db, taskId);
-        if (!task?.worktree_path) throw new Error("worktree がありません");
-        const project = (await getProject(ctx.db, task.project_id))!;
+        const target = await resolveRemoveTarget(ctx, params);
+        // force が外すのは未コミットの変更の拒否だけ。走る・待つ・再開できるタスクや
+        // 進行中の Intake の作業場所は、force でも消させない。
+        if (target.kind === "task" && !isTerminal(target.task.state)) {
+          throw new Error(`終わっていないタスク（${target.task.state}）の worktree は消せません`);
+        }
+        if (target.kind === "intake" && !isIntakeTerminal(target.intake.state)) {
+          throw new Error(
+            `終わっていない Intake（${target.intake.state}）の worktree は消せません`,
+          );
+        }
         // 失敗したタスクの worktree は汚れているのが通常。force を明示しない限り
         // 未コミットの作業は失われず、削除は拒否される。
         await removeWorktree({
-          repoPath: project.path,
-          worktreePath: task.worktree_path,
+          repoPath: target.project.path,
+          worktreePath: target.worktreePath,
           force: params.force === true,
         });
-        await releaseReviewRefs(ctx, project.path, taskId);
-        await commitStepBoundary(ctx.db, { taskId, taskPatch: { worktree_path: null } });
-        return { removed: task.worktree_path };
+        if (target.kind === "task") {
+          await releaseReviewRefs(ctx, target.project.path, target.task.id);
+          await commitStepBoundary(ctx.db, {
+            taskId: target.task.id,
+            taskPatch: { worktree_path: null },
+          });
+        } else if (target.kind === "intake") {
+          await updateIntake(ctx.db, target.intake.id, { worktree_path: null });
+        }
+        return { removed: target.worktreePath };
       }
 
       case "daemon.warnings":
@@ -768,6 +798,64 @@ async function releaseReviewRefs(
   await releaseTrees(projectPath, taskId).catch((e: Error) => {
     ctx.warnings.push(`レビュー参照を消せませんでした: ${e.message}`, taskId);
   });
+}
+
+type RemoveTarget =
+  | { kind: "task"; task: TaskRow; project: ProjectRow; worktreePath: string }
+  | { kind: "intake"; intake: IntakeRow; project: ProjectRow; worktreePath: string }
+  | { kind: "orphan"; project: ProjectRow; worktreePath: string };
+
+/**
+ * worktree.remove の対象を task_id か path のどちらか一方から決める。
+ * path は stateDir()/worktrees 配下で、かつそのプロジェクトの git worktree list に
+ * 出るものだけを通す。タスクや Intake の worktree に当たればその持ち主として扱う。
+ */
+async function resolveRemoveTarget(
+  ctx: DaemonContext,
+  params: Record<string, unknown>,
+): Promise<RemoveTarget> {
+  const taskId = opt(params, "task_id");
+  const path = opt(params, "path");
+  if ((taskId === undefined) === (path === undefined)) {
+    throw new Error("task_id か path のどちらか一方を指定してください");
+  }
+
+  if (taskId !== undefined) {
+    const task = await getTask(ctx.db, taskId);
+    if (!task?.worktree_path) throw new Error("worktree がありません");
+    const project = (await getProject(ctx.db, task.project_id))!;
+    return { kind: "task", task, project, worktreePath: task.worktree_path };
+  }
+
+  // 相対パスはデーモンの cwd から解決されてしまう。
+  if (!isAbsolute(path!)) throw new Error(`path は絶対パスで指定してください: ${path}`);
+  const real = await canonical(path!);
+  if (!await isUnderWorktreesDir(real)) {
+    throw new Error(`doctrine の worktree 置き場の外にあるパスは消せません: ${path}`);
+  }
+
+  for (const project of await listProjects(ctx.db)) {
+    let worktreePath: string | undefined;
+    for (const w of await listWorktrees(project.path)) {
+      if (await canonical(w.path) === real) worktreePath = w.path;
+    }
+    if (worktreePath === undefined) continue;
+
+    for (const task of await listTasks(ctx.db, { projectId: project.id })) {
+      if (task.worktree_path && await canonical(task.worktree_path) === real) {
+        return { kind: "task", task, project, worktreePath };
+      }
+    }
+    for (
+      const intake of await listIntakes(ctx.db, { projectId: project.id, includeClosed: true })
+    ) {
+      if (intake.worktree_path && await canonical(intake.worktree_path) === real) {
+        return { kind: "intake", intake, project, worktreePath };
+      }
+    }
+    return { kind: "orphan", project, worktreePath };
+  }
+  throw new Error(`git worktree list に出ないパスは消せません: ${path}`);
 }
 
 /**

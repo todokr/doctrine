@@ -29,9 +29,6 @@ const nodeLabel = (n: PfdNode) =>
     .filter(Boolean)
     .join("、");
 
-/** 種類の印。文字は pfd.ts が幅に数えた印と同じ並びにする */
-const kindMarks = (n: PfdNode) => [n.frozen && "🔒", n.goal && "◎", n.given && "既存", n.decision && "決定", n.human && "人"].filter(Boolean);
-
 /** PFD を手書きの SVG で描く。外部の読み込みを持たず、要素の選択とコメント・状態の印は props で受ける */
 export function PfdDiagram({ view, selected, onSelect }: { view: PfdView; selected: string | null; onSelect: (key: string) => void }) {
   const arrowId = useSvgId("pfd-arrow");
@@ -69,12 +66,13 @@ export function PfdDiagram({ view, selected, onSelect }: { view: PfdView; select
               <title>{n.label}</title>
               <rect x={n.x} y={n.y} width={n.w} height={n.h} rx={rx} />
               {n.human && <rect className="pfd-inner" x={n.x + 3} y={n.y + 3} width={n.w - 6} height={n.h - 6} rx={rx - 3} />}
-              <text x={n.x + n.w / 2} y={n.y + n.h / 2 + 3.5} textAnchor="middle" className="pfd-label">
-                {mark && `${mark} `}
-                {kindMarks(n).map((m) => (
-                  <tspan key={m as string} className="pfd-mark">{m} </tspan>
+              <text x={n.x + 8} y={n.y + 16} className="pfd-mark">
+                {[mark, ...n.marks].filter(Boolean).join(" ")}
+              </text>
+              <text x={n.x + n.w / 2} y={n.y + 31} textAnchor="middle" className="pfd-label">
+                {n.lines.map((line, i) => (
+                  <tspan key={i} x={n.x + n.w / 2} dy={i === 0 ? 0 : 13}>{line}</tspan>
                 ))}
-                {n.label}
               </text>
               {n.stage !== null && (
                 <text x={n.x} y={n.y - 4} className="pfd-stage">{n.stage}</text>

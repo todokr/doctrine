@@ -221,6 +221,17 @@ export function stepRunHistory(detail?: TaskDetail): StepRun[] {
   return detail ? [...detail.stepRuns].reverse() : [];
 }
 
+/** 実行履歴の状態の表示名とクラス。interrupted は人やデーモンの停止で外から閉じた実行で、失敗ではない */
+export const RUN_PILL: Record<StepRun["status"], [string, string]> = {
+  running: ["実行中", "p-run"],
+  awaiting: ["レビュー待ち", "p-attn"],
+  success: ["成功", "p-ok"],
+  failed: ["失敗", "p-danger"],
+  interrupted: ["中断", "p-muted"],
+  bounced: ["差し戻し", "p-muted"],
+  rate_limited: ["上限待ち", "p-muted"],
+};
+
 /** 拒否1件を「ツール名 + 主要引数」の並びにする。引数は切り詰めない（コマンドを読むため）。 */
 export function denialLines(d: StepRunDenials): { tool: string; detail: string }[] {
   return d.denials.map((x) => ({

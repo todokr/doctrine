@@ -220,6 +220,31 @@ export const PFD_SAMPLE: Pfd = {
   ],
 };
 
+/** ラベルの長い PFD の標本（#62 の 1 回目の案を縮めたもの）。折り返しと、作り手の無い成果物の列の寄せを確かめる */
+export const PFD_LONG_LABELS: Pfd = {
+  title: "日常運用の操作をアプリに揃える",
+  goal: ["view", "settings-ui"],
+  artifacts: [
+    { id: "rpc", name: "既存の RPC（task.pause / task.resume / task.logs / daemon.warnings、core/src/domain/worktree.ts、states.ts）", given: true },
+    { id: "cli", name: "既存の dctl CLI（core/src/cli/dctl.ts）", given: true },
+    { id: "app", name: "既存のアプリ（app/src のタスク画面・サイドバー・store、app/src-tauri の lib.rs）", given: true },
+    { id: "d-launch", name: "外部コマンドを起動する場所の決定", given: true, decision: "q1", verify: "回答に残っている" },
+    { id: "d-resume", name: "アプリの再開ボタンを出す状態の決定", given: true, decision: "q2", verify: "回答に残っている" },
+    { id: "list", name: "全件を返す worktree.list", given: false, verify: "テストが通る" },
+    { id: "follow", name: "dctl logs --follow のストリーミング表示", given: false, verify: "テストが通る" },
+    { id: "tauri", name: "設定の読み書きと外部コマンド起動の Tauri コマンド", given: false, verify: "テストが通る" },
+    { id: "view", name: "worktree と警告のビュー", given: false, verify: "画面のテストが通る" },
+    { id: "settings-ui", name: "設定の画面", given: false, verify: "画面のテストが通る" },
+  ],
+  processes: [
+    { id: "1", name: "worktree.list を全件を返す形に変える", actor: "agent", inputs: ["rpc"], outputs: ["list"], purpose: "p" },
+    { id: "2", name: "dctl logs --follow をストリーミング表示にする", actor: "agent", inputs: ["cli", "rpc"], outputs: ["follow"], purpose: "p" },
+    { id: "3", name: "設定の読み書きと外部コマンド起動の Tauri コマンドを足す", actor: "agent", inputs: ["app", "d-launch"], outputs: ["tauri"], purpose: "p" },
+    { id: "4", name: "worktree と警告のビューを作る", actor: "agent", inputs: ["list", "app", "d-resume"], outputs: ["view"], purpose: "p" },
+    { id: "5", name: "設定の画面を作る", actor: "agent", inputs: ["tauri"], outputs: ["settings-ui"], purpose: "p" },
+  ],
+};
+
 const PFD_PR: PrFact = {
   number: 42,
   url: "https://github.com/todokr/doctrine/pull/42",

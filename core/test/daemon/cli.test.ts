@@ -4,7 +4,7 @@ import { createServer, type Server, type Socket } from "node:net";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { call, parseArgv } from "../../src/cli/dctl.ts";
+import { call, followLogs, parseArgv } from "../../src/cli/dctl.ts";
 
 let root: string;
 let sock: string;
@@ -89,6 +89,14 @@ test("dctl gc は worktree.remove", () => {
   assert.deepEqual(
     parseArgv(["gc", "t1", "--force"]),
     { method: "worktree.remove", params: { task_id: "t1", force: true } },
+  );
+  assert.deepEqual(
+    parseArgv(["gc", "--path", "/s/worktrees/r/x"]),
+    { method: "worktree.remove", params: { path: "/s/worktrees/r/x" } },
+  );
+  assert.deepEqual(
+    parseArgv(["gc", "--path", "/p", "--force"]),
+    { method: "worktree.remove", params: { path: "/p", force: true } },
   );
 });
 
@@ -187,4 +195,117 @@ test("call: 応答が来ないままタイムアウトする（短いタイム�
     // 何も書き込まない。応答を返さないデーモンを模す。
   });
   await assert.rejects(call(sock, "task.list", {}, 50), /応答がありません/);
+});
+
+test("dctl logs --follow", () => {
+  assert.deepEqual(parseArgv(["logs", "t1", "--follow"]), {
+    method: "task.logs",
+    params: { task_id: "t1", follow: true },
+  });
+});
+
+/** 最初に届いたリクエスト（1 行 JSON）を読んで、parse したものを渡す。 */
+function onRequest(socket: Socket, handler: (request: unknown) => void): void {
+  socket.once("data", (data) => handler(JSON.parse(data.toString().split("\n")[0])));
+}
+
+const logLine = (task_id: string, step_run_id: number, line: string) =>
+  JSON.stringify({ event: "log.line", task_id, step_run_id, line }) + "\n";
+
+test("followLogs: 末尾を出した後、そのタスクの log.line だけを届いた順に出す", async () => {
+  let request: unknown;
+  await fakeDaemon((socket) => {
+    onRequest(socket, (req) => {
+      request = req;
+      socket.write(logLine("t1", 1, "応答前"));
+      socket.write(
+        JSON.stringify({
+          id: 1,
+          ok: true,
+          result: { step_run_id: 1, log_path: "/x", lines: ["a", "", "b", ""] },
+        }) + "\n",
+      );
+      socket.write(logLine("t1", 1, "c"));
+      socket.write(
+        JSON.stringify({
+          event: "task.stateChanged",
+          task_id: "t1",
+          from: "queued",
+          to: "running",
+        }) +
+          "\n",
+      );
+      socket.write(logLine("t2", 9, "他タスク"));
+      socket.write(logLine("t1", 2, "d"));
+      socket.end();
+    });
+  });
+  const got: string[] = [];
+  await assert.rejects(
+    followLogs(
+      sock,
+      { task_id: "t1", follow: true },
+      (l) => got.push(l),
+      new AbortController().signal,
+    ),
+    /デーモンが接続を閉じました/,
+  );
+  assert.deepEqual(got, ["a", "", "b", "c", "d"]);
+  assert.deepEqual(request, {
+    id: 1,
+    method: "task.logs",
+    params: { task_id: "t1", follow: true },
+  });
+});
+
+test("followLogs: 中断すると接続を閉じて resolve する", async () => {
+  await fakeDaemon((socket) => {
+    onRequest(socket, () => {
+      socket.write(
+        JSON.stringify({
+          id: 1,
+          ok: true,
+          result: { step_run_id: 1, log_path: "/x", lines: ["a"] },
+        }) + "\n",
+      );
+      socket.write(logLine("t1", 1, "b"));
+      // 閉じない。追従中のデーモンを模す。
+    });
+  });
+  const controller = new AbortController();
+  const got: string[] = [];
+  await followLogs(sock, { task_id: "t1", follow: true }, (l) => {
+    got.push(l);
+    if (l === "b") controller.abort();
+  }, controller.signal);
+  assert.deepEqual(got, ["a", "b"]);
+});
+
+test("followLogs: 最初の応答が来ないとタイムアウトする", async () => {
+  await fakeDaemon(() => {
+    // 何も書き込まない。応答を返さないデーモンを模す。
+  });
+  await assert.rejects(
+    followLogs(sock, { task_id: "t1", follow: true }, () => {}, new AbortController().signal, 50),
+    /応答がありません/,
+  );
+});
+
+test("followLogs: 失敗の応答はそのまま投げる", async () => {
+  await fakeDaemon((socket) => {
+    onRequest(socket, () => {
+      socket.write(JSON.stringify({ id: 1, ok: false, error: "ステップ実行がありません" }) + "\n");
+    });
+  });
+  const got: string[] = [];
+  await assert.rejects(
+    followLogs(
+      sock,
+      { task_id: "t1", follow: true },
+      (l) => got.push(l),
+      new AbortController().signal,
+    ),
+    /ステップ実行がありません/,
+  );
+  assert.deepEqual(got, []);
 });

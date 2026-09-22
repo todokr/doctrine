@@ -57,3 +57,27 @@ export async function loadDrafts(): Promise<SavedDrafts> {
 export function saveDrafts(drafts: SavedDrafts): Promise<void> {
   return invoke("save_drafts", { drafts });
 }
+
+/** アプリの設定。キーは Rust の Settings（serde の camelCase）と同じ */
+export type AppSettings = {
+  editorCommand: string;
+  terminalCommand: string;
+  staleDays: number;
+};
+
+/** ファイルが無いときやキーが欠けているときの既定値は Rust が埋めるので、ここでは補わない */
+export function loadSettings(): Promise<AppSettings> {
+  return invoke<AppSettings>("load_settings");
+}
+
+export function saveSettings(settings: AppSettings): Promise<void> {
+  return invoke("save_settings", { settings });
+}
+
+/**
+ * command の `{path}` をクォートした path に置き換えて起動する。
+ * 終了は待たないので、コマンドが見つからないことはここでは分からない。
+ */
+export function openPath(command: string, path: string): Promise<void> {
+  return invoke("open_path", { command, path });
+}

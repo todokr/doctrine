@@ -5,15 +5,23 @@ import { existsSync } from "node:fs";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { openDb, openDbOn } from "../../src/db/migrate.ts";
 import { getTask, insertTask } from "../../src/db/tasks.ts";
 import { listStepRuns } from "../../src/db/stepRuns.ts";
 import { captureTree, reviewRefName } from "../../src/domain/reviewTree.ts";
-import { ensureDoctrineOutExcluded } from "../../src/domain/worktree.ts";
+import {
+  createDetachedWorktree,
+  createWorktree,
+  ensureDoctrineOutExcluded,
+  intakeWorktreePathFor,
+  listWorktrees,
+  stateDir,
+  worktreePathFor,
+} from "../../src/domain/worktree.ts";
 import { createHandler, type DaemonContext, tick } from "../../src/daemon/handlers.ts";
-import { createMockAdapter } from "../../src/adapter/mock.ts";
+import { createMockAdapter, type MockAdapter } from "../../src/adapter/mock.ts";
 import { createWarningLog } from "../../src/daemon/warnings.ts";
 import { parseWorkflow } from "../../src/workflow/schema.ts";
 import type {
@@ -30,12 +38,6 @@ import { fakeTracker } from "../helpers/tracker.ts";
 import { noopWatcher } from "../helpers/watcher.ts";
 import { getIntake, insertIntake, listIntakeRuns, updateIntake } from "../../src/db/intakes.ts";
 import { enqueueIntakeRun } from "../../src/intake/runner.ts";
-import {
-  createDetachedWorktree,
-  createWorktree,
-  intakeWorktreePathFor,
-  worktreePathFor,
-} from "../../src/domain/worktree.ts";
 import { question, questionsOut } from "../intake/runnerHelper.ts";
 
 const run = promisify(execFile);
@@ -839,15 +841,25 @@ test("worktree 作成に失敗したタスクは failed になり、他プロジ
 const TWO_AGENTS = 'name: twoagents\nsteps:\n  - id: a\n    type: agent\n    prompt: "p1"\n' +
   '  - id: b\n    type: agent\n    prompt: "p2"\n';
 
-/** agent ステップ a の実行中（まだ結果が返らない状態）まで進めたタスクを作る。 */
-async function midFlight(ctx: DaemonContext, h: ReturnType<typeof createHandler>) {
-  const adapter = createMockAdapter({ result: { ok: true, text: "done" }, delayMs: 300 });
+/**
+ * agent ステップ a の実行中（まだ結果が返らない状態）まで進めたタスクを作る。
+ * アダプタとワークフローは省略すると、成功で返る mock と TWO_AGENTS になる。
+ */
+async function midFlight(
+  ctx: DaemonContext,
+  h: ReturnType<typeof createHandler>,
+  o: { adapter?: MockAdapter; workflow?: string } = {},
+) {
+  const adapter = o.adapter ??
+    createMockAdapter({ result: { ok: true, text: "done" }, delayMs: 300 });
   ctx.adapter = adapter;
-  await writeFile(join(repo, ".doctrine", "workflows", "twoagents.yaml"), TWO_AGENTS);
+  const workflow = o.workflow ?? TWO_AGENTS;
+  const name = parseWorkflow(workflow).workflow.name;
+  await writeFile(join(repo, ".doctrine", "workflows", `${name}.yaml`), workflow);
   await h("project.add", { path: repo }, NOOP_CONN);
   const t = await h(
     "task.create",
-    { project: repo, title: "T", prompt: "p", workflow: "twoagents" },
+    { project: repo, title: "T", prompt: "p", workflow: name },
     NOOP_CONN,
   ) as { id: string };
   await tick(ctx);
@@ -899,6 +911,76 @@ test("実行中に pause されたら runTask は current_step_id を進めな�
     "a",
     "中断されたステップより先に進むと resume が1ステップ飛ばしてしまう",
   );
+});
+
+/** SIGTERM で止められた子（143 で終わる）。mock の pid は kill できないので結果で表す。 */
+function terminatedAdapter(): MockAdapter {
+  return createMockAdapter({ result: { ok: false, exitCode: 143, text: "" }, delayMs: 300 });
+}
+
+function finishedOf(events: ServerEvent[]) {
+  return events.flatMap((e) => e.event === "stepRun.finished" ? [e] : []);
+}
+
+function warningsOf(events: ServerEvent[]) {
+  return events.filter((e) => e.event === "daemon.warning");
+}
+
+test("running のタスクに task.pause を送ると、走っていた実行は interrupted で閉じ、タスクは paused になる", async () => {
+  const events: ServerEvent[] = [];
+  const ctx = await context(events);
+  const h = createHandler(ctx);
+  const { taskId } = await midFlight(ctx, h, { adapter: terminatedAdapter() });
+
+  await h("task.pause", { task_id: taskId }, NOOP_CONN);
+  await until(() => ctx.running.size === 0, 5000, "runTask の終了");
+
+  const runs = await listStepRuns(ctx.db, taskId);
+  assert.equal(runs.length, 1);
+  assert.equal(runs[0].status, "interrupted");
+  assert.notEqual(runs[0].ended_at, null);
+  assert.equal((await getTask(ctx.db, taskId))?.state, "paused");
+
+  const finished = finishedOf(events).filter((e) => e.step_run_id === runs[0].id);
+  assert.equal(finished.length, 1);
+  assert.equal(finished[0].status, "interrupted");
+  assert.deepEqual(warningsOf(events), [], "止めただけで警告を出してはいけない");
+});
+
+test("onFailure のあるステップを task.pause で止めても差し戻しとは記録しない", async () => {
+  const events: ServerEvent[] = [];
+  const ctx = await context(events);
+  const h = createHandler(ctx);
+  const adapter = terminatedAdapter();
+  const { taskId } = await midFlight(ctx, h, {
+    adapter,
+    workflow: 'name: retry\nsteps:\n  - id: a\n    type: agent\n    prompt: "p1"\n' +
+      "    onFailure:\n      goto: a\n      maxAttempts: 3\n",
+  });
+
+  await h("task.pause", { task_id: taskId }, NOOP_CONN);
+  await until(() => ctx.running.size === 0, 5000, "runTask の終了");
+
+  const runs = await listStepRuns(ctx.db, taskId);
+  assert.equal(runs.length, 1);
+  assert.equal(runs[0].status, "interrupted");
+  assert.equal(runs[0].goto_step_id, null);
+  assert.deepEqual(finishedOf(events).map((e) => e.status), ["interrupted"]);
+  assert.equal(adapter.calls.length, 1);
+});
+
+test("running のタスクに task.cancel を送ると、走っていた実行は interrupted で閉じ、タスクは canceled になる", async () => {
+  const events: ServerEvent[] = [];
+  const ctx = await context(events);
+  const h = createHandler(ctx);
+  const { taskId } = await midFlight(ctx, h, { adapter: terminatedAdapter() });
+
+  await h("task.cancel", { task_id: taskId }, NOOP_CONN);
+  await until(() => ctx.running.size === 0, 5000, "runTask の終了");
+
+  assert.deepEqual((await listStepRuns(ctx.db, taskId)).map((r) => r.status), ["interrupted"]);
+  assert.equal((await getTask(ctx.db, taskId))?.state, "canceled");
+  assert.deepEqual(warningsOf(events), []);
 });
 
 // --- 最終ステップが approval のワークフローの後始末 -----------------------
@@ -1505,6 +1587,7 @@ test("worktree を消すとそのタスクのレビュー参照も消える", as
   const before = await run("git", ["-C", repo, "for-each-ref", "--format=%(refname)", ref]);
   assert.equal(before.stdout.trim(), ref, "suspended に入った時点で参照が張られている");
 
+  await h("task.cancel", { task_id: t.id }, NOOP_CONN);
   await h("worktree.remove", { task_id: t.id, force: true }, NOOP_CONN);
 
   const after = await run("git", [
@@ -1529,10 +1612,14 @@ test("削除を拒否されたら参照は残す", async () => {
   await until(async () => (await getTask(ctx.db, t.id))?.state === "suspended");
   await until(() => ctx.running.size === 0);
   const worktree = (await getTask(ctx.db, t.id))!.worktree_path!;
+  await h("task.cancel", { task_id: t.id }, NOOP_CONN);
   await writeFile(join(worktree, "dirty.txt"), "未コミット\n");
 
   // force を付けなければ、未コミットの変更を理由に削除は拒否される。
-  await assert.rejects(() => h("worktree.remove", { task_id: t.id }, NOOP_CONN));
+  await assert.rejects(
+    () => h("worktree.remove", { task_id: t.id }, NOOP_CONN),
+    /未コミットの変更/,
+  );
 
   const after = await run("git", [
     "-C",
@@ -1542,6 +1629,194 @@ test("削除を拒否されたら参照は残す", async () => {
     "refs/doctrine/reviews",
   ]);
   assert.notEqual(after.stdout.trim(), "", "worktree が残るなら基準点も残す");
+});
+
+// --- worktree.remove（task_id か path のどちらか一方で消す）--------------------
+
+async function reviewRefs(): Promise<string> {
+  const r = await run("git", [
+    "-C",
+    repo,
+    "for-each-ref",
+    "--format=%(refname)",
+    "refs/doctrine/reviews",
+  ]);
+  return r.stdout.trim();
+}
+
+/** suspended まで進めて cancel する。worktree もレビュー参照も残る終端状態。 */
+async function canceledTask(
+  ctx: DaemonContext,
+  h: ReturnType<typeof createHandler>,
+): Promise<{ id: string; worktree: string }> {
+  const id = await suspendedTask(ctx, h);
+  const worktree = (await getTask(ctx.db, id))!.worktree_path!;
+  await h("task.cancel", { task_id: id }, NOOP_CONN);
+  return { id, worktree };
+}
+
+test("worktree.remove はパスで終端タスクの worktree を消し、worktree_path を null にする", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  const { id, worktree } = await canceledTask(ctx, h);
+  assert.notEqual(await reviewRefs(), "");
+
+  const res = await h("worktree.remove", { path: worktree }, NOOP_CONN);
+
+  assert.deepEqual(res, { removed: worktree });
+  assert.equal(existsSync(worktree), false);
+  assert.equal((await getTask(ctx.db, id))?.worktree_path, null);
+  assert.equal(await reviewRefs(), "", "レビュー参照も消える");
+});
+
+test("worktree.remove はパスが実パスでなくても受け付ける", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  const { id } = await canceledTask(ctx, h);
+
+  // root は tmpdir() 配下。macOS では /var が /private/var への symlink なので、
+  // stateDir() から組んだ表記は git が返す実パスとは字面が違う。
+  await h(
+    "worktree.remove",
+    { path: join(stateDir(), "worktrees", basename(repo), id) },
+    NOOP_CONN,
+  );
+
+  assert.equal((await getTask(ctx.db, id))?.worktree_path, null);
+});
+
+test("worktree.remove は DB に対応のない worktree をパスで消す", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  await h("project.add", { path: repo }, NOOP_CONN);
+  const orphan = await createDetachedWorktree({
+    repoPath: repo,
+    worktreePath: worktreePathFor(repo, "orphan"),
+    baseBranch: "main",
+  });
+  assert.deepEqual(await listWorktrees(repo), [{ path: orphan, branch: null }]);
+
+  await h("worktree.remove", { path: orphan }, NOOP_CONN);
+
+  assert.deepEqual(await listWorktrees(repo), []);
+  assert.equal(existsSync(orphan), false);
+});
+
+test("worktree.remove は worktree 置き場の外のパスを拒否する", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  await h("project.add", { path: repo }, NOOP_CONN);
+  const elsewhere = await createDetachedWorktree({
+    repoPath: repo,
+    worktreePath: join(root, "elsewhere"),
+    baseBranch: "main",
+  });
+
+  await assert.rejects(
+    () => h("worktree.remove", { path: elsewhere, force: true }, NOOP_CONN),
+    /worktree 置き場の外/,
+  );
+  await assert.rejects(
+    () => h("worktree.remove", { path: repo, force: true }, NOOP_CONN),
+    /worktree 置き場の外/,
+  );
+  assert.equal(existsSync(elsewhere), true);
+  assert.equal(existsSync(repo), true);
+});
+
+test("worktree.remove は git worktree list に出ないパスを拒否する", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  await h("project.add", { path: repo }, NOOP_CONN);
+  const stray = join(stateDir(), "worktrees", basename(repo), "stray");
+  await mkdir(stray, { recursive: true });
+
+  await assert.rejects(
+    () => h("worktree.remove", { path: stray, force: true }, NOOP_CONN),
+    /git worktree list に出ない/,
+  );
+  assert.equal(existsSync(stray), true);
+});
+
+test("worktree.remove は相対パスを拒否する", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  await assert.rejects(
+    () => h("worktree.remove", { path: "worktrees/x" }, NOOP_CONN),
+    /絶対パス/,
+  );
+});
+
+test("worktree.remove は task_id と path の両方、またはどちらも無いときは拒否する", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  const { id, worktree } = await canceledTask(ctx, h);
+
+  await assert.rejects(
+    () => h("worktree.remove", { task_id: id, path: worktree }, NOOP_CONN),
+    /どちらか一方/,
+  );
+  await assert.rejects(() => h("worktree.remove", {}, NOOP_CONN), /どちらか一方/);
+  assert.equal(existsSync(worktree), true);
+});
+
+test("worktree.remove は終わっていないタスクの worktree を force でも拒否する", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  const id = await suspendedTask(ctx, h);
+  const worktree = (await getTask(ctx.db, id))!.worktree_path!;
+
+  await assert.rejects(
+    () => h("worktree.remove", { task_id: id, force: true }, NOOP_CONN),
+    /終わっていないタスク（suspended）/,
+  );
+  await assert.rejects(
+    () => h("worktree.remove", { path: worktree, force: true }, NOOP_CONN),
+    /終わっていないタスク（suspended）/,
+  );
+  assert.equal(existsSync(worktree), true);
+  assert.equal((await getTask(ctx.db, id))?.worktree_path, worktree);
+});
+
+/** Intake i1 に detached worktree を持たせる。state は investigating のまま。 */
+async function intakeWithWorktree(
+  ctx: DaemonContext,
+  h: ReturnType<typeof createHandler>,
+): Promise<string> {
+  const project = await h("project.add", { path: repo }, NOOP_CONN) as { id: number };
+  await addIntake(ctx, project.id);
+  const worktree = await createDetachedWorktree({
+    repoPath: repo,
+    worktreePath: intakeWorktreePathFor(repo, "i1"),
+    baseBranch: "main",
+  });
+  await updateIntake(ctx.db, "i1", { worktree_path: worktree });
+  return worktree;
+}
+
+test("worktree.remove は終わっていない Intake の worktree を force でも拒否する", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  const worktree = await intakeWithWorktree(ctx, h);
+
+  await assert.rejects(
+    () => h("worktree.remove", { path: worktree, force: true }, NOOP_CONN),
+    /終わっていない Intake（investigating）/,
+  );
+  assert.equal(existsSync(worktree), true);
+  assert.equal((await getIntake(ctx.db, "i1"))?.worktree_path, worktree);
+});
+
+test("worktree.remove は終わった Intake の worktree を消して worktree_path を null にする", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  const worktree = await intakeWithWorktree(ctx, h);
+  await updateIntake(ctx.db, "i1", { state: "canceled" });
+
+  await h("worktree.remove", { path: worktree }, NOOP_CONN);
+
+  assert.equal((await getIntake(ctx.db, "i1"))?.worktree_path, null);
+  assert.equal(existsSync(worktree), false);
 });
 
 // --- suspended から出る3つの経路が、開いている awaiting 行を必ず閉じる -------

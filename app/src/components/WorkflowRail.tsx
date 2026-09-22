@@ -2,7 +2,7 @@ import type { TaskDetail } from "../../../shared/protocol.ts";
 import { buildRail, laneY, NODE_H, NODE_W, ROW_TOP } from "../rail";
 import type { RailStatus } from "../rail";
 
-/** ノードの塗り分け。TaskView の RUN_PILL と同じ対応で、pending は muted。 */
+/** ノードの塗り分け。model.ts の RUN_PILL と同じ対応で、pending は muted。 */
 const STATUS_CLASS: Record<RailStatus, string> = {
   running: "wr-run",
   awaiting: "wr-attn",

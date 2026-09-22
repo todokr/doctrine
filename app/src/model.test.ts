@@ -36,6 +36,7 @@ import {
   rejections,
   remaining,
   reviewRound,
+  RUN_PILL,
   selectedIntake,
   sidebarOrder,
   stepRunHistory,
@@ -583,6 +584,15 @@ describe("daemon イベント", () => {
     expect(after.tasks[0].bounce).toEqual({ step: "test", goto: "implement", attempt: 1 });
     // 差し戻しは「要確認」でも「終了」でもない。ワークフローは続いている
     expect(groupOf(after.tasks[0])).toBe("running");
+  });
+
+  test("stepRun.finished の interrupted は差し戻しの通知を立てない", () => {
+    const after = reduce(withTask(), {
+      type: "daemon",
+      ev: bounceEvent({ status: "interrupted", goto_step_id: null }),
+      now: 999,
+    });
+    expect(after.tasks[0].bounce).toBeUndefined();
   });
 
   test("差し戻してもサイドバーの並びは変わらない", () => {
@@ -1202,6 +1212,20 @@ describe("止まった理由と実行履歴", () => {
   test("動いているタスクには止まった理由が無い", () => {
     const task = t({ state: "running", refused: false });
     expect(stopReasons([task], task, detail([stepRun()]))).toEqual([]);
+  });
+
+  test("中断（interrupted）の実行は失敗と別の表示になる", () => {
+    expect(RUN_PILL.interrupted).toEqual(["中断", "p-muted"]);
+    expect(RUN_PILL.failed).toEqual(["失敗", "p-danger"]);
+    expect(RUN_PILL.interrupted[0]).not.toBe(RUN_PILL.failed[0]);
+    expect(RUN_PILL.interrupted[1]).not.toBe(RUN_PILL.failed[1]);
+  });
+
+  test("一時停止したタスクの中断した実行は、止まった理由（失敗）に出ない", () => {
+    const task = t({ state: "paused", worktree: "/w", refused: false });
+    const d = detail([stepRun({ id: 1, status: "interrupted", exit_code: 143 })]);
+    expect(stopReasons([task], task, d)).toEqual([]);
+    expect(groupOf(task)).toBe("paused");
   });
 
   test("実行履歴は新しい順", () => {

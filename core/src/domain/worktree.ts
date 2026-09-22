@@ -1,4 +1,4 @@
-import { basename, dirname, isAbsolute, join, resolve } from "@std/path";
+import { basename, dirname, isAbsolute, join, resolve, SEPARATOR } from "@std/path";
 import { runCommand } from "../util/exec.ts";
 import { homeDir } from "../util/home.ts";
 
@@ -199,6 +199,15 @@ export async function canonical(p: string): Promise<string> {
   } catch {
     return resolve(p);
   }
+}
+
+/**
+ * `realPath`（canonical 済み）が stateDir()/worktrees の配下かを返す。置き場の側も
+ * 実パスに直してから比べる。直さないと macOS の /var → /private/var で、正しいパスまで外と判定される。
+ */
+export async function isUnderWorktreesDir(realPath: string): Promise<boolean> {
+  const root = await canonical(join(stateDir(), "worktrees"));
+  return realPath.startsWith(root + SEPARATOR);
 }
 
 export type ListedWorktree = { path: string; branch: string | null };
