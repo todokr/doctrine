@@ -164,9 +164,8 @@ test("スケジューリングの1周が失敗してもデーモンは落ちず�
     globalLimit: 4,
     configPath: join(root, "config.json"),
     broadcast: () => {},
-    loadWorkflow: async () => {
-      throw new Error("使わない");
-    },
+    loadWorkflow: () => Promise.reject(new Error("使わない")),
+    workflowOf: () => Promise.reject(new Error("使わない")),
     running: new Set(),
     tracker: fakeTracker(),
     runningIntakeRuns: new Set(),

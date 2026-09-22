@@ -210,6 +210,8 @@ const COLUMNS = {
     intake_process_id: true,
     issue_url: true,
     parent_issue_url: true,
+    workflow_yaml: true,
+    workflow_setup: true,
   },
   step_runs: {
     id: true,
@@ -500,6 +502,7 @@ test("開き直してもマイグレーションは二度流れず、データ�
     "0008_step_run_drop_degraded",
     "0009_intake",
     "0010_intake_revision",
+    "0011_task_workflow_pin",
   ]);
   await first.destroy();
 
@@ -516,6 +519,7 @@ test("開き直してもマイグレーションは二度流れず、データ�
       "0008_step_run_drop_degraded",
       "0009_intake",
       "0010_intake_revision",
+      "0011_task_workflow_pin",
     ]);
     assert.equal((await second.selectFrom("projects").selectAll().execute()).length, 1);
   } finally {
@@ -552,6 +556,7 @@ test("pending_feed を足す前に作られたDBファイルは、行を保っ�
       "0008_step_run_drop_degraded",
       "0009_intake",
       "0010_intake_revision",
+      "0011_task_workflow_pin",
     ]);
     const old = await getTask(d, "old");
     assert.equal(old?.state, "suspended", "既存の行は残る");
@@ -1238,4 +1243,33 @@ test("0010: 改訂の範囲の列は null で足される", async () => {
     () => d.updateTable("intakes").set({ revision_run_id: 999 }).execute(),
     /FOREIGN KEY/,
   );
+});
+
+test("0011: 移行前からあるタスクは作成時の定義の列が NULL のまま残る", async () => {
+  const d = await openDbOn(legacyWithChildren());
+  const t = (await getTask(d, "t1"))!;
+  assert.equal(t.workflow_yaml, null);
+  assert.equal(t.workflow_setup, null);
+
+  const violations = await sql<{ table: string }>`PRAGMA foreign_key_check`.execute(d);
+  assert.deepEqual(violations.rows, [], "外部キーが壊れていない");
+});
+
+test("0011: insertTask は作成時の定義を書き戻せる", async () => {
+  const d = await db();
+  const pid = await seed(d);
+  await insertTask(d, {
+    ...newTask("t1"),
+    project_id: pid,
+    workflow_yaml: "name: x\n",
+    workflow_setup: "echo hi",
+  });
+  const t1 = (await getTask(d, "t1"))!;
+  assert.equal(t1.workflow_yaml, "name: x\n");
+  assert.equal(t1.workflow_setup, "echo hi");
+
+  await insertTask(d, { ...newTask("t2"), project_id: pid });
+  const t2 = (await getTask(d, "t2"))!;
+  assert.equal(t2.workflow_yaml, null);
+  assert.equal(t2.workflow_setup, null);
 });

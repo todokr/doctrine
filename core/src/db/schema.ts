@@ -77,6 +77,10 @@ export interface TasksTable {
   /** このタスクが実装する sub-issue の URL。 */
   issue_url: string | null;
   parent_issue_url: string | null;
+  /** 作成時のワークフロー YAML の中身。NULL は 0011 より前に作られた行で、ディスクの YAML で進む。 */
+  workflow_yaml: string | null;
+  /** 作成時の projects.setup。workflow_yaml が非 NULL の行で NULL なら、作成時に setup が無かった。 */
+  workflow_setup: string | null;
 }
 
 export interface TaskSessionsTable {

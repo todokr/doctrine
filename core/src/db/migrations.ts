@@ -709,6 +709,21 @@ const migrations: Record<string, Migration> = {
         .execute();
     },
   },
+
+  /**
+   * タスクを作成時のワークフロー定義に固定する（pin）。設定画面からワークフローを
+   * 編集できるようにしたとき、進行中のタスクがディスクの変更を追って消えたステップや
+   * 変わった goto に当たらないようにするため。workflow_yaml が NULL の行はこの
+   * マイグレーションより前に作られたタスクで、作成時の中身を持たないので、
+   * 従来どおりディスクの YAML を読む。制約の無い列なので再構築は要らない。
+   */
+  "0011_task_workflow_pin": {
+    // deno-lint-ignore no-explicit-any
+    async up(db: Kysely<any>) {
+      await db.schema.alterTable("tasks").addColumn("workflow_yaml", "text").execute();
+      await db.schema.alterTable("tasks").addColumn("workflow_setup", "text").execute();
+    },
+  },
 };
 
 /** ファイルを動的 import しない（権限も要らず、deno check で型検査される）。 */
