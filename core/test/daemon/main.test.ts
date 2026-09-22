@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, test } from "@std/testing/bdd";
 import assert from "node:assert/strict";
-import { chmod, mkdtemp, rm, stat } from "node:fs/promises";
+import { chmod, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type ChildProcess, spawn } from "node:child_process";
@@ -12,6 +12,8 @@ import { createMockAdapter } from "../../src/adapter/mock.ts";
 import type { DaemonContext } from "../../src/daemon/handlers.ts";
 import { fakeTracker } from "../helpers/tracker.ts";
 import { noopWatcher } from "../helpers/watcher.ts";
+import { call } from "../../src/cli/dctl.ts";
+import type { DaemonSlots, Warning } from "../../../shared/protocol.ts";
 
 let root: string;
 const daemons: { stop(): Promise<void> }[] = [];
@@ -160,6 +162,7 @@ test("スケジューリングの1周が失敗してもデーモンは落ちず�
     adapter: createMockAdapter({ result: { ok: true, text: "done" } }),
     logRoot: join(root, "logs"),
     globalLimit: 4,
+    configPath: join(root, "config.json"),
     broadcast: () => {},
     loadWorkflow: () => Promise.reject(new Error("使わない")),
     workflowOf: () => Promise.reject(new Error("使わない")),
@@ -203,4 +206,87 @@ test("スケジューリングの1周が失敗してもデーモンは落ちず�
     console.error = realError;
     await db.destroy();
   }
+});
+
+// --- 設定ファイルの読み込み ---------------------------------------------
+
+test("設定ファイルが無ければ全体の実行枠 4 で起動する", async () => {
+  const sock = join(root, "dctld.sock");
+  const d = await startDaemon({
+    dbPath: join(root, "a.db"),
+    socketPath: sock,
+    logRoot: join(root, "logs"),
+    configPath: join(root, "config.json"),
+    tickMs: 1_000_000,
+  });
+  daemons.push(d);
+
+  const slots = await call(sock, "daemon.slots", {}) as DaemonSlots;
+  assert.equal(slots.global_limit, 4);
+});
+
+test("設定ファイルがあればその値で起動する", async () => {
+  const sock = join(root, "dctld.sock");
+  const configPath = join(root, "config.json");
+  await writeFile(configPath, JSON.stringify({ globalLimit: 7 }));
+  const d = await startDaemon({
+    dbPath: join(root, "a.db"),
+    socketPath: sock,
+    logRoot: join(root, "logs"),
+    configPath,
+    tickMs: 1_000_000,
+  });
+  daemons.push(d);
+
+  const slots = await call(sock, "daemon.slots", {}) as DaemonSlots;
+  assert.equal(slots.global_limit, 7);
+});
+
+test("壊れた設定ファイルでも既定値で起動し、警告を出す", async () => {
+  const sock = join(root, "dctld.sock");
+  const configPath = join(root, "config.json");
+  await writeFile(configPath, "{");
+  const d = await startDaemon({
+    dbPath: join(root, "a.db"),
+    socketPath: sock,
+    logRoot: join(root, "logs"),
+    configPath,
+    tickMs: 1_000_000,
+  });
+  daemons.push(d);
+
+  const slots = await call(sock, "daemon.slots", {}) as DaemonSlots;
+  assert.equal(slots.global_limit, 4);
+  const warnings = await call(sock, "daemon.warnings", {}) as Warning[];
+  assert.ok(warnings.some((w) => /設定ファイル/.test(w.message)));
+});
+
+test("daemon.setGlobalLimit で変えた値は再起動しても残る", async () => {
+  const sock = join(root, "dctld.sock");
+  const dbPath = join(root, "a.db");
+  const configPath = join(root, "config.json");
+  const d1 = await startDaemon({
+    dbPath,
+    socketPath: sock,
+    logRoot: join(root, "logs"),
+    configPath,
+    tickMs: 1_000_000,
+  });
+  daemons.push(d1);
+
+  await call(sock, "daemon.setGlobalLimit", { global_limit: 6 });
+  await d1.stop();
+  daemons.splice(daemons.indexOf(d1), 1);
+
+  const d2 = await startDaemon({
+    dbPath,
+    socketPath: sock,
+    logRoot: join(root, "logs"),
+    configPath,
+    tickMs: 1_000_000,
+  });
+  daemons.push(d2);
+
+  const slots = await call(sock, "daemon.slots", {}) as DaemonSlots;
+  assert.equal(slots.global_limit, 6);
 });

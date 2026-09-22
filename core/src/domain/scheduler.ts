@@ -1,5 +1,5 @@
 import { getProject, type TaskRow } from "../db/tasks.ts";
-import type { Db, IntakeRunRow, IntakeState } from "../db/schema.ts";
+import type { Db, IntakeRunPurpose, IntakeRunRow, IntakeState } from "../db/schema.ts";
 import { commitStepBoundary, StateConflictError } from "../db/boundary.ts";
 import { IntakeStateConflictError, updateIntake } from "../db/intakes.ts";
 import { enqueueIntakeRun } from "../intake/runner.ts";
@@ -145,6 +145,17 @@ export async function selectAdmissibleIntakeRuns(
     .execute();
 }
 
+/** queued のタスクを受付順に。再開したタスク → 優先度 → 作成時刻の FIFO。 */
+async function queuedInAdmissionOrder(db: Db): Promise<TaskRow[]> {
+  return await db.selectFrom("tasks").selectAll()
+    .where("state", "=", "queued")
+    .orderBy("resumed", "desc").orderBy("priority", "asc").orderBy("created_at", "asc").orderBy(
+      "id",
+      "asc",
+    )
+    .execute();
+}
+
 /**
  * 受付順: 再開したタスク → 優先度（小さいほど優先） → 作成時刻のFIFO。
  * 両スコープに空きがあるタスクだけを、上限いっぱいまで返す。
@@ -157,13 +168,7 @@ export async function selectAdmissible(
   let globalFree = globalLimit - usage.global;
   if (globalFree <= 0) return [];
 
-  const queued = await db.selectFrom("tasks").selectAll()
-    .where("state", "=", "queued")
-    .orderBy("resumed", "desc").orderBy("priority", "asc").orderBy("created_at", "asc").orderBy(
-      "id",
-      "asc",
-    )
-    .execute();
+  const queued = await queuedInAdmissionOrder(db);
 
   const admitted: TaskRow[] = [];
   const projectUsed = new Map(usage.byProject);
@@ -178,4 +183,35 @@ export async function selectAdmissible(
     globalFree -= 1;
   }
   return admitted;
+}
+
+export type SlotsSnapshot = {
+  globalLimit: number;
+  inUse: number;
+  waitingTasks: TaskRow[];
+  waitingIntakeRuns: {
+    id: number;
+    intake_id: string;
+    issue_title: string;
+    purpose: IntakeRunPurpose;
+  }[];
+};
+
+/** 全体の実行枠のいまの様子。数え方は currentUsage と受付の関数と同じにする。 */
+export async function slotsSnapshot(db: Db, globalLimit: number): Promise<SlotsSnapshot> {
+  const inUse = (await currentUsage(db)).global;
+  const waitingTasks = await queuedInAdmissionOrder(db);
+  const waitingIntakeRuns = await db.selectFrom("intake_runs")
+    .innerJoin("intakes", "intakes.id", "intake_runs.intake_id")
+    .select([
+      "intake_runs.id",
+      "intake_runs.intake_id",
+      "intakes.issue_title",
+      "intake_runs.purpose",
+    ])
+    .where("intake_runs.status", "=", "queued")
+    .where("intakes.state", "in", RUNNING_INTAKE_STATES)
+    .orderBy("intake_runs.id", "asc")
+    .execute();
+  return { globalLimit, inUse, waitingTasks, waitingIntakeRuns };
 }

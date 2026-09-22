@@ -76,6 +76,7 @@ async function context(adapter = createMockAdapter({ result: { ok: true, text: "
     adapter,
     logRoot: join(root, "logs"),
     globalLimit: 4,
+    configPath: join(root, "config.json"),
     broadcast: (ev) => events.push(ev),
     loadWorkflow: loadWorkflowFromDisk,
     workflowOf: (t, p) => taskWorkflow(t, p, loadWorkflowFromDisk),
