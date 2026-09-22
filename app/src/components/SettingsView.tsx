@@ -4,6 +4,7 @@ import { checkSettingsForm, toSettingsForm, type SettingsForm } from "../setting
 import { sendDecision } from "../decision";
 import type { Action } from "../model";
 import { useSettingsRpc, useStore } from "../store";
+import { WorkflowSettings } from "./WorkflowSettings";
 
 /** props だけで描く。テストはこちらを描く */
 export function SettingsFields(props: {
@@ -104,11 +105,10 @@ function SettingsEditor({ initial }: { initial: AppSettings }) {
 
 export function SettingsView(): React.JSX.Element {
   const { s } = useStore();
-  if (s.settings.kind === "loading") {
-    return <div className="pad"><p className="hint">設定を読み込んでいます…</p></div>;
-  }
-  if (s.settings.kind === "error") {
-    return (
+  const main = s.settings.kind === "loading"
+    ? <div className="pad"><p className="hint">設定を読み込んでいます…</p></div>
+    : s.settings.kind === "error"
+    ? (
       <div className="pad">
         <div className="box danger">
           <p>設定を読めませんでした</p>
@@ -116,7 +116,12 @@ export function SettingsView(): React.JSX.Element {
           <p className="hint">設定ファイルを直してから、アプリを開き直してください。</p>
         </div>
       </div>
-    );
-  }
-  return <SettingsEditor key={JSON.stringify(s.settings.value)} initial={s.settings.value} />;
+    )
+    : <SettingsEditor key={JSON.stringify(s.settings.value)} initial={s.settings.value} />;
+  return (
+    <>
+      {main}
+      <WorkflowSettings />
+    </>
+  );
 }
