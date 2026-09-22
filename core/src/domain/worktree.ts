@@ -1,4 +1,4 @@
-import { basename, dirname, isAbsolute, join, resolve } from "@std/path";
+import { basename, dirname, isAbsolute, join, resolve, SEPARATOR } from "@std/path";
 import { runCommand } from "../util/exec.ts";
 import { homeDir } from "../util/home.ts";
 
@@ -193,12 +193,21 @@ export async function removeWorktree(o: {
  * 実パスを報告するため、比較側も realpath で解決してから揃える。パスが既に
  * 存在しない（削除済みの worktree など）場合は resolve にフォールバックする。
  */
-async function canonical(p: string): Promise<string> {
+export async function canonical(p: string): Promise<string> {
   try {
     return await Deno.realPath(p);
   } catch {
     return resolve(p);
   }
+}
+
+/**
+ * `realPath`（canonical 済み）が stateDir()/worktrees の配下かを返す。置き場の側も
+ * 実パスに直してから比べる。直さないと macOS の /var → /private/var で、正しいパスまで外と判定される。
+ */
+export async function isUnderWorktreesDir(realPath: string): Promise<boolean> {
+  const root = await canonical(join(stateDir(), "worktrees"));
+  return realPath.startsWith(root + SEPARATOR);
 }
 
 export async function listWorktrees(repoPath: string): Promise<string[]> {

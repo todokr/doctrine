@@ -90,6 +90,14 @@ test("dctl gc は worktree.remove", () => {
     parseArgv(["gc", "t1", "--force"]),
     { method: "worktree.remove", params: { task_id: "t1", force: true } },
   );
+  assert.deepEqual(
+    parseArgv(["gc", "--path", "/s/worktrees/r/x"]),
+    { method: "worktree.remove", params: { path: "/s/worktrees/r/x" } },
+  );
+  assert.deepEqual(
+    parseArgv(["gc", "--path", "/p", "--force"]),
+    { method: "worktree.remove", params: { path: "/p", force: true } },
+  );
 });
 
 test("priority は数値になる", () => {

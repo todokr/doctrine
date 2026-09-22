@@ -75,6 +75,7 @@ Intake
 worktree
   worktrees
   gc <task-id> [--force]
+  gc --path <path> [--force]      dctl worktrees が出すパスを消す
 
 その他
   ratelimit [--limit <n>]
@@ -126,7 +127,11 @@ export function parseArgv(argv: string[]): { method: string; params: Record<stri
     case "worktrees":
       return { method: "worktree.list", params: {} };
     case "gc":
-      return { method: "worktree.remove", params: { task_id: positional[0], ...flags } };
+      // task_id と path の排他はデーモンが検査する。task_id のキーは指定があるときだけ載せる。
+      return {
+        method: "worktree.remove",
+        params: positional[0] === undefined ? flags : { task_id: positional[0], ...flags },
+      };
     case "ratelimit":
       return { method: "ratelimit.recent", params: flags };
     case undefined:

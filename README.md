@@ -325,9 +325,11 @@ dctl ls --state failed              # 失敗したタスクを探す
 dctl get <task-id>                  # worktree_path を確認する
 dctl gc <task-id>                   # そのタスクのworktreeを削除する
 dctl gc <task-id> --force           # 削除が拒否される場合（未コミットの変更がある）
+dctl gc --path <path>               # dctl worktrees が出した孤児を消す
 ```
 
 **`--force` を付けると、worktree内の未コミットの作業は失われる。** 確認してから使うこと。
+終わっていないタスク・Intake の worktree は `--force` を付けても消せない。消すのは worktree だけで、ブランチは残る。
 
 worktree を消すと、そのタスクのレビュー参照（`refs/doctrine/reviews/<task-id>/`）も
 一緒に消える。この参照は「レビュー時点の worktree の中身」を `git gc` から守るために
