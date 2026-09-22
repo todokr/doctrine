@@ -185,7 +185,7 @@ export function TaskView({ t }: { t: Task }) {
 
   return (
     <div className="pad">
-      <Crumbs t={t} />
+      <Crumbs t={t} kind="Task" />
       <h1>{t.title}</h1>
       <div className="headrow">
         <StatusDot tone={TASK_TONE[t.state]} word={STATE_WORD[t.state]} />
@@ -281,19 +281,20 @@ export function TaskView({ t }: { t: Task }) {
       </TaskActions>
       {t.worktree && <p className="mono hint">{t.worktree}</p>}
 
-      {detail && <WorkflowRail detail={detail} />}
+      {detail && (
+        <div className="blk">
+          <div className="headrow"><span className="lbl">Workflow</span><span className="mono hint">{t.wf}</span></div>
+          <WorkflowRail detail={detail} legend />
+        </div>
+      )}
 
       <div className="headrow">
-        <b>ログ</b>
+        <span className="lbl">Log</span>
         <span className="mono hint">
           {history.find((r) => r.id === log?.stepRunId)?.step_id ?? ""}
         </span>
         <span className="spacer" />
-        <span className="hint">
-          {following
-            ? <><span className="spin" style={{ display: "inline-block", verticalAlign: -2 }} /> 追従中</>
-            : `末尾 ${TAIL} 行`}
-        </span>
+        {!following && <span className="hint">末尾 {TAIL} 行</span>}
       </div>
       {log && log.lines.some((l) => l !== "")
         ? (
@@ -319,7 +320,7 @@ export function TaskView({ t }: { t: Task }) {
 
       {history.length > 0 && (
         <details className="runs">
-          <summary>実行履歴</summary>
+          <summary><span className="lbl">History</span> 実行履歴</summary>
           <div className="runtable">
             <table>
               <thead>

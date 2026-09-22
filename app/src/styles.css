@@ -248,7 +248,6 @@ th{color:var(--ink-3);font-size:11px;font-weight:500;border-top:0;background:var
 .g-change.removed{color:var(--danger)}
 .g-order-item{border:1px solid var(--line);border-radius:7px;padding:6px 8px;display:grid;gap:1px}
 .g-order-item::before{content:counter(go) ". ";color:var(--accent-text);font-weight:500}
-.wr-scroll{overflow-x:auto}
 .pfd-scroll{overflow-x:auto}
 .pfd{display:block}
 .pfd-edge{fill:none;stroke:var(--ink-3);stroke-width:1.2}
@@ -275,25 +274,6 @@ th{color:var(--ink-3);font-size:11px;font-weight:500;border-top:0;background:var
 .pfd-comments text{fill:var(--accent-ink);font-size:9px;font-weight:500}
 /* 選択は状態の枠より後に書き、選んだ要素の枠が状態の枠に負けないようにする */
 .pfd-node:focus-visible rect,.pfd-node.selected rect{stroke:var(--accent);stroke-width:2.5}
-.wr{display:block}
-.wr-edge{stroke:var(--line);stroke-width:1.4}
-.wr-back{fill:none;stroke:var(--ink-3);stroke-width:1.2}
-.wr-arrowhead{fill:var(--ink-3)}
-.wr-arclbl{font-family:var(--mono);font-size:10px;fill:var(--ink-3)}
-.wr-node rect{fill:var(--surface-2);stroke:var(--line)}
-.wr-id{font-family:var(--mono);font-size:11px;fill:var(--ink-2)}
-.wr-ok rect{fill:var(--ok-bg)}
-.wr-ok .wr-id{fill:var(--ok)}
-.wr-run rect{fill:var(--run-bg)}
-.wr-run .wr-id{fill:var(--run)}
-.wr-attn rect{fill:var(--accent-soft)}
-.wr-attn .wr-id{fill:var(--accent-text)}
-.wr-danger rect{fill:var(--danger-bg)}
-.wr-danger .wr-id{fill:var(--danger)}
-.wr-node.unknown rect{stroke:var(--ink-3);stroke-dasharray:4 3}
-.wr-node[aria-current="step"] rect{stroke:var(--accent);stroke-width:2}
-.wr-badge rect{fill:var(--surface);stroke:var(--line)}
-.wr-badge text{font-family:var(--mono);font-size:9.5px;fill:var(--ink-2)}
 
 /* ガイドの順（縦1本の流れ） */
 .flow{display:grid;gap:22px;min-width:0}
@@ -476,3 +456,22 @@ tr.wt-stale{background:var(--accent-soft)}
 .lbl{font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3);font-weight:500}
 .lbl.human{color:var(--human-text)}
 .st-btn{border:0;background:transparent;padding:0;font:inherit;cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px}
+
+/* ワークフローの帯（spec 3.1）。枠で囲まず .pad の幅いっぱいに使う */
+.wf{display:grid;gap:10px;min-width:0}
+.wf-scroll{overflow-x:auto;padding-bottom:2px}
+.wf-steps{list-style:none;margin:0;padding:0;display:flex}
+.wf-step{flex:1 0 92px;display:grid;gap:6px;padding-right:8px;min-width:0}
+.wf-step .bar{height:6px;border-radius:3px;background:var(--tone)}
+.wf-step .nm{font-family:var(--mono);font-size:11.5px;color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.wf-step.tone-danger .nm{color:var(--danger)}
+.wf-step.gate .bar{background:repeating-linear-gradient(90deg,var(--accent) 0 6px,transparent 6px 10px);opacity:.65}
+.wf-step.gate .nm,.wf-step.tone-human .nm{color:var(--human-text)}
+.wf-step.unknown .bar{background:repeating-linear-gradient(90deg,var(--ink-3) 0 6px,transparent 6px 10px)}
+.wf-step.now .bar{box-shadow:0 0 0 3px var(--tone-soft)}
+.wf-step.now .nm{color:var(--ink);font-weight:500}
+.wf-legend{display:flex;gap:14px;flex-wrap:wrap;font-size:11.5px;color:var(--ink-3)}
+.wf-legend span{display:inline-flex;align-items:center;gap:6px}
+.wf-legend i{width:14px;height:4px;border-radius:2px;background:var(--tone)}
+
+.blk{display:grid;grid-template-columns:minmax(0,1fr);gap:8px;min-width:0}

@@ -46,11 +46,12 @@ function rememberPosition(): string | null {
   return key ? `[data-anchor="${CSS.escape(key)}"]` : null;
 }
 
-export function Crumbs({ t }: { t: Task }) {
+export function Crumbs({ t, kind }: { t: Task; kind: "Task" | "Review" }) {
   const { s, dispatch } = useStore();
   const p = s.projects.find((x) => x.id === t.project);
   return (
     <div className="crumbs">
+      <span className="lbl">{kind}</span>
       {p && <span className="pjdot" style={{ background: p.color }} />}
       <span>{p?.id ?? t.project}</span>
       <span className="mono">{t.wf}</span>
@@ -284,7 +285,7 @@ export function ReviewView({ t }: { t: Task }) {
   return (
     <>
       <div className="pad">
-        <Crumbs t={t} />
+        <Crumbs t={t} kind="Review" />
         <h1>{t.title}</h1>
         <div className="headrow">
           <StatusDot tone="human" word="レビュー待ち" />
