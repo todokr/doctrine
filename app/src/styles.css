@@ -138,6 +138,10 @@ table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}
 th,td{padding:6px 10px;border-top:1px solid var(--line);text-align:left;white-space:nowrap;vertical-align:top}
 th{color:var(--ink-3);font-size:11px;font-weight:500;border-top:0;background:var(--surface-2)}
 .table-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:9px}
+.wf-list{display:flex;flex-wrap:wrap;gap:6px}
+.wf-step{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:4px 12px;margin:0}
+.wf-step dt{color:var(--ink-3);font-size:11.5px}
+.wf-step dd{margin:0}
 
 /* review */
 .rv-files-md{border:1px solid var(--line);border-radius:9px;overflow:hidden}
@@ -266,6 +270,30 @@ th{color:var(--ink-3);font-size:11px;font-weight:500;border-top:0;background:var
 .pfd-comments text{fill:var(--accent-ink);font-size:9px;font-weight:500}
 /* 選択は状態の枠より後に書き、選んだ要素の枠が状態の枠に負けないようにする */
 .pfd-node:focus-visible rect,.pfd-node.selected rect{stroke:var(--accent);stroke-width:2.5}
+/* ワークフローの定義の図（設定画面）。タスク画面の帯は .wf */
+.wr{display:block}
+.wr-edge{stroke:var(--line);stroke-width:1.4}
+.wr-back{fill:none;stroke:var(--ink-3);stroke-width:1.2}
+.wr-arrowhead{fill:var(--ink-3)}
+.wr-arclbl{font-family:var(--mono);font-size:10px;fill:var(--ink-3)}
+.wr-node rect{fill:var(--surface-2);stroke:var(--line)}
+.wr-id{font-family:var(--mono);font-size:11px;fill:var(--ink-2)}
+.wr-ok rect{fill:var(--ok-bg)}
+.wr-ok .wr-id{fill:var(--ok)}
+.wr-run rect{fill:var(--run-bg)}
+.wr-run .wr-id{fill:var(--run)}
+.wr-attn rect{fill:var(--accent-soft)}
+.wr-attn .wr-id{fill:var(--accent-text)}
+.wr-danger rect{fill:var(--danger-bg)}
+.wr-danger .wr-id{fill:var(--danger)}
+.wr-node.unknown rect{stroke:var(--ink-3);stroke-dasharray:4 3}
+.wr-node[aria-current="step"] rect{stroke:var(--accent);stroke-width:2}
+.wr-badge rect{fill:var(--surface);stroke:var(--line)}
+.wr-badge text{font-family:var(--mono);font-size:9.5px;fill:var(--ink-2)}
+.wr-def{cursor:pointer}
+.wr-def:focus{outline:none}
+.wr-kind{font-family:var(--mono);font-size:9.5px;fill:var(--ink-3)}
+.wr-def:focus-visible rect,.wr-def.selected rect{stroke:var(--accent);stroke-width:2}
 
 /* ガイドの順（縦1本の流れ） */
 .flow{display:grid;gap:22px;min-width:0}

@@ -5,6 +5,7 @@ import { sendDecision } from "../decision";
 import type { Action, Loaded } from "../model";
 import { useSettingsRpc, useSlotsRpc, useStore } from "../store";
 import { ProjectConfigSection } from "./ProjectConfigSection";
+import { WorkflowSettings } from "./WorkflowSettings";
 import type { DaemonSlots } from "../../../shared/protocol.ts";
 import type { IntakeRunPurpose } from "../../../shared/intake/state.ts";
 
@@ -306,6 +307,7 @@ export function SettingsView(): React.JSX.Element {
       <AppSettingsSection />
       <SlotsSection />
       <ProjectConfigSection />
+      <WorkflowSettings />
     </div>
   );
 }
