@@ -26,7 +26,7 @@ import type {
 } from "../../shared/protocol.ts";
 import { toolInputParts } from "../../shared/toolInput.ts";
 import type { GuideView } from "./guide";
-import type { ConnectionStatus } from "./daemon/client";
+import type { AppSettings, ConnectionStatus } from "./daemon/client";
 import type { Answer } from "../../shared/intake/question.ts";
 import {
   canRejectIntake,
@@ -108,7 +108,7 @@ export const GROUPS: { key: Exclude<Group, "done">; name: string; sort: (a: Task
   { key: "paused", name: "一時停止", sort: (a, b) => b.since - a.since },
 ];
 
-export type View = "tasks" | "done" | "intake" | "worktrees";
+export type View = "tasks" | "done" | "intake" | "worktrees" | "settings";
 
 /** そのタスクが並ぶビュー。終了したタスクは「終了したタスク」にしか並ばない */
 export function taskViewFor(t: Task): "tasks" | "done" {
@@ -546,11 +546,15 @@ export type State = {
   worktrees: WorktreeEntry[];
   /** 警告。新しい順。取り直しで置き換え、daemon.warning で先頭に足す */
   warnings: Warning[];
-  /** 設定の古い worktree のしきい値（日）。読めていなければ null（強調も点も出さない） */
-  staleDays: number | null;
   /** 削除の確認ダイアログで確かめている worktree。dirty は分からなければ null */
   removing: { path: string; dirty: boolean | null } | null;
+  /** 起動時に load_settings で読んだ設定。保存に成功したら置き換える */
+  settings: Loaded<AppSettings>;
 };
+
+/** 古い worktree のしきい値（日）。設定が読めていなければ null（強調も点も出さない） */
+export const staleDaysOf = (s: Pick<State, "settings">): number | null =>
+  s.settings.kind === "ok" ? s.settings.value.staleDays : null;
 
 export const EMPTY_DRAFT: Draft = { comments: [], overall: "" };
 export const draftOf = (s: State, id: string): Draft => s.drafts[id] ?? EMPTY_DRAFT;
@@ -660,9 +664,9 @@ export type Action =
   | { type: "connection"; conn: ConnectionStatus }
   /** worktree.list / daemon.warnings の取り直し。warnings が null のときは警告を置き換えない（daemon.warnings だけ落ちた回） */
   | { type: "worktrees.sync"; worktrees: WorktreeEntry[]; warnings: Warning[] | null }
-  | { type: "settings.loaded"; staleDays: number | null }
   | { type: "remove.ask"; path: string; dirty: boolean | null }
-  | { type: "remove.close" };
+  | { type: "remove.close" }
+  | { type: "settings"; loaded: Loaded<AppSettings> };
 
 /**
  * 流れてきた1行を足す。step_run_id が持っているものと違えば、別のステップの
@@ -731,6 +735,7 @@ export function reduce(s: State, a: Action): State {
   switch (a.type) {
     case "view": {
       if (a.view === "intake" || a.view === "worktrees") return { ...s, view: a.view, editing: null };
+      if (a.view === "settings") return { ...s, view: "settings", editing: null };
       const next = { ...s, view: a.view };
       const leaving = a.view === "done" || (t !== null && groupOf(t) === "done");
       const first = sidebarOrder(s.tasks, a.view, s.project)[0];
@@ -738,10 +743,15 @@ export function reduce(s: State, a: Action): State {
     }
     case "project":
       return { ...s, project: a.project };
-    case "select":
+    case "select": {
+      if (s.view === "settings") {
+        const target = s.tasks.find((x) => x.id === a.id);
+        return target ? { ...s, view: taskViewFor(target), sel: a.id, editing: null } : { ...s, sel: a.id };
+      }
       return { ...s, sel: a.id, editing: null };
+    }
     case "move": {
-      if (s.view === "worktrees") return s;
+      if (s.view === "worktrees" || s.view === "settings") return s;
       if (s.view === "intake") {
         const rows = intakeOrder(s.intakes, s.projects, s.project, s.showClosedIntakes);
         if (!rows.length) return s;
@@ -1086,11 +1096,11 @@ export function reduce(s: State, a: Action): State {
         worktrees: a.worktrees,
         warnings: a.warnings === null ? s.warnings : sortWarnings(a.warnings),
       };
-    case "settings.loaded":
-      return { ...s, staleDays: a.staleDays };
     case "remove.ask":
       return { ...s, removing: { path: a.path, dirty: a.dirty } };
     case "remove.close":
       return { ...s, removing: null };
+    case "settings":
+      return { ...s, settings: a.loaded };
   }
 }

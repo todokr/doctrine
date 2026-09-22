@@ -4,6 +4,7 @@ import { fileAnchor } from "./components/DiffFileBlock";
 import { IntakeView } from "./components/IntakeView";
 import { ReviewView } from "./components/ReviewView";
 import { Rail, Sidebar } from "./components/Sidebar";
+import { SettingsView } from "./components/SettingsView";
 import { TaskView } from "./components/TaskView";
 import { RemoveWorktreeModal, WorktreeView } from "./components/WorktreeView";
 import { sendDecision } from "./decision";
@@ -138,6 +139,8 @@ export default function App() {
         <main className="main" ref={mainRef}>
           {s.view === "worktrees" ? (
             <WorktreeView />
+          ) : s.view === "settings" ? (
+            <SettingsView />
           ) : s.view === "intake" ? (
             <IntakeView />
           ) : !t ? (

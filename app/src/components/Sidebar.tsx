@@ -9,7 +9,7 @@ import {
   issueNumber,
   taskIntakeMark,
 } from "../intake";
-import { GROUPS, ago, countReview, groupOf, hm, sidebarOrder, timeLabel, visibleTasks } from "../model";
+import { GROUPS, ago, countReview, groupOf, hm, sidebarOrder, staleDaysOf, timeLabel, visibleTasks } from "../model";
 import { useNotYet, useStore } from "../store";
 import type { Task } from "../types";
 import { isStaleWorktree, worktreesNeedAttention } from "../worktrees";
@@ -35,7 +35,6 @@ const icons = {
 
 export function Rail() {
   const { s, dispatch } = useStore();
-  const notYet = useNotYet();
   const attention = countIntakeAttention(s.intakes);
   return (
     <nav className="rail" aria-label="ビュー">
@@ -57,10 +56,10 @@ export function Rail() {
         onClick={() => dispatch({ type: "view", view: "worktrees" })}
       >
         {icons.worktree}
-        {worktreesNeedAttention(s.worktrees, s.warnings, s.intakes, s.staleDays, s.now) && <span className="pip" />}
+        {worktreesNeedAttention(s.worktrees, s.warnings, s.intakes, staleDaysOf(s), s.now) && <span className="pip" />}
       </button>
       <span className="grow" />
-      <button className="ib" title="設定" onClick={() => notYet("設定画面はまだありません")}>
+      <button className="ib" title="設定" aria-pressed={s.view === "settings"} onClick={() => dispatch({ type: "view", view: "settings" })}>
         {icons.gear}
       </button>
     </nav>
@@ -172,7 +171,7 @@ function IntakeSidebar() {
 
 function WorktreeSidebar() {
   const { s, dispatch } = useStore();
-  const staleCount = s.worktrees.filter((e) => isStaleWorktree(e, s.intakes, s.staleDays, s.now)).length;
+  const staleCount = s.worktrees.filter((e) => isStaleWorktree(e, s.intakes, staleDaysOf(s), s.now)).length;
   return (
     <aside className="side">
       <div className="side-head">
@@ -189,11 +188,21 @@ function WorktreeSidebar() {
   );
 }
 
+function SettingsSidebar() {
+  return (
+    <aside className="side">
+      <div className="side-head">設定</div>
+      <RateLimit />
+    </aside>
+  );
+}
+
 export function Sidebar() {
   const { s, dispatch } = useStore();
   const notYet = useNotYet();
   if (s.view === "worktrees") return <WorktreeSidebar />;
   if (s.view === "intake") return <IntakeSidebar />;
+  if (s.view === "settings") return <SettingsSidebar />;
   const ts = visibleTasks(s.tasks, s.project);
   const isDone = s.view === "done";
   const count = ts.filter((t) => (groupOf(t) === "done") === isDone).length;

@@ -1,6 +1,6 @@
 import { type ReactNode, useState } from "react";
 import type { IntakeSummary, Warning, WorktreeEntry } from "../../../shared/protocol.ts";
-import { ago, clock, projectKey } from "../model";
+import { ago, clock, projectKey, staleDaysOf } from "../model";
 import { sendDecision } from "../decision";
 import { useDecide, useRefresh, useStore } from "../store";
 import type { Project, Task } from "../types";
@@ -163,7 +163,7 @@ export function WorktreeView(): ReactNode {
     .filter((e) => s.project === "all" || (s.projects.find((p) => p.path === e.project)?.id ?? e.project) === s.project)
     .slice()
     .sort((a, b) => Date.parse(a.age_basis) - Date.parse(b.age_basis));
-  const staleCount = rows.filter((e) => isStaleWorktree(e, s.intakes, s.staleDays, s.now)).length;
+  const staleCount = rows.filter((e) => isStaleWorktree(e, s.intakes, staleDaysOf(s), s.now)).length;
 
   return (
     <div className="pad">
@@ -193,7 +193,7 @@ export function WorktreeView(): ReactNode {
                     projects={s.projects}
                     tasks={s.tasks}
                     intakes={s.intakes}
-                    staleDays={s.staleDays}
+                    staleDays={staleDaysOf(s)}
                     now={s.now}
                     onRemove={() => dispatch({ type: "remove.ask", path: e.path, dirty: e.dirty })}
                     onOpenTask={(id) => dispatch({ type: "task.open", id })}

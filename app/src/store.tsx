@@ -16,6 +16,8 @@ import {
   onDaemonEvent,
   rpc,
   saveDrafts,
+  saveSettings,
+  type AppSettings,
 } from "./daemon/client";
 import { receiveGuide } from "./guide";
 import { buildDiff } from "./patch";
@@ -86,8 +88,8 @@ function initialState(): State {
     conn: { status: "connecting" },
     worktrees: [],
     warnings: [],
-    staleDays: null,
     removing: null,
+    settings: { kind: "loading" },
   };
 }
 
@@ -271,24 +273,25 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  // 起動時に1度読む。設定画面ができたときに開き直せば反映されるよう、
-  // worktrees のビューを開いたときにも読み直す
+  // 起動時に1度だけ読む。壊れた JSON のときは既定値に倒さず、error のまま持つ
+  // （フォームを既定値で描くと、次の保存で人が手で書いた設定が消える）
   useEffect(() => {
     let alive = true;
     void loadSettings().then(
-      (settings) => {
-        if (alive) dispatch({ type: "settings.loaded", staleDays: settings.staleDays });
+      (value) => {
+        if (alive) dispatch({ type: "settings", loaded: { kind: "ok", value } });
       },
       (e) => {
         if (!alive) return;
-        dispatch({ type: "settings.loaded", staleDays: null });
+        console.warn("設定を読めませんでした", e);
+        dispatch({ type: "settings", loaded: { kind: "error", message: errorMessage(e) } });
         dispatch({ type: "toast", message: `設定を読めませんでした（${errorMessage(e)}）` });
       },
     );
     return () => {
       alive = false;
     };
-  }, [s.view === "worktrees"]);
+  }, []);
 
   useEffect(() => {
     // 読み終える前に書くと、まだ空の drafts でファイルを潰してしまう
@@ -477,6 +480,11 @@ export function useIntakeRpc() {
       rpc("intake.setDispatchPaused", { intake_id: intakeId, paused }),
     closeIssue: (intakeId: string): Promise<IntakeSummary> => rpc("intake.closeIssue", { intake_id: intakeId }),
   };
+}
+
+/** 設定を書く。成否の判定は呼び出し側が sendDecision で行う */
+export function useSettingsRpc(): { save: (settings: AppSettings) => Promise<void> } {
+  return { save: (settings: AppSettings) => saveSettings(settings) };
 }
 
 /** 第2段階に回した操作のボタンが押されたときに出す */
