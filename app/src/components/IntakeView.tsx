@@ -31,7 +31,7 @@ export function IntakeHeading(
   return (
     <>
       <div className="crumbs">
-        <span>Intake</span>
+        <span className="lbl">Intake</span>
         <span>/</span>
         <span className="pjdot" style={{ background: project?.color ?? "#666" }} />
         <span>{project?.id ?? ""}</span>

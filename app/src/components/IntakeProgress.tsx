@@ -23,6 +23,7 @@ import { useIntakeRpc, useStore } from "../store";
 import { IntakeHistory } from "./IntakeHistory";
 import { PfdDiagram } from "./PfdDiagram";
 import { PfdElementPanel } from "./PfdElementPanel";
+import { StatusCounts } from "./StatusCounts";
 import { StatusDot } from "./StatusDot";
 import { Markdown } from "./text";
 
@@ -387,6 +388,7 @@ export function IntakeProgress({ detail, heading }: { detail: IntakeDetail; head
           }}
           onCloseIssue={closeIssue}
         />
+        <StatusCounts view={view} />
         <div className="plan-body">
           <PfdDiagram view={view} selected={selected} onSelect={setSelected} />
           <PfdElementPanel

@@ -258,13 +258,6 @@ th{color:var(--ink-3);font-size:11px;font-weight:500;border-top:0;background:var
 .pfd-node.given rect{fill:var(--surface-2)}
 .pfd-node.goal rect{stroke-width:2}
 .pfd-node.available rect{fill:var(--ok-bg)}
-.pfd-waiting rect{stroke:var(--line);stroke-dasharray:4 3}
-.pfd-ready rect{stroke:var(--ink-3)}
-.pfd-running rect{fill:var(--run-bg);stroke:var(--run)}
-.pfd-pr_open rect{fill:var(--run-bg);stroke:var(--run);stroke-width:2.2}
-.pfd-merged rect,.pfd-done rect{fill:var(--ok-bg);stroke:var(--ok)}
-.pfd-your_turn rect{fill:var(--accent-soft);stroke:var(--accent);stroke-width:2.2}
-.pfd-needs_attention rect{fill:var(--danger-bg);stroke:var(--danger)}
 .pfd-node.frozen rect{fill:var(--surface-2);opacity:.75}
 .pfd-node rect.pfd-inner{fill:none}
 .pfd-label{font-size:10.5px;fill:var(--ink)}
@@ -423,7 +416,7 @@ kbd{font-family:var(--mono);font-size:10.5px;border:1px solid var(--line);border
 @media (max-width:1150px){.el-panel{position:static;max-height:none}}
 .el-head{display:grid;gap:2px}
 .el-sec{display:grid;gap:6px}
-.el-sec h3,.el-sec-title{margin:0;font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:var(--ink-3)}
+.el-sec h3,.el-sec-title{margin:0;font-family:var(--mono);font-size:10px;font-weight:500;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3)}
 .el-links{display:flex;gap:6px;flex-wrap:wrap}
 .el-link{border:0;background:transparent;padding:0;color:var(--accent);text-decoration:underline;cursor:pointer;font-size:12.5px}
 .el-comment{display:grid;gap:2px;border-top:1px dashed var(--line);padding-top:6px;font-size:12.5px}
@@ -476,3 +469,13 @@ tr.wt-stale{background:var(--accent-soft)}
 .wf-legend i{width:14px;height:4px;border-radius:2px;background:var(--tone)}
 
 .blk{display:grid;grid-template-columns:minmax(0,1fr);gap:8px;min-width:0}
+
+/* PFD のプロセスの状態（spec 3.4） */
+.pfd-bar{stroke:var(--tone);stroke-width:4;stroke-linecap:round}
+.pfd-bar.dashed{stroke-dasharray:5 3;stroke-linecap:butt}
+/* Intake の状態ごとの件数（spec 3.5） */
+.counts{display:flex;gap:18px;flex-wrap:wrap}
+.count{display:grid;gap:3px;min-width:88px}
+.count .v{font-family:var(--mono);font-size:12px}
+.count .b{height:4px;border-radius:2px;background:var(--tone)}
+.count.dashed .b{background:repeating-linear-gradient(90deg,var(--tone) 0 5px,transparent 5px 8px)}
