@@ -56,7 +56,7 @@ function BranchSettings({ kind, branch }: { kind: WorkflowStepDetail["type"]; br
     <>
       <dt>{BRANCH_HEADING[kind]}</dt>
       <dd>
-        <dl className="wf-step">
+        <dl className="wf-props">
           <dt>goto</dt>
           <dd className="mono">{branch.goto}</dd>
           <dt>maxAttempts</dt>
@@ -76,7 +76,7 @@ export function StepSettings({ step }: { step: WorkflowStepDetail }) {
     <div>
       <h3 className="mono">{step.id}</h3>
       <p className="hint">{step.type}</p>
-      <dl className="wf-step">
+      <dl className="wf-props">
         {step.type === "command" && (
           <>
             <dt>run</dt>
