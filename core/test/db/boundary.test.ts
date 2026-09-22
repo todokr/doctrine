@@ -2,7 +2,7 @@ import { test } from "@std/testing/bdd";
 import assert from "node:assert/strict";
 import { openDb } from "../../src/db/migrate.ts";
 import { getTask, insertProject, insertTask } from "../../src/db/tasks.ts";
-import { getStepOutputs, listStepRuns } from "../../src/db/stepRuns.ts";
+import { getStepOutputs, getStepRun, listStepRuns } from "../../src/db/stepRuns.ts";
 import {
   commitStepBoundary,
   DENIAL_VALUE_CHARS,
@@ -416,4 +416,31 @@ test("入力のネストした値は切らない", async () => {
     ]))!,
   );
   assert.deepEqual(saved.denials[0].input, nested);
+});
+
+test("stepRunReopen は閉じた行を running に戻し、その id を返す", async () => {
+  const d = await fixture();
+  const runId = await commitStepBoundary(d, {
+    taskId: "t1",
+    taskPatch: { state: "waiting" },
+    stepRun: {
+      step_id: "wait",
+      attempt: 1,
+      status: "waiting",
+      exit_code: 75,
+      started_at: "2026-09-12T00:00:00Z",
+      ended_at: "2026-09-12T00:00:01Z",
+      log_path: "/logs/t1/wait.1.log",
+    },
+  });
+  const id = await commitStepBoundary(d, {
+    taskId: "t1",
+    taskPatch: {},
+    stepRunReopen: { id: runId! },
+  });
+  assert.equal(id, runId);
+  const row = (await getStepRun(d, runId!))!;
+  assert.equal(row.status, "running");
+  assert.equal(row.ended_at, null);
+  assert.equal(row.exit_code, null);
 });

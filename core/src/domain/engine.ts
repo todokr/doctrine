@@ -1,5 +1,5 @@
 import type { Branch, Workflow } from "../workflow/schema.ts";
-import { branchOf } from "../workflow/schema.ts";
+import { branchOf, intervalMs } from "../workflow/schema.ts";
 import { expand, type TemplateContext } from "../workflow/template.ts";
 import { commitStepBoundary, StateConflictError, type StepBoundary } from "../db/boundary.ts";
 import {
@@ -25,6 +25,7 @@ import {
   MAX_CONSECUTIVE_RATE_LIMITS,
   type RateLimitVerdict,
 } from "./rateLimit.ts";
+import { pollVerdict } from "./poll.ts";
 import { getSessionId } from "../db/sessions.ts";
 import type { Db } from "../db/schema.ts";
 import { assertTransition } from "./states.ts";
@@ -340,12 +341,15 @@ export async function runTask(
       return;
     }
 
-    // 上限待ちから戻ってきた実行は、ワークフロー上の新しい試行ではない。カウンタは
+    // 上限待ち・マージ待ちから戻ってきた実行は、ワークフロー上の新しい試行ではない。カウンタは
     // 持たず、直前の step_run の status から導く（デーモンの再起動をまたいでも同じ）。
-    // 進めてしまうと onFailure / onReject の maxAttempts を上限が食い潰す。
-    const resumingAfterRateLimit =
-      (await lastStepRunFor(db, taskId, step.id))?.status === "rate_limited";
-    const attempt = attemptCount(task, step.id) + (resumingAfterRateLimit ? 0 : 1);
+    // 進めてしまうと onFailure / onReject の maxAttempts を待ちが食い潰す。
+    const lastRun = await lastStepRunFor(db, taskId, step.id);
+    const resumingAfterRateLimit = lastRun?.status === "rate_limited";
+    // マージ待ちは待ちの1周を1行にする（spec 3 章）。閉じた waiting の行をそのまま使い直す。
+    const reopenRunId = step.type === "poll" && lastRun?.status === "waiting" ? lastRun.id : null;
+    const keepAttempt = resumingAfterRateLimit || reopenRunId !== null;
+    const attempt = attemptCount(task, step.id) + (keepAttempt ? 0 : 1);
     const ctx = await contextFor(db, task);
     // セッションはロール単位（agent ステップの session、省略時は既定ロール）。
     // 「このロールで会話が既にあったか」だけが resume すべきかを決める
@@ -373,7 +377,7 @@ export async function runTask(
         requireState: "running",
         taskPatch: {
           current_step_id: step.id,
-          attempt_counts: resumingAfterRateLimit ? task.attempt_counts : withAttempt(task, step.id),
+          attempt_counts: keepAttempt ? task.attempt_counts : withAttempt(task, step.id),
           pending_feed: null,
         },
         // 会話を始めるのは agent ステップだけ。command ステップでは書かない —
@@ -381,15 +385,19 @@ export async function runTask(
         // そのロールで resume してしまうのを防ぐ（project.setup は全ワークフローの
         // 先頭に command ステップとして入るので、これは常道の形で必ず踏む）。
         sessionUpsert: role ? { role, session_id: sessionId } : undefined,
-        stepRun: {
-          step_id: step.id,
-          attempt,
-          status: "running",
-          exit_code: null,
-          started_at: new Date().toISOString(),
-          ended_at: null,
-          log_path: logPath,
-        },
+        ...(reopenRunId !== null
+          ? { stepRunReopen: { id: reopenRunId } }
+          : {
+            stepRun: {
+              step_id: step.id,
+              attempt,
+              status: "running",
+              exit_code: null,
+              started_at: new Date().toISOString(),
+              ended_at: null,
+              log_path: logPath,
+            },
+          }),
       }))!;
     } catch (e) {
       if (e instanceof StateConflictError) return;
@@ -421,10 +429,7 @@ export async function runTask(
     // プロンプト文字列ではなく、goto の時点で expand 済みのこのローカル変数が正。
     const feedForThisStep = pendingFeed;
     let outcome: StepOutcome;
-    // Task 4 で poll ステップの実行を実装するまでの暫定。ここが無いと else 節が
-    // AgentStep を期待する runAgentStep に PollStep を渡すことになり型が壊れる。
-    if (step.type === "poll") throw new Error("poll ステップはまだ実行できません");
-    if (step.type === "command") {
+    if (step.type === "command" || step.type === "poll") {
       outcome = await runCommandStep(step, ctx, {
         cwd: task.worktree_path!,
         taskId,
@@ -469,6 +474,71 @@ export async function runTask(
     const verdict: RateLimitDecision = step.type === "agent" || step.type === "guide"
       ? await decideRateLimit(db, outcome, taskId, step.id)
       : { kind: "none" };
+
+    const polled = step.type === "poll" ? pollVerdict(outcome.exitCode) : null;
+
+    if (step.type === "poll" && polled === "wait") {
+      assertTransition(task.state, "waiting");
+      try {
+        await commitStepBoundary(db, {
+          taskId,
+          requireState: "running",
+          taskPatch: {
+            state: "waiting",
+            waiting_until: new Date(Date.now() + intervalMs(step.interval)).toISOString(),
+            child_pid: null,
+            child_started_at: null,
+          },
+          stepRunUpdate: {
+            id: stepRunId,
+            status: "waiting",
+            exit_code: outcome.exitCode,
+            ended_at: outcome.endedAt,
+            duration_ms: outcome.durationMs,
+          },
+          outputs: { last_stdout: outcome.stdout, last_stderr: outcome.stderr, exit_code: outcome.exitCode },
+        });
+      } catch (e) {
+        if (e instanceof StateConflictError) {
+          await closeInterrupted(db, taskId, stepRunId, outcome);
+          deps.onStepRunFinished?.(taskId, stepRunId, step.id, "interrupted", null, attempt);
+          return;
+        }
+        throw e;
+      }
+      deps.onStateChanged?.(taskId, "running", "waiting");
+      deps.onStepRunFinished?.(taskId, stepRunId, step.id, "waiting", null, attempt);
+      return;
+    }
+
+    if (polled === "abandon") {
+      // PR が閉じられた。外から閉じられた実行として interrupted で閉じ、分岐せずに終える。
+      try {
+        await commitStepBoundary(db, {
+          taskId,
+          requireState: "running",
+          taskPatch: { child_pid: null, child_started_at: null },
+          stepRunUpdate: {
+            id: stepRunId,
+            status: "interrupted",
+            exit_code: outcome.exitCode,
+            ended_at: outcome.endedAt,
+            duration_ms: outcome.durationMs,
+          },
+          outputs: { last_stdout: outcome.stdout, last_stderr: outcome.stderr, exit_code: outcome.exitCode },
+        });
+      } catch (e) {
+        if (e instanceof StateConflictError) {
+          await closeInterrupted(db, taskId, stepRunId, outcome);
+          deps.onStepRunFinished?.(taskId, stepRunId, step.id, "interrupted", null, attempt);
+          return;
+        }
+        throw e;
+      }
+      deps.onStepRunFinished?.(taskId, stepRunId, step.id, "interrupted", null, attempt);
+      await setState(db, (await getTask(db, taskId))!, "canceled", deps);
+      return;
+    }
 
     if (verdict.kind === "wait") {
       assertTransition(task.state, "rate_limited");

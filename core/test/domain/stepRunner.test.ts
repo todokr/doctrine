@@ -42,7 +42,7 @@ async function deps(over: Partial<RunnerDeps> = {}): Promise<RunnerDeps> {
 
 test("成功した command は success", async () => {
   const out = await runCommandStep(
-    { id: "s", type: "command", run: "echo hello" },
+    { id: "s", run: "echo hello" },
     ctx,
     { cwd: root, taskId: "t1", attempt: 1, deps: await deps() },
   );
@@ -53,7 +53,7 @@ test("成功した command は success", async () => {
 
 test("非0終了でステップ失敗", async () => {
   const out = await runCommandStep(
-    { id: "s", type: "command", run: "exit 3" },
+    { id: "s", run: "exit 3" },
     ctx,
     { cwd: root, taskId: "t1", attempt: 1, deps: await deps() },
   );
@@ -63,7 +63,7 @@ test("非0終了でステップ失敗", async () => {
 
 test("コマンドの変数は実行前に展開される", async () => {
   const out = await runCommandStep(
-    { id: "s", type: "command", run: "echo {{ task.branch }}" },
+    { id: "s", run: "echo {{ task.branch }}" },
     ctx,
     { cwd: root, taskId: "t1", attempt: 1, deps: await deps() },
   );
@@ -81,7 +81,7 @@ const stripStamp = (line: string) => line.replace(STAMP, "");
 test("ログ本文はファイルに書かれる", async () => {
   const d = await deps();
   const out = await runCommandStep(
-    { id: "s", type: "command", run: "echo ログ行" },
+    { id: "s", run: "echo ログ行" },
     ctx,
     { cwd: root, taskId: "t1", attempt: 2, deps: d },
   );
@@ -231,7 +231,7 @@ test("アダプタの permission_denials が StepOutcome に載る", async () =>
 
 test("command ステップの permissionDenials は空", async () => {
   const out = await runCommandStep(
-    { id: "s", type: "command", run: "echo hello" },
+    { id: "s", run: "echo hello" },
     ctx,
     { cwd: root, taskId: "t1", attempt: 1, deps: await deps() },
   );
@@ -320,7 +320,7 @@ test("実行中に観測した rate_limit は window ごとの最新が結果に
 
 test("command ステップは rate_limit を観測しない", async () => {
   const out = await runCommandStep(
-    { id: "a", type: "command", run: "true" },
+    { id: "a", run: "true" },
     ctx,
     { cwd: root, taskId: "t1", attempt: 1, deps: await deps() },
   );
@@ -335,7 +335,7 @@ test("command ステップでも子プロセスのpidと開始時刻が通知さ
     },
   });
   await runCommandStep(
-    { id: "s", type: "command", run: "echo x" },
+    { id: "s", run: "echo x" },
     ctx,
     { cwd: root, taskId: "t1", attempt: 1, deps: d },
   );
@@ -347,7 +347,7 @@ test("command ステップでも子プロセスのpidと開始時刻が通知さ
 test("stdout はexitではなくcloseまで待ってから確定する（大量出力の取りこぼしがない）", async () => {
   const n = 200000;
   const out = await runCommandStep(
-    { id: "s", type: "command", run: `yes | head -c ${n}` },
+    { id: "s", run: `yes | head -c ${n}` },
     ctx,
     { cwd: root, taskId: "t1", attempt: 1, deps: await deps() },
   );
@@ -360,7 +360,7 @@ test("stdout はexitではなくcloseまで待ってから確定する（大量�
 test("run に未知の変数を使うとTemplateErrorが伝播する（握りつぶさない）", async () => {
   await assert.rejects(
     runCommandStep(
-      { id: "s", type: "command", run: "echo {{ nope.nope }}" },
+      { id: "s", run: "echo {{ nope.nope }}" },
       ctx,
       { cwd: root, taskId: "t1", attempt: 1, deps: await deps() },
     ),
@@ -375,7 +375,7 @@ test("ログ先が書き込み不能でもステップの実行結果には影�
   const d = await deps({ logRoot: join(blocker, "logs") });
 
   const out = await runCommandStep(
-    { id: "s", type: "command", run: "echo hello" },
+    { id: "s", run: "echo hello" },
     ctx,
     { cwd: root, taskId: "t1", attempt: 1, deps: d },
   );
@@ -436,7 +436,7 @@ test("コマンドの出力は1行ずつ、行頭に時刻が付く", async () =
   const live: string[] = [];
   const d = await deps({ onLogLine: (l: string) => live.push(l) });
   const out = await runCommandStep(
-    { id: "s", type: "command", run: "printf '1行目\\n2行目\\n端数'" },
+    { id: "s", run: "printf '1行目\\n2行目\\n端数'" },
     ctx,
     { cwd: root, taskId: "t1", attempt: 1, deps: d },
   );
