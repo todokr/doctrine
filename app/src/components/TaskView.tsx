@@ -256,7 +256,7 @@ export function TaskView({ t }: { t: Task }) {
         <section className="box quiet">
           <p>
             PR のマージを待っています。{t.checkAt ? `次は ${hm(t.checkAt)} に確認します。` : ""}
-            develop と conflict したら、取り込み直して push し直します。
+            ベースブランチと conflict したら、取り込み直して push し直します。
           </p>
         </section>
       )}

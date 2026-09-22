@@ -107,7 +107,7 @@ export const GROUPS: { key: Exclude<Group, "done">; name: string; sort: (a: Task
   { key: "check", name: "要確認", sort: (a, b) => b.since - a.since },
   { key: "running", name: "実行中", sort: (a, b) => a.since - b.since },
   { key: "limited", name: "上限待ち", sort: (a, b) => (a.resumeAt ?? Infinity) - (b.resumeAt ?? Infinity) },
-  { key: "waiting", name: "マージ待ち", sort: (a, b) => (a.since ?? 0) - (b.since ?? 0) },
+  { key: "waiting", name: "マージ待ち", sort: (a, b) => a.since - b.since },
   { key: "queued", name: "待ち", sort: (a, b) => a.prio - b.prio || a.since - b.since },
   { key: "paused", name: "一時停止", sort: (a, b) => b.since - a.since },
 ];

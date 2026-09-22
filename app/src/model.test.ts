@@ -494,10 +494,11 @@ describe("toProject / toTask", () => {
     expect(groupOf(t1({ state: "failed", worktree_path: null }))).toBe("done");
   });
 
-  test("toTask は waiting_until を checkAt に写す", () => {
+  test("toTask は waiting_until を checkAt に写し、読めない値は落とす", () => {
     expect(t1({ waiting_until: "2026-09-22T03:20:00.000Z" }).checkAt)
       .toBe(Date.parse("2026-09-22T03:20:00.000Z"));
     expect(t1({ waiting_until: null }).checkAt).toBeNull();
+    expect(t1({ waiting_until: "いつか" }).checkAt).toBeNull();
   });
 
   test("差し戻しの通知は 15 秒ごとの取り直しで消えない", () => {
