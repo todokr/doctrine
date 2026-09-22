@@ -151,6 +151,51 @@ export type StepView = {
  */
 export type TaskDetail = { task: TaskSummary; stepRuns: StepRun[]; steps: StepView[] | null };
 
+/** workflow.get が返す分岐。approval は onReject、それ以外は onFailure を branchOf で取り出したもの。 */
+export type WorkflowBranchDetail = {
+  goto: string;
+  maxAttempts: number;
+  feed: string | null;
+  /** YAML に書かれていない、guide の既定の分岐（自分へ戻る）なら true。 */
+  implicit: boolean;
+};
+
+/** workflow.get が返すステップ1つ。YAML に書かれた設定を種類ごとにそのまま返す。 */
+export type WorkflowStepDetail =
+  & { id: string; branch: WorkflowBranchDetail | null }
+  & (
+    | { type: "command"; run: string }
+    | {
+      type: "agent";
+      prompt: string;
+      session: string | null;
+      model: string | null;
+      permissionMode: string | null;
+      allowedTools: string[] | null;
+    }
+    | { type: "approval"; title: string; reviewFiles: string[] | null }
+    | {
+      type: "guide";
+      session: string;
+      model: string | null;
+      permissionMode: string | null;
+      allowedTools: string[] | null;
+    }
+  );
+
+/** workflow.list の1件。name は .doctrine/workflows/<name>.yaml の <name>。 */
+export type WorkflowListEntry =
+  | { name: string; ok: true }
+  | { name: string; ok: false; issues: string[] };
+
+/**
+ * workflow.get の応答。setup（project.yaml）は差し込まない、ファイルに書かれたステップの列。
+ * warnings は parseWorkflow の警告（再実行で二重に効くコマンドなど）。
+ */
+export type WorkflowDetail =
+  | { name: string; ok: true; steps: WorkflowStepDetail[]; warnings: string[] }
+  | { name: string; ok: false; issues: string[] };
+
 export type TaskLogs = { step_run_id: number | null; log_path: string | null; lines: string[] };
 
 /** daemon.warnings が返す1件。イベントの daemon.warning と同じ形。 */
@@ -414,6 +459,10 @@ export type GithubIssue = IssueSummary & { intake_id: string | null };
 export type Methods = {
   "task.list": { params: { project?: string; state?: TaskState }; result: TaskSummary[] };
   "project.list": { params: Record<string, never>; result: ProjectSummary[] };
+  /** <project>/.doctrine/workflows/*.yaml を名前の昇順で。検証に落ちたものも issues とともに返す。 */
+  "workflow.list": { params: { project: string }; result: WorkflowListEntry[] };
+  /** 検証に落ちたときは例外ではなく ok: false で返す。ファイルが無ければ失敗する。 */
+  "workflow.get": { params: { project: string; name: string }; result: WorkflowDetail };
   "project.config.get": { params: { project: string }; result: ProjectConfig };
   "project.config.save": {
     params: { project: string; config: ProjectConfigInput };
