@@ -23,10 +23,12 @@
 #   guide       の検証が落ちたら guide 自身へ（最大3回。onFailure を書かない既定の分岐）
 #   review（人の承認）で却下されたら implement へ（最大5回）
 #   verify-sync が落ちたら sync へ（最大3回。使い切ったら人の判断を待つ）
-#   wait-merge  が conflict を見たら sync へ（最大10回。使い切ったら人の判断を待つ）
+#   wait-merge  が非0で終わったら sync へ（conflict か gh 自体の失敗。最大10回。使い切ったら人の判断を待つ）
 #
 # review の後で develop を取り込み（sync）、テストを通してから PR を開き、マージされるまで待つ。
 # マージを待っている間に develop と conflict したら、sync に戻って直し、open-pr で push し直す。
+# gh pr view 自体が失敗した（認証切れ・ネットワーク断など）ときも同じ sync へ戻すが、
+# その場合 conflict は起きていないので sync は何もせず終える。
 # 初回の sync は conflict が無ければ git merge だけで終わり、PR を develop に追従した状態で開く。
 # 自動で解決した conflict は人に見直させず、sync が書いた記録を open-pr が PR にコメントする。
 # PR がマージされずに閉じられたら、タスクは canceled で終わる。
@@ -402,6 +404,8 @@ steps:
       - "Bash(git show:*)"
       - "Bash(git add:*)"
       - "Bash(git commit:*)"
+      - "Bash(git checkout:*)"
+      - "Bash(git rm:*)"
       - "Bash(mise run core:test:*)"
       - "Bash(mise run core:check:*)"
       - "Bash(mise run core:deps:*)"
@@ -423,6 +427,9 @@ steps:
       2. conflict が無ければ、それで終わりです。何も書かずに終えてください。
       3. conflict があれば、両側の意図を保つように解決し、触ったディレクトリの検証を通してから
          `git add` と `git commit --no-edit` でマージコミットを作ってください。rebase はしないでください。
+         `app/pnpm-lock.yaml` の conflict は手で編集せず、`git checkout --ours` か `--theirs` で
+         どちらかの版を丸ごと採用してから `pnpm -C app install` で入れ直してください
+         （片側が削除した delete/modify の conflict には `git rm` を使います）。
          解決したら {{ worktree.path }}/.doctrine-out/sync-notes.md に次を書きます。
          - conflict したファイル
          - それぞれをどう解決したか（どちらの変更を残したか、両方を合わせたか）
@@ -488,5 +495,7 @@ steps:
       maxAttempts: 10
       onExhausted: suspend
       feed: |
-        PR が develop と conflict した。develop を取り込み直して解決してください:
+        wait-merge が非0で終わりました。下の出力を読んでください。
+        conflict なら develop を取り込み直して解決してください。
+        conflict でない（gh の失敗など）なら、何もせずそのまま終えてください:
         {{ steps.wait-merge.last_stdout }}
