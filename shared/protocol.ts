@@ -156,6 +156,26 @@ export type TaskLogs = { step_run_id: number | null; log_path: string | null; li
 /** daemon.warnings が返す1件。イベントの daemon.warning と同じ形。 */
 export type Warning = { at: string; message: string; task_id?: string };
 
+/** daemon.slots が返す、枠を待っている Intake の実行 1 件。 */
+export type WaitingIntakeRun = {
+  id: number;
+  intake_id: string;
+  issue_title: string;
+  purpose: IntakeRunPurpose;
+};
+
+/**
+ * daemon.slots / daemon.setGlobalLimit の応答。in_use は running のタスクと Intake の実行の数。
+ * waiting_tasks は queued のタスクを受付順（再開 → 優先度 → 作成順）に並べたもの。
+ * プロジェクト枠や利用上限で待っているものも含む（待っている理由は分けない）。
+ */
+export type DaemonSlots = {
+  global_limit: number;
+  in_use: number;
+  waiting_tasks: TaskSummary[];
+  waiting_intake_runs: WaitingIntakeRun[];
+};
+
 /**
  * worktree.list が返す 1 件。ディスク上にある worktree を、対応するタスク・Intake と一緒に返す。
  * どちらにも当たらないもの（task_id も intake_id も null）が孤児。
@@ -394,6 +414,9 @@ export type Methods = {
   };
   "worktree.list": { params: Record<string, never>; result: WorktreeEntry[] };
   "daemon.warnings": { params: Record<string, never>; result: Warning[] };
+  "daemon.slots": { params: Record<string, never>; result: DaemonSlots };
+  /** global_limit は 1 以上の整数。すぐ効き、デーモンの設定ファイルに保存する。 */
+  "daemon.setGlobalLimit": { params: { global_limit: number }; result: DaemonSlots };
   /** task_id か path のどちらか一方。非終端のタスクと終わっていない Intake の worktree は force でも拒否される。 */
   "worktree.remove": {
     params: { task_id: string; force?: boolean } | { path: string; force?: boolean };

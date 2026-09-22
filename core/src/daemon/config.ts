@@ -59,9 +59,10 @@ export async function readDaemonConfig(
   if (!parsed.success) {
     return {
       config: { globalLimit: DEFAULT_GLOBAL_LIMIT },
-      warning: `設定ファイル (${path}) を読めないため全体の実行枠は既定値 ${DEFAULT_GLOBAL_LIMIT} で動きます: ${
-        formatZodIssues(parsed.error).join("; ")
-      }`,
+      warning:
+        `設定ファイル (${path}) を読めないため全体の実行枠は既定値 ${DEFAULT_GLOBAL_LIMIT} で動きます: ${
+          formatZodIssues(parsed.error).join("; ")
+        }`,
     };
   }
   return {

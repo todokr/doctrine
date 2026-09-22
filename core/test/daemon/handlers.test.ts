@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { openDb, openDbOn } from "../../src/db/migrate.ts";
-import { getTask, insertTask } from "../../src/db/tasks.ts";
+import { getTask, insertTask, listTasks } from "../../src/db/tasks.ts";
 import { listStepRuns } from "../../src/db/stepRuns.ts";
 import { captureTree, reviewRefName } from "../../src/domain/reviewTree.ts";
 import {
@@ -25,6 +25,7 @@ import { createMockAdapter, type MockAdapter } from "../../src/adapter/mock.ts";
 import { createWarningLog } from "../../src/daemon/warnings.ts";
 import { parseWorkflow } from "../../src/workflow/schema.ts";
 import type {
+  DaemonSlots,
   ProjectSummary,
   ServerEvent,
   TaskGuide,
@@ -2743,4 +2744,149 @@ test("worktree.list は Intake の worktree を孤児にしない", async () => 
   await updateIntake(ctx.db, "i1", { worktree_path: worktree });
   const after = await h("worktree.list", {}, NOOP_CONN) as WorktreeEntry[];
   assert.deepEqual(pick(after), [{ path: worktree, task_id: null, intake_id: "i1" }]);
+});
+
+// --- daemon.slots / daemon.setGlobalLimit ---------------------------------
+
+test("daemon.slots は全体の実行枠・使っている数・枠待ちを返す", async () => {
+  const ctx = await context();
+  ctx.globalLimit = 2;
+  const h = createHandler(ctx);
+  const project = await h("project.add", { path: repo }, NOOP_CONN) as { id: number };
+  const a = await h(
+    "task.create",
+    { project: repo, title: "A", prompt: "p" },
+    NOOP_CONN,
+  ) as { id: string };
+  const b = await h(
+    "task.create",
+    { project: repo, title: "B", prompt: "p" },
+    NOOP_CONN,
+  ) as { id: string };
+  await addIntake(ctx, project.id);
+  await enqueueIntakeRun(ctx.db, "i1", "investigate", { logRoot: ctx.logRoot, resume: false });
+  await ctx.db.updateTable("tasks").set({ state: "running" }).where("id", "=", a.id).execute();
+
+  const slots = await h("daemon.slots", {}, NOOP_CONN) as DaemonSlots;
+
+  assert.equal(slots.global_limit, 2);
+  assert.equal(slots.in_use, 1);
+  assert.deepEqual(slots.waiting_tasks.map((t) => t.id), [b.id]);
+  assert.equal(slots.waiting_intake_runs.length, 1);
+  assert.equal(slots.waiting_intake_runs[0].intake_id, "i1");
+  assert.equal(slots.waiting_intake_runs[0].issue_title, "T");
+  assert.equal(slots.waiting_intake_runs[0].purpose, "investigate");
+});
+
+test("daemon.slots の枠待ちは受付順に並ぶ", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  await h("project.add", { path: repo }, NOOP_CONN);
+  const x = await h(
+    "task.create",
+    { project: repo, title: "X", prompt: "p", priority: 2 },
+    NOOP_CONN,
+  ) as { id: string };
+  const y = await h(
+    "task.create",
+    { project: repo, title: "Y", prompt: "p", priority: 0 },
+    NOOP_CONN,
+  ) as { id: string };
+
+  const slots = await h("daemon.slots", {}, NOOP_CONN) as DaemonSlots;
+  assert.deepEqual(slots.waiting_tasks.map((t) => t.id), [y.id, x.id]);
+});
+
+test("終わった Intake の queued の実行は枠待ちに出さない", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  const project = await h("project.add", { path: repo }, NOOP_CONN) as { id: number };
+  await addIntake(ctx, project.id);
+  await enqueueIntakeRun(ctx.db, "i1", "investigate", { logRoot: ctx.logRoot, resume: false });
+  await updateIntake(ctx.db, "i1", { state: "canceled" });
+
+  const slots = await h("daemon.slots", {}, NOOP_CONN) as DaemonSlots;
+  assert.deepEqual(slots.waiting_intake_runs, []);
+});
+
+const SLOW_AGENT = 'name: slow\nsteps:\n  - id: a\n    type: agent\n    prompt: "p"\n';
+
+test("daemon.setGlobalLimit で値を変えると次の tick でその数まで running になる", async () => {
+  await writeFile(
+    join(repo, ".doctrine", "project.yaml"),
+    "defaultWorkflow: feature\nmaxConcurrent: 4\nbaseBranch: main\n",
+  );
+  await writeFile(join(repo, ".doctrine", "workflows", "slow.yaml"), SLOW_AGENT);
+  const ctx = await context();
+  ctx.adapter = createMockAdapter({ result: { ok: true, text: "done" }, delayMs: 3000 });
+  ctx.globalLimit = 1;
+  const h = createHandler(ctx);
+  await h("project.add", { path: repo }, NOOP_CONN);
+  for (const title of ["A", "B", "C"]) {
+    await h(
+      "task.create",
+      { project: repo, title, prompt: "p", workflow: "slow" },
+      NOOP_CONN,
+    );
+  }
+
+  await tick(ctx);
+  assert.equal((await listTasks(ctx.db, { state: "running" })).length, 1);
+
+  const slots = await h(
+    "daemon.setGlobalLimit",
+    { global_limit: 3 },
+    NOOP_CONN,
+  ) as DaemonSlots;
+  assert.equal(slots.global_limit, 3);
+  assert.equal(ctx.globalLimit, 3);
+
+  await tick(ctx);
+  assert.equal((await listTasks(ctx.db, { state: "running" })).length, 3);
+});
+
+test("daemon.setGlobalLimit は値を設定ファイルに保存する", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  await h("daemon.setGlobalLimit", { global_limit: 5 }, NOOP_CONN);
+  const saved = JSON.parse(await readFile(ctx.configPath, "utf8"));
+  assert.deepEqual(saved, { globalLimit: 5 });
+});
+
+test("daemon.setGlobalLimit は 1 未満や整数でない値を拒み、何も変えない", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  for (const bad of [0, -1, 1.5, "3", undefined]) {
+    await assert.rejects(
+      () => h("daemon.setGlobalLimit", bad === undefined ? {} : { global_limit: bad }, NOOP_CONN),
+      /1 以上の整数/,
+    );
+  }
+  assert.equal(ctx.globalLimit, 4);
+  assert.equal(existsSync(ctx.configPath), false);
+});
+
+test("daemon.setGlobalLimit は上限を設けない", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  const slots = await h(
+    "daemon.setGlobalLimit",
+    { global_limit: 1000 },
+    NOOP_CONN,
+  ) as DaemonSlots;
+  assert.equal(slots.global_limit, 1000);
+});
+
+test("daemon.setGlobalLimit は保存に失敗しても値は効かせ、警告を積んで失敗を返す", async () => {
+  const ctx = await context();
+  await writeFile(join(root, "file"), "");
+  ctx.configPath = join(root, "file", "config.json");
+  const h = createHandler(ctx);
+
+  await assert.rejects(
+    () => h("daemon.setGlobalLimit", { global_limit: 2 }, NOOP_CONN),
+    /保存できません/,
+  );
+  assert.equal(ctx.globalLimit, 2);
+  assert.match(ctx.warnings.recent()[0].message, /保存できません/);
 });
