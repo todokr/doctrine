@@ -1,7 +1,7 @@
 # doctrine 状態の見せ方の統一設計
 
 - 日付: 2026-09-22
-- 状態: 承認済み。実装計画の作成待ち
+- 状態: 実装済み
 - 前提: [ワークフローレールspec](2026-09-20-workflow-rail-design.md)、[レビューアプリspec](2026-09-13-review-app-design.md)、[Intake UI spec](2026-09-21-intake-ui-design.md)
 - UI 案: <https://claude.ai/artifact/M5u918bk667C3KEDxxoyk8>（v2）
 
