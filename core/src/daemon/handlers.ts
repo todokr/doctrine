@@ -33,7 +33,9 @@ import {
   releaseDueRateLimited,
   selectAdmissible,
   selectAdmissibleIntakeRuns,
+  slotsSnapshot,
 } from "../domain/scheduler.ts";
+import { validateGlobalLimit, writeDaemonConfig } from "./config.ts";
 import {
   getIntake,
   type IntakeRow,
@@ -83,6 +85,7 @@ import { assertTransition, isTerminal } from "../domain/states.ts";
 import type { AgentAdapter } from "../adapter/types.ts";
 import type { Handler } from "./server.ts";
 import type {
+  DaemonSlots,
   RateLimitSample,
   ServerEvent,
   StepRunDenials,
@@ -112,6 +115,8 @@ export type DaemonContext = {
   intakeWatcher: IntakeWatcher;
   /** 後始末を拒否したときなど、人に見せる必要のある警告 */
   warnings: WarningLog;
+  /** 全体の実行枠を保存する設定ファイル（daemon.setGlobalLimit が書く）。 */
+  configPath: string;
 };
 
 /** step_runs.permission_denials の JSON を読む。NULL も壊れた JSON も null（拒否なし扱い）。 */
@@ -592,6 +597,26 @@ export function createHandler(ctx: DaemonContext): Handler {
       case "daemon.warnings":
         return ctx.warnings.recent();
 
+      case "daemon.slots":
+        return await daemonSlots(ctx);
+
+      case "daemon.setGlobalLimit": {
+        const globalLimit = validateGlobalLimit(params.global_limit);
+        ctx.globalLimit = globalLimit;
+        try {
+          await writeDaemonConfig(ctx.configPath, { globalLimit });
+        } catch (e) {
+          const message = (e as Error).message;
+          ctx.warnings.push(
+            `全体の実行枠 ${globalLimit} は効いていますが、設定ファイル (${ctx.configPath}) に保存できませんでした。再起動すると元に戻ります: ${message}`,
+          );
+          throw new Error(
+            `全体の実行枠 ${globalLimit} は効いていますが、設定ファイル (${ctx.configPath}) に保存できませんでした。再起動すると元に戻ります: ${message}`,
+          );
+        }
+        return await daemonSlots(ctx);
+      }
+
       case "ratelimit.recent": {
         const rows = await recentRateLimitSamples(
           ctx.db,
@@ -808,6 +833,17 @@ export function createHandler(ctx: DaemonContext): Handler {
       default:
         throw new Error(`未知のメソッドです: ${method}`);
     }
+  };
+}
+
+/** daemon.slots の応答。 */
+async function daemonSlots(ctx: DaemonContext): Promise<DaemonSlots> {
+  const snapshot = await slotsSnapshot(ctx.db, ctx.globalLimit);
+  return {
+    global_limit: snapshot.globalLimit,
+    in_use: snapshot.inUse,
+    waiting_tasks: snapshot.waitingTasks,
+    waiting_intake_runs: snapshot.waitingIntakeRuns,
   };
 }
 
