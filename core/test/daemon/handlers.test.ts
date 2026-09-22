@@ -2848,7 +2848,7 @@ test("workflow.get: default.yaml の 10 ステップの設定と分岐を返す"
   assert.ok(plan.type === "agent");
   if (plan.type === "agent") {
     assert.equal(plan.session, "planner");
-    assert.equal(plan.model, "claude-opus-5");
+    assert.equal(plan.model, "claude-opus-5-5");
     assert.equal(plan.permissionMode, "acceptEdits");
     assert.equal(plan.allowedTools?.[0], "Bash(git status:*)");
     assert.ok(plan.prompt.includes("次のタスクの実装計画を立ててください。"));
