@@ -14,7 +14,7 @@ import { getTask, insertProject, insertTask } from "../../src/db/tasks.ts";
 import { getStepOutputs, getStepRun, listStepRuns } from "../../src/db/stepRuns.ts";
 import { createMockAdapter } from "../../src/adapter/mock.ts";
 import type { Db } from "../../src/db/schema.ts";
-import { makeRepo } from "../helpers/repo.ts";
+import { makeRepo, until } from "../helpers/repo.ts";
 
 const roots: string[] = [];
 
@@ -1606,4 +1606,145 @@ steps:
     () => applyApproval(db, "t1", { approved: true, comment: "" }, workflow),
     /承認待ちのステップ実行がありません/,
   );
+});
+
+// --- 外から止められた実行（task.pause / task.cancel が先に状態を書いた） ------------
+
+/** SIGTERM で止められた子（143 で終わる）。 */
+const TERMINATED: Partial<AgentResult> = { ok: false, exitCode: 143, text: "" };
+
+const AGENT_THEN_COMMAND = `${AGENT_ONLY}  - id: after
+    type: command
+    run: "true"
+`;
+
+/**
+ * running の行が立つのを待ち、タスクの状態を書き換えてから runTask の終了を待つ。
+ * ps を通さずに「ハンドラが先に状態を書いた」状況を作る。
+ */
+async function stopMidFlight(
+  db: Db,
+  run: Promise<void>,
+  state: "paused" | "canceled",
+): Promise<void> {
+  await until(async () => (await listStepRuns(db, "t1")).some((r) => r.status === "running"));
+  await db.updateTable("tasks").set({ state }).where("id", "=", "t1").execute();
+  await run;
+}
+
+test("実行中に paused になったら、SIGTERM で失敗した実行は failed ではなく interrupted で閉じる", async () => {
+  const { db, root, workflow } = await taskFixture(AGENT_THEN_COMMAND);
+  const adapter = createMockAdapter({ result: TERMINATED, delayMs: 200 });
+  const { events, deps } = recorder();
+
+  const done = runTask(db, "t1", workflow, {
+    db,
+    adapter,
+    logRoot: join(root, "logs"),
+    globalLimit: 4,
+    ...deps,
+  });
+  await stopMidFlight(db, done, "paused");
+
+  const runs = await listStepRuns(db, "t1");
+  assert.equal(runs.length, 1);
+  assert.equal(runs[0].status, "interrupted");
+  assert.notEqual(runs[0].ended_at, null);
+  assert.equal(runs[0].exit_code, 143);
+  assert.equal(runs[0].goto_step_id, null);
+
+  const task = (await getTask(db, "t1"))!;
+  assert.equal(task.state, "paused");
+  assert.equal(task.current_step_id, "implement");
+  assert.equal(adapter.calls.length, 1);
+  assert.deepEqual(events.onStepRunFinished, ["implement:interrupted"]);
+  assert.deepEqual(events.onStateChanged, []);
+});
+
+test("onFailure のあるステップを止めても、差し戻し（bounced）とは記録しない", async () => {
+  const { db, root, workflow } = await taskFixture(AGENT_WITH_RETRY);
+  const adapter = createMockAdapter({ result: TERMINATED, delayMs: 200 });
+  const { events, deps } = recorder();
+
+  const done = runTask(db, "t1", workflow, {
+    db,
+    adapter,
+    logRoot: join(root, "logs"),
+    globalLimit: 4,
+    ...deps,
+  });
+  await stopMidFlight(db, done, "paused");
+
+  const runs = await listStepRuns(db, "t1");
+  assert.equal(runs.length, 1);
+  assert.equal(runs[0].status, "interrupted");
+  assert.equal(runs[0].goto_step_id, null);
+  assert.equal(adapter.calls.length, 1);
+  const task = (await getTask(db, "t1"))!;
+  assert.equal(task.state, "paused");
+  assert.equal(task.pending_feed, null);
+  assert.deepEqual(events.onStepRunFinished, ["implement:interrupted"]);
+});
+
+test("実行中に canceled になっても interrupted で閉じ、タスクは canceled のまま", async () => {
+  const { db, root, workflow } = await taskFixture(AGENT_ONLY);
+  const adapter = createMockAdapter({ result: TERMINATED, delayMs: 200 });
+
+  const done = runTask(db, "t1", workflow, {
+    db,
+    adapter,
+    logRoot: join(root, "logs"),
+    globalLimit: 4,
+  });
+  await stopMidFlight(db, done, "canceled");
+
+  const runs = await listStepRuns(db, "t1");
+  assert.deepEqual(runs.map((r) => r.status), ["interrupted"]);
+  assert.equal((await getTask(db, "t1"))!.state, "canceled");
+});
+
+test("止めた直後に成功で返った実行も interrupted で閉じ、次のステップへ進まない", async () => {
+  const { db, root, workflow } = await taskFixture(AGENT_THEN_COMMAND);
+  const adapter = createMockAdapter({ result: { ok: true, text: "done" }, delayMs: 200 });
+
+  const done = runTask(db, "t1", workflow, {
+    db,
+    adapter,
+    logRoot: join(root, "logs"),
+    globalLimit: 4,
+  });
+  await stopMidFlight(db, done, "paused");
+
+  const runs = await listStepRuns(db, "t1");
+  assert.deepEqual(runs.map((r) => r.status), ["interrupted"]);
+  const task = (await getTask(db, "t1"))!;
+  assert.equal(task.state, "paused");
+  assert.equal(task.current_step_id, "implement");
+});
+
+test("上限待ちに入るはずだった実行を止めても、行を running のまま残さない", async () => {
+  const { db, root, workflow } = await taskFixture(AGENT_ONLY);
+  const adapter = createMockAdapter({
+    eventsSequence: [[saturated()]],
+    result: {},
+    sequence: [HIT],
+    delayMs: 200,
+  });
+  const { events, deps } = recorder();
+
+  const done = runTask(db, "t1", workflow, {
+    db,
+    adapter,
+    logRoot: join(root, "logs"),
+    globalLimit: 4,
+    ...deps,
+  });
+  await stopMidFlight(db, done, "paused");
+
+  const runs = await listStepRuns(db, "t1");
+  assert.deepEqual(runs.map((r) => r.status), ["interrupted"]);
+  const task = (await getTask(db, "t1"))!;
+  assert.equal(task.state, "paused");
+  assert.equal(task.rate_limited_until, null);
+  assert.deepEqual(events.onStepRunFinished, ["implement:interrupted"]);
 });

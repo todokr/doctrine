@@ -156,6 +156,38 @@ function withNote(stderr: string, note: string): string {
   return stderr ? `${stderr}\n${note}` : note;
 }
 
+/**
+ * 状態が running でなくなった後に終わった実行の行を interrupted で閉じる。
+ * （task.pause / task.cancel が先に状態を書いた。状態はそちらが持つので触らない。）
+ */
+async function closeInterrupted(
+  db: Db,
+  taskId: string,
+  stepRunId: number,
+  outcome: StepOutcome,
+): Promise<void> {
+  await commitStepBoundary(db, {
+    taskId,
+    taskPatch: {},
+    stepRunUpdate: {
+      id: stepRunId,
+      status: "interrupted",
+      exit_code: outcome.exitCode,
+      ended_at: outcome.endedAt,
+      cost_usd: outcome.costUsd,
+      num_turns: outcome.numTurns,
+      duration_ms: outcome.durationMs,
+      permission_denials: outcome.permissionDenials,
+    },
+    // 止められた子の stderr の末尾は、後から診断するのに使う。
+    outputs: {
+      last_stdout: outcome.stdout,
+      last_stderr: outcome.stderr,
+      exit_code: outcome.exitCode,
+    },
+  });
+}
+
 async function decideRateLimit(
   db: Db,
   outcome: StepOutcome,
@@ -215,7 +247,8 @@ export async function runTask(
   while (true) {
     task = (await getTask(db, taskId))!;
     // ループが走り続ける権利を毎周確認する。task.cancel / task.pause は子を
-    // SIGTERM して新しい状態を書くが、このループを止める手段は持っていない。
+    // SIGTERM して新しい状態を書くが、このループを止める手段は持っていない
+    // （走っていた実行の行は、終了コミットが状態の食い違いを見て interrupted で閉じる）。
     // ここで降りないと、cancel 後も次のステップの子を spawn して、ユーザーが
     // 捨てたつもりの worktree に書き続ける。pause ではさらに current_step_id を
     // 進めてしまい、後の resume が1ステップ黙って飛ばす。
@@ -473,7 +506,11 @@ export async function runTask(
           sessionDelete: !isResume && role ? { role } : undefined,
         });
       } catch (e) {
-        if (e instanceof StateConflictError) return;
+        if (e instanceof StateConflictError) {
+          await closeInterrupted(db, taskId, stepRunId, outcome);
+          deps.onStepRunFinished?.(taskId, stepRunId, step.id, "interrupted", null, attempt);
+          return;
+        }
         throw e;
       }
       // この経路は setState を通らないので、通知は自分で呼ぶ（呼ばないとアプリは
@@ -499,29 +536,41 @@ export async function runTask(
     const bounced = verdict.kind !== "give-up" && decision.kind === "goto";
     const recordedStatus: StepRunStatus = bounced ? "bounced" : outcome.status as StepRunStatus;
 
-    await commitStepBoundary(db, {
-      taskId,
-      taskPatch: { child_pid: null, child_started_at: null },
-      stepRunUpdate: {
-        id: stepRunId,
-        status: recordedStatus,
-        exit_code: outcome.exitCode,
-        ended_at: outcome.endedAt,
-        cost_usd: outcome.costUsd,
-        num_turns: outcome.numTurns,
-        duration_ms: outcome.durationMs,
-        goto_step_id: bounced ? decision.stepId : null,
-        permission_denials: outcome.permissionDenials,
-      },
-      outputs: {
-        last_stdout: outcome.stdout,
-        // 待たずに失敗させた上限は、board 上で普通の失敗と区別が付くようにする。
-        last_stderr: verdict.kind === "give-up"
-          ? withNote(outcome.stderr, verdict.note)
-          : outcome.stderr,
-        exit_code: outcome.exitCode,
-      },
-    });
+    try {
+      await commitStepBoundary(db, {
+        taskId,
+        // running でなくなっていれば（pause / cancel が先に書いた）、この実行の
+        // 結果は使わず行を interrupted で閉じる。
+        requireState: "running",
+        taskPatch: { child_pid: null, child_started_at: null },
+        stepRunUpdate: {
+          id: stepRunId,
+          status: recordedStatus,
+          exit_code: outcome.exitCode,
+          ended_at: outcome.endedAt,
+          cost_usd: outcome.costUsd,
+          num_turns: outcome.numTurns,
+          duration_ms: outcome.durationMs,
+          goto_step_id: bounced ? decision.stepId : null,
+          permission_denials: outcome.permissionDenials,
+        },
+        outputs: {
+          last_stdout: outcome.stdout,
+          // 待たずに失敗させた上限は、board 上で普通の失敗と区別が付くようにする。
+          last_stderr: verdict.kind === "give-up"
+            ? withNote(outcome.stderr, verdict.note)
+            : outcome.stderr,
+          exit_code: outcome.exitCode,
+        },
+      });
+    } catch (e) {
+      if (e instanceof StateConflictError) {
+        await closeInterrupted(db, taskId, stepRunId, outcome);
+        deps.onStepRunFinished?.(taskId, stepRunId, step.id, "interrupted", null, attempt);
+        return;
+      }
+      throw e;
+    }
     // イベントとDBが食い違わないよう、渡すのは記録した status。
     deps.onStepRunFinished?.(
       taskId,
