@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { StepRun, StepView } from "../../shared/protocol.ts";
-import { buildRail, type RailArc } from "./rail";
+import { WORKFLOW_DEFAULT } from "./fixtures";
+import { buildDefinitionRail, buildRail } from "./rail";
 
 // .doctrine/workflows/default.yaml と同じ形（9 ステップ・後戻り 4 本）。
 // app から core / YAML を読まないので、ここに手書きする。
@@ -56,7 +57,7 @@ const arcOf = (rail: NonNullable<ReturnType<typeof buildRail>>, from: string) =>
  * - 入れ子（端を共有する場合を含む）: 内側の lane が外側より小さければ交差しない
  * - 部分的に重なる: 交差する
  */
-function crosses(a: RailArc, b: RailArc): boolean {
+function crosses(a: { fromIndex: number; toIndex: number; lane: number }, b: { fromIndex: number; toIndex: number; lane: number }): boolean {
   const [a0, a1] = [Math.min(a.fromIndex, a.toIndex), Math.max(a.fromIndex, a.toIndex)];
   const [b0, b1] = [Math.min(b.fromIndex, b.toIndex), Math.max(b.fromIndex, b.toIndex)];
   if (a1 <= b0 || b1 <= a0) return false;
@@ -209,5 +210,72 @@ describe("steps に無い step_id", () => {
 describe("steps が null", () => {
   it("帯を描かない", () => {
     expect(buildRail(null, [stepRun({ step_id: "plan" })], at("plan"))).toBeNull();
+  });
+});
+
+describe("buildDefinitionRail", () => {
+  const arcOf = (rail: ReturnType<typeof buildDefinitionRail>, from: string) =>
+    rail.arcs.find((a) => a.from === from)!;
+
+  it("全ステップを steps の順にノードにし、種類と approval の title を引き継ぐ", () => {
+    const rail = buildDefinitionRail(WORKFLOW_DEFAULT.steps);
+    expect(rail.nodes.map((n) => n.id)).toEqual(WORKFLOW_DEFAULT.steps.map((s) => s.id));
+    expect(rail.nodes.find((n) => n.id === "review")).toMatchObject({ type: "approval", title: "変更を確認してください" });
+    expect(rail.nodes.find((n) => n.id === "guide")).toMatchObject({ type: "guide" });
+    expect(rail.nodes.find((n) => n.id === "plan")!.title).toBeUndefined();
+  });
+
+  it("実行の状態を持たない", () => {
+    for (const n of buildDefinitionRail(WORKFLOW_DEFAULT.steps).nodes) {
+      expect(n).not.toHaveProperty("status");
+      expect(n).not.toHaveProperty("attempt");
+      expect(n).not.toHaveProperty("current");
+      expect(n).not.toHaveProperty("unknown");
+    }
+    for (const a of buildDefinitionRail(WORKFLOW_DEFAULT.steps).arcs) {
+      expect(a).not.toHaveProperty("used");
+    }
+  });
+
+  it("goto の戻りの弧と maxAttempts", () => {
+    const rail = buildDefinitionRail(WORKFLOW_DEFAULT.steps);
+    expect(rail.arcs).toHaveLength(5);
+    expect(arcOf(rail, "guide")).toMatchObject({ to: "guide", fromIndex: 7, toIndex: 7, lane: 0, maxAttempts: 3, implicit: true });
+    expect(arcOf(rail, "verify")).toMatchObject({ to: "implement", fromIndex: 4, toIndex: 3, lane: 1, maxAttempts: 3, implicit: false });
+    expect(arcOf(rail, "plan-gate")).toMatchObject({ to: "plan", fromIndex: 2, toIndex: 0, lane: 2, maxAttempts: 3, implicit: false });
+    expect(arcOf(rail, "review-gate")).toMatchObject({ to: "implement", fromIndex: 6, toIndex: 3, lane: 3, maxAttempts: 3, implicit: false });
+    expect(arcOf(rail, "review")).toMatchObject({ to: "implement", fromIndex: 8, toIndex: 3, lane: 4, maxAttempts: 5, implicit: false });
+
+    for (let i = 0; i < rail.arcs.length; i++) {
+      for (let j = i + 1; j < rail.arcs.length; j++) {
+        expect(crosses(rail.arcs[i], rail.arcs[j]), `${rail.arcs[i].from} と ${rail.arcs[j].from}`).toBe(false);
+      }
+    }
+  });
+
+  it("goto 先が steps に無い弧は作らない", () => {
+    const rail = buildDefinitionRail([
+      { id: "a", type: "command", run: "true", branch: { goto: "nowhere", maxAttempts: 2, feed: null, implicit: false } },
+    ]);
+    expect(rail.arcs).toEqual([]);
+  });
+
+  it("座標と大きさは buildRail と同じ規則", () => {
+    const views: StepView[] = WORKFLOW_DEFAULT.steps.map((s) => ({
+      id: s.id,
+      type: s.type,
+      ...(s.type === "approval" && { title: s.title }),
+      ...(s.branch && { branch: { goto: s.branch.goto, maxAttempts: s.branch.maxAttempts } }),
+    }));
+    const defRail = buildDefinitionRail(WORKFLOW_DEFAULT.steps);
+    const rail = buildRail(views, [], { current_step_id: null })!;
+
+    expect(defRail.nodes.map((n) => n.x)).toEqual(rail.nodes.map((n) => n.x));
+    expect(defRail.width).toBe(rail.width);
+    expect(defRail.height).toBe(rail.height);
+    const laneOf = (arcs: { from: string; lane: number }[], from: string) => arcs.find((a) => a.from === from)!.lane;
+    for (const a of defRail.arcs) {
+      expect(a.lane).toBe(laneOf(rail.arcs, a.from));
+    }
   });
 });
