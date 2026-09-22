@@ -470,3 +470,7 @@ details.history>summary{cursor:pointer;color:var(--ink-2);font-size:12px;font-we
 details.history[open]>summary{margin-bottom:8px}
 .hist-head{display:flex;gap:10px;align-items:baseline}
 .hist-comments{display:grid;gap:6px}
+
+/* 設定の画面 */
+.settings-field{display:grid;gap:4px}
+.hint.error{color:var(--danger)}

@@ -24,7 +24,7 @@ import type {
 } from "../../shared/protocol.ts";
 import { toolInputParts } from "../../shared/toolInput.ts";
 import type { GuideView } from "./guide";
-import type { ConnectionStatus } from "./daemon/client";
+import type { AppSettings, ConnectionStatus } from "./daemon/client";
 import type { Answer } from "../../shared/intake/question.ts";
 import {
   canRejectIntake,
@@ -105,10 +105,10 @@ export const GROUPS: { key: Exclude<Group, "done">; name: string; sort: (a: Task
   { key: "paused", name: "一時停止", sort: (a, b) => b.since - a.since },
 ];
 
-export type View = "tasks" | "done" | "intake";
+export type View = "tasks" | "done" | "intake" | "settings";
 
 /** そのタスクが並ぶビュー。終了したタスクは「終了したタスク」にしか並ばない */
-export function taskViewFor(t: Task): Exclude<View, "intake"> {
+export function taskViewFor(t: Task): Exclude<View, "intake" | "settings"> {
   return groupOf(t) === "done" ? "done" : "tasks";
 }
 
@@ -539,6 +539,8 @@ export type State = {
   modal: "reject-preview" | "intake-answer" | "intake-reject" | "intake-cancel" | null;
   toast: string | null;
   conn: ConnectionStatus;
+  /** 起動時に load_settings で読んだ設定。保存に成功したら置き換える */
+  settings: Loaded<AppSettings>;
 };
 
 export const EMPTY_DRAFT: Draft = { comments: [], overall: "" };
@@ -646,7 +648,8 @@ export type Action =
   | { type: "sync"; tasks: Task[]; projects: Project[]; now: number }
   | { type: "limits.recent"; samples: RateLimitWindow[] }
   | { type: "daemon"; ev: ServerEvent; now: number }
-  | { type: "connection"; conn: ConnectionStatus };
+  | { type: "connection"; conn: ConnectionStatus }
+  | { type: "settings"; loaded: Loaded<AppSettings> };
 
 /**
  * 流れてきた1行を足す。step_run_id が持っているものと違えば、別のステップの
@@ -715,6 +718,7 @@ export function reduce(s: State, a: Action): State {
   switch (a.type) {
     case "view": {
       if (a.view === "intake") return { ...s, view: "intake", editing: null };
+      if (a.view === "settings") return { ...s, view: "settings", editing: null };
       const next = { ...s, view: a.view };
       const leaving = a.view === "done" || (t !== null && groupOf(t) === "done");
       const first = sidebarOrder(s.tasks, a.view, s.project)[0];
@@ -722,9 +726,15 @@ export function reduce(s: State, a: Action): State {
     }
     case "project":
       return { ...s, project: a.project };
-    case "select":
+    case "select": {
+      if (s.view === "settings") {
+        const target = s.tasks.find((x) => x.id === a.id);
+        return target ? { ...s, view: taskViewFor(target), sel: a.id, editing: null } : { ...s, sel: a.id };
+      }
       return { ...s, sel: a.id, editing: null };
+    }
     case "move": {
+      if (s.view === "settings") return s;
       if (s.view === "intake") {
         const rows = intakeOrder(s.intakes, s.projects, s.project, s.showClosedIntakes);
         if (!rows.length) return s;
@@ -1060,5 +1070,7 @@ export function reduce(s: State, a: Action): State {
         intakeDetails: drop(s.intakeDetails, (v) => v.kind === "error"),
       };
     }
+    case "settings":
+      return { ...s, settings: a.loaded };
   }
 }
