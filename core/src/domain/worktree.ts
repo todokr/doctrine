@@ -210,19 +210,30 @@ export async function isUnderWorktreesDir(realPath: string): Promise<boolean> {
   return realPath.startsWith(root + SEPARATOR);
 }
 
-export async function listWorktrees(repoPath: string): Promise<string[]> {
+export type ListedWorktree = { path: string; branch: string | null };
+
+/** メインの作業ツリーを除く。branch は refs/heads/ を外した名前、detached なら null。 */
+export async function listWorktrees(repoPath: string): Promise<ListedWorktree[]> {
   const { stdout } = await runCommand("git", ["-C", repoPath, "worktree", "list", "--porcelain"]);
-  const paths: string[] = [];
-  for (const line of stdout.split("\n")) {
-    if (line.startsWith("worktree ")) paths.push(line.slice("worktree ".length).trim());
+  const listed: ListedWorktree[] = [];
+  for (const block of stdout.split(/\n\s*\n/)) {
+    let path: string | null = null;
+    let branch: string | null = null;
+    for (const line of block.split("\n")) {
+      if (line.startsWith("worktree ")) path = line.slice("worktree ".length).trim();
+      else if (line.startsWith("branch ")) {
+        branch = line.slice("branch ".length).trim().replace(/^refs\/heads\//, "");
+      }
+    }
+    if (path !== null) listed.push({ path, branch });
   }
   const resolvedRepoPath = await canonical(repoPath);
   // 先頭はメインの作業ツリー自身なので除く（git が報告するパスはシンボリックリンク
   // 解決済みなので、こちら側も canonical() で解決してから比較する）
   const results = await Promise.all(
-    paths.map(async (p) => ({ path: p, resolved: await canonical(p) })),
+    listed.map(async (w) => ({ worktree: w, resolved: await canonical(w.path) })),
   );
-  return results.filter((r) => r.resolved !== resolvedRepoPath).map((r) => r.path);
+  return results.filter((r) => r.resolved !== resolvedRepoPath).map((r) => r.worktree);
 }
 
 /** 自動削除はしない。見つけて報告するだけ。 */
@@ -230,7 +241,7 @@ export async function findOrphans(repoPath: string, knownPaths: string[]): Promi
   const known = new Set(await Promise.all(knownPaths.map((p) => canonical(p))));
   const worktrees = await listWorktrees(repoPath);
   const withResolved = await Promise.all(
-    worktrees.map(async (p) => ({ path: p, resolved: await canonical(p) })),
+    worktrees.map(async (w) => ({ path: w.path, resolved: await canonical(w.path) })),
   );
   return withResolved.filter((r) => !known.has(r.resolved)).map((r) => r.path);
 }

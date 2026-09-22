@@ -156,6 +156,23 @@ export type TaskLogs = { step_run_id: number | null; log_path: string | null; li
 /** daemon.warnings が返す1件。イベントの daemon.warning と同じ形。 */
 export type Warning = { at: string; message: string; task_id?: string };
 
+/**
+ * worktree.list が返す 1 件。ディスク上にある worktree を、対応するタスク・Intake と一緒に返す。
+ * どちらにも当たらないもの（task_id も intake_id も null）が孤児。
+ * age_basis は古さを測る基準の時刻（ISO 8601）。タスクと Intake は updated_at、孤児はディレクトリの mtime。
+ * 古いかどうかはデーモンは判定しない（しきい値は UI の設定）。
+ */
+export type WorktreeEntry = {
+  project: string;
+  path: string;
+  branch: string | null;
+  task_id: string | null;
+  task_state: TaskState | null;
+  intake_id: string | null;
+  dirty: boolean;
+  age_basis: string;
+};
+
 /** ratelimit.recent が返す1件。resets_at は ISO 8601 か null（読めない生値は null）。 */
 export type RateLimitSample = {
   observed_at: string;
@@ -373,6 +390,7 @@ export type Methods = {
     params: { task_id: string; step_run_id?: number; tail?: number; follow?: boolean };
     result: TaskLogs;
   };
+  "worktree.list": { params: Record<string, never>; result: WorktreeEntry[] };
   "daemon.warnings": { params: Record<string, never>; result: Warning[] };
   "ratelimit.recent": { params: { limit?: number }; result: RateLimitSample[] };
   "github.status": { params: { project: string }; result: GhStatus };

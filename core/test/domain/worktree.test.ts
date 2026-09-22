@@ -229,7 +229,7 @@ test("createWorktree は DB に保存する表記として実パスを返す", a
     baseBranch: "main",
   });
   assert.equal(created, await realpath(wt));
-  assert.deepEqual(await listWorktrees(repo), [created]);
+  assert.deepEqual(await listWorktrees(repo), [{ path: created, branch: "doctrine/t1-x" }]);
 });
 
 test("stateDir は DOCTRINE_STATE_DIR を尊重する", () => {
@@ -262,7 +262,25 @@ test("listWorktrees はメインの作業ツリーを除外する", async () => 
 
   const worktrees = await listWorktrees(repo);
   assert.equal(worktrees.length, 1);
-  assert.equal(await realpath(worktrees[0]!), await realpath(wt));
+  assert.equal(await realpath(worktrees[0]!.path), await realpath(wt));
+});
+
+test("listWorktrees はブランチ名を返し、detached の worktree は null にする", async () => {
+  const a = join(root, "wt", "a");
+  const b = join(root, "wt", "b");
+  await createWorktree({
+    repoPath: repo,
+    worktreePath: a,
+    branch: "doctrine/a",
+    baseBranch: "main",
+  });
+  await createDetachedWorktree({ repoPath: repo, worktreePath: b, baseBranch: "main" });
+
+  const worktrees = await listWorktrees(repo);
+  const byPath = new Map(worktrees.map((w) => [w.path, w.branch]));
+  assert.equal(worktrees.length, 2);
+  assert.equal(byPath.get(await realpath(a)), "doctrine/a");
+  assert.equal(byPath.get(await realpath(b)), null);
 });
 
 test("slugify は切り詰めた後にトリムする（境界にハイフンが来ても末尾に残さない）", () => {
