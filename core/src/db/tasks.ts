@@ -68,3 +68,10 @@ export function withAttempt(task: TaskRow, stepId: string): string {
   counts[stepId] = (counts[stepId] ?? 0) + 1;
   return JSON.stringify(counts);
 }
+
+/** 上限到達を人が承認したとき、そのステップの回数を数え直すために消す。 */
+export function withoutAttempt(task: TaskRow, stepId: string): string {
+  const counts = JSON.parse(task.attempt_counts) as Record<string, number>;
+  delete counts[stepId];
+  return JSON.stringify(counts);
+}

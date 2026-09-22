@@ -1,7 +1,7 @@
 import type { Db, StepRunRow, StepRunStatus } from "../db/schema.ts";
 import type { TaskRow } from "../db/tasks.ts";
 import { listStepOutputs, listStepRuns } from "../db/stepRuns.ts";
-import type { Step, Workflow } from "../workflow/schema.ts";
+import { branchOf, type Step, type Workflow } from "../workflow/schema.ts";
 import { readReviewFiles, type ReviewFile } from "./reviewFiles.ts";
 
 type StepOutputRow = { last_stdout: string; last_stderr: string; exit_code: number | null };
@@ -50,6 +50,8 @@ export type TaskContext = {
   lastCommand: CommandResult | null;
   lastAgentMessage: string | null;
   reviewFiles: ReviewFile[];
+  /** 上限到達（onExhausted: suspend）で止まっているときだけ入る。承認で goto 先からやり直す。 */
+  escalation: { stepId: string; goto: string; maxAttempts: number } | null;
 };
 
 /**
@@ -88,7 +90,16 @@ export async function buildTaskContext(
     lastCommand: lastCommandOf(runs, outputs, types),
     lastAgentMessage: lastOutputOf(runs, outputs, types, "agent")?.last_stdout ?? null,
     reviewFiles: await reviewFilesOf(task, workflow),
+    escalation: escalationOf(task, workflow),
   };
+}
+
+function escalationOf(task: TaskRow, workflow: Workflow | null): TaskContext["escalation"] {
+  if (task.state !== "suspended" || !workflow) return null;
+  const step = workflow.steps.find((s) => s.id === task.current_step_id);
+  if (!step || step.type === "approval") return null;
+  const b = branchOf(step);
+  return b ? { stepId: step.id, goto: b.goto, maxAttempts: b.maxAttempts } : null;
 }
 
 function toReview(r: StepRunRow, outputs: Map<number, StepOutputRow>): ReviewEntry {

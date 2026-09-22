@@ -73,6 +73,22 @@ test("maxAttempts を超えたら failed", () => {
   assert.match((d as { reason: string }).reason, /maxAttempts/);
 });
 
+test("onExhausted: suspend なら maxAttempts を超えても failed にせず escalate", () => {
+  const w = parseWorkflow(`
+name: f
+steps:
+  - id: a
+    type: command
+    run: "true"
+  - id: b
+    type: command
+    run: "false"
+    onFailure: { goto: a, maxAttempts: 2, onExhausted: suspend }
+`).workflow;
+  assert.equal(decide({ workflow: w, currentStepId: "b", outcome: "failed", attempts: 2 }).kind, "escalate");
+  assert.equal(decide({ workflow: w, currentStepId: "b", outcome: "failed", attempts: 1 }).kind, "goto");
+});
+
 test("onFailure が無いステップの失敗は即 failed", () => {
   const d = decide({ workflow: wf, currentStepId: "open-pr", outcome: "failed", attempts: 1 });
   assert.equal(d.kind, "fail");
@@ -1890,4 +1906,71 @@ steps:
   assert.equal(task.state, "paused", "canceled には上書きされない");
   assert.deepEqual(events.onStepRunFinished, ["wait:interrupted"]);
   assert.deepEqual(events.onStateChanged, [], "canceled への遷移イベントは出ていない");
+});
+
+// --- onExhausted: suspend ---------------------------------------------
+
+const ESCALATE_WF = `
+name: f
+steps:
+  - id: fix
+    type: command
+    run: "true"
+  - id: check
+    type: command
+    run: "exit $(cat verdict)"
+    onFailure: { goto: fix, maxAttempts: 2, feed: "直して: {{ steps.check.last_stdout }}", onExhausted: suspend }
+`;
+
+test("上限に達すると、そのステップの awaiting の行を立てて suspended になる", async () => {
+  const { db, root, workflow } = await taskFixture(ESCALATE_WF);
+  writeFileSync(join(root, "verdict"), "1");
+  await runTask(db, "t1", workflow, {
+    db,
+    adapter: createMockAdapter({ result: {} }),
+    logRoot: join(root, "logs"),
+    globalLimit: 4,
+  });
+  const t = (await getTask(db, "t1"))!;
+  assert.equal(t.state, "suspended");
+  assert.equal(t.current_step_id, "check");
+  assert.deepEqual(
+    (await listStepRuns(db, "t1")).map((r) => [r.step_id, r.status]),
+    [["fix", "success"], ["check", "bounced"], ["fix", "success"], ["check", "failed"], ["check", "awaiting"]],
+  );
+});
+
+test("上限到達の承認は回数を戻して goto 先から続け、feed を渡す", async () => {
+  const { db, root, workflow } = await taskFixture(ESCALATE_WF);
+  writeFileSync(join(root, "verdict"), "1");
+  const deps = { db, adapter: createMockAdapter({ result: {} }), logRoot: join(root, "logs"), globalLimit: 4 };
+  await runTask(db, "t1", workflow, deps);
+
+  await applyApproval(db, "t1", { approved: true, comment: "" }, workflow);
+  const t = (await getTask(db, "t1"))!;
+  assert.equal(t.state, "queued");
+  assert.equal(t.current_step_id, "fix");
+  assert.equal(JSON.parse(t.attempt_counts).check, undefined, "check の回数を戻す");
+  assert.match(t.pending_feed ?? "", /^直して: /);
+  const last = (await listStepRuns(db, "t1")).at(-1)!;
+  assert.deepEqual([last.step_id, last.status, last.goto_step_id], ["check", "bounced", "fix"]);
+
+  writeFileSync(join(root, "verdict"), "0");
+  await toRunning(db, "t1");
+  await runTask(db, "t1", workflow, deps);
+  assert.equal((await getTask(db, "t1"))?.state, "completed");
+});
+
+test("上限到達の却下は failed で終える", async () => {
+  const { db, root, workflow } = await taskFixture(ESCALATE_WF);
+  writeFileSync(join(root, "verdict"), "1");
+  await runTask(db, "t1", workflow, {
+    db,
+    adapter: createMockAdapter({ result: {} }),
+    logRoot: join(root, "logs"),
+    globalLimit: 4,
+  });
+  await applyApproval(db, "t1", { approved: false, comment: "手で直す" }, workflow);
+  assert.equal((await getTask(db, "t1"))?.state, "failed");
+  assert.equal((await listStepRuns(db, "t1")).at(-1)?.status, "failed");
 });

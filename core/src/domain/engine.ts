@@ -1,4 +1,4 @@
-import type { Branch, Workflow } from "../workflow/schema.ts";
+import type { Branch, Step, Workflow } from "../workflow/schema.ts";
 import { branchOf, intervalMs } from "../workflow/schema.ts";
 import { expand, type TemplateContext } from "../workflow/template.ts";
 import { commitStepBoundary, StateConflictError, type StepBoundary } from "../db/boundary.ts";
@@ -17,6 +17,7 @@ import {
   type TaskRow,
   type TaskState,
   withAttempt,
+  withoutAttempt,
 } from "../db/tasks.ts";
 import { insertRateLimitSample, rateLimitsObservedSince } from "../db/rateLimits.ts";
 import {
@@ -47,7 +48,8 @@ export type Decision =
   | { kind: "goto"; stepId: string; feed: string | null }
   | { kind: "suspend" }
   | { kind: "complete" }
-  | { kind: "fail"; reason: string };
+  | { kind: "fail"; reason: string }
+  | { kind: "escalate"; reason: string };
 
 /**
  * ワークフローの意味論。I/Oを持たないので、ここだけを読めば進行規則が分かる。
@@ -74,10 +76,8 @@ export function decide(o: {
     return { kind: "fail", reason: `ステップ "${step.id}" が失敗し、onFailure がありません` };
   }
   if (o.attempts >= branch.maxAttempts) {
-    return {
-      kind: "fail",
-      reason: `ステップ "${step.id}" が maxAttempts (${branch.maxAttempts}) を超えました`,
-    };
+    const reason = `ステップ "${step.id}" が maxAttempts (${branch.maxAttempts}) を超えました`;
+    return branch.onExhausted === "suspend" ? { kind: "escalate", reason } : { kind: "fail", reason };
   }
   return { kind: "goto", stepId: branch.goto, feed: branch.feed ?? null };
 }
@@ -223,6 +223,41 @@ async function decideRateLimit(
     };
   }
   return verdict;
+}
+
+/**
+ * maxAttempts を使い切ったステップで人の判断を待つ（onExhausted: suspend）。
+ * suspended には「開いている awaiting の行がちょうど1件ある」という不変条件があるので、
+ * 失敗した実行の行とは別に、そのステップの id で awaiting の行を立てる。
+ */
+async function escalate(
+  db: Db,
+  task: TaskRow,
+  stepId: string,
+  attempt: number,
+  deps: EngineDeps,
+): Promise<void> {
+  assertTransition(task.state, "suspended");
+  try {
+    await commitStepBoundary(db, {
+      taskId: task.id,
+      requireState: "running",
+      taskPatch: { state: "suspended", child_pid: null, child_started_at: null },
+      stepRun: {
+        step_id: stepId,
+        attempt,
+        status: "awaiting",
+        exit_code: null,
+        started_at: new Date().toISOString(),
+        ended_at: null,
+        log_path: "",
+      },
+    });
+  } catch (e) {
+    if (e instanceof StateConflictError) return;
+    throw e;
+  }
+  deps.onStateChanged?.(task.id, task.state, "suspended");
 }
 
 /**
@@ -683,6 +718,9 @@ export async function runTask(
       case "suspend":
         await setState(db, task, "suspended", deps);
         return;
+      case "escalate":
+        await escalate(db, task, step.id, attempt, deps);
+        return;
     }
   }
 }
@@ -723,6 +761,12 @@ export async function applyApproval(
   const awaiting = await getAwaitingStepRun(db, taskId, stepId);
   if (!awaiting) {
     throw new Error(`承認待ちのステップ実行がありません: ${taskId} / ${stepId}`);
+  }
+
+  const step = workflow.steps[index];
+  if (step.type !== "approval") {
+    await applyEscalation(db, task, step, awaiting.id, verdict, now);
+    return;
   }
 
   if (verdict.approved) {
@@ -799,5 +843,54 @@ export async function applyApproval(
     taskPatch: { state: "failed" },
     stepRunUpdate: { id: awaiting.id, status: "failed", exit_code: 1, ended_at: now },
     ...comment,
+  });
+}
+
+/**
+ * 上限到達（escalate）で止まったステップへの人の判断。承認は回数を戻して goto 先から、
+ * 却下は failed。approval の承認のように次のステップへは進めない（spec 6 章）。
+ */
+async function applyEscalation(
+  db: Db,
+  task: TaskRow,
+  step: Step,
+  awaitingId: number,
+  verdict: { approved: boolean; comment: string },
+  now: string,
+): Promise<void> {
+  const branch = branchOf(step);
+  if (!branch) throw new Error(`ステップ "${step.id}" に onFailure がありません`);
+
+  if (verdict.approved) {
+    assertTransition(task.state, "queued");
+    const ctx = await contextFor(db, task);
+    await commitStepBoundary(db, {
+      taskId: task.id,
+      requireState: "suspended",
+      taskPatch: {
+        state: "queued",
+        current_step_id: branch.goto,
+        resumed: 1,
+        attempt_counts: withoutAttempt(task, step.id),
+        pending_feed: branch.feed ? expand(branch.feed, ctx) : null,
+      },
+      stepRunUpdate: {
+        id: awaitingId,
+        status: "bounced",
+        exit_code: 0,
+        ended_at: now,
+        goto_step_id: branch.goto,
+      },
+    });
+    return;
+  }
+
+  assertTransition(task.state, "failed");
+  await commitStepBoundary(db, {
+    taskId: task.id,
+    requireState: "suspended",
+    taskPatch: { state: "failed" },
+    stepRunUpdate: { id: awaitingId, status: "failed", exit_code: 1, ended_at: now },
+    outputs: { last_stdout: verdict.comment, last_stderr: "", exit_code: 1 },
   });
 }

@@ -323,6 +323,8 @@ export type TaskContext = {
   lastCommand: CommandResult | null;
   lastAgentMessage: string | null;
   reviewFiles: ReviewFile[];
+  /** 上限到達（onExhausted: suspend）で止まっているときだけ入る。承認で goto 先からやり直す。 */
+  escalation: { stepId: string; goto: string; maxAttempts: number } | null;
 };
 
 /** 見張りの健康状態（spec 11.6）。プロジェクトごとにメモリに持ち、再起動で消える。 */

@@ -254,7 +254,7 @@ describe("経緯", () => {
     ({ stepRunId: 1, stepId: "review", attempt: 1, startedAt: "2026-09-18T00:00:00.000Z", reviewTree: "abc",
        endedAt: "2026-09-18T00:05:00.000Z", comment: "直してください", ...o }) as ReviewEntry;
   const ctx = (reviews: ReviewEntry[]): TaskContext =>
-    ({ prompt: "p", reviews, lastCommand: null, lastAgentMessage: null, reviewFiles: [] });
+    ({ prompt: "p", reviews, lastCommand: null, lastAgentMessage: null, reviewFiles: [], escalation: null });
 
   test("今が何回目かは、決着した回に1を足した数（今待っている回は数えない）", () => {
     expect(reviewRound(ctx([entry({ status: "awaiting" })]))).toBe(1);
