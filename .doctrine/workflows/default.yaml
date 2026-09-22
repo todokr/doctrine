@@ -1,4 +1,5 @@
-# doctrine の既定ワークフロー（plan → plan-review → implement → verify → agent-review → guide → review → open-pr）
+# doctrine の既定ワークフロー
+# （plan → plan-review → implement → verify → agent-review → guide → review → sync → verify-sync → open-pr → wait-merge）
 #
 # エージェントを planner / plan-reviewer / implementer / code-reviewer / guide の5つの役割に分け、
 # 役割の間は .doctrine-out/ のファイルで成果物を受け渡す。
@@ -21,6 +22,15 @@
 #   review-gate が落ちたら implement へ（最大3回）
 #   guide       の検証が落ちたら guide 自身へ（最大3回。onFailure を書かない既定の分岐）
 #   review（人の承認）で却下されたら implement へ（最大5回）
+#   verify-sync が落ちたら sync へ（最大3回。使い切ったら人の判断を待つ）
+#   wait-merge  が conflict を見たら sync へ（最大10回。使い切ったら人の判断を待つ）
+#
+# review の後で develop を取り込み（sync）、テストを通してから PR を開き、マージされるまで待つ。
+# マージを待っている間に develop と conflict したら、sync に戻って直し、open-pr で push し直す。
+# 初回の sync は conflict が無ければ git merge だけで終わり、PR を develop に追従した状態で開く。
+# 自動で解決した conflict は人に見直させず、sync が書いた記録を open-pr が PR にコメントする。
+# PR がマージされずに閉じられたら、タスクは canceled で終わる。
+#
 # maxAttempts を使い切ってもゲートが通らない場合、タスクは failed になる。
 # guide が3回とも検証に落ちたときも同じで、人の review に届かないまま failed になる。
 # そのとき worktree は削除されずに残るので、中を見て手で直すか、タスクを作り直す。
@@ -378,6 +388,55 @@ steps:
         - .doctrine-out/implement-notes.md
         - .doctrine-out/plan.md
 
+  - id: sync
+    type: agent
+    session: implementer
+    model: claude-sonnet-5
+    permissionMode: acceptEdits
+    allowedTools:
+      - "Bash(git fetch:*)"
+      - "Bash(git merge:*)"
+      - "Bash(git status:*)"
+      - "Bash(git diff:*)"
+      - "Bash(git log:*)"
+      - "Bash(git show:*)"
+      - "Bash(git add:*)"
+      - "Bash(git commit:*)"
+      - "Bash(mise run core:test:*)"
+      - "Bash(mise run core:check:*)"
+      - "Bash(mise run app:test:*)"
+      - "Bash(mise run app:build:*)"
+      - "Bash(mise run pfd:test:*)"
+      - "Bash(mise run pfd:check:*)"
+      - "Bash(grep:*)"
+      - "Bash(sed -n:*)"
+      - "Bash(cat:*)"
+      - "Bash(ls:*)"
+    prompt: |
+      develop の最新をこのブランチに取り込んでください。
+
+      1. `git fetch origin develop` を実行し、続けて `git merge --no-edit origin/develop` を実行します。
+      2. conflict が無ければ、それで終わりです。何も書かずに終えてください。
+      3. conflict があれば、両側の意図を保つように解決し、触ったディレクトリの検証を通してから
+         `git add` と `git commit --no-edit` でマージコミットを作ってください。rebase はしないでください。
+         解決したら {{ worktree.path }}/.doctrine-out/sync-notes.md に次を書きます。
+         - conflict したファイル
+         - それぞれをどう解決したか（どちらの変更を残したか、両方を合わせたか）
+
+      コマンドは1つずつ実行してください。`&&` や `cd` でつなぐと権限で拒否されます。
+
+  - id: verify-sync
+    type: command
+    run: "mise run core:check && mise run core:test && mise run app:deps && mise run app:test && mise run app:build && mise run pfd:check && mise run pfd:test"
+    onFailure:
+      goto: sync
+      maxAttempts: 3
+      onExhausted: suspend
+      feed: |
+        develop を取り込んだ後の型検査かテストが失敗した:
+        {{ steps.verify-sync.last_stdout }}
+        {{ steps.verify-sync.last_stderr }}
+
   # 人の承認が済んだものだけを PR にする。command ステップはクラッシュ復帰・resume の
   # たびに頭から再実行されるので、既に PR があれば作らない形にしてある。push は同じ
   # コミットを送り直すだけなので、二度実行しても効果が変わらない。
@@ -395,4 +454,28 @@ steps:
   # 本文は implement-notes.md のまま。
   - id: open-pr
     type: command
-    run: "git push -u origin HEAD && { gh pr view --json url --jq .url || { cat .doctrine-out/implement-notes.md; if [ -n '{{ issue.closes }}' ]; then printf '\\n%s\\n' '{{ issue.closes }}'; fi; } | gh pr create --base develop --title \"{{ task.title }}\" --body-file -; }"
+    run: "git push -u origin HEAD && { gh pr view --json url --jq .url || { cat .doctrine-out/implement-notes.md; if [ -n '{{ issue.closes }}' ]; then printf '\\n%s\\n' '{{ issue.closes }}'; fi; } | gh pr create --base develop --title \"{{ task.title }}\" --body-file -; } && if [ -f .doctrine-out/sync-notes.md ]; then gh pr comment --body-file .doctrine-out/sync-notes.md && rm .doctrine-out/sync-notes.md; fi"
+
+  # 「まだ」は 75、閉じられたら 2（spec 2026-09-22-merge-wait-design.md 3 章）。
+  # push 直後の mergeable は UNKNOWN になるので、まだとして待つ。
+  # BEHIND（conflict は無いが遅れている）は追わない。
+  - id: wait-merge
+    type: poll
+    interval: 1m
+    run: |
+      gh pr view --json state,mergeable --jq '.state + " " + .mergeable' | {
+        read s m
+        case "$s $m" in
+          "MERGED "*) exit 0 ;;
+          "CLOSED "*) echo "PR がマージされずに閉じられました"; exit 2 ;;
+          *" CONFLICTING") echo "develop と conflict しています"; exit 1 ;;
+          *) exit 75 ;;
+        esac
+      }
+    onFailure:
+      goto: sync
+      maxAttempts: 10
+      onExhausted: suspend
+      feed: |
+        PR が develop と conflict した。develop を取り込み直して解決してください:
+        {{ steps.wait-merge.last_stdout }}

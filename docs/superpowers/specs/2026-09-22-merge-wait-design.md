@@ -139,6 +139,9 @@ worktree を置き去りにするより、人に続けるかどうかを聞く�
 
 `wait-merge` と `verify-sync` の両方に付ける。
 
+approval ステップの `onReject` には `onExhausted: suspend` を書けない（ワークフローの検証で弾く）。
+approval の却下はすでに人の判断なので、上限到達でもう一度人を待たせる意味が無い。
+
 `suspended` には「開いている awaiting の行がちょうど1件ある」という不変条件があり、`applyApproval` は
 それを前提にしている。そこで上限に達したら、失敗した実行の行を閉じた後に、**そのステップの id で**
 awaiting の行を立てて `suspended` にする（`decide` の新しい kind `escalate`）。`applyApproval` は、止まって
