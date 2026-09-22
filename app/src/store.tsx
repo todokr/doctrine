@@ -34,7 +34,10 @@ import type {
   ProjectConfigInput,
   ProjectSummary,
   Warning,
+  WorkflowDetail,
   WorkflowListEntry,
+  WorkflowSaveResult,
+  WorkflowStepChange,
   WorktreeEntry,
 } from "../../shared/protocol.ts";
 import {
@@ -504,6 +507,20 @@ export function useProjectConfigRpc(): ProjectConfigRpc {
     get: (project: string) => rpc("project.config.get", { project }),
     workflows: (project: string) => rpc("workflow.list", { project }),
     save: (project: string, config: ProjectConfigInput) => rpc("project.config.save", { project, config }),
+  };
+}
+
+/** ワークフローの定義の読み書き。成否の判定は呼び出し側で行う */
+export type WorkflowRpc = {
+  get: (project: string, name: string) => Promise<WorkflowDetail>;
+  save: (project: string, name: string, changes: WorkflowStepChange[]) => Promise<WorkflowSaveResult>;
+};
+
+export function useWorkflowRpc(): WorkflowRpc {
+  return {
+    get: (project: string, name: string) => rpc("workflow.get", { project, name }),
+    save: (project: string, name: string, changes: WorkflowStepChange[]) =>
+      rpc("workflow.save", { project, name, changes }),
   };
 }
 
