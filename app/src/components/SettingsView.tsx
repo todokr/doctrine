@@ -4,6 +4,7 @@ import { checkSettingsForm, toSettingsForm, type SettingsForm } from "../setting
 import { sendDecision } from "../decision";
 import type { Action } from "../model";
 import { useSettingsRpc, useStore } from "../store";
+import { ProjectConfigSection } from "./ProjectConfigSection";
 
 /** props だけで描く。テストはこちらを描く */
 export function SettingsFields(props: {
@@ -16,8 +17,8 @@ export function SettingsFields(props: {
   const check = checkSettingsForm(form);
   const errors = check.ok ? {} : check.errors;
   return (
-    <div className="pad">
-      <h1>設定</h1>
+    <section>
+      <h2>アプリ</h2>
       <div className="settings-field">
         <label className="hint" htmlFor="settings-editor">エディタの起動コマンド</label>
         <input
@@ -59,7 +60,7 @@ export function SettingsFields(props: {
       <div className="actions">
         <button className="btn primary" disabled={!check.ok || pending} onClick={onSave}>保存</button>
       </div>
-    </div>
+    </section>
   );
 }
 
@@ -102,21 +103,29 @@ function SettingsEditor({ initial }: { initial: AppSettings }) {
   return <SettingsFields form={form} pending={pending} onChange={setForm} onSave={onSave} />;
 }
 
-export function SettingsView(): React.JSX.Element {
+function AppSettingsSection(): React.JSX.Element {
   const { s } = useStore();
   if (s.settings.kind === "loading") {
-    return <div className="pad"><p className="hint">設定を読み込んでいます…</p></div>;
+    return <p className="hint">設定を読み込んでいます…</p>;
   }
   if (s.settings.kind === "error") {
     return (
-      <div className="pad">
-        <div className="box danger">
-          <p>設定を読めませんでした</p>
-          <p className="mono">{s.settings.message}</p>
-          <p className="hint">設定ファイルを直してから、アプリを開き直してください。</p>
-        </div>
+      <div className="box danger">
+        <p>設定を読めませんでした</p>
+        <p className="mono">{s.settings.message}</p>
+        <p className="hint">設定ファイルを直してから、アプリを開き直してください。</p>
       </div>
     );
   }
   return <SettingsEditor key={JSON.stringify(s.settings.value)} initial={s.settings.value} />;
+}
+
+export function SettingsView(): React.JSX.Element {
+  return (
+    <div className="pad">
+      <h1>設定</h1>
+      <AppSettingsSection />
+      <ProjectConfigSection />
+    </div>
+  );
 }
