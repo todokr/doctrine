@@ -76,7 +76,6 @@ h1,h2,h3,h4,h5,h6,b,strong{font-weight:500}
 .limits-empty{margin:0;color:var(--ink-3)}
 .limit{display:grid;gap:3px;padding:4px 6px}
 .limit-head,.limit-meta{display:flex;justify-content:space-between;gap:8px;color:var(--ink-3);font-variant-numeric:tabular-nums}
-.limit-name{font-weight:500;color:var(--ink-2)}
 .limit-bar{display:block;height:6px;border-radius:3px;background:var(--sunken);overflow:hidden}
 .limit-bar span{display:block;height:100%;background:var(--ink-3)}
 .limit-pct{color:var(--ink)}
@@ -449,7 +448,8 @@ tr.wt-stale{background:var(--accent-soft)}
 .tone-danger{--tone:var(--danger);--tone-soft:var(--danger-bg);--tone-text:var(--danger)}
 .tone-human{--tone:var(--accent);--tone-soft:var(--accent-soft);--tone-text:var(--human-text)}
 .tone-idle{--tone:var(--idle);--tone-soft:var(--surface-2);--tone-text:var(--ink-3)}
-.st{display:inline-flex;align-items:center;gap:7px;font-weight:500;color:var(--tone-text);white-space:nowrap}
+/* StatusDot は .st に必ず tone-* も付くので、その組で絞る。.fl .st（ファイル一覧・ガイド目次の件数）は無地の .st なので触らない */
+.st.tone-ok,.st.tone-run,.st.tone-danger,.st.tone-human,.st.tone-idle{display:inline-flex;align-items:center;gap:7px;font-weight:500;color:var(--tone-text);white-space:nowrap}
 .st > i{width:7px;height:7px;border-radius:50%;background:var(--tone);box-shadow:0 0 0 3px var(--tone-soft);flex:none}
 .lbl{font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3);font-weight:500}
 .lbl.human{color:var(--human-text)}
@@ -478,12 +478,12 @@ tr.wt-stale{background:var(--accent-soft)}
 /* PFD のプロセスの状態（spec 3.4） */
 .pfd-bar{stroke:var(--tone);stroke-width:4;stroke-linecap:round}
 .pfd-bar.dashed{stroke-dasharray:5 3;stroke-linecap:butt}
-/* Intake の状態ごとの件数（spec 3.5） */
+/* Intake の状態ごとの件数（spec 3.5）。.count はサイドバーの既存の件数表示と名前が被るので .counts 配下だけに絞る */
 .counts{display:flex;gap:18px;flex-wrap:wrap}
-.count{display:grid;gap:3px;min-width:88px}
-.count .v{font-family:var(--mono);font-size:12px}
-.count .b{height:4px;border-radius:2px;background:var(--tone)}
-.count.dashed .b{background:repeating-linear-gradient(90deg,var(--tone) 0 5px,transparent 5px 8px)}
+.counts .count{display:grid;gap:3px;min-width:88px}
+.counts .count .v{font-family:var(--mono);font-size:12px}
+.counts .count .b{height:4px;border-radius:2px;background:var(--tone)}
+.counts .count.dashed .b{background:repeating-linear-gradient(90deg,var(--tone) 0 5px,transparent 5px 8px)}
 
 /* レビュー画面の指示とフィードバック（spec 3.6） */
 .ctx-row{display:grid;gap:6px;justify-items:start}
