@@ -167,7 +167,7 @@ export function StepFields(props: {
 
       {step.type === "approval" && (
         <>
-          <dl className="wf-step">
+          <dl className="wf-props">
             <dt>title</dt>
             <dd>{step.title}</dd>
           </dl>
@@ -186,7 +186,7 @@ export function StepFields(props: {
 
       {step.type === "guide" && (
         <>
-          <dl className="wf-step">
+          <dl className="wf-props">
             <dt>session</dt>
             <dd className="mono">{step.session}</dd>
             <dt>model</dt>
