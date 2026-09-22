@@ -12,7 +12,7 @@ export function RateLimit() {
       {views.map((v) => (
         <div className={`limit ${v.severity}${v.stale ? " stale" : ""}`} key={v.window}>
           <div className="limit-head">
-            <span className="limit-name">{v.label}</span>
+            <span className="limit-name lbl">{v.label}</span>
             <span>{v.observed}</span>
           </div>
           <span

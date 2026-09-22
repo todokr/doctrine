@@ -11,6 +11,7 @@ import {
 } from "../intake";
 import { GROUPS, ago, countReview, groupOf, hm, sidebarOrder, staleDaysOf, timeLabel, visibleTasks } from "../model";
 import { useNotYet, useStore } from "../store";
+import { groupTone, sectionTone, toneClass } from "../tone";
 import type { Task } from "../types";
 import { isStaleWorktree, worktreesNeedAttention } from "../worktrees";
 import { RateLimit } from "./RateLimit";
@@ -66,24 +67,15 @@ export function Rail() {
   );
 }
 
-export function StateIcon({ t }: { t: Task }) {
-  switch (groupOf(t)) {
-    case "review": return <span className="diamond" />;
-    case "check": return <span className="bang">!</span>;
-    case "running": return <span className="spin" />;
-    case "limited": return <span className="hourglass" />;
-    case "queued": return <span className="ring" />;
-    case "paused": return <span className="pause" />;
-    default: return t.state === "completed" ? <span className="check" /> : <span className="xmark" />;
-  }
-}
-
 function Item({ t }: { t: Task }) {
   const { s, dispatch } = useStore();
   const p = s.projects.find((x) => x.id === t.project);
   return (
-    <button className="it" aria-current={s.sel === t.id} onClick={() => dispatch({ type: "select", id: t.id })}>
-      <span className="ico"><StateIcon t={t} /></span>
+    <button
+      className={`it ${toneClass(groupTone(groupOf(t), t))}`}
+      aria-current={s.sel === t.id}
+      onClick={() => dispatch({ type: "select", id: t.id })}
+    >
       <span className="t">{t.title}</span>
       <span className="m">
         <span className="pj">
@@ -97,23 +89,17 @@ function Item({ t }: { t: Task }) {
   );
 }
 
-function IntakeIcon({ i }: { i: IntakeSummary }) {
-  switch (intakeSection(i)) {
-    case "attention": return i.state === "needs_attention" ? <span className="bang">!</span> : <span className="diamond" />;
-    case "working": return i.rate_limited_until ? <span className="hourglass" /> : <span className="spin" />;
-    case "active": return <span className="ring" />;
-    case "closed": return i.state === "completed" ? <span className="check" /> : <span className="xmark" />;
-  }
-}
-
 function IntakeItem({ i }: { i: IntakeSummary }) {
   const { s, dispatch } = useStore();
   const p = s.projects.find((x) => x.daemonId === i.project_id);
   const num = issueNumber(i.issue_url);
   const progress = intakeProgress(i);
   return (
-    <button className="it" aria-current={s.intakeSel === i.id} onClick={() => dispatch({ type: "intake.select", id: i.id })}>
-      <span className="ico"><IntakeIcon i={i} /></span>
+    <button
+      className={`it ${toneClass(sectionTone(intakeSection(i), i))}`}
+      aria-current={s.intakeSel === i.id}
+      onClick={() => dispatch({ type: "intake.select", id: i.id })}
+    >
       <span className="t">
         {num !== null && <span className="num">{`#${num}`}</span>}
         {i.issue_title}
@@ -156,7 +142,7 @@ function IntakeSidebar() {
           if (!list.length) return null;
           return (
             <section className="grp" key={sec.key}>
-              <h3>{sec.name} <span className="count">{list.length}</span></h3>
+              <h3><span className="lbl">{sec.name}</span> <span className="count">{list.length}</span></h3>
               {list.map((i) => <IntakeItem key={i.id} i={i} />)}
             </section>
           );
@@ -226,7 +212,7 @@ export function Sidebar() {
             if (!list.length) return null;
             return (
               <section className="grp" key={g.key}>
-                <h3>{g.name} <span className="count">{list.length}</span></h3>
+                <h3><span className="lbl">{g.name}</span> <span className="count">{list.length}</span></h3>
                 {list.map((t) => <Item key={t.id} t={t} />)}
               </section>
             );
