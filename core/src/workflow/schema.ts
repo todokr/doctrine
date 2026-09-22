@@ -1,7 +1,13 @@
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 
-export type Branch = { goto: string; maxAttempts: number; feed?: string };
+export type Branch = {
+  goto: string;
+  maxAttempts: number;
+  feed?: string;
+  /** maxAttempts を使い切ったとき。suspend なら failed にせず人の承認を待つ（省略時 fail）。 */
+  onExhausted?: "fail" | "suspend";
+};
 export type CommandStep = { id: string; type: "command"; run: string; onFailure?: Branch };
 export type AgentStep = {
   id: string;
@@ -35,14 +41,39 @@ export type GuideStep = {
   allowedTools?: string[];
   onFailure?: Branch;
 };
-export type Step = CommandStep | AgentStep | ApprovalStep | GuideStep;
+/**
+ * 判定コマンドを interval ごとに実行して待つステップ。終了コードの意味は
+ * 0 済み / 75 まだ / 2 諦める（canceled）/ それ以外は失敗。
+ */
+export type PollStep = {
+  id: string;
+  type: "poll";
+  run: string;
+  interval: string;
+  onFailure?: Branch;
+};
+export type Step = CommandStep | AgentStep | ApprovalStep | GuideStep | PollStep;
 export type Workflow = { name: string; steps: Step[] };
 
 export const RESERVED_STEP_IDS = ["setup"] as const;
 
+export const DEFAULT_POLL_INTERVAL = "1m";
+export const MIN_POLL_INTERVAL_MS = 30_000;
+const INTERVAL_UNITS: Record<string, number> = { s: 1_000, m: 60_000, h: 3_600_000 };
+
+/** "30s" / "5m" / "2h" をミリ秒にする。書式が違うか下限を割れば投げる。 */
+export function intervalMs(interval: string): number {
+  const m = /^(\d+)([smh])$/.exec(interval);
+  if (!m) throw new Error(`interval は 30s / 5m / 2h のように書いてください: ${interval}`);
+  const ms = Number(m[1]) * INTERVAL_UNITS[m[2]];
+  if (ms < MIN_POLL_INTERVAL_MS) throw new Error(`interval は 30s 以上にしてください: ${interval}`);
+  return ms;
+}
+
 /** 再実行で二重に効く代表的なコマンド。完全には防げないが、黙って壊れるよりよい。 */
 const NON_IDEMPOTENT = [
   /\bgh\s+pr\s+create\b/,
+  /\bgh\s+pr\s+comment\b/,
   /\bgh\s+release\s+create\b/,
   /\bgit\s+push\b/,
   /\bnpm\s+publish\b/,
@@ -66,6 +97,7 @@ const branch = z.object({
   goto: z.string().min(1),
   maxAttempts: z.number().int().min(1),
   feed: z.string().optional(),
+  onExhausted: z.enum(["fail", "suspend"]).optional(),
 }).strict();
 
 /**
@@ -130,6 +162,20 @@ const stepSchema = z.discriminatedUnion("type", [
     allowedTools: z.array(z.string().min(1)).optional(),
     onFailure: branch.optional(),
   }).strict(),
+  z.object({
+    id: stepId,
+    type: z.literal("poll"),
+    run: z.string().min(1),
+    interval: z.string().default(DEFAULT_POLL_INTERVAL).refine((v) => {
+      try {
+        intervalMs(v);
+        return true;
+      } catch {
+        return false;
+      }
+    }, "interval は 30s 以上で、30s / 5m / 2h のように書いてください"),
+    onFailure: branch.optional(),
+  }).strict(),
 ]);
 
 const workflowSchema = z.object({
@@ -139,7 +185,7 @@ const workflowSchema = z.object({
 
 /**
  * ステップの「失敗時の分岐」を型を問わず取り出す。
- * approval は onReject、それ以外（command / agent / guide）は onFailure。
+ * approval は onReject、それ以外（command / agent / guide / poll）は onFailure。
  * guide は onFailure を書かなければ、自分に戻って理由を feed する既定の分岐を持つ。
  * ワークフローエンジン（後続タスク）も同じアクセサを使う。
  */
@@ -266,11 +312,11 @@ export function parseWorkflow(yamlText: string): { workflow: Workflow; warnings:
 
   const warnings: string[] = [];
   for (const step of workflow.steps) {
-    if (step.type !== "command") continue;
+    if (step.type !== "command" && step.type !== "poll") continue;
     if (NON_IDEMPOTENT.some((re) => re.test(step.run))) {
       warnings.push(
         `ステップ "${step.id}" のコマンドは再実行で二重に効く可能性があります: ${step.run}\n` +
-          `  クラッシュ復帰時、command ステップは頭から再実行されます。`,
+          `  クラッシュ復帰時、command / poll ステップは頭から再実行されます。`,
       );
     }
   }

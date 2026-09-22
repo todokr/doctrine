@@ -143,7 +143,7 @@ export type StepRun = {
  */
 export type StepView = {
   id: string;
-  type: "command" | "agent" | "approval" | "guide";
+  type: "command" | "agent" | "approval" | "guide" | "poll";
   title?: string;
   branch?: { goto: string; maxAttempts: number };
 };

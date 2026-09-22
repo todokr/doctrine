@@ -421,6 +421,9 @@ export async function runTask(
     // プロンプト文字列ではなく、goto の時点で expand 済みのこのローカル変数が正。
     const feedForThisStep = pendingFeed;
     let outcome: StepOutcome;
+    // Task 4 で poll ステップの実行を実装するまでの暫定。ここが無いと else 節が
+    // AgentStep を期待する runAgentStep に PollStep を渡すことになり型が壊れる。
+    if (step.type === "poll") throw new Error("poll ステップはまだ実行できません");
     if (step.type === "command") {
       outcome = await runCommandStep(step, ctx, {
         cwd: task.worktree_path!,
