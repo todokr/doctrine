@@ -1951,7 +1951,9 @@ test("上限到達の承認は回数を戻して goto 先から続け、feed を
   assert.equal(t.state, "queued");
   assert.equal(t.current_step_id, "fix");
   assert.equal(JSON.parse(t.attempt_counts).check, undefined, "check の回数を戻す");
-  assert.match(t.pending_feed ?? "", /^直して: /);
+  // last_stdout は失敗した check の実行の出力のまま（承認が outputs を上書きしていない証拠）。
+  // "exit $(cat verdict)" は標準出力に何も書かないので、展開後は空文字が続く。
+  assert.equal(t.pending_feed, "直して: ");
   const last = (await listStepRuns(db, "t1")).at(-1)!;
   assert.deepEqual([last.step_id, last.status, last.goto_step_id], ["check", "bounced", "fix"]);
 

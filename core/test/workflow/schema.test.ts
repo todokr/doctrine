@@ -484,6 +484,28 @@ steps:
   assert.throws(() => parseWorkflow(yaml("retry")), WorkflowValidationError);
 });
 
+test("approval の onReject に onExhausted: suspend は書けない", () => {
+  const yaml = `
+name: f
+steps:
+  - id: implement
+    type: agent
+    prompt: "p"
+  - id: review
+    type: approval
+    title: "見て"
+    onReject: { goto: implement, maxAttempts: 2, onExhausted: suspend }
+`;
+  assert.throws(
+    () => parseWorkflow(yaml),
+    (e: unknown) => {
+      assert.ok(e instanceof WorkflowValidationError);
+      assert.match(e.message, /review.+onReject.+onExhausted: suspend/s);
+      return true;
+    },
+  );
+});
+
 test("poll ステップの二重に効くコマンドにも警告を出し、gh pr comment も対象にする", () => {
   const { warnings } = parseWorkflow(`
 name: f

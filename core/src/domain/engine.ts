@@ -834,7 +834,9 @@ export async function applyApproval(
     return;
   }
 
-  // decision.kind === "fail"（onReject が無い、または maxAttempts を使い切った）
+  // decision.kind === "fail"（onReject が無い、または maxAttempts を使い切った）。
+  // approval の onReject に onExhausted: suspend は書けない（schema.ts の検証）ので、
+  // ここで decision.kind === "escalate" になることは無い。
   const to: TaskState = "failed";
   assertTransition(task.state, to);
   await commitStepBoundary(db, {

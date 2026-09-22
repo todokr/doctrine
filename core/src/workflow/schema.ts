@@ -301,6 +301,13 @@ export function parseWorkflow(yamlText: string): { workflow: Workflow; warnings:
         `ステップid "${step.id}" は予約語です（project.yaml の setup が自動挿入されます）`,
       );
     }
+    // approval の却下は既に人が下した判断なので、上限に達したところでもう一度人を待たせる
+    // 意味が無い（applyApproval は escalate を approval 側に実装していない）。
+    if (step.type === "approval" && step.onReject?.onExhausted === "suspend") {
+      issues.push(
+        `ステップ "${step.id}" の onReject に onExhausted: suspend は書けません（approval の却下は既に人の判断なので、上限到達で再び人を待つ意味がありません）`,
+      );
+    }
   }
   for (const step of workflow.steps) {
     const b = branchOf(step);
