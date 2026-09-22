@@ -77,6 +77,8 @@ worktree
 
 その他
   ratelimit [--limit <n>]
+  slots                           全体の実行枠・使っている数・枠待ちを見る
+  slots set --limit <n>           全体の実行枠を変える（1 以上の整数。すぐ効き、再起動しても残る）
 
 環境変数 DOCTRINE_SOCKET でデーモンのソケットの場所を上書きできる。`;
 
@@ -132,6 +134,22 @@ export function parseArgv(argv: string[]): { method: string; params: Record<stri
       };
     case "ratelimit":
       return { method: "ratelimit.recent", params: flags };
+    case "slots": {
+      const [sub] = positional;
+      if (sub === undefined) {
+        if (flags.limit !== undefined) {
+          throw new Error(`値を変えるときは slots set --limit <n> です\n\n${USAGE}`);
+        }
+        return { method: "daemon.slots", params: {} };
+      }
+      if (sub === "set") {
+        if (flags.limit === undefined) {
+          throw new Error(`slots set には --limit <n> を指定してください\n\n${USAGE}`);
+        }
+        return { method: "daemon.setGlobalLimit", params: { global_limit: flags.limit } };
+      }
+      throw new Error(`未知のコマンドです: slots ${sub}\n\n${USAGE}`);
+    }
     case undefined:
     case "help":
     case "--help":

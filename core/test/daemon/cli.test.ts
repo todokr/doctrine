@@ -85,6 +85,36 @@ test("dctl approve / reject", () => {
   );
 });
 
+test("dctl slots", () => {
+  assert.deepEqual(parseArgv(["slots"]), { method: "daemon.slots", params: {} });
+});
+
+test("dctl slots set", () => {
+  assert.deepEqual(
+    parseArgv(["slots", "set", "--limit", "3"]),
+    { method: "daemon.setGlobalLimit", params: { global_limit: 3 } },
+  );
+});
+
+test("dctl slots set は --limit が無いと落ちる", () => {
+  assert.throws(() => parseArgv(["slots", "set"]), /--limit/);
+});
+
+test("dctl slots に set なしで --limit を付けると落ちる", () => {
+  assert.throws(() => parseArgv(["slots", "--limit", "3"]), /slots set --limit/);
+});
+
+test("dctl slots set --limit に数値でない値を渡すと落ちる", () => {
+  assert.throws(() => parseArgv(["slots", "set", "--limit", "abc"]), /--limit.*数値/);
+});
+
+test("dctl slots の未知のサブコマンドは使い方を添えて落ちる", () => {
+  assert.throws(
+    () => parseArgv(["slots", "foo"]),
+    /未知のコマンドです: slots foo[\s\S]*使い方/,
+  );
+});
+
 test("dctl gc は worktree.remove", () => {
   assert.deepEqual(
     parseArgv(["gc", "t1", "--force"]),
