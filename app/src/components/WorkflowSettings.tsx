@@ -307,6 +307,7 @@ function StepEditor(
     setForm(next);
     setSaveErrors(NO_STEP_ERRORS);
     setSaved(false);
+    setWarnings([]);
   }
 
   async function onSave() {
