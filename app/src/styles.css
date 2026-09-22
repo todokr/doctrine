@@ -471,6 +471,11 @@ details.history[open]>summary{margin-bottom:8px}
 .hist-head{display:flex;gap:10px;align-items:baseline}
 .hist-comments{display:grid;gap:6px}
 
+/* worktree と警告 */
+tr.wt-stale{background:var(--accent-soft)}
+.warnings{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.warnings li{display:flex;gap:10px;align-items:baseline}
+
 /* 設定の画面 */
 .settings-field{display:grid;gap:4px}
 .hint.error{color:var(--danger)}

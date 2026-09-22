@@ -9,9 +9,10 @@ import {
   issueNumber,
   taskIntakeMark,
 } from "../intake";
-import { GROUPS, ago, countReview, groupOf, hm, sidebarOrder, timeLabel, visibleTasks } from "../model";
+import { GROUPS, ago, countReview, groupOf, hm, sidebarOrder, staleDaysOf, timeLabel, visibleTasks } from "../model";
 import { useNotYet, useStore } from "../store";
 import type { Task } from "../types";
+import { isStaleWorktree, worktreesNeedAttention } from "../worktrees";
 import { RateLimit } from "./RateLimit";
 
 const icons = {
@@ -23,6 +24,9 @@ const icons = {
   ),
   done: (
     <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><path d="m8 12 3 3 5-6" /></svg>
+  ),
+  worktree: (
+    <svg viewBox="0 0 24 24"><path d="M7 3v12" /><circle cx="7" cy="18" r="3" /><circle cx="7" cy="6" r="3" /><circle cx="17" cy="18" r="3" /><path d="M7 9c0 6 4 6 8 8" /></svg>
   ),
   gear: (
     <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" /></svg>
@@ -44,6 +48,15 @@ export function Rail() {
       </button>
       <button className="ib" title="終了したタスク" aria-pressed={s.view === "done"} onClick={() => dispatch({ type: "view", view: "done" })}>
         {icons.done}
+      </button>
+      <button
+        className="ib"
+        title="worktree と警告"
+        aria-pressed={s.view === "worktrees"}
+        onClick={() => dispatch({ type: "view", view: "worktrees" })}
+      >
+        {icons.worktree}
+        {worktreesNeedAttention(s.worktrees, s.warnings, s.intakes, staleDaysOf(s), s.now) && <span className="pip" />}
       </button>
       <span className="grow" />
       <button className="ib" title="設定" aria-pressed={s.view === "settings"} onClick={() => dispatch({ type: "view", view: "settings" })}>
@@ -156,6 +169,25 @@ function IntakeSidebar() {
   );
 }
 
+function WorktreeSidebar() {
+  const { s, dispatch } = useStore();
+  const staleCount = s.worktrees.filter((e) => isStaleWorktree(e, s.intakes, staleDaysOf(s), s.now)).length;
+  return (
+    <aside className="side">
+      <div className="side-head">
+        <select aria-label="プロジェクトで絞り込む" value={s.project} onChange={(e) => dispatch({ type: "project", project: e.target.value })}>
+          <option value="all">すべてのプロジェクト</option>
+          {s.projects.map((p) => <option key={p.id} value={p.id}>{p.id}</option>)}
+        </select>
+      </div>
+      <div className="side-scroll">
+        <p className="hint" style={{ padding: 8 }}>古い worktree {staleCount} 件・警告 {s.warnings.length} 件</p>
+      </div>
+      <RateLimit />
+    </aside>
+  );
+}
+
 function SettingsSidebar() {
   return (
     <aside className="side">
@@ -168,6 +200,7 @@ function SettingsSidebar() {
 export function Sidebar() {
   const { s, dispatch } = useStore();
   const notYet = useNotYet();
+  if (s.view === "worktrees") return <WorktreeSidebar />;
   if (s.view === "intake") return <IntakeSidebar />;
   if (s.view === "settings") return <SettingsSidebar />;
   const ts = visibleTasks(s.tasks, s.project);

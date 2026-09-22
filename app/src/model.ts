@@ -21,6 +21,8 @@ import type {
   StepRunDenials,
   TaskDetail,
   TaskSummary,
+  Warning,
+  WorktreeEntry,
 } from "../../shared/protocol.ts";
 import { toolInputParts } from "../../shared/toolInput.ts";
 import type { GuideView } from "./guide";
@@ -35,6 +37,7 @@ import {
   setWholeComment,
   summaryOf,
 } from "./intake";
+import { addWarning, sortWarnings } from "./worktrees";
 
 export const MIN = 60000;
 
@@ -105,10 +108,10 @@ export const GROUPS: { key: Exclude<Group, "done">; name: string; sort: (a: Task
   { key: "paused", name: "一時停止", sort: (a, b) => b.since - a.since },
 ];
 
-export type View = "tasks" | "done" | "intake" | "settings";
+export type View = "tasks" | "done" | "intake" | "worktrees" | "settings";
 
 /** そのタスクが並ぶビュー。終了したタスクは「終了したタスク」にしか並ばない */
-export function taskViewFor(t: Task): Exclude<View, "intake" | "settings"> {
+export function taskViewFor(t: Task): "tasks" | "done" {
   return groupOf(t) === "done" ? "done" : "tasks";
 }
 
@@ -539,9 +542,19 @@ export type State = {
   modal: "reject-preview" | "intake-answer" | "intake-reject" | "intake-cancel" | null;
   toast: string | null;
   conn: ConnectionStatus;
+  /** worktree.list の結果。取り直しで置き換える。取れなかった回は前の値を残す */
+  worktrees: WorktreeEntry[];
+  /** 警告。新しい順。取り直しで置き換え、daemon.warning で先頭に足す */
+  warnings: Warning[];
+  /** 削除の確認ダイアログで確かめている worktree。dirty は分からなければ null */
+  removing: { path: string; dirty: boolean | null } | null;
   /** 起動時に load_settings で読んだ設定。保存に成功したら置き換える */
   settings: Loaded<AppSettings>;
 };
+
+/** 古い worktree のしきい値（日）。設定が読めていなければ null（強調も点も出さない） */
+export const staleDaysOf = (s: Pick<State, "settings">): number | null =>
+  s.settings.kind === "ok" ? s.settings.value.staleDays : null;
 
 export const EMPTY_DRAFT: Draft = { comments: [], overall: "" };
 export const draftOf = (s: State, id: string): Draft => s.drafts[id] ?? EMPTY_DRAFT;
@@ -649,6 +662,10 @@ export type Action =
   | { type: "limits.recent"; samples: RateLimitWindow[] }
   | { type: "daemon"; ev: ServerEvent; now: number }
   | { type: "connection"; conn: ConnectionStatus }
+  /** worktree.list / daemon.warnings の取り直し。warnings が null のときは警告を置き換えない（daemon.warnings だけ落ちた回） */
+  | { type: "worktrees.sync"; worktrees: WorktreeEntry[]; warnings: Warning[] | null }
+  | { type: "remove.ask"; path: string; dirty: boolean | null }
+  | { type: "remove.close" }
   | { type: "settings"; loaded: Loaded<AppSettings> };
 
 /**
@@ -717,7 +734,7 @@ export function reduce(s: State, a: Action): State {
   const t = selectedTask(s);
   switch (a.type) {
     case "view": {
-      if (a.view === "intake") return { ...s, view: "intake", editing: null };
+      if (a.view === "intake" || a.view === "worktrees") return { ...s, view: a.view, editing: null };
       if (a.view === "settings") return { ...s, view: "settings", editing: null };
       const next = { ...s, view: a.view };
       const leaving = a.view === "done" || (t !== null && groupOf(t) === "done");
@@ -734,7 +751,7 @@ export function reduce(s: State, a: Action): State {
       return { ...s, sel: a.id, editing: null };
     }
     case "move": {
-      if (s.view === "settings") return s;
+      if (s.view === "worktrees" || s.view === "settings") return s;
       if (s.view === "intake") {
         const rows = intakeOrder(s.intakes, s.projects, s.project, s.showClosedIntakes);
         if (!rows.length) return s;
@@ -1042,7 +1059,10 @@ export function reduce(s: State, a: Action): State {
         };
       }
       if (ev.event === "daemon.warning") {
-        return { ...s, toast: ev.message };
+        const warning: Warning = ev.task_id === undefined
+          ? { at: ev.at, message: ev.message }
+          : { at: ev.at, message: ev.message, task_id: ev.task_id };
+        return { ...s, toast: ev.message, warnings: addWarning(s.warnings, warning) };
       }
       if (ev.event === "ratelimit.sample") {
         const w: RateLimitWindow = {
@@ -1070,6 +1090,16 @@ export function reduce(s: State, a: Action): State {
         intakeDetails: drop(s.intakeDetails, (v) => v.kind === "error"),
       };
     }
+    case "worktrees.sync":
+      return {
+        ...s,
+        worktrees: a.worktrees,
+        warnings: a.warnings === null ? s.warnings : sortWarnings(a.warnings),
+      };
+    case "remove.ask":
+      return { ...s, removing: { path: a.path, dirty: a.dirty } };
+    case "remove.close":
+      return { ...s, removing: null };
     case "settings":
       return { ...s, settings: a.loaded };
   }

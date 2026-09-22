@@ -63,6 +63,7 @@ import type {
   StepRun,
   TaskDetail,
   TaskSummary,
+  WorktreeEntry,
 } from "../../shared/protocol.ts";
 
 const base = (overrides: Partial<State> = {}): State => ({
@@ -94,6 +95,9 @@ const base = (overrides: Partial<State> = {}): State => ({
   modal: null,
   conn: { status: "connected" },
   toast: null,
+  worktrees: [],
+  warnings: [],
+  removing: null,
   settings: { kind: "loading" },
   ...overrides,
 });
@@ -751,6 +755,64 @@ describe("daemon イベント", () => {
       now: 999,
     });
     expect(after.toast).toBe("消せませんでした");
+  });
+
+  test("daemon.warning はトーストで知らせ、警告の一覧の先頭に足す", () => {
+    const s = base({ warnings: [{ at: "2026-09-19T10:00:00.000Z", message: "前の警告" }] });
+    const after = reduce(s, {
+      type: "daemon",
+      ev: {
+        event: "daemon.warning",
+        at: "2026-09-19T12:00:00.000Z",
+        message: "消せませんでした",
+        task_id: "t-e812",
+      },
+      now: 999,
+    });
+    expect(after.toast).toBe("消せませんでした");
+    expect(after.warnings).toEqual([
+      { at: "2026-09-19T12:00:00.000Z", message: "消せませんでした", task_id: "t-e812" },
+      { at: "2026-09-19T10:00:00.000Z", message: "前の警告" },
+    ]);
+    expect(after.warnings.length).toBe(2);
+  });
+});
+
+describe("worktree と警告", () => {
+  test("worktrees.sync は一覧を置き換え、warnings が null なら警告を残す", () => {
+    const s = base({ warnings: [{ at: "2026-09-19T10:00:00.000Z", message: "前の警告" }], worktrees: [] });
+    const entry: WorktreeEntry = {
+      project: "~/git/doctrine",
+      path: "/w/x",
+      branch: "doctrine/x",
+      task_id: null,
+      task_state: null,
+      intake_id: null,
+      dirty: false,
+      age_basis: "2026-09-19T00:00:00.000Z",
+    };
+    const after = reduce(s, { type: "worktrees.sync", worktrees: [entry], warnings: null });
+    expect(after.warnings).toEqual(s.warnings);
+    expect(after.worktrees).toEqual([entry]);
+  });
+
+  test("worktree と警告のビューに切り替えても選んでいるタスクは変えない", () => {
+    const after = reduce(base(), { type: "view", view: "worktrees" });
+    expect(after.view).toBe("worktrees");
+    expect(after.sel).toBe("t-2b91");
+  });
+
+  test("worktree と警告のビューでは j / k で何も動かない", () => {
+    const s = base({ view: "worktrees" });
+    const after = reduce(s, { type: "move", delta: 1 });
+    expect(after).toBe(s);
+  });
+
+  test("remove.ask と remove.close で確認の対象を出し入れする", () => {
+    const asked = reduce(base(), { type: "remove.ask", path: "/w/x", dirty: true });
+    expect(asked.removing).toEqual({ path: "/w/x", dirty: true });
+    const closed = reduce(asked, { type: "remove.close" });
+    expect(closed.removing).toBeNull();
   });
 });
 

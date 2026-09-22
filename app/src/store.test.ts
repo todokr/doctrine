@@ -29,3 +29,26 @@ describe("useDecide の一時停止・再開", () => {
     expect(r).toEqual({ ok: false, message: "再開を送れませんでした: 再開できる状態ではありません: running" });
   });
 });
+
+describe("useDecide の worktree の削除", () => {
+  test("確定すると force 付きの worktree.remove をパスで送る", async () => {
+    await useDecide().removeWorktree("/s/worktrees/doctrine/x");
+    expect(invoke).toHaveBeenCalledTimes(1);
+    expect(invoke).toHaveBeenCalledWith("rpc", {
+      method: "worktree.remove",
+      params: { path: "/s/worktrees/doctrine/x", force: true },
+    });
+  });
+
+  test("拒否されたら理由付きの失敗になる", async () => {
+    invoke.mockRejectedValueOnce("終わっていないタスク（running）の worktree は消せません");
+    const r = await sendDecision(
+      useDecide().removeWorktree("/s/worktrees/doctrine/x"),
+      "worktree を削除できませんでした",
+    );
+    expect(r).toEqual({
+      ok: false,
+      message: "worktree を削除できませんでした: 終わっていないタスク（running）の worktree は消せません",
+    });
+  });
+});

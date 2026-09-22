@@ -23,7 +23,15 @@ import { receiveGuide } from "./guide";
 import { buildDiff } from "./patch";
 import type { GhStatus, IssueDetail } from "../../shared/intake/github.ts";
 import type { Answer } from "../../shared/intake/question.ts";
-import type { GithubIssue, IntakeDetail, IntakeSummary, NewComment, PfdDraft } from "../../shared/protocol.ts";
+import type {
+  GithubIssue,
+  IntakeDetail,
+  IntakeSummary,
+  NewComment,
+  PfdDraft,
+  Warning,
+  WorktreeEntry,
+} from "../../shared/protocol.ts";
 import {
   contextOf,
   diffOf,
@@ -78,11 +86,14 @@ function initialState(): State {
     modal: null,
     toast: null,
     conn: { status: "connecting" },
+    worktrees: [],
+    warnings: [],
+    removing: null,
     settings: { kind: "loading" },
   };
 }
 
-const Ctx = createContext<{ s: State; dispatch: Dispatch<Action> } | null>(null);
+const Ctx = createContext<{ s: State; dispatch: Dispatch<Action>; refresh: () => Promise<void> } | null>(null);
 
 export function StoreProvider({ children }: { children: ReactNode }) {
   const [s, dispatch] = useReducer(reduce, undefined, initialState);
@@ -135,6 +146,22 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           now: Date.now(),
         });
         if (intakes) dispatch({ type: "intakes.sync", intakes });
+
+        // worktree.list は worktree ごとに git status を回す（重い）ので、タスク一覧の
+        // 反映をそれに待たせないよう別の Promise.all で取る。
+        // アイコンの点はビューを開いていなくても要るので取り直しに乗せる
+        const [worktreeList, warningList] = await Promise.all([
+          rpc("worktree.list", {}).catch((): WorktreeEntry[] | null => null),
+          rpc("daemon.warnings", {}).catch((): Warning[] | null => null),
+        ]);
+        if (!alive || !refreshGate.isLatest(token)) return;
+        if (worktreeList || warningList) {
+          dispatch({
+            type: "worktrees.sync",
+            worktrees: worktreeList ?? latest.current.worktrees,
+            warnings: warningList,
+          });
+        }
       } catch (e) {
         // 切断中は失敗して当然。理由はバナーが出している。
         // ただし接続中に失敗するのは、ソケットは開いているが dctld が固まっている
@@ -360,13 +387,22 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     return () => clearTimeout(h);
   }, [s.toast]);
 
-  return <Ctx.Provider value={{ s, dispatch }}>{children}</Ctx.Provider>;
+  const refresh = () => refreshRef.current?.() ?? Promise.resolve();
+
+  return <Ctx.Provider value={{ s, dispatch, refresh }}>{children}</Ctx.Provider>;
 }
 
 export function useStore() {
   const v = useContext(Ctx);
   if (!v) throw new Error("StoreProvider の外で useStore を呼んでいます");
   return v;
+}
+
+/** 部品から明示的に一覧を取り直す（例: worktree の削除の後）。購読の effect の外からも呼べる */
+export function useRefresh(): () => Promise<void> {
+  const v = useContext(Ctx);
+  if (!v) throw new Error("StoreProvider の外で useRefresh を呼んでいます");
+  return v.refresh;
 }
 
 /**
@@ -386,6 +422,8 @@ export function useDecide() {
     cancel: (taskId: string) => rpc("task.cancel", { task_id: taskId }),
     pause: (taskId: string) => rpc("task.pause", { task_id: taskId }),
     resume: (taskId: string) => rpc("task.resume", { task_id: taskId }),
+    // 確認ダイアログを経た後しか呼ばないので、常に force を付ける
+    removeWorktree: (path: string) => rpc("worktree.remove", { path, force: true }),
   };
 }
 
