@@ -1,7 +1,14 @@
 import { isAbsolute, join } from "@std/path";
 import { computeDiff, mergeBase, type TaskDiff } from "../domain/diff.ts";
 import { branchOf, parseWorkflow, type Workflow } from "../workflow/schema.ts";
-import { parseProjectConfig, withSetupStep } from "../workflow/project.ts";
+import {
+  applyProjectConfig,
+  parseProjectConfig,
+  type ProjectConfig,
+  type ProjectConfigInput,
+  withSetupStep,
+  writeProjectYaml,
+} from "../workflow/project.ts";
 import { ensureProjectScaffold } from "../workflow/scaffold.ts";
 import {
   getProject,
@@ -153,6 +160,36 @@ async function reqProject(ctx: DaemonContext, params: Record<string, unknown>) {
   return project;
 }
 
+/** project.yaml から読んだ設定を projects の行へ写す。 */
+async function syncProjectRow(
+  ctx: DaemonContext,
+  projectId: number,
+  cfg: ProjectConfig,
+): Promise<void> {
+  await ctx.db.updateTable("projects")
+    .set({
+      default_workflow: cfg.defaultWorkflow,
+      max_concurrent: cfg.maxConcurrent,
+      base_branch: cfg.baseBranch,
+      setup: cfg.setup ?? null,
+    })
+    .where("id", "=", projectId)
+    .execute();
+}
+
+/** params.config を取り出す。オブジェクトでなければ投げる。値の型検証は applyProjectConfig に任せる。 */
+function readProjectConfigInput(params: Record<string, unknown>): ProjectConfigInput {
+  const config = params.config;
+  if (typeof config !== "object" || config === null) throw new Error("config は必須です");
+  const c = config as Record<string, unknown>;
+  return {
+    defaultWorkflow: c.defaultWorkflow as string,
+    maxConcurrent: c.maxConcurrent as number,
+    baseBranch: c.baseBranch as string,
+    setup: c.setup as string | null | undefined,
+  };
+}
+
 function broadcastIntakeTransition(ctx: DaemonContext, t: IntakeTransition): void {
   ctx.broadcast({
     event: "intake.stateChanged",
@@ -232,15 +269,31 @@ export function createHandler(ctx: DaemonContext): Handler {
         const cfg = parseProjectConfig(
           await Deno.readTextFile(join(path, ".doctrine", "project.yaml")),
         );
-        await ctx.db.updateTable("projects")
-          .set({
-            default_workflow: cfg.defaultWorkflow,
-            max_concurrent: cfg.maxConcurrent,
-            base_branch: cfg.baseBranch,
-            setup: cfg.setup ?? null,
-          })
-          .where("id", "=", project.id)
-          .execute();
+        await syncProjectRow(ctx, project.id, cfg);
+        return await getProject(ctx.db, project.id);
+      }
+      case "project.config.get": {
+        const project = await reqProject(ctx, params);
+        return parseProjectConfig(
+          await Deno.readTextFile(join(project.path, ".doctrine", "project.yaml")),
+        );
+      }
+      case "project.config.save": {
+        const project = await reqProject(ctx, params);
+        const input = readProjectConfigInput(params);
+        const yamlText = await Deno.readTextFile(
+          join(project.path, ".doctrine", "project.yaml"),
+        );
+        const { text, config } = applyProjectConfig(yamlText, input);
+        await ctx.loadWorkflow(project.path, config.defaultWorkflow).catch((e) => {
+          throw new Error(
+            `defaultWorkflow が指すワークフローを読めません: .doctrine/workflows/${config.defaultWorkflow}.yaml（${
+              (e as Error).message
+            }）`,
+          );
+        });
+        await writeProjectYaml(project.path, text);
+        await syncProjectRow(ctx, project.id, config);
         return await getProject(ctx.db, project.id);
       }
 

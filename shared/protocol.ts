@@ -191,6 +191,25 @@ export type ProjectSummary = {
 };
 
 /**
+ * project.yaml の設定（project.config.get が返す。core/src/workflow/project.ts の ProjectConfig と同じ形）。
+ * setup は書かれていなければ無い。
+ */
+export type ProjectConfig = {
+  defaultWorkflow: string;
+  maxConcurrent: number;
+  baseBranch: string;
+  setup?: string;
+};
+
+/** project.config.save に渡す設定。setup が null か空文字ならキーを消す。 */
+export type ProjectConfigInput = {
+  defaultWorkflow: string;
+  maxConcurrent: number;
+  baseBranch: string;
+  setup?: string | null;
+};
+
+/**
  * task.diff が返すファイル1件（core/src/domain/diff.ts の DiffFile と同じ形）。
  * リネーム（R）とコピー（C）だけが old_path を持ち、バイナリだけが行数を持たない。
  * どちらも交差型で表すので、「R / C でないのに old_path」「バイナリなのに additions」
@@ -375,6 +394,11 @@ export type GithubIssue = IssueSummary & { intake_id: string | null };
 export type Methods = {
   "task.list": { params: { project?: string; state?: TaskState }; result: TaskSummary[] };
   "project.list": { params: Record<string, never>; result: ProjectSummary[] };
+  "project.config.get": { params: { project: string }; result: ProjectConfig };
+  "project.config.save": {
+    params: { project: string; config: ProjectConfigInput };
+    result: ProjectSummary;
+  };
   "task.diff": { params: { task_id: string; since?: "last_review" }; result: TaskDiff };
   "task.context": { params: { task_id: string }; result: TaskContext };
   "task.guide": { params: { task_id: string }; result: TaskGuide };

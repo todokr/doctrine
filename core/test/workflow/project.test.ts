@@ -1,6 +1,10 @@
 import { test } from "@std/testing/bdd";
 import assert from "node:assert/strict";
-import { parseProjectConfig, withSetupStep } from "../../src/workflow/project.ts";
+import {
+  applyProjectConfig,
+  parseProjectConfig,
+  withSetupStep,
+} from "../../src/workflow/project.ts";
 import { parseWorkflow, WorkflowValidationError } from "../../src/workflow/schema.ts";
 
 test("project.yaml を既定値つきで読む", () => {
@@ -75,4 +79,81 @@ test("setup 挿入は元のワークフローを破壊しない", () => {
   );
   withSetupStep(workflow, "echo hi");
   assert.equal(workflow.steps.length, 1);
+});
+
+test("applyProjectConfig は値を当ててもコメントを残す", () => {
+  const { text, config } = applyProjectConfig(
+    "# ヘッダー\ndefaultWorkflow: feature # 既定\nmaxConcurrent: 1 # 並列数\nbaseBranch: main\n",
+    { defaultWorkflow: "feature", maxConcurrent: 3, baseBranch: "develop" },
+  );
+  assert(text.includes("# ヘッダー"));
+  assert(text.includes("# 既定"));
+  assert(text.includes("# 並列数"));
+  assert(text.includes("maxConcurrent: 3"));
+  assert(text.includes("baseBranch: develop"));
+  assert.deepEqual(config, { defaultWorkflow: "feature", maxConcurrent: 3, baseBranch: "develop" });
+});
+
+test("applyProjectConfig は setup が空ならキーを消し、あれば書く", () => {
+  const removedEmpty = applyProjectConfig("defaultWorkflow: f\nsetup: pnpm i\n", {
+    defaultWorkflow: "f",
+    maxConcurrent: 1,
+    baseBranch: "main",
+    setup: "",
+  });
+  assert(!removedEmpty.text.includes("setup"));
+  assert.equal(removedEmpty.config.setup, undefined);
+
+  const removedNull = applyProjectConfig("defaultWorkflow: f\nsetup: pnpm i\n", {
+    defaultWorkflow: "f",
+    maxConcurrent: 1,
+    baseBranch: "main",
+    setup: null,
+  });
+  assert(!removedNull.text.includes("setup"));
+  assert.equal(removedNull.config.setup, undefined);
+
+  const added = applyProjectConfig("defaultWorkflow: f\n", {
+    defaultWorkflow: "f",
+    maxConcurrent: 1,
+    baseBranch: "main",
+    setup: "pnpm i",
+  });
+  assert(added.text.includes("setup: pnpm i"));
+  assert.equal(added.config.setup, "pnpm i");
+});
+
+test("applyProjectConfig は長い setup を折り返さない", () => {
+  const setup = ("pnpm install --frozen-lockfile && " + "pnpm run build ".repeat(6)).trim();
+  const { text } = applyProjectConfig("defaultWorkflow: f\n", {
+    defaultWorkflow: "f",
+    maxConcurrent: 1,
+    baseBranch: "main",
+    setup,
+  });
+  assert(text.split("\n").some((line) => line.includes(`setup: ${setup}`)));
+});
+
+test("applyProjectConfig は maxConcurrent が0なら WorkflowValidationError を投げる", () => {
+  assert.throws(
+    () =>
+      applyProjectConfig("defaultWorkflow: f\n", {
+        defaultWorkflow: "f",
+        maxConcurrent: 0,
+        baseBranch: "main",
+      }),
+    WorkflowValidationError,
+  );
+});
+
+test("applyProjectConfig は壊れた YAML なら WorkflowValidationError を投げる", () => {
+  assert.throws(
+    () =>
+      applyProjectConfig("defaultWorkflow: [\n", {
+        defaultWorkflow: "f",
+        maxConcurrent: 1,
+        baseBranch: "main",
+      }),
+    WorkflowValidationError,
+  );
 });
