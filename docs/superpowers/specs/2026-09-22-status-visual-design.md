@@ -56,9 +56,9 @@
 | サイドバーのタスクの区分（`groupOf`） | done のうち completed | running | check | review | limited, queued, paused、done のうち completed 以外 |
 | サイドバーの Intake の区分（`intakeSection`） | closed のうち completed | working | attention のうち needs_attention | attention のうち needs_attention 以外 | active、closed のうち completed 以外 |
 
-- `STATE_PILL`（TaskView.tsx）、`RUN_PILL`（model.ts）、`INTAKE_STATE`（intake.ts）は、
-  `[文言, pillクラス]` から `[文言, Tone]` に変える。`LOOK`（pfd.ts）は `cls` を `tone` と
-  `dashed` に置き換える。
+- トーンは `tone.ts` の表にだけ持つ。`STATE_PILL`（TaskView.tsx）、`RUN_PILL`（model.ts）、
+  `INTAKE_STATE`（intake.ts）は文言だけの表 `STATE_WORD` / `RUN_WORD` / `INTAKE_WORD` に
+  改名する。`LOOK`（pfd.ts）は `mark` と `cls` を消し、`word` だけを持つ。
 - **UI 案からの変更が 1 つある。** 案の「状態の色」タブでは interrupted を danger に入れた。
   しかし `model.test.ts` は「interrupted と failed は見た目で区別できること」を確かめている。
   中断はデーモンの再起動で起きるもので、ステップの失敗ではない。この区別を残すため

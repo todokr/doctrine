@@ -6,6 +6,7 @@
   --accent:#AD7625; --accent-ink:#20140A; --accent-soft:#F1E3C9; --accent-text:#20140A;  --run:#2E6CA4; --run-bg:#DEEAF5;
   --danger:#AA3A2C; --danger-bg:#F7E2DD;
   --ok:#296B49; --ok-bg:#DEEFE4;
+  --idle:#D3D9DF; --human-text:#8A5A17;
   --add-bg:#E1F0E5; --add-gutter:#C9E3D1; --del-bg:#F7E4E0; --del-gutter:#EFC9C2;
   --kw:#7A4AA0; --str:#2B7A4B; --com:#8B93A0; --num:#A05A22; --fn:#2A5DA8; --ty:#1F6F73;
   --shadow:0 12px 32px rgba(20,26,34,.18);
@@ -20,6 +21,7 @@
     --accent:#E0A857; --accent-ink:#241804; --accent-soft:#3A2E15; --accent-text:#E0A857;    --run:#7FB2E0; --run-bg:#1D2E3E;
     --danger:#E38B7B; --danger-bg:#3B211C;
     --ok:#7FCB9E; --ok-bg:#16301F;
+    --idle:#3A414B; --human-text:#E0A857;
     --add-bg:#173322; --add-gutter:#1F452E; --del-bg:#3A2019; --del-gutter:#4A2921;
     --kw:#C79EE8; --str:#8FDBA9; --com:#707A85; --num:#E0A067; --fn:#8FBCE8; --ty:#79C9CE;
     --shadow:0 12px 32px rgba(0,0,0,.55);
@@ -32,6 +34,7 @@
   --accent:#E0A857; --accent-ink:#241804; --accent-soft:#3A2E15; --accent-text:#E0A857;  --run:#7FB2E0; --run-bg:#1D2E3E;
   --danger:#E38B7B; --danger-bg:#3B211C;
   --ok:#7FCB9E; --ok-bg:#16301F;
+  --idle:#3A414B; --human-text:#E0A857;
   --add-bg:#173322; --add-gutter:#1F452E; --del-bg:#3A2019; --del-gutter:#4A2921;
   --kw:#C79EE8; --str:#8FDBA9; --com:#707A85; --num:#E0A067; --fn:#8FBCE8; --ty:#79C9CE;
   --shadow:0 12px 32px rgba(0,0,0,.55);
@@ -479,3 +482,14 @@ tr.wt-stale{background:var(--accent-soft)}
 /* 設定の画面 */
 .settings-field{display:grid;gap:4px}
 .hint.error{color:var(--danger)}
+
+/* 状態のトーン（spec 2 章）。バー・ドット・縦線は --tone を読む */
+.tone-ok{--tone:var(--ok);--tone-soft:var(--ok-bg);--tone-text:var(--ok)}
+.tone-run{--tone:var(--run);--tone-soft:var(--run-bg);--tone-text:var(--run)}
+.tone-danger{--tone:var(--danger);--tone-soft:var(--danger-bg);--tone-text:var(--danger)}
+.tone-human{--tone:var(--accent);--tone-soft:var(--accent-soft);--tone-text:var(--human-text)}
+.tone-idle{--tone:var(--idle);--tone-soft:var(--surface-2);--tone-text:var(--ink-3)}
+.st{display:inline-flex;align-items:center;gap:7px;font-weight:500;color:var(--tone-text);white-space:nowrap}
+.st > i{width:7px;height:7px;border-radius:50%;background:var(--tone);box-shadow:0 0 0 3px var(--tone-soft);flex:none}
+.lbl{font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3);font-weight:500}
+.lbl.human{color:var(--human-text)}
