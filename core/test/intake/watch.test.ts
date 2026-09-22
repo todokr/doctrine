@@ -1,4 +1,4 @@
-import { fakeBaseSync } from "../helpers/watcher.ts";
+import { fakeBaseSync, fakeWorkflowLoader } from "../helpers/watcher.ts";
 import { test } from "@std/testing/bdd";
 import assert from "node:assert/strict";
 import type { PrFact } from "../../../shared/intake/github.ts";
@@ -58,7 +58,7 @@ test("choosePr: PR が無ければ null", () => {
 async function seedDispatched(): Promise<{ db: Db; projectId: number; branch: string }> {
   const { db, projectId } = await seedActive();
   await updateProcess(db, "i1", "1", { sub_issue_url: "https://github.com/o/r/issues/101" });
-  await dispatchIntake(db, "i1");
+  await dispatchIntake(db, "i1", { loadWorkflow: fakeWorkflowLoader() });
   return { db, projectId, branch: (await listTasks(db))[0].branch };
 }
 
@@ -116,6 +116,7 @@ async function setup(pfd: Pfd = example()) {
     tracker: ft.tracker,
     prWatcher: pw.prWatcher,
     baseSync: base.baseSync,
+    loadWorkflow: fakeWorkflowLoader(),
     onStateChanged: (t) => transitions.push(t),
     onUpdated: (id) => updated.push(id),
   });
@@ -427,6 +428,7 @@ test("偽の gh: ghTracker と ghPrWatcher を通して、承認直後の投入�
     tracker: ghTracker(gh.run),
     prWatcher: ghPrWatcher(gh.run),
     baseSync: fakeBaseSync().baseSync,
+    loadWorkflow: fakeWorkflowLoader(),
     onStateChanged: () => {},
     onUpdated: () => {},
   });

@@ -11,10 +11,9 @@ import { ghTracker } from "../github/ghTracker.ts";
 import { createIntakeWatcher, gitBaseSync, WATCH_INTERVAL_MS } from "../intake/watch.ts";
 import type { Db } from "../db/schema.ts";
 import { DEFAULT_GLOBAL_LIMIT } from "../domain/scheduler.ts";
-import { parseWorkflow } from "../workflow/schema.ts";
-import { withSetupStep } from "../workflow/project.ts";
+import { loadWorkflowFromDisk, taskWorkflow } from "../workflow/load.ts";
 import { createServer, socketPath } from "./server.ts";
-import { createHandler, type DaemonContext, loadWorkflowFromDisk, tick } from "./handlers.ts";
+import { createHandler, type DaemonContext, tick } from "./handlers.ts";
 import { createWarningLog } from "./warnings.ts";
 import { stateRoot } from "../util/home.ts";
 
@@ -26,15 +25,15 @@ export { stateRoot };
  * 安全側=rerun-command に倒す）。ここで例外を漏らすと1タスクの不備で
  * recoverOnStartup 全体が落ち、他の stale タスクが救済されずに残る。
  */
-function buildWorkflowLookup(db: Db): WorkflowLookup {
+export function buildWorkflowLookup(
+  db: Db,
+  workflowOf: DaemonContext["workflowOf"],
+): WorkflowLookup {
   return async (task: TaskRow) => {
     try {
       const project = await getProject(db, task.project_id);
       if (!project) return undefined;
-      const path = join(project.path, ".doctrine", "workflows", `${task.workflow_name}.yaml`);
-      const text = await Deno.readTextFile(path);
-      const workflow = parseWorkflow(text).workflow;
-      return withSetupStep(workflow, project.setup ?? undefined);
+      return await workflowOf(task, project);
     } catch {
       return undefined;
     }
@@ -134,6 +133,7 @@ export async function startDaemon(o: {
     globalLimit: o.globalLimit ?? DEFAULT_GLOBAL_LIMIT,
     broadcast: () => {},
     loadWorkflow: loadWorkflowFromDisk,
+    workflowOf: (task, project) => taskWorkflow(task, project, loadWorkflowFromDisk),
     running: new Set(),
     tracker,
     runningIntakeRuns: new Set(),
@@ -143,6 +143,7 @@ export async function startDaemon(o: {
       tracker,
       prWatcher: ghPrWatcher(),
       baseSync: gitBaseSync,
+      loadWorkflow: loadWorkflowFromDisk,
       onStateChanged: (t) =>
         ctx.broadcast({
           event: "intake.stateChanged",
@@ -165,7 +166,11 @@ export async function startDaemon(o: {
   // 復帰に失敗したタスクは failed になって返る — ここで漏らさず出力する。
   // 出力しなければ、そのタスクは running のまま両スロットを永久に塞いだまま、
   // 起動ログの1行以外どこにも見えなくなる。
-  const recovered = await recoverOnStartup(db, defaultProbe(), buildWorkflowLookup(db));
+  const recovered = await recoverOnStartup(
+    db,
+    defaultProbe(),
+    buildWorkflowLookup(db, ctx.workflowOf),
+  );
   for (const r of recovered) {
     if (r.outcome === "recovered") {
       console.error(`[recovery] ${r.taskId}: ${r.action}`);

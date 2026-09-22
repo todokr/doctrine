@@ -24,6 +24,7 @@ import { createHandler, type DaemonContext, tick } from "../../src/daemon/handle
 import { createMockAdapter, type MockAdapter } from "../../src/adapter/mock.ts";
 import { createWarningLog } from "../../src/daemon/warnings.ts";
 import { parseWorkflow } from "../../src/workflow/schema.ts";
+import { loadWorkflowFromDisk, taskWorkflow } from "../../src/workflow/load.ts";
 import type {
   ProjectSummary,
   ServerEvent,
@@ -87,13 +88,8 @@ async function context(events: ServerEvent[] = []): Promise<DaemonContext> {
     broadcast: (ev) => events.push(ev),
     // 警告もイベントとして流れる（daemon.warning）。stderr へは出さない。
     warnings: createWarningLog({ broadcast: (ev) => events.push(ev), write: () => {} }),
-    loadWorkflow: async (projectPath, name) => {
-      const { parseWorkflow } = await import("../../src/workflow/schema.ts");
-      const { readFile } = await import("node:fs/promises");
-      return parseWorkflow(
-        await readFile(join(projectPath, ".doctrine", "workflows", `${name}.yaml`), "utf8"),
-      );
-    },
+    loadWorkflow: loadWorkflowFromDisk,
+    workflowOf: (t, p) => taskWorkflow(t, p, loadWorkflowFromDisk),
     running: new Set(),
     tracker: fakeTracker(),
     runningIntakeRuns: new Set(),
@@ -101,6 +97,17 @@ async function context(events: ServerEvent[] = []): Promise<DaemonContext> {
   };
   contexts.push(ctx);
   return ctx;
+}
+
+/**
+ * 作成時の定義を外し、0011 より前に作られた行と同じ状態（NULL の行）に戻す。
+ * ディスクの YAML が読めない経路を試すテストが、pin 後もその経路を再現するために使う。
+ */
+async function unpin(ctx: DaemonContext, taskId: string): Promise<void> {
+  await ctx.db.updateTable("tasks")
+    .set({ workflow_yaml: null, workflow_setup: null })
+    .where("id", "=", taskId)
+    .execute();
 }
 
 test("project.add でプロジェクトを登録し、設定を読む", async () => {
@@ -250,7 +257,7 @@ test("tick は非冪等コマンドの警告を毎周期 ctx.warnings に積み�
   assert.equal(
     ctx.warnings.recent().length,
     afterCreate,
-    "tick が同じワークフローを毎回読み込んでも、作成時に一度出た警告を再び積まない",
+    "tick が作成時に固定した定義を毎回読み直しても、作成時に一度出た警告を再び積まない",
   );
 });
 
@@ -296,7 +303,7 @@ test("却下ループを何度回しても task.approve/task.reject は警告を
   assert.equal(
     ctx.warnings.recent().length,
     afterCreate,
-    "却下ループ中、task.reject も tick も同じワークフローを読み直すが ctx.warnings は増えない",
+    "却下ループ中、task.reject も tick も作成時に固定した定義を読み直すが ctx.warnings は増えない",
   );
 
   // 最後に承認して push まで進める（push 自体は失敗してよい。ここでの関心は
@@ -643,7 +650,7 @@ test("失敗したタスクの worktree は削除しない", async () => {
   assert.ok((await getTask(ctx.db, t.id))?.worktree_path);
 });
 
-test("tick 時点でワークフローが読めないタスクは failed になり、以後 tick で再試行されない", async () => {
+test("作成時の定義を持たないタスクは、tick 時点でワークフローが読めなければ failed になり、以後 tick で再試行されない", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
   await h("project.add", { path: repo }, NOOP_CONN);
@@ -656,7 +663,8 @@ test("tick 時点でワークフローが読めないタスクは failed にな�
     { project: repo, title: "T", prompt: "p", workflow: "vanishing" },
     NOOP_CONN,
   ) as { id: string };
-  // 作成時点では読めたワークフローが、tick までの間に壊れる/消える場合を再現する。
+  // 作成時の定義を持たない行（0011 より前）を再現し、tick までの間にディスクが壊れる/消える場合を試す。
+  await unpin(ctx, t.id);
   await writeFile(join(repo, ".doctrine", "workflows", "vanishing.yaml"), "not: [valid");
 
   await tick(ctx);
@@ -1070,14 +1078,14 @@ test("tick が重なって呼ばれても maxConcurrent: 1 のプロジェクト
   // 実際に admit された回数を数える。2周目が2件目を繰り上げたならここが増える。
   const admitted: string[] = [];
   const stateAtSlowWork: string[] = [];
-  const loadWorkflow = ctx.loadWorkflow;
-  ctx.loadWorkflow = async (projectPath, name) => {
-    admitted.push(name);
+  const workflowOf = ctx.workflowOf;
+  ctx.workflowOf = async (task, project) => {
+    admitted.push(task.workflow_name);
     stateAtSlowWork.push((await getTask(ctx.db, a.id))!.state);
-    return loadWorkflow(projectPath, name);
+    return workflowOf(task, project);
   };
 
-  // 1周目が飛行中（DB読み書きや loadWorkflow / createWorktree を await している最中）に2周目を始める
+  // 1周目が飛行中（DB読み書きやワークフローの解決 / createWorktree を await している最中）に2周目を始める
   const first = tick(ctx);
   const second = tick(ctx);
   await Promise.all([first, second]);
@@ -1117,7 +1125,7 @@ test("tick が重なって呼ばれても maxConcurrent: 1 のプロジェクト
 
 /**
  * 枠を奪われる窓の再現。修正前の tick は `state: "running"` を書く前に
- * loadWorkflow / createWorktree を await するので、その間に入った
+ * ワークフローの解決 / createWorktree を await するので、その間に入った
  * 優先度の高いタスクが2周目の受付順の先頭に立ち、1周目のタスクを
  * 押しのけて admit される（1周目のタスクはまだ queued なので枠は空に見え、
  * 押しのけられた側は ctx.running にも入っていないので弾かれない）。
@@ -1136,14 +1144,14 @@ test("窓の中に priority 0 のタスクが入っても maxConcurrent: 1 の�
   });
   const bId = randomUUID();
   const admitted: string[] = [];
-  const inner = ctx.loadWorkflow;
+  const inner = ctx.workflowOf;
   let first = true;
-  ctx.loadWorkflow = async (projectPath, name) => {
-    admitted.push(name);
+  ctx.workflowOf = async (task, proj) => {
+    admitted.push(task.workflow_name);
     if (first) {
       first = false;
       // 1周目が await している最中に、より優先度の高いタスクが作られる。
-      // handler 経由だと ctx.loadWorkflow に再入するので直接 insert する。
+      // handler 経由だとタスクの作成が挟まるので直接 insert する。
       await insertTask(ctx.db, {
         id: bId,
         project_id: project.id,
@@ -1155,7 +1163,7 @@ test("窓の中に priority 0 のタスクが入っても maxConcurrent: 1 の�
       });
       await released;
     }
-    return inner(projectPath, name);
+    return inner(task, proj);
   };
 
   const t1 = tick(ctx);
@@ -1209,10 +1217,10 @@ test("窓の中に別プロジェクトの priority 0 が入っても globalLimi
   });
   const bId = randomUUID();
   const admitted: string[] = [];
-  const inner = ctx.loadWorkflow;
+  const inner = ctx.workflowOf;
   let first = true;
-  ctx.loadWorkflow = async (projectPath, name) => {
-    admitted.push(projectPath);
+  ctx.workflowOf = async (task, proj) => {
+    admitted.push(proj.path);
     if (first) {
       first = false;
       await insertTask(ctx.db, {
@@ -1226,7 +1234,7 @@ test("窓の中に別プロジェクトの priority 0 が入っても globalLimi
       });
       await released;
     }
-    return inner(projectPath, name);
+    return inner(task, proj);
   };
 
   const t1 = tick(ctx);
@@ -1290,10 +1298,10 @@ test("受付候補を読んだ後に cancel が届いたタスクは、running �
   };
 
   const loaded: string[] = [];
-  const inner = ctx.loadWorkflow;
-  ctx.loadWorkflow = async (projectPath, name) => {
-    loaded.push(name);
-    return inner(projectPath, name);
+  const inner = ctx.workflowOf;
+  ctx.workflowOf = async (task, proj) => {
+    loaded.push(task.workflow_name);
+    return inner(task, proj);
   };
 
   // selectAdmissible は queued を読んだ後、プロジェクト枠の判定のためにプロジェクトを読む。
@@ -1315,7 +1323,7 @@ test("受付候補を読んだ後に cancel が届いたタスクは、running �
   const row = (await getTask(ctx.db, a.id))!;
   assert.equal(row.state, "canceled", "cancel を running で上書きしてはいけない");
   assert.equal(row.worktree_path, null, "見送ったタスクの worktree は作らない");
-  assert.deepEqual(loaded, [], "ワークフローの読み込み（実行の開始）に進まない");
+  assert.deepEqual(loaded, [], "ワークフローの解決（実行の開始）に進まない");
   assert.deepEqual(ctx.warnings.recent(), [], "見送りは失敗ではない");
 });
 
@@ -1955,7 +1963,7 @@ test("task.context は承認待ちでないタスクでも呼べる", async () =
   assert.deepEqual(got.reviewFiles, []);
 });
 
-test("task.context はワークフローが読めなくても経緯を返す", async () => {
+test("作成時の定義を持たないタスクは task.context はワークフローが読めなくても経緯を返す", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
   await h("project.add", { path: repo }, NOOP_CONN);
@@ -1967,7 +1975,8 @@ test("task.context はワークフローが読めなくても経緯を返す", a
   await tick(ctx);
   await until(async () => (await getTask(ctx.db, t.id))?.state === "suspended", 5000, "承認待ち");
 
-  // 承認待ちの間にワークフローが消える
+  // 作成時の定義を持たない行を再現し、承認待ちの間にディスクのワークフローが消える
+  await unpin(ctx, t.id);
   await rm(join(repo, ".doctrine", "workflows", "feature.yaml"));
 
   const got = await h("task.context", { task_id: t.id }, NOOP_CONN) as {
@@ -2003,7 +2012,7 @@ test("task.get は setup を先頭に含む steps を返す", async () => {
   assert.equal(got.steps[1].title, "見て");
 });
 
-test("task.get はワークフロー YAML が読めないとき steps を null にし、task と stepRuns は従来どおり返す", async () => {
+test("作成時の定義を持たないタスクは task.get はワークフロー YAML が読めないとき steps を null にし、task と stepRuns は従来どおり返す", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
   await h("project.add", { path: repo }, NOOP_CONN);
@@ -2013,7 +2022,8 @@ test("task.get はワークフロー YAML が読めないとき steps を null �
   await tick(ctx);
   await until(async () => (await getTask(ctx.db, t.id))?.state === "suspended", 5000, "承認待ち");
 
-  // 承認待ちの間にワークフローが消える
+  // 作成時の定義を持たない行を再現し、承認待ちの間にディスクのワークフローが消える
+  await unpin(ctx, t.id);
   await rm(join(repo, ".doctrine", "workflows", "feature.yaml"));
 
   const got = await h("task.get", { task_id: t.id }, NOOP_CONN) as {
@@ -2575,14 +2585,16 @@ test("task.guide はガイドステップがあるのにファイルが無けれ
   const ctx = await context();
   const h = createHandler(ctx);
   const { id } = await guidableTask(ctx, h);
-  await writeFile(join(repo, ".doctrine", "workflows", "feature.yaml"), GUIDE_WORKFLOW);
+  await ctx.db.updateTable("tasks").set({ workflow_yaml: GUIDE_WORKFLOW }).where("id", "=", id)
+    .execute();
   assert.deepEqual(await h("task.guide", { task_id: id }, NOOP_CONN), { status: "missing" });
 });
 
-test("task.guide はワークフローが読めなくても、ファイルが無ければ none とは言わず missing を返す", async () => {
+test("作成時の定義を持たないタスクは task.guide はワークフローが読めなくても、ファイルが無ければ none とは言わず missing を返す", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
   const { id } = await guidableTask(ctx, h);
+  await unpin(ctx, id);
   await writeFile(join(repo, ".doctrine", "workflows", "feature.yaml"), "steps: [");
   assert.deepEqual(await h("task.guide", { task_id: id }, NOOP_CONN), { status: "missing" });
 });

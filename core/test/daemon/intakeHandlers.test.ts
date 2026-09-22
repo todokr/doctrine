@@ -19,6 +19,7 @@ import type { PrFact } from "../../../shared/intake/github.ts";
 import type { IntakeState } from "../../../shared/intake/state.ts";
 import type { PrWatcher, Tracker } from "../../src/github/tracker.ts";
 import { createIntakeWatcher } from "../../src/intake/watch.ts";
+import { loadWorkflowFromDisk, taskWorkflow } from "../../src/workflow/load.ts";
 import { fakeTracker as statefulTracker } from "../helpers/fakeTracker.ts";
 import { fakePrWatcher } from "../helpers/prWatcher.ts";
 import { makeRepo, until } from "../helpers/repo.ts";
@@ -77,7 +78,8 @@ async function context(events: ServerEvent[] = [], o: Options = {}): Promise<Dae
     globalLimit: 4,
     broadcast: (ev) => events.push(ev),
     warnings: createWarningLog({ broadcast: (ev) => events.push(ev), write: () => {} }),
-    loadWorkflow: () => Promise.reject(new Error("この試験では使わない")),
+    loadWorkflow: loadWorkflowFromDisk,
+    workflowOf: (t, p) => taskWorkflow(t, p, loadWorkflowFromDisk),
     running: new Set(),
     tracker,
     runningIntakeRuns: new Set(),
@@ -86,6 +88,7 @@ async function context(events: ServerEvent[] = [], o: Options = {}): Promise<Dae
       tracker,
       prWatcher: o.prWatcher ?? fakePrWatcher().prWatcher,
       baseSync: fakeBaseSync().baseSync,
+      loadWorkflow: loadWorkflowFromDisk,
       onStateChanged: (t) =>
         events.push({
           event: "intake.stateChanged",

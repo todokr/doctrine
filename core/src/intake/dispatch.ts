@@ -12,10 +12,13 @@ import {
 import type { Db, IntakeProcessRow, IntakeRow, ProjectRow } from "../db/schema.ts";
 import { getProject, insertTask, type NewTask } from "../db/tasks.ts";
 import { branchNameFor } from "../domain/worktree.ts";
+import { pinOf, type WorkflowLoader, type WorkflowPin } from "../workflow/load.ts";
 import { sha256Hex } from "./pfd/hash.ts";
 import { buildTaskPrompt } from "./pfd/prompt.ts";
 import { computeProcessStatuses, type ProcessProgress } from "./pfd/status.ts";
 import { intakeDraft, processProgressOf } from "./view.ts";
+
+export type DispatchDeps = { loadWorkflow: WorkflowLoader };
 
 export type ApprovedPlan = { pfd: Pfd; draftId: number };
 
@@ -137,6 +140,7 @@ async function dispatchProcess(
   db: Db,
   src: DispatchSource,
   row: IntakeProcessRow,
+  pin: WorkflowPin,
 ): Promise<string | null> {
   const { intake, project, pfd } = src;
   const process = pfd.processes.find((p) => p.id === row.process_id)!;
@@ -165,6 +169,7 @@ async function dispatchProcess(
       intake_process_id: process.id,
       issue_url: row.sub_issue_url,
       parent_issue_url: intake.issue_url,
+      ...pin,
     },
   });
   return committed ? taskId : null;
@@ -172,9 +177,13 @@ async function dispatchProcess(
 
 /**
  * active・revising 0・dispatch_paused 0 の Intake について、ready で blockedBy が null の
- * エージェントのプロセスをタスクにする。DB だけを読み書きし、gh は呼ばない。
+ * エージェントのプロセスをタスクにする。ワークフローは deps から読み、gh は呼ばない。
  */
-export async function dispatchIntake(db: Db, intakeId: string): Promise<DispatchReport> {
+export async function dispatchIntake(
+  db: Db,
+  intakeId: string,
+  deps: DispatchDeps,
+): Promise<DispatchReport> {
   const report: DispatchReport = { created: [], errors: [] };
   const intake = await getIntake(db, intakeId);
   if (
@@ -185,12 +194,20 @@ export async function dispatchIntake(db: Db, intakeId: string): Promise<Dispatch
   const src = await loadDispatchSource(db, intake, plan.pfd);
   const statuses = statusesOf(src, await processProgressOf(db, intakeId));
 
-  for (const status of statuses) {
-    if (status.state !== "ready" || status.blockedBy !== null) continue;
-    const process = plan.pfd.processes.find((p) => p.id === status.id)!;
-    if (process.actor !== "agent") continue;
+  const ready = statuses.filter((s) => s.state === "ready" && s.blockedBy === null)
+    .map((s) => plan.pfd.processes.find((p) => p.id === s.id)!)
+    .filter((p) => p.actor === "agent");
+  if (ready.length === 0) return report;
+
+  // どのプロセスも同じ default_workflow なので、1回の呼び出しでは1度だけ読む。
+  const pin = pinOf(
+    await deps.loadWorkflow(src.project.path, src.project.default_workflow),
+    src.project,
+  );
+
+  for (const process of ready) {
     try {
-      const taskId = await dispatchProcess(db, src, src.rows.get(process.id)!);
+      const taskId = await dispatchProcess(db, src, src.rows.get(process.id)!, pin);
       if (taskId !== null) report.created.push({ processId: process.id, taskId });
     } catch (e) {
       report.errors.push({
@@ -209,6 +226,7 @@ export async function dispatchIntake(db: Db, intakeId: string): Promise<Dispatch
 export async function redispatchProcess(
   db: Db,
   o: { intakeId: string; processId: string },
+  deps: DispatchDeps,
 ): Promise<{ taskId: string; replacedTaskId: string | null }> {
   const intake = await getIntake(db, o.intakeId);
   if (!intake) throw new Error("Intake がありません");
@@ -226,7 +244,11 @@ export async function redispatchProcess(
       `要確認のプロセスだけを再投入できます: ${o.processId}（${status?.state ?? "案に無い"}）`,
     );
   }
-  const taskId = await dispatchProcess(db, src, row);
+  const pin = pinOf(
+    await deps.loadWorkflow(src.project.path, src.project.default_workflow),
+    src.project,
+  );
+  const taskId = await dispatchProcess(db, src, row, pin);
   if (taskId === null) throw new Error("ほかの操作が先にタスクを置き換えました");
   return { taskId, replacedTaskId: row.current_task_id };
 }

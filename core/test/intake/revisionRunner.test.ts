@@ -41,6 +41,7 @@ import {
   questionsOut,
 } from "./runnerHelper.ts";
 import { example, revised } from "./pfd/fixture.ts";
+import { fakeWorkflowLoader } from "../helpers/watcher.ts";
 
 const run = promisify(execFile);
 
@@ -89,7 +90,7 @@ async function seedApproved(): Promise<string> {
     worktree_path: worktree,
     claude_session_id: "old",
   });
-  const report = await dispatchIntake(f.db, "i1");
+  const report = await dispatchIntake(f.db, "i1", { loadWorkflow: fakeWorkflowLoader() });
   assert.deepEqual(report.created.map((c) => c.processId), ["1"]);
   return worktree;
 }
