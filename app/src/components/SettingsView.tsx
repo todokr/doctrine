@@ -1,4 +1,4 @@
-import { useEffect, useState, type Dispatch } from "react";
+import { useEffect, useRef, useState, type Dispatch } from "react";
 import type { AppSettings } from "../daemon/client";
 import { checkGlobalLimit, checkSettingsForm, toSettingsForm, type SettingsForm } from "../settings";
 import { sendDecision } from "../decision";
@@ -140,9 +140,10 @@ export function SlotsFields(props: {
         </div>
       )}
       {okSlots && (
-        <p className="hint">
-          いまの値: {okSlots.global_limit} / 使っている数: {okSlots.in_use} / {okSlots.global_limit}
-        </p>
+        <>
+          <p className="hint">いまの値: {okSlots.global_limit}</p>
+          <p className="hint">使っている数: {okSlots.in_use} / {okSlots.global_limit}</p>
+        </>
       )}
       <div className="settings-field">
         <label className="hint" htmlFor="settings-global-limit">全体の実行枠</label>
@@ -159,30 +160,34 @@ export function SlotsFields(props: {
       <div className="actions">
         <button className="btn primary" disabled={disabledSave} onClick={onSave}>実行枠を保存</button>
       </div>
-      <h3>枠待ちのタスク</h3>
-      <p className="hint">プロジェクトの枠や利用上限で待っているものも含みます</p>
-      {okSlots && okSlots.waiting_tasks.length === 0 && <p className="hint">ありません</p>}
-      {okSlots && okSlots.waiting_tasks.length > 0 && (
-        <ul className="warnings">
-          {okSlots.waiting_tasks.map((t) => (
-            <li key={t.id}>
-              <button className="btn sm" onClick={() => onOpenTask(t.id)}>{t.title}</button>
-              <span className="mono hint">{t.id}</span>
-            </li>
-          ))}
-        </ul>
-      )}
-      <h3>枠待ちの Intake</h3>
-      {okSlots && okSlots.waiting_intake_runs.length === 0 && <p className="hint">ありません</p>}
-      {okSlots && okSlots.waiting_intake_runs.length > 0 && (
-        <ul className="warnings">
-          {okSlots.waiting_intake_runs.map((r) => (
-            <li key={r.id}>
-              <button className="btn sm" onClick={() => onOpenIntake(r.intake_id)}>{r.issue_title}</button>
-              <span className="hint">{PURPOSE_LABEL[r.purpose]}</span>
-            </li>
-          ))}
-        </ul>
+      {okSlots && (
+        <>
+          <h3>枠待ちのタスク</h3>
+          <p className="hint">プロジェクトの枠や利用上限で待っているものも含みます</p>
+          {okSlots.waiting_tasks.length === 0 && <p className="hint">ありません</p>}
+          {okSlots.waiting_tasks.length > 0 && (
+            <ul className="warnings">
+              {okSlots.waiting_tasks.map((t) => (
+                <li key={t.id}>
+                  <button className="btn sm" onClick={() => onOpenTask(t.id)}>{t.title}</button>
+                  <span className="mono hint">{t.id}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+          <h3>枠待ちの Intake</h3>
+          {okSlots.waiting_intake_runs.length === 0 && <p className="hint">ありません</p>}
+          {okSlots.waiting_intake_runs.length > 0 && (
+            <ul className="warnings">
+              {okSlots.waiting_intake_runs.map((r) => (
+                <li key={r.id}>
+                  <button className="btn sm" onClick={() => onOpenIntake(r.intake_id)}>{r.issue_title}</button>
+                  <span className="hint">{PURPOSE_LABEL[r.purpose]}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
       )}
     </>
   );
@@ -215,7 +220,7 @@ function SlotsSection(): React.JSX.Element {
   const connected = s.conn.status === "connected";
   const [slots, setSlots] = useState<Loaded<DaemonSlots>>({ kind: "loading" });
   const [limit, setLimit] = useState("");
-  const [, setEdited] = useState(false);
+  const edited = useRef(false);
   const [pending, setPending] = useState(false);
 
   useEffect(() => {
@@ -226,10 +231,7 @@ function SlotsSection(): React.JSX.Element {
         const v = await load();
         if (!alive) return;
         setSlots({ kind: "ok", value: v });
-        setEdited((wasEdited) => {
-          if (!wasEdited) setLimit(String(v.global_limit));
-          return wasEdited;
-        });
+        if (!edited.current) setLimit(String(v.global_limit));
       } catch (e) {
         if (!alive) return;
         setSlots({ kind: "error", message: String(e) });
@@ -241,7 +243,6 @@ function SlotsSection(): React.JSX.Element {
       alive = false;
       clearInterval(id);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [connected]);
 
   async function onSave() {
@@ -251,7 +252,7 @@ function SlotsSection(): React.JSX.Element {
       if (result) {
         setSlots({ kind: "ok", value: result });
         setLimit(String(result.global_limit));
-        setEdited(false);
+        edited.current = false;
       } else {
         try {
           const v = await load();
@@ -273,7 +274,7 @@ function SlotsSection(): React.JSX.Element {
       pending={pending}
       onChange={(v) => {
         setLimit(v);
-        setEdited(true);
+        edited.current = true;
       }}
       onSave={onSave}
       onOpenTask={(id) => dispatch({ type: "task.open", id })}
