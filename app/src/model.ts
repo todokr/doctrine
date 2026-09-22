@@ -78,17 +78,20 @@ export function ago(ms: number, now: number): string {
 export const isTerminal = (s: TaskState) => s === "completed" || s === "failed" || s === "canceled";
 
 // core/src/domain/states.ts の TRANSITIONS で paused に移れる状態。app からは import できないので写している
-export const canPause = (s: TaskState) => s === "queued" || s === "running" || s === "rate_limited";
+export const canPause = (s: TaskState) =>
+  s === "queued" || s === "running" || s === "rate_limited" || s === "waiting";
 
 // デーモンは suspended / rate_limited の再開も受けるが、アプリは paused だけに出す（決定 q62-resume-scope）
 export const canResume = (s: TaskState) => s === "paused";
 
-export type Group = "review" | "check" | "running" | "limited" | "queued" | "paused" | "done";
+export type Group = "review" | "check" | "running" | "limited" | "waiting" | "queued" | "paused" | "done";
 
 export function groupOf(t: Task): Group {
   if (t.state === "suspended") return "review";
   // 要確認には入れない。人が何かする必要は無く、枠が明ければ自分で再開する
   if (t.state === "rate_limited") return "limited";
+  // 要確認には入れない。人が何かする必要は無く、マージされるか conflict するまで自分で見に行く
+  if (t.state === "waiting") return "waiting";
   // failed を要確認に置くのは worktree が残っている間だけ（レビューアプリ設計spec 5章）。
   // 削除拒否の completed は refused の定義そのものが同じ規則になっている
   const failedWithEvidence = t.state === "failed" && t.worktree !== null;
@@ -104,6 +107,7 @@ export const GROUPS: { key: Exclude<Group, "done">; name: string; sort: (a: Task
   { key: "check", name: "要確認", sort: (a, b) => b.since - a.since },
   { key: "running", name: "実行中", sort: (a, b) => a.since - b.since },
   { key: "limited", name: "上限待ち", sort: (a, b) => (a.resumeAt ?? Infinity) - (b.resumeAt ?? Infinity) },
+  { key: "waiting", name: "マージ待ち", sort: (a, b) => (a.since ?? 0) - (b.since ?? 0) },
   { key: "queued", name: "待ち", sort: (a, b) => a.prio - b.prio || a.since - b.since },
   { key: "paused", name: "一時停止", sort: (a, b) => b.since - a.since },
 ];
@@ -134,6 +138,7 @@ export function timeLabel(t: Task, now: number): string {
   if (g === "running") return elapsed(t.since, now);
   // task.stateChanged は期限を運ばないので、取り直しが来るまでは分からない
   if (g === "limited") return t.resumeAt ? `${hm(t.resumeAt)} 再開` : "再開時刻は取得中";
+  if (g === "waiting") return t.checkAt ? `${hm(t.checkAt)} に確認` : "マージ待ち";
   if (g === "queued") return `P${t.prio} · ${ago(t.since, now)}`;
   return ago(t.since, now);
 }
@@ -373,6 +378,7 @@ export function toTask(
     // 「待ち始めた時刻」の記録は #43。それまでは最後に動いた時刻で代える
     since: Date.parse(row.updated_at),
     resumeAt: parseTime(row.rate_limited_until),
+    checkAt: parseTime(row.waiting_until),
     // 完了したのに worktree が残っているのは、後始末が削除を拒否したということ
     refused: row.state === "completed" && row.worktree_path !== null,
     // 差し戻しは task.list に載らない（進行中の一時的な出来事なので印を足さない）ので、

@@ -134,6 +134,9 @@ describe("groupOf", () => {
   test("unknown（版のずれで知らない state になったタスク）は要確認に入る", () => {
     expect(groupOf(t({ state: "unknown" }))).toBe("check");
   });
+  test("waiting はマージ待ちの区分に入り、要確認には入れない", () => {
+    expect(groupOf(t({ state: "waiting" }))).toBe("waiting");
+  });
 });
 
 describe("isTerminal", () => {
@@ -143,13 +146,16 @@ describe("isTerminal", () => {
 });
 
 describe("canPause / canResume", () => {
-  test("一時停止は queued・running・rate_limited のときだけ", () => {
-    for (const s of ["queued", "running", "rate_limited"] as const) {
+  test("一時停止は queued・running・rate_limited・waiting のときだけ", () => {
+    for (const s of ["queued", "running", "rate_limited", "waiting"] as const) {
       expect(canPause(s)).toBe(true);
     }
     for (const s of ["suspended", "paused", "completed", "failed", "canceled", "unknown"] as const) {
       expect(canPause(s)).toBe(false);
     }
+  });
+  test("マージ待ちは一時停止できる", () => {
+    expect(canPause("waiting")).toBe(true);
   });
   test("再開は paused のときだけ", () => {
     expect(canResume("paused")).toBe(true);
@@ -486,6 +492,12 @@ describe("toProject / toTask", () => {
   test("failed が要確認に入るかは worktree_path の有無で決まる", () => {
     expect(groupOf(t1({ state: "failed", worktree_path: "/w" }))).toBe("check");
     expect(groupOf(t1({ state: "failed", worktree_path: null }))).toBe("done");
+  });
+
+  test("toTask は waiting_until を checkAt に写す", () => {
+    expect(t1({ waiting_until: "2026-09-22T03:20:00.000Z" }).checkAt)
+      .toBe(Date.parse("2026-09-22T03:20:00.000Z"));
+    expect(t1({ waiting_until: null }).checkAt).toBeNull();
   });
 
   test("差し戻しの通知は 15 秒ごとの取り直しで消えない", () => {

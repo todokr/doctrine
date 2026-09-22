@@ -72,6 +72,7 @@ export function StateIcon({ t }: { t: Task }) {
     case "check": return <span className="bang">!</span>;
     case "running": return <span className="spin" />;
     case "limited": return <span className="hourglass" />;
+    case "waiting": return <span className="hourglass" />;
     case "queued": return <span className="ring" />;
     case "paused": return <span className="pause" />;
     default: return t.state === "completed" ? <span className="check" /> : <span className="xmark" />;

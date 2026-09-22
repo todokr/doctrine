@@ -252,6 +252,14 @@ export function TaskView({ t }: { t: Task }) {
           </p>
         </section>
       )}
+      {t.state === "waiting" && (
+        <section className="box quiet">
+          <p>
+            PR のマージを待っています。{t.checkAt ? `次は ${hm(t.checkAt)} に確認します。` : ""}
+            develop と conflict したら、取り込み直して push し直します。
+          </p>
+        </section>
+      )}
       {t.bounce && (
         // 差し戻しは失敗ではない（ワークフローは続いている）ので、赤い見た目は使わない
         <section className="box quiet">

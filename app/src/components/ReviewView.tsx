@@ -294,6 +294,15 @@ export function ReviewView({ t }: { t: Task }) {
           <OpenInEditor />
         </div>
 
+        {c?.escalation && (
+          <section className="box quiet">
+            <p>
+              ステップ「{c.escalation.stepId}」が {c.escalation.maxAttempts} 回やり直しても通りませんでした。
+              承認すると回数を戻して「{c.escalation.goto}」からやり直します。却下するとタスクは失敗で終わります。
+            </p>
+          </section>
+        )}
+
         <Context t={t} loaded={context} />
 
         {/* 宣言されたパスの出どころはワークフロー定義ではなく task.context の応答。

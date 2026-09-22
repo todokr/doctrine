@@ -58,6 +58,8 @@ export type Task = {
   since: number;
   /** 上限待ちのタスクが再開してよい時刻。task.stateChanged では埋まらないので null になりうる */
   resumeAt?: number | null;
+  /** マージ待ちのタスクが次に PR を確かめる時刻。task.stateChanged では埋まらないので null になりうる */
+  checkAt?: number | null;
   dirty?: boolean;
   refused?: boolean;
   /**
