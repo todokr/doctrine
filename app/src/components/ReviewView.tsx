@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState, type RefObject } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { sendDecision } from "../decision";
 import { risksAt } from "../flow";
 import { taskIntakeLabel } from "../intake";
@@ -10,17 +10,18 @@ import {
   contextOf,
   diffOf,
   draftOf,
+  feedbackOf,
   fellBackToAll,
   guideOf,
   hasSince,
   isPartial,
   layoutOf,
-  rejections,
   reviewRound,
   scopeOf,
   type DiffView,
   type Layout,
   type Loaded,
+  type RejectedReview,
   type Scope,
 } from "../model";
 import { useDecide, useNotYet, useStore } from "../store";
@@ -29,6 +30,8 @@ import { DiffFileBlock, fileAnchor, fileStat } from "./DiffFileBlock";
 import { GuideNotice, GuidePanel, RiskNote } from "./Guide";
 import { flowSectionAnchor, ReadingFlow } from "./ReadingFlow";
 import { StatusDot } from "./StatusDot";
+import { useTaskDetail } from "./TaskView";
+import { WorkflowRail } from "./WorkflowRail";
 import { Markdown } from "./text";
 
 /**
@@ -81,46 +84,74 @@ function LoadError({ what, message }: { what: string; message: string }) {
   );
 }
 
-function Context({ t, loaded }: { t: Task; loaded: Loaded<TaskContext> | undefined }) {
-  const { s } = useStore();
+/** 指示は長くなるので 4 行で畳む。4 行に収まるかは描いた後に測る */
+export function Prompt({ text }: { text: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [open, setOpen] = useState(false);
+  const [overflows, setOverflows] = useState(false);
+  // タスクを切り替えたら畳んだ状態に戻す（ReviewView は key={t.id} で作り直されるが、明示しておく）
+  useEffect(() => setOpen(false), [text]);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (el && !open) setOverflows(el.scrollHeight > el.clientHeight);
+  }, [text, open]);
   return (
-    <div style={{ display: "grid", gap: 8 }}>
-      <div>
-        {/* 元の指示だけは task.list が持っているので、経緯を取れなくても出せる */}
-        <b>元の指示</b>
-        <pre className="block" style={{ marginTop: 6, whiteSpace: "pre-wrap" }}>{t.prompt}</pre>
-      </div>
-      {(loaded === undefined || loaded.kind === "loading") && <p className="hint">経緯を読み込んでいます…</p>}
-      {loaded?.kind === "error" && <LoadError what="経緯（task.context）" message={loaded.message} />}
-      {loaded?.kind === "ok" && <History c={loaded.value} now={s.now} />}
+    <div className="ctx-row">
+      <span className="lbl">指示</span>
+      <div ref={ref} className={`prompt${open ? "" : " clamp"}`}>{text}</div>
+      {(overflows || open) && (
+        <button className="toggle" aria-expanded={open} onClick={() => setOpen(!open)}>
+          {open ? "4 行に畳む" : "全文を表示"}
+        </button>
+      )}
     </div>
   );
 }
 
-function History({ c, now }: { c: TaskContext; now: number }) {
-  const past = rejections(c);
+function FeedbackBody({ r, now }: { r: RejectedReview; now: number }) {
+  const at = Date.parse(r.endedAt);
   return (
     <>
-      {past.length > 0 && (
+      <span className="hint">{clock(at)} · {ago(at, now)} · <span className="mono">{r.stepId}</span></span>
+      <div className="feedback">{r.comment}</div>
+    </>
+  );
+}
+
+/** 前回のフィードバックは畳まずに出し、それより前は新しい順に畳む（spec 3.6） */
+export function Feedback({ c, now }: { c: TaskContext; now: number }) {
+  const { latest, earlier } = feedbackOf(c);
+  if (!latest) return null;
+  return (
+    <div className="ctx-row">
+      <span className="lbl">前回のフィードバック</span>
+      <FeedbackBody r={latest} now={now} />
+      {earlier.length > 0 && (
         <details className="ctx">
-          <summary>これまでのレビュー（{past.length}件、差し戻し）</summary>
+          <summary>それ以前の {earlier.length} 件</summary>
           <div style={{ display: "grid", gap: 8 }}>
-            {past.map((r) => {
-              const at = Date.parse(r.endedAt);
-              return (
-                <div key={r.stepRunId}>
-                  <span className="hint">{clock(at)} · {ago(at, now)} · <span className="mono">{r.stepId}</span></span>
-                  <pre className="block" style={{ marginTop: 4 }}>{r.comment}</pre>
-                </div>
-              );
-            })}
+            {earlier.map((r) => <div key={r.stepRunId} className="ctx-row"><FeedbackBody r={r} now={now} /></div>)}
           </div>
         </details>
       )}
-      {c.lastCommand && (
+    </div>
+  );
+}
+
+function Context({ t, loaded }: { t: Task; loaded: Loaded<TaskContext> | undefined }) {
+  const { s } = useStore();
+  const c = loaded?.kind === "ok" ? loaded.value : null;
+  return (
+    <div style={{ display: "grid", gap: 12 }}>
+      {/* 指示だけは task.list が持っているので、経緯を取れなくても出せる */}
+      <Prompt text={t.prompt} />
+      {(loaded === undefined || loaded.kind === "loading") && <p className="hint">経緯を読み込んでいます…</p>}
+      {loaded?.kind === "error" && <LoadError what="経緯（task.context）" message={loaded.message} />}
+      {c && <Feedback c={c} now={s.now} />}
+      {c?.lastCommand && (
         <details className="ctx">
           <summary>
-            直近の command ステップの結果（<span className="mono">{c.lastCommand.stepId}</span> · exit{" "}
+            <span className="lbl">Last command</span> 直近の command ステップの結果（<span className="mono">{c.lastCommand.stepId}</span> · exit{" "}
             {c.lastCommand.exitCode === null ? "シグナルで停止（終了コードなし）" : c.lastCommand.exitCode}）
           </summary>
           <pre className="block">
@@ -128,7 +159,7 @@ function History({ c, now }: { c: TaskContext; now: number }) {
           </pre>
         </details>
       )}
-    </>
+    </div>
   );
 }
 
@@ -281,6 +312,8 @@ export function ReviewView({ t }: { t: Task }) {
     jump.current = rememberPosition();
     dispatch({ type: "layout", layout: next });
   };
+  useTaskDetail(t);
+  const detail = s.detail[t.id];
 
   return (
     <>
@@ -297,6 +330,8 @@ export function ReviewView({ t }: { t: Task }) {
           <OpenInEditor />
         </div>
 
+        {detail && <WorkflowRail detail={detail} legend={false} />}
+
         <Context t={t} loaded={context} />
 
         {/* 宣言されたパスの出どころはワークフロー定義ではなく task.context の応答。
@@ -310,7 +345,7 @@ export function ReviewView({ t }: { t: Task }) {
         ))}
 
         <div className="headrow">
-          <b>変更</b>
+          <span className="lbl">Changes</span>
           {diff?.kind === "ok" && (
             <span className="hint">
               {fellBackToAll(diff.value, scope)

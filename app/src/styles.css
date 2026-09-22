@@ -479,3 +479,11 @@ tr.wt-stale{background:var(--accent-soft)}
 .count .v{font-family:var(--mono);font-size:12px}
 .count .b{height:4px;border-radius:2px;background:var(--tone)}
 .count.dashed .b{background:repeating-linear-gradient(90deg,var(--tone) 0 5px,transparent 5px 8px)}
+
+/* レビュー画面の指示とフィードバック（spec 3.6） */
+.ctx-row{display:grid;gap:6px;justify-items:start}
+.ctx-row > *{justify-self:stretch}
+.prompt{background:var(--sunken);border-radius:7px;padding:10px 12px;line-height:1.65;white-space:pre-wrap;overflow-wrap:anywhere}
+.prompt.clamp{display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}
+.toggle{justify-self:start !important;border:0;background:transparent;padding:0;color:var(--human-text);font-size:12px;text-decoration:underline;text-underline-offset:3px;cursor:pointer}
+.feedback{border-left:3px solid var(--accent);background:var(--accent-soft);border-radius:0 7px 7px 0;padding:10px 12px;line-height:1.65;white-space:pre-wrap;overflow-wrap:anywhere}

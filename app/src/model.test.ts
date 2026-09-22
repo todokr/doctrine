@@ -20,6 +20,7 @@ import {
   denialLines,
   diffLines,
   diffOf,
+  feedbackOf,
   fellBackToAll,
   groupOf,
   guideOf,
@@ -1701,5 +1702,27 @@ describe("selectedIntake", () => {
     expect(selectedIntake(gone)?.id).toBe("z");
     expect(selectedIntake(base({ intakeSel: "new" }))).toBeNull();
     expect(selectedIntake(base({ intakeSel: "z" }))).toBeNull();
+  });
+});
+
+describe("feedbackOf", () => {
+  const rejected = (stepRunId: number) => ({
+    stepRunId,
+    stepId: "review",
+    status: "rejected" as const,
+    endedAt: `2026-09-22T0${stepRunId}:00:00.000Z`,
+    comment: `c${stepRunId}`,
+  });
+  const ctx = (reviews: unknown[]) =>
+    ({ prompt: "p", reviews, lastCommand: null, lastAgentMessage: null, reviewFiles: [] }) as unknown as TaskContext;
+
+  test("差し戻しが無ければ latest は null", () => {
+    expect(feedbackOf(ctx([]))).toEqual({ latest: null, earlier: [] });
+  });
+
+  test("reviews は古い順に届くので、最後の差し戻しが latest", () => {
+    const got = feedbackOf(ctx([rejected(1), { stepRunId: 2, stepId: "review", status: "approved", endedAt: "x" }, rejected(3), rejected(5)]));
+    expect(got.latest?.stepRunId).toBe(5);
+    expect(got.earlier.map((r) => r.stepRunId)).toEqual([3, 1]);
   });
 });

@@ -265,6 +265,14 @@ export const reviewRound = (c: TaskContext) =>
 export const rejections = (c: TaskContext) =>
   c.reviews.filter((r): r is ReviewEntry & { status: "rejected" } => r.status === "rejected");
 
+export type RejectedReview = ReturnType<typeof rejections>[number];
+
+/** 前回のフィードバックと、それより前の差し戻し（新しい順）。reviews は step_runs の id の昇順で届く */
+export function feedbackOf(c: TaskContext): { latest: RejectedReview | null; earlier: RejectedReview[] } {
+  const past = rejections(c);
+  return { latest: past.at(-1) ?? null, earlier: past.slice(0, -1).reverse() };
+}
+
 /**
  * 「前回レビュー以降」を出してよいか。記録（review_tree）の無い回は
  * デーモンが基準にできないので、あっても切り替えを出さない。

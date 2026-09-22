@@ -47,7 +47,7 @@ const TAIL = 200;
  * タスクの状態やステップが動いたら取り直す。log.line のような流れ続ける
  * イベントでは取り直さない（毎行 task.get を投げることになる）。
  */
-function useTaskDetail(t: Task) {
+export function useTaskDetail(t: Task) {
   const { dispatch } = useStore();
   useEffect(() => {
     let alive = true;
