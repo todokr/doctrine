@@ -1,3 +1,4 @@
+import { fakeBaseSync } from "../helpers/watcher.ts";
 import { afterEach, beforeEach, test } from "@std/testing/bdd";
 import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -80,6 +81,7 @@ async function context(events: ServerEvent[] = [], o: Options = {}): Promise<Dae
       db,
       tracker,
       prWatcher: o.prWatcher ?? fakePrWatcher().prWatcher,
+      baseSync: fakeBaseSync().baseSync,
       onStateChanged: (t) =>
         events.push({
           event: "intake.stateChanged",

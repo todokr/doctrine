@@ -8,7 +8,7 @@ import { getProject, listProjects, listTasks, type TaskRow } from "../db/tasks.t
 import { listIntakes } from "../db/intakes.ts";
 import { ghPrWatcher } from "../github/ghPrWatcher.ts";
 import { ghTracker } from "../github/ghTracker.ts";
-import { createIntakeWatcher, WATCH_INTERVAL_MS } from "../intake/watch.ts";
+import { createIntakeWatcher, gitBaseSync, WATCH_INTERVAL_MS } from "../intake/watch.ts";
 import type { Db } from "../db/schema.ts";
 import { DEFAULT_GLOBAL_LIMIT } from "../domain/scheduler.ts";
 import { parseWorkflow } from "../workflow/schema.ts";
@@ -142,6 +142,7 @@ export async function startDaemon(o: {
       db,
       tracker,
       prWatcher: ghPrWatcher(),
+      baseSync: gitBaseSync,
       onStateChanged: (t) =>
         ctx.broadcast({
           event: "intake.stateChanged",

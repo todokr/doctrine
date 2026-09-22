@@ -111,6 +111,29 @@ export async function createWorktree(o: {
   return await canonical(o.worktreePath);
 }
 
+/** Intake 由来のタスクの worktree の起点。GitHub 上のマージを持つよう、origin 側から切る（spec 11.3）。 */
+export const originRef = (baseBranch: string) => `origin/${baseBranch}`;
+
+/** origin の baseBranch を取り込む。手元の baseBranch は動かさない。 */
+export async function fetchBaseBranch(repoPath: string, baseBranch: string): Promise<void> {
+  await runCommand("git", ["-C", repoPath, "fetch", "origin", baseBranch]);
+}
+
+/** commit が ref に含まれるか。commit が手元に無い（まだ取り込んでいない）ときも false。 */
+export async function containsCommit(
+  repoPath: string,
+  ref: string,
+  commit: string,
+): Promise<boolean> {
+  const out = await new Deno.Command("git", {
+    args: ["-C", repoPath, "merge-base", "--is-ancestor", commit, ref],
+    stdin: "null",
+    stdout: "null",
+    stderr: "null",
+  }).output();
+  return out.success;
+}
+
 /** Intake の worktree の置き場。worktreePathFor と同じ置き場の intake-<id>（spec 7 章）。 */
 export function intakeWorktreePathFor(projectPath: string, intakeId: string): string {
   return worktreePathFor(projectPath, `intake-${intakeId}`);

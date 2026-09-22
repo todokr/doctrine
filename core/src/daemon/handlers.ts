@@ -58,9 +58,11 @@ import {
   branchNameFor,
   canonical,
   createWorktree,
+  fetchBaseBranch,
   hasUncommittedChanges,
   isUnderWorktreesDir,
   listWorktrees,
+  originRef,
   removeWorktree,
   UncommittedChangesError,
   worktreePathFor,
@@ -183,6 +185,20 @@ export async function loadWorkflowFromDisk(
     throw new Error(`ワークフローがありません: ${path}`);
   });
   return parseWorkflow(text);
+}
+
+/**
+ * Intake 由来のタスクの worktree の起点（spec 11.3）。見張りは投入の前に取り込んでいるが、
+ * 画面からの再投入は見張りを通らないので、ここでも取り込む。取り込めなくても、前に取り込んだ origin 側から切る。
+ */
+async function intakeBase(project: ProjectRow): Promise<string> {
+  await fetchBaseBranch(project.path, project.base_branch).catch((e) => {
+    console.error(
+      `origin の ${project.base_branch} を取り込めませんでした（前に取り込んだものから切ります）:`,
+      e,
+    );
+  });
+  return originRef(project.base_branch);
 }
 
 export function createHandler(ctx: DaemonContext): Handler {
@@ -1105,7 +1121,7 @@ async function tickOnce(ctx: DaemonContext): Promise<void> {
         repoPath: project.path,
         worktreePath: worktreePathFor(project.path, task.id),
         branch: task.branch,
-        baseBranch: project.base_branch,
+        baseBranch: task.intake_id === null ? project.base_branch : await intakeBase(project),
       });
 
       await commitStepBoundary(ctx.db, {

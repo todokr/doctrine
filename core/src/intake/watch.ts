@@ -11,6 +11,7 @@ import type { Db, ProjectRow } from "../db/schema.ts";
 import { getProject, listProjects } from "../db/tasks.ts";
 import { assertIntakeTransition } from "../domain/intakeStates.ts";
 import type { PrWatcher, Tracker } from "../github/tracker.ts";
+import { containsCommit, fetchBaseBranch, originRef } from "../domain/worktree.ts";
 import type { IntakeTransition } from "./commands.ts";
 import { dispatchIntake, loadApprovedPlan } from "./dispatch.ts";
 import { computeProcessStatuses, goalReached } from "./pfd/status.ts";
@@ -33,6 +34,36 @@ export function choosePr(facts: readonly PrFact[], baseBranch: string): PrFact |
 }
 
 export type ObserveReport = { changedIntakeIds: Set<string> };
+
+/**
+ * 投入の前に origin の baseBranch を取り込み、上流のマージがそこへ入ったかを確かめる口（spec 11.3）。
+ * タスクの worktree は origin 側から切るので、取り込んでいないマージは下流に届かない。テストで偽物に差し替える。
+ */
+export interface BaseSync {
+  fetch(projectPath: string, baseBranch: string): Promise<void>;
+  contains(projectPath: string, baseBranch: string, commit: string): Promise<boolean>;
+}
+
+export const gitBaseSync: BaseSync = {
+  fetch: fetchBaseBranch,
+  contains: (projectPath, baseBranch, commit) =>
+    containsCommit(projectPath, originRef(baseBranch), commit),
+};
+
+/** baseBranch へのマージを観測したタスクのマージのコミットが、すべて origin の baseBranch に入っているか。 */
+async function mergesArrived(
+  db: Db,
+  baseSync: BaseSync,
+  project: ProjectRow,
+  intakeId: string,
+): Promise<boolean> {
+  for (const progress of (await processProgressOf(db, intakeId)).values()) {
+    const pr = progress.pr;
+    if (pr?.state !== "MERGED" || pr.baseRef !== project.base_branch || !pr.mergeCommit) continue;
+    if (!await baseSync.contains(project.path, project.base_branch, pr.mergeCommit)) return false;
+  }
+  return true;
+}
 
 /**
  * プロジェクトの active な Intake と、終わっていない改訂中の Intake について、current_task_id のタスクのうち、
@@ -126,7 +157,7 @@ export type ProjectWatchReport = {
 /** 1 プロジェクトの 1 周。投げない（想定外の例外も errors に入れる）。 */
 export async function watchProject(
   db: Db,
-  deps: { tracker: Tracker; prWatcher: PrWatcher },
+  deps: { tracker: Tracker; prWatcher: PrWatcher; baseSync: BaseSync },
   projectId: number,
 ): Promise<ProjectWatchReport> {
   const report: ProjectWatchReport = {
@@ -177,8 +208,19 @@ export async function watchProject(
       report.errors.push(`PR の観測: ${describe(e)}`);
     }
 
-    for (const intake of intakes) {
+    // 取り込めなかった周は投入しない。手元の古い baseBranch から切ると、下流が上流の成果物を持たずに始まる
+    let fetched = true;
+    try {
+      await deps.baseSync.fetch(project.path, project.base_branch);
+    } catch (e) {
+      fetched = false;
+      report.errors.push(`origin の ${project.base_branch} の取り込み: ${describe(e)}`);
+    }
+
+    for (const intake of fetched ? intakes : []) {
       try {
+        // GitHub がマージを返しても、fetch に載るのが遅れることがある。載るまで次の周へ延ばす
+        if (!await mergesArrived(db, deps.baseSync, project, intake.id)) continue;
         const dispatched = await dispatchIntake(db, intake.id);
         if (dispatched.created.length > 0) report.updated.add(intake.id);
         for (const f of dispatched.errors) {
@@ -238,6 +280,7 @@ export function createIntakeWatcher(deps: {
   db: Db;
   tracker: Tracker;
   prWatcher: PrWatcher;
+  baseSync: BaseSync;
   onStateChanged(t: IntakeTransition): void;
   onUpdated(intakeId: string): void;
   now?: () => Date;

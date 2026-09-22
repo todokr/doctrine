@@ -1,3 +1,4 @@
+import { fakeBaseSync } from "../helpers/watcher.ts";
 import { test } from "@std/testing/bdd";
 import assert from "node:assert/strict";
 import type { PrFact } from "../../../shared/intake/github.ts";
@@ -107,16 +108,18 @@ async function setup(pfd: Pfd = example()) {
   const seeded = await seedActive(pfd);
   const ft = fakeTracker();
   const pw = fakePrWatcher();
+  const base = fakeBaseSync();
   const updated: string[] = [];
   const transitions: IntakeTransition[] = [];
   const watcher = createIntakeWatcher({
     db: seeded.db,
     tracker: ft.tracker,
     prWatcher: pw.prWatcher,
+    baseSync: base.baseSync,
     onStateChanged: (t) => transitions.push(t),
     onUpdated: (id) => updated.push(id),
   });
-  return { ...seeded, ft, pw, watcher, updated, transitions };
+  return { ...seeded, ft, pw, base, watcher, updated, transitions };
 }
 
 /** そのプロセスの current_task_id のタスクのブランチに、MERGED の PR を 1 件置く。 */
@@ -225,6 +228,35 @@ test("baseBranch へのマージを検知すると下流を投入する", async 
   assert.match(task2[0].prompt, /人が決めたこと:/);
   assert.match(task2[0].prompt, /ログイン 1 回を 1 利用と数える/);
   assert.equal(tasks.some((t) => t.intake_process_id === "4"), false);
+});
+
+test("origin の baseBranch を取り込めなかった周は投入せず、失敗を健康状態に出す", async () => {
+  const { db, projectId, base, watcher } = await setup();
+  base.fetchError = new Error("Could not resolve host: github.com");
+  await watcher.request(projectId);
+  assert.deepEqual(await listTasks(db), []);
+  assert.equal(watcher.health(projectId).consecutiveFailures, 1);
+  assert.match(watcher.health(projectId).lastError!, /github\.com/);
+
+  base.fetchError = null;
+  await watcher.request(projectId);
+  assert.equal((await listTasks(db)).filter((t) => t.intake_process_id === "1").length, 1);
+});
+
+test("上流のマージのコミットが origin の baseBranch に入るまで、下流を投入しない", async () => {
+  const { db, projectId, pw, base, watcher } = await setup();
+  await watcher.request(projectId);
+  await finishHuman3(db);
+  await mergeOf(pw, db, "1");
+  base.missing.add("c11");
+  await watcher.request(projectId);
+  assert.equal((await listTasks(db)).some((t) => t.intake_process_id === "2"), false);
+  assert.equal(watcher.health(projectId).consecutiveFailures, 0, "取り込みの遅れは失敗ではない");
+
+  base.missing.delete("c11");
+  await watcher.request(projectId);
+  assert.equal((await listTasks(db)).filter((t) => t.intake_process_id === "2").length, 1);
+  assert.ok(base.fetches >= 3, "周ごとに取り込む");
 });
 
 test("マージされても、人のプロセスが終わっていなければ下流は投入しない", async () => {
@@ -394,6 +426,7 @@ test("偽の gh: ghTracker と ghPrWatcher を通して、承認直後の投入�
     db,
     tracker: ghTracker(gh.run),
     prWatcher: ghPrWatcher(gh.run),
+    baseSync: fakeBaseSync().baseSync,
     onStateChanged: () => {},
     onUpdated: () => {},
   });

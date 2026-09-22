@@ -9,12 +9,15 @@ import {
   branchNameFor,
   changedPaths,
   checkoutDetached,
+  containsCommit,
   createDetachedWorktree,
   createWorktree,
+  fetchBaseBranch,
   findOrphans,
   hasUncommittedChanges,
   intakeWorktreePathFor,
   listWorktrees,
+  originRef,
   removeWorktree,
   restoreWorktree,
   slugify,
@@ -363,4 +366,45 @@ test("changedPaths と restoreWorktree", async () => {
   await restoreWorktree(wt);
   assert.deepEqual(await changedPaths(wt), []);
   assert.equal(await readFile(join(wt, "README.md"), "utf8"), "hi\n");
+});
+
+test("fetchBaseBranch: origin の baseBranch を取り込み、手元の baseBranch より新しいコミットから worktree を切れる", async () => {
+  // origin は repo を clone したもの。GitHub 上のマージを、origin にだけあるコミットで表す
+  const origin = join(root, "origin");
+  await run("git", ["clone", "-q", repo, origin]);
+  await run("git", ["-C", origin, "config", "user.email", "t@example.com"]);
+  await run("git", ["-C", origin, "config", "user.name", "t"]);
+  await writeFile(join(origin, "merged.txt"), "m\n");
+  await run("git", ["-C", origin, "add", "."]);
+  await run("git", ["-C", origin, "commit", "-m", "merged upstream"]);
+  const merged = (await run("git", ["-C", origin, "rev-parse", "HEAD"])).stdout.trim();
+  await run("git", ["-C", repo, "remote", "add", "origin", origin]);
+
+  assert.equal(await containsCommit(repo, originRef("main"), merged), false, "取り込む前は無い");
+  await fetchBaseBranch(repo, "main");
+  assert.equal(await containsCommit(repo, originRef("main"), merged), true);
+  assert.equal(await containsCommit(repo, "main", merged), false, "手元の main は動かさない");
+
+  const wt = await createWorktree({
+    repoPath: repo,
+    worktreePath: join(root, "wt", "t9"),
+    branch: "doctrine/t9-x",
+    baseBranch: originRef("main"),
+  });
+  assert.ok((await stat(join(wt, "merged.txt"))).isFile(), "上流の成果物を持って始まる");
+});
+
+test("containsCommit: 含まれない・手元に無いコミットは false", async () => {
+  const head = (await run("git", ["-C", repo, "rev-parse", "HEAD"])).stdout.trim();
+  assert.equal(await containsCommit(repo, "main", head), true);
+  await run("git", ["-C", repo, "switch", "-q", "-c", "side"]);
+  await writeFile(join(repo, "side.txt"), "s\n");
+  await run("git", ["-C", repo, "add", "."]);
+  await run("git", ["-C", repo, "commit", "-m", "side"]);
+  const side = (await run("git", ["-C", repo, "rev-parse", "HEAD"])).stdout.trim();
+  assert.equal(await containsCommit(repo, "main", side), false);
+  assert.equal(
+    await containsCommit(repo, "main", "0123456789abcdef0123456789abcdef01234567"),
+    false,
+  );
 });
