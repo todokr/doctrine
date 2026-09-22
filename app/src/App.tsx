@@ -5,6 +5,7 @@ import { IntakeView } from "./components/IntakeView";
 import { ReviewView } from "./components/ReviewView";
 import { Rail, Sidebar } from "./components/Sidebar";
 import { TaskView } from "./components/TaskView";
+import { RemoveWorktreeModal, WorktreeView } from "./components/WorktreeView";
 import { sendDecision } from "./decision";
 import { composeRejection, diffOf, draftOf, layoutOf, scopeOf, selectedTask } from "./model";
 import { useDecide, useStore } from "./store";
@@ -89,6 +90,7 @@ function useKeys() {
       const s = latest.current;
       if ((e.target as Element).closest("input,textarea,select,[contenteditable]") || e.metaKey || e.ctrlKey || e.altKey) return;
       if (e.key === "Escape" && s.modal) return dispatch({ type: "modal.close" });
+      if (e.key === "Escape" && s.removing) return dispatch({ type: "remove.close" });
       if (e.key === "j" || e.key === "k") return dispatch({ type: "move", delta: e.key === "j" ? 1 : -1 });
       const t = selectedTask(s);
       if (!t || t.state !== "suspended") return;
@@ -134,7 +136,9 @@ export default function App() {
         <Rail />
         <Sidebar />
         <main className="main" ref={mainRef}>
-          {s.view === "intake" ? (
+          {s.view === "worktrees" ? (
+            <WorktreeView />
+          ) : s.view === "intake" ? (
             <IntakeView />
           ) : !t ? (
             <div className="pad"><p className="hint">左からタスクを選んでください</p></div>
@@ -146,6 +150,7 @@ export default function App() {
         </main>
       </div>
       <RejectModal />
+      <RemoveWorktreeModal />
       {s.toast && <div className="toast" role="status">{s.toast}</div>}
     </>
   );

@@ -22,7 +22,7 @@ import type { Task, TaskState } from "../types";
 import { Crumbs, OpenInEditor } from "./ReviewView";
 import { WorkflowRail } from "./WorkflowRail";
 
-const STATE_PILL: Record<TaskState, [string, string]> = {
+export const STATE_PILL: Record<TaskState, [string, string]> = {
   suspended: ["レビュー待ち", "p-attn"],
   running: ["実行中", "p-run"],
   queued: ["待ち", "p-muted"],
