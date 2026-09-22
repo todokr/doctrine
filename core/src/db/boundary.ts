@@ -177,6 +177,7 @@ export function commitStepBoundary(db: Db, b: StepBoundary): Promise<number | nu
     }
 
     if (b.stepRunReopen) {
+      // started_at は戻さない: この行が指す attempt は最初に waiting へ入ったときに始まっている。
       await trx.updateTable("step_runs")
         .set({ status: "running", ended_at: null, exit_code: null })
         .where("id", "=", b.stepRunReopen.id)

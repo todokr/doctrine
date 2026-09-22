@@ -1832,3 +1832,62 @@ steps:
     [["wait", "bounced"], ["fix", "success"], ["wait", "success"]],
   );
 });
+
+test("poll が 75 で waiting に入るはずだった実行を止めても、行は running のまま残らず interrupted で閉じる", async () => {
+  const { db, root, workflow } = await taskFixture(`
+name: f
+steps:
+  - id: wait
+    type: poll
+    run: "sleep 0.2; exit $(cat verdict)"
+    interval: 30s
+`);
+  writeFileSync(join(root, "verdict"), "75");
+  const { events, deps } = recorder();
+
+  const done = runTask(db, "t1", workflow, {
+    db,
+    adapter: createMockAdapter({ result: {} }),
+    logRoot: join(root, "logs"),
+    globalLimit: 4,
+    ...deps,
+  });
+  await stopMidFlight(db, done, "paused");
+
+  const runs = await listStepRuns(db, "t1");
+  assert.deepEqual(runs.map((r) => r.status), ["interrupted"]);
+  const task = (await getTask(db, "t1"))!;
+  assert.equal(task.state, "paused");
+  assert.equal(task.waiting_until, null, "waiting へは書き換わっていない");
+  assert.deepEqual(events.onStepRunFinished, ["wait:interrupted"]);
+  assert.deepEqual(events.onStateChanged, [], "waiting への遷移イベントは出ていない");
+});
+
+test("poll が 2 で canceled にするはずだった実行を止めても、タスクの状態は上書きされない", async () => {
+  const { db, root, workflow } = await taskFixture(`
+name: f
+steps:
+  - id: wait
+    type: poll
+    run: "sleep 0.2; exit $(cat verdict)"
+    interval: 30s
+`);
+  writeFileSync(join(root, "verdict"), "2");
+  const { events, deps } = recorder();
+
+  const done = runTask(db, "t1", workflow, {
+    db,
+    adapter: createMockAdapter({ result: {} }),
+    logRoot: join(root, "logs"),
+    globalLimit: 4,
+    ...deps,
+  });
+  await stopMidFlight(db, done, "paused");
+
+  const runs = await listStepRuns(db, "t1");
+  assert.deepEqual(runs.map((r) => r.status), ["interrupted"]);
+  const task = (await getTask(db, "t1"))!;
+  assert.equal(task.state, "paused", "canceled には上書きされない");
+  assert.deepEqual(events.onStepRunFinished, ["wait:interrupted"]);
+  assert.deepEqual(events.onStateChanged, [], "canceled への遷移イベントは出ていない");
+});
