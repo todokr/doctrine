@@ -404,10 +404,14 @@ steps:
       - "Bash(git commit:*)"
       - "Bash(mise run core:test:*)"
       - "Bash(mise run core:check:*)"
+      - "Bash(mise run core:deps:*)"
+      - "Bash(mise run app:deps:*)"
       - "Bash(mise run app:test:*)"
       - "Bash(mise run app:build:*)"
+      - "Bash(mise run pfd:deps:*)"
       - "Bash(mise run pfd:test:*)"
       - "Bash(mise run pfd:check:*)"
+      - "Bash(pnpm -C app:*)"
       - "Bash(grep:*)"
       - "Bash(sed -n:*)"
       - "Bash(cat:*)"
@@ -459,19 +463,26 @@ steps:
   # 「まだ」は 75、閉じられたら 2（spec 2026-09-22-merge-wait-design.md 3 章）。
   # push 直後の mergeable は UNKNOWN になるので、まだとして待つ。
   # BEHIND（conflict は無いが遅れている）は追わない。
+  # gh pr view の出力を `| { read ... }` に渡すと、パイプ全体の終了コードは右側（read/case）の
+  # ものになり、gh 自身が認証切れやネットワーク断で失敗しても "" が read され、どの明示パターンにも
+  # 一致せず 75（まだ）に化ける。それでは gh の失敗が onFailure に届かず、毎分ポーリングし続けてしまう。
+  # そのため gh の出力を一度変数で受け、gh 自身の終了コードを `|| exit 1` で保持する。
+  # 75 に落ちるのは、gh が成功し、状態が OPEN かつ MERGEABLE / UNKNOWN のときだけ。
   - id: wait-merge
     type: poll
     interval: 1m
     run: |
-      gh pr view --json state,mergeable --jq '.state + " " + .mergeable' | {
-        read s m
-        case "$s $m" in
-          "MERGED "*) exit 0 ;;
-          "CLOSED "*) echo "PR がマージされずに閉じられました"; exit 2 ;;
-          *" CONFLICTING") echo "develop と conflict しています"; exit 1 ;;
-          *) exit 75 ;;
-        esac
+      out=$(gh pr view --json state,mergeable --jq '.state + " " + .mergeable') || {
+        echo "gh pr view に失敗しました"
+        exit 1
       }
+      set -- $out
+      case "$1 $2" in
+        "MERGED "*) exit 0 ;;
+        "CLOSED "*) echo "PR がマージされずに閉じられました"; exit 2 ;;
+        *" CONFLICTING") echo "develop と conflict しています"; exit 1 ;;
+        *) exit 75 ;;
+      esac
     onFailure:
       goto: sync
       maxAttempts: 10

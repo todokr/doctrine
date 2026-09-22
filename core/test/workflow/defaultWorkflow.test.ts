@@ -40,16 +40,18 @@ async function runOpenPr(
       await writeFile(join(dir, ".doctrine-out", "sync-notes.md"), syncNotes);
     }
     await writeFile(join(dir, "bin", "git"), "#!/bin/sh\nexit 0\n");
+    // gh は open-pr の中で複数回呼ばれることがある（PR 作成 → sync-notes.md のコメント）。
+    // 呼び出しごとに上書きすると先の呼び出しの引数が消えるので、区切り線を挟んで追記する。
     const gh = prExists
       ? `#!/bin/sh
 if [ "$1 $2" = "pr view" ]; then echo https://github.com/o/r/pull/9; exit 0; fi
-for a in "$@"; do printf '%s\\n' "$a"; done > "$GH_ARGS"
+{ for a in "$@"; do printf '%s\\n' "$a"; done; echo "---"; } >> "$GH_ARGS"
 if [ "$1 $2" = "pr comment" ]; then exit 0; fi
 cat > "$GH_BODY"
 `
       : `#!/bin/sh
 if [ "$1 $2" = "pr view" ]; then exit 1; fi
-for a in "$@"; do printf '%s\\n' "$a"; done > "$GH_ARGS"
+{ for a in "$@"; do printf '%s\\n' "$a"; done; echo "---"; } >> "$GH_ARGS"
 if [ "$1 $2" = "pr comment" ]; then exit 0; fi
 cat > "$GH_BODY"
 `;
@@ -136,6 +138,15 @@ test("open-pr: sync の記録が無ければコメントしない", async () => 
   assert.equal(r.args.some((a) => a === "comment"), false);
 });
 
+test("open-pr: PR がまだ無く sync の記録があれば、PR を作ってからコメントし、ファイルを消す", async () => {
+  const r = await runOpenPr({ url: null, parent_url: null }, false, "## develop を取り込んだ\n- a.ts\n");
+  assert.equal(r.code, 0);
+  assert.match(r.args.join(" "), /pr create/);
+  assert.match(r.args.join(" "), /pr comment --body-file/);
+  assert.equal(r.body, NOTES);
+  assert.equal(r.syncNotesLeft, false);
+});
+
 async function waitMergeRun(): Promise<string> {
   const yaml = await readFile(
     new URL("../../../.doctrine/workflows/default.yaml", import.meta.url),
@@ -146,12 +157,12 @@ async function waitMergeRun(): Promise<string> {
   return (step as PollStep).run;
 }
 
-/** gh pr view の --jq の結果として `state mergeable` を返す偽の gh で wait-merge を実行する。 */
-async function runWaitMerge(stateAndMergeable: string): Promise<{ code: number; stdout: string }> {
+/** 偽の gh スクリプト（本文）を使って wait-merge を実行する。 */
+async function runWaitMergeWithGh(ghScript: string): Promise<{ code: number; stdout: string }> {
   const dir = await mkdtemp(join(tmpdir(), "doctrine-wait-merge-"));
   try {
     await mkdir(join(dir, "bin"));
-    await writeFile(join(dir, "bin", "gh"), `#!/bin/sh\necho '${stateAndMergeable}'\n`);
+    await writeFile(join(dir, "bin", "gh"), ghScript);
     await chmod(join(dir, "bin", "gh"), 0o755);
     const ctx: TemplateContext = {
       task: { id: "t", title: "T", prompt: "P", branch: "b" },
@@ -175,6 +186,11 @@ async function runWaitMerge(stateAndMergeable: string): Promise<{ code: number; 
   }
 }
 
+/** gh pr view の --jq の結果として `state mergeable` を返す偽の gh で wait-merge を実行する。 */
+function runWaitMerge(stateAndMergeable: string): Promise<{ code: number; stdout: string }> {
+  return runWaitMergeWithGh(`#!/bin/sh\necho '${stateAndMergeable}'\n`);
+}
+
 test("wait-merge: マージされたら 0", async () => {
   assert.equal((await runWaitMerge("MERGED UNKNOWN")).code, 0);
 });
@@ -192,4 +208,9 @@ test("wait-merge: 閉じられたら 2", async () => {
 test("wait-merge: マージ可能・判定中はまだ（75）", async () => {
   assert.equal((await runWaitMerge("OPEN MERGEABLE")).code, 75);
   assert.equal((await runWaitMerge("OPEN UNKNOWN")).code, 75);
+});
+
+test("wait-merge: gh 自体が失敗したら、まだ（75）にせず onFailure へ行く（1）", async () => {
+  const r = await runWaitMergeWithGh("#!/bin/sh\nexit 1\n");
+  assert.equal(r.code, 1);
 });
