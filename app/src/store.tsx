@@ -24,6 +24,7 @@ import { buildDiff } from "./patch";
 import type { GhStatus, IssueDetail } from "../../shared/intake/github.ts";
 import type { Answer } from "../../shared/intake/question.ts";
 import type {
+  DaemonSlots,
   GithubIssue,
   IntakeDetail,
   IntakeSummary,
@@ -485,6 +486,17 @@ export function useIntakeRpc() {
 /** 設定を書く。成否の判定は呼び出し側が sendDecision で行う */
 export function useSettingsRpc(): { save: (settings: AppSettings) => Promise<void> } {
   return { save: (settings: AppSettings) => saveSettings(settings) };
+}
+
+/** 全体の実行枠の読み書き。成否の判定は呼び出し側で行う */
+export function useSlotsRpc(): {
+  load: () => Promise<DaemonSlots>;
+  setGlobalLimit: (globalLimit: number) => Promise<DaemonSlots>;
+} {
+  return {
+    load: () => rpc("daemon.slots", {}),
+    setGlobalLimit: (globalLimit: number) => rpc("daemon.setGlobalLimit", { global_limit: globalLimit }),
+  };
 }
 
 /** 第2段階に回した操作のボタンが押されたときに出す */
