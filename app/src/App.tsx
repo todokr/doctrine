@@ -4,6 +4,7 @@ import { fileAnchor } from "./components/DiffFileBlock";
 import { IntakeView } from "./components/IntakeView";
 import { ReviewView } from "./components/ReviewView";
 import { Rail, Sidebar } from "./components/Sidebar";
+import { SettingsView } from "./components/SettingsView";
 import { TaskView } from "./components/TaskView";
 import { sendDecision } from "./decision";
 import { composeRejection, diffOf, draftOf, layoutOf, scopeOf, selectedTask } from "./model";
@@ -134,7 +135,9 @@ export default function App() {
         <Rail />
         <Sidebar />
         <main className="main" ref={mainRef}>
-          {s.view === "intake" ? (
+          {s.view === "settings" ? (
+            <SettingsView />
+          ) : s.view === "intake" ? (
             <IntakeView />
           ) : !t ? (
             <div className="pad"><p className="hint">左からタスクを選んでください</p></div>

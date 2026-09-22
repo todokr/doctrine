@@ -11,10 +11,13 @@ import {
 import {
   connectionStatus,
   loadDrafts,
+  loadSettings,
   onConnection,
   onDaemonEvent,
   rpc,
   saveDrafts,
+  saveSettings,
+  type AppSettings,
 } from "./daemon/client";
 import { receiveGuide } from "./guide";
 import { buildDiff } from "./patch";
@@ -75,6 +78,7 @@ function initialState(): State {
     modal: null,
     toast: null,
     conn: { status: "connecting" },
+    settings: { kind: "loading" },
   };
 }
 
@@ -235,6 +239,26 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         console.warn("下書きを読めませんでした", e);
         dispatch({ type: "drafts.loaded", drafts: { tasks: {}, intakes: {} } });
         dispatch({ type: "toast", message: `下書きを読めませんでした（${errorMessage(e)}）` });
+      },
+    );
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  // 起動時に1度だけ読む。壊れた JSON のときは既定値に倒さず、error のまま持つ
+  // （フォームを既定値で描くと、次の保存で人が手で書いた設定が消える）
+  useEffect(() => {
+    let alive = true;
+    void loadSettings().then(
+      (value) => {
+        if (alive) dispatch({ type: "settings", loaded: { kind: "ok", value } });
+      },
+      (e) => {
+        if (!alive) return;
+        console.warn("設定を読めませんでした", e);
+        dispatch({ type: "settings", loaded: { kind: "error", message: errorMessage(e) } });
+        dispatch({ type: "toast", message: `設定を読めませんでした（${errorMessage(e)}）` });
       },
     );
     return () => {
@@ -418,6 +442,11 @@ export function useIntakeRpc() {
       rpc("intake.setDispatchPaused", { intake_id: intakeId, paused }),
     closeIssue: (intakeId: string): Promise<IntakeSummary> => rpc("intake.closeIssue", { intake_id: intakeId }),
   };
+}
+
+/** 設定を書く。成否の判定は呼び出し側が sendDecision で行う */
+export function useSettingsRpc(): { save: (settings: AppSettings) => Promise<void> } {
+  return { save: (settings: AppSettings) => saveSettings(settings) };
 }
 
 /** 第2段階に回した操作のボタンが押されたときに出す */

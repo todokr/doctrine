@@ -94,6 +94,7 @@ const base = (overrides: Partial<State> = {}): State => ({
   modal: null,
   conn: { status: "connected" },
   toast: null,
+  settings: { kind: "loading" },
   ...overrides,
 });
 
@@ -1500,6 +1501,37 @@ describe("Intake のビュー", () => {
   test("一覧が空なら j/k は何もしない", () => {
     const s = base({ view: "intake" });
     expect(reduce(s, { type: "move", delta: 1 })).toBe(s);
+  });
+});
+
+describe("設定のビュー", () => {
+  test("設定ビューへ移ってもタスクの選択は消えない", () => {
+    const s = reduce(base({ sel: "t-0a77" }), { type: "view", view: "settings" });
+    expect(s.view).toBe("settings");
+    expect(s.sel).toBe("t-0a77");
+    expect(s.editing).toBe(null);
+  });
+
+  test("設定ビューで j/k は何もしない", () => {
+    const s = base({ view: "settings" });
+    expect(reduce(s, { type: "move", delta: 1 })).toBe(s);
+  });
+
+  test("設定ビューでタスクを選ぶとタスクのビューに戻る", () => {
+    const s = reduce(base({ view: "settings" }), { type: "select", id: "t-7f3a" });
+    expect(s.view).toBe("tasks");
+    expect(s.sel).toBe("t-7f3a");
+  });
+
+  test("読み込んだ設定を持つ", () => {
+    const value = { editorCommand: "code {path}", terminalCommand: "wezterm start --cwd {path}", staleDays: 14 };
+    const s = reduce(base(), { type: "settings", loaded: { kind: "ok", value } });
+    expect(s.settings).toEqual({ kind: "ok", value });
+  });
+
+  test("読み込みの失敗を持つ", () => {
+    const s = reduce(base(), { type: "settings", loaded: { kind: "error", message: "壊れています" } });
+    expect(s.settings.kind).toBe("error");
   });
 });
 
