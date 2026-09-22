@@ -96,7 +96,7 @@ function UnguidedNote({ files, guide, truncated }: { files: DiffFile[]; guide: G
 
 /** 影響の段階。文字そのもので段階が分かるので、色に頼らない */
 function ImpactBadge({ impact }: { impact: Risk["impact"] }) {
-  return <span className={`impact impact-${impact}`}>{IMPACT_LABEL[impact]}</span>;
+  return <span className={`impact impact-${impact}`}><i aria-hidden="true" />{IMPACT_LABEL[impact]}</span>;
 }
 
 /** Risk が指す箇所。今の diff にある箇所はその場所へ飛ぶボタン、無い箇所は文字だけ */
@@ -146,8 +146,9 @@ export function DecisionItem({ d }: { d: Decision }) {
 export function RiskNote({ risks }: { risks: Risk[] | undefined }): ReactNode {
   if (!risks?.length) return null;
   const { shown, folded } = splitRisks(risks);
+  const top = IMPACT_ORDER.find((i) => risks.some((r) => r.impact === i))!;
   return (
-    <div className="hunk-risk" role="note">
+    <div className={`hunk-risk impact-${top}`} role="note">
       {shown.map((r) => (
         <div key={r.id}>
           <div className="risk-head"><ImpactBadge impact={r.impact} /><b>{RISK_LABEL[r.kind]}</b></div>
