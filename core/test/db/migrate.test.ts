@@ -280,7 +280,9 @@ const COLUMNS = {
     intake_id: true,
     run_id: true,
     questions: true,
+    assumptions: true,
     answers: true,
+    assumption_responses: true,
     created_at: true,
     answered_at: true,
   },
@@ -503,6 +505,7 @@ test("開き直してもマイグレーションは二度流れず、データ�
     "0009_intake",
     "0010_intake_revision",
     "0011_task_workflow_pin",
+    "0012_intake_assumptions",
   ]);
   await first.destroy();
 
@@ -520,6 +523,7 @@ test("開き直してもマイグレーションは二度流れず、データ�
       "0009_intake",
       "0010_intake_revision",
       "0011_task_workflow_pin",
+      "0012_intake_assumptions",
     ]);
     assert.equal((await second.selectFrom("projects").selectAll().execute()).length, 1);
   } finally {
@@ -557,6 +561,7 @@ test("pending_feed を足す前に作られたDBファイルは、行を保っ�
       "0009_intake",
       "0010_intake_revision",
       "0011_task_workflow_pin",
+      "0012_intake_assumptions",
     ]);
     const old = await getTask(d, "old");
     assert.equal(old?.state, "suspended", "既存の行は残る");

@@ -9,12 +9,12 @@ import {
   latestDraft,
   listLiveIntakeTasks,
   listProcesses,
-  listQuestionSets,
   type NewIntakeComment,
   recordHumanDone,
   retireProcesses,
   updateIntake,
 } from "../db/intakes.ts";
+import { loadQuestionSets } from "./questionSet.ts";
 import type { Db, IntakeRow, IntakeState } from "../db/schema.ts";
 import { getProject, type TaskState } from "../db/tasks.ts";
 import { cancelTask } from "../domain/cancelTask.ts";
@@ -22,7 +22,6 @@ import { assertIntakeTransition, isIntakeTerminal } from "../domain/intakeStates
 import { killStaleChild, type ProcessProbe } from "../domain/recovery.ts";
 import type { Tracker } from "../github/tracker.ts";
 import type { Pfd } from "../../../shared/intake/pfd.ts";
-import type { Question } from "../../../shared/intake/question.ts";
 import { validateAnswers } from "../../../shared/intake/validateQuestion.ts";
 import { loadApprovedPlan } from "./dispatch.ts";
 import { computeProcessStatuses } from "./pfd/status.ts";
@@ -90,7 +89,13 @@ export async function startIntake(
 
 export async function answerIntake(
   db: Db,
-  o: { intakeId: string; questionSetId: number; answers: unknown; logRoot: string },
+  o: {
+    intakeId: string;
+    questionSetId: number;
+    answers: unknown;
+    assumptionResponses: unknown;
+    logRoot: string;
+  },
 ): Promise<IntakeTransition> {
   const intake = await requireIntake(db, o.intakeId);
   if (intake.state !== "answering") {
@@ -99,14 +104,21 @@ export async function answerIntake(
   const revising = intake.revising === 1;
   assertIntakeTransition("answering", "decomposing", revising);
 
-  const set = (await listQuestionSets(db, intake.id)).find((q) => q.id === o.questionSetId);
+  const set = (await loadQuestionSets(db, intake.id)).find((q) => q.id === o.questionSetId);
   if (!set) throw new Error("質問のまとまりがありません");
-  if (set.answers !== null) throw new Error("すでに回答されています");
-  const validated = validateAnswers(JSON.parse(set.questions) as Question[], o.answers);
+  if (set.reply !== null) throw new Error("すでに回答されています");
+  const validated = validateAnswers(set, {
+    answers: o.answers,
+    assumptionResponses: o.assumptionResponses,
+  });
   if (!validated.ok) throw new Error(validated.issues.join("\n"));
 
   await db.transaction().execute(async (trx) => {
-    if (!await answerQuestionSet(trx, set.id, JSON.stringify(validated.answers))) {
+    const reply = {
+      answers: JSON.stringify(validated.answers),
+      assumption_responses: JSON.stringify(validated.assumptionResponses),
+    };
+    if (!await answerQuestionSet(trx, set.id, reply)) {
       throw new Error("すでに回答されています");
     }
     await updateIntake(trx, intake.id, { state: "decomposing" }, { requireState: "answering" });

@@ -27,7 +27,7 @@ import type {
 import { toolInputParts } from "../../shared/toolInput.ts";
 import type { GuideView } from "./guide";
 import type { AppSettings, ConnectionStatus } from "./daemon/client";
-import type { Answer } from "../../shared/intake/question.ts";
+import type { QuestionSetReply } from "../../shared/intake/validateQuestion.ts";
 import {
   canRejectIntake,
   commentTarget,
@@ -623,7 +623,7 @@ export type Action =
   | { type: "comment.delete"; index: number }
   | { type: "overall"; text: string }
   | { type: "drafts.loaded"; drafts: { tasks: Record<string, Draft>; intakes: Record<string, IntakeDraft> } }
-  | { type: "intake.answers"; id: string; questionSetId: number; answers: Answer[] }
+  | { type: "intake.answers"; id: string; questionSetId: number; reply: QuestionSetReply }
   | { type: "intake.comment.add"; id: string; key: string; body: string }
   | { type: "intake.comment.delete"; id: string; index: number }
   | { type: "intake.whole"; id: string; body: string }
@@ -809,7 +809,7 @@ export function reduce(s: State, a: Action): State {
     case "intake.answers":
       return {
         ...s,
-        intakeDrafts: setIntakeDraft(s, a.id, { answers: { questionSetId: a.questionSetId, answers: a.answers } }),
+        intakeDrafts: setIntakeDraft(s, a.id, { answers: { questionSetId: a.questionSetId, ...a.reply } }),
       };
     case "intake.comment.add": {
       const target = commentTarget(a.key);

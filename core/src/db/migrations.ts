@@ -724,6 +724,25 @@ const migrations: Record<string, Migration> = {
       await db.schema.alterTable("tasks").addColumn("workflow_setup", "text").execute();
     },
   },
+
+  /**
+   * 質問のまとまりに仮定と、仮定への応答を足す（Intake PRD Q-9）。既存の行は仮定を
+   * 持たないので assumptions は空配列にする。回答済みの既存の行の応答も空配列にし、
+   * 「answers が非 null なら assumption_responses も非 null」を保つ。
+   */
+  "0012_intake_assumptions": {
+    // deno-lint-ignore no-explicit-any
+    async up(db: Kysely<any>) {
+      await db.schema.alterTable("intake_question_sets")
+        .addColumn("assumptions", "text", (c) => c.notNull().defaultTo("[]"))
+        .execute();
+      await db.schema.alterTable("intake_question_sets")
+        .addColumn("assumption_responses", "text")
+        .execute();
+      await sql`UPDATE intake_question_sets SET assumption_responses = '[]'
+        WHERE answers IS NOT NULL`.execute(db);
+    },
+  },
 };
 
 /** ファイルを動的 import しない（権限も要らず、deno check で型検査される）。 */

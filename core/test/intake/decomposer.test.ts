@@ -8,13 +8,16 @@ test("decomposerJsonSchema はトップレベルが 1 つのオブジェクト",
   assert.equal("anyOf" in schema, false);
   assert.equal("oneOf" in schema, false);
   const properties = schema.properties as Record<string, unknown>;
-  for (const key of ["kind", "questions", "pfd", "replies"]) assert.ok(key in properties, key);
+  for (const key of ["kind", "questions", "assumptions", "pfd", "replies"]) {
+    assert.ok(key in properties, key);
+  }
 });
 
 test("質問の出力を読める", () => {
   const parsed = decomposerOutputSchema.safeParse({
     kind: "questions",
     questions: [],
+    assumptions: [],
     pfd: null,
     replies: null,
   });

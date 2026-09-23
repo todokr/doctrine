@@ -3,9 +3,14 @@ import { buildFeedback } from "../../shared/intake/feedback.ts";
 import type { GhStatus } from "../../shared/intake/github.ts";
 import type { Pfd, Process } from "../../shared/intake/pfd.ts";
 import type { PrFact, ProcessStatus } from "../../shared/intake/processStatus.ts";
-import type { Answer, Question } from "../../shared/intake/question.ts";
+import type { Answer, AssumptionResponse, Question } from "../../shared/intake/question.ts";
 import type { IntakeState } from "../../shared/intake/state.ts";
-import { answerChoiceIssue } from "../../shared/intake/validateQuestion.ts";
+import {
+  answerChoiceIssue,
+  assumptionResponseIssue,
+  type QuestionSetContent,
+  type QuestionSetReply,
+} from "../../shared/intake/validateQuestion.ts";
 import type {
   IntakeComment,
   IntakeDetail,
@@ -18,7 +23,8 @@ import type {
 import { LOOK, parsePfdKey, pfdKey } from "./pfd";
 import type { Project, Task } from "./types";
 
-export type AnswerIssue = { questionId: string; message: string };
+/** targetId は質問か仮定の id */
+export type AnswerIssue = { targetId: string; message: string };
 
 const CHOICE_MESSAGE: Record<Question["kind"], string> = {
   single: "選択肢を 1 つ選ぶか、その他に書きます",
@@ -44,18 +50,50 @@ export function normalizeAnswers(questions: Question[], answers: Answer[]): Answ
   });
 }
 
-/** 送れない質問ごとに 1 件。空なら送れる */
-export function answerIssues(questions: Question[], answers: Answer[]): AnswerIssue[] {
+/** 仮定の順にそろえる。仮定に無い応答と、まだ選んでいない仮定の分は落とす */
+export function normalizeResponses(
+  set: QuestionSetContent,
+  responses: AssumptionResponse[],
+): AssumptionResponse[] {
+  return set.assumptions.flatMap((a) => responses.filter((r) => r.assumptionId === a.id).slice(0, 1));
+}
+
+/** 送る形にそろえた回答と応答 */
+export function normalizeReply(set: QuestionSetContent, reply: QuestionSetReply): QuestionSetReply {
+  return {
+    answers: normalizeAnswers(set.questions, reply.answers),
+    assumptionResponses: normalizeResponses(set, reply.assumptionResponses),
+  };
+}
+
+/** 送れない質問・仮定ごとに 1 件。空なら送れる */
+export function answerIssues(set: QuestionSetContent, reply: QuestionSetReply): AnswerIssue[] {
   const issues: AnswerIssue[] = [];
-  normalizeAnswers(questions, answers).forEach((answer, i) => {
-    const question = questions[i];
+  normalizeAnswers(set.questions, reply.answers).forEach((answer, i) => {
+    const question = set.questions[i];
     if (answer.optionIds.some((id) => !question.options.some((o) => o.id === id))) {
-      issues.push({ questionId: question.id, message: "選択肢が見つかりません" });
+      issues.push({ targetId: question.id, message: "選択肢が見つかりません" });
     } else if (answerChoiceIssue(question, answer) !== null) {
-      issues.push({ questionId: question.id, message: CHOICE_MESSAGE[question.kind] });
+      issues.push({ targetId: question.id, message: CHOICE_MESSAGE[question.kind] });
     }
   });
+  for (const assumption of set.assumptions) {
+    const response = reply.assumptionResponses.find((r) => r.assumptionId === assumption.id);
+    if (response === undefined) {
+      issues.push({ targetId: assumption.id, message: "認めるか書き直すかを選びます" });
+    } else if (assumptionResponseIssue(response) !== null) {
+      issues.push({ targetId: assumption.id, message: "正しい内容を書きます" });
+    }
+  }
   return issues;
+}
+
+/** assumptionId の応答を next で置き換えた新しい配列 */
+export function updateResponse(
+  responses: AssumptionResponse[],
+  next: AssumptionResponse,
+): AssumptionResponse[] {
+  return [...responses.filter((r) => r.assumptionId !== next.assumptionId), next];
 }
 
 /** questionId の回答に patch を重ねた新しい配列。other と note は生の文字列のまま持つ */
@@ -174,8 +212,8 @@ export function intakeFace(state: IntakeState): IntakeFace {
 /** UI spec 11 章。comments には whole も入る */
 export type IntakeDraft = {
   comments: NewComment[];
-  /** 回答中の答え。questionSetId が今の未回答のまとまりと違えば使わない */
-  answers: { questionSetId: number; answers: Answer[] } | null;
+  /** 回答中の答えと仮定への応答。questionSetId が今の未回答のまとまりと違えば使わない */
+  answers: { questionSetId: number; answers: Answer[]; assumptionResponses: AssumptionResponse[] } | null;
   /** 人のプロセスの「決めた内容」。キーは process_id */
   notes: Record<string, string>;
 };
@@ -184,13 +222,14 @@ export const EMPTY_INTAKE_DRAFT: IntakeDraft = { comments: [], answers: null, no
 
 /** 回答待ちの面が出す、未回答のまとまり。無ければ null */
 export function openQuestionSet(detail: IntakeDetail): IntakeQuestionSet | null {
-  const open = detail.question_sets.filter((q) => q.answers === null);
+  const open = detail.question_sets.filter((q) => q.reply === null);
   return open[open.length - 1] ?? null;
 }
 
-/** 下書きの答え。まとまりが違えば空配列 */
-export function draftAnswers(draft: IntakeDraft, questionSetId: number): Answer[] {
-  return draft.answers?.questionSetId === questionSetId ? draft.answers.answers : [];
+/** 下書きの答えと応答。まとまりが違えば空 */
+export function draftReply(draft: IntakeDraft, questionSetId: number): QuestionSetReply {
+  if (draft.answers?.questionSetId !== questionSetId) return { answers: [], assumptionResponses: [] };
+  return { answers: draft.answers.answers, assumptionResponses: draft.answers.assumptionResponses };
 }
 
 /** 図で選んだ要素のキー（a:<id> / p:<id>）を、コメントの対象にする */
@@ -286,7 +325,7 @@ export function intakeHistory(detail: IntakeDetail): IntakeHistoryEntry[] {
 
   const entries: IntakeHistoryEntry[] = [
     ...detail.question_sets
-      .filter((set) => set.answers !== null)
+      .filter((set) => set.reply !== null)
       .map((set): IntakeHistoryEntry => ({ kind: "questions", at: set.created_at, set })),
     ...drafts.map((d, i): IntakeHistoryEntry => ({
       kind: "draft",

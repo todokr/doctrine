@@ -145,7 +145,7 @@ export function PfdElementPanel(p: {
             </Sec>
             {info.decision && (
               <Sec title="決定">
-                <span>{info.decision.prompt ?? `質問 ${info.decision.questionId}`}</span>
+                <span>{info.decision.prompt ?? `質問か仮定 ${info.decision.id}`}</span>
                 <span>{info.decision.answer ?? "回答が見つかりません"}</span>
               </Sec>
             )}

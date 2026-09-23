@@ -1052,7 +1052,7 @@ describe("Intake の下書き", () => {
     const draft: IntakeDraft = {
       ...EMPTY_INTAKE_DRAFT,
       comments: [{ target_kind: "whole", target_id: null, body: "全体" }],
-      answers: { questionSetId: 2, answers: [] },
+      answers: { questionSetId: 2, answers: [], assumptionResponses: [] },
     };
     const s = base({
       intakeSel: "i1",

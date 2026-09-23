@@ -1,18 +1,33 @@
 import { z } from "zod/v4";
-import { type Answer, answerSetSchema, type Question, questionSetSchema } from "./question.ts";
+import {
+  type Answer,
+  answerSetSchema,
+  type Assumption,
+  type AssumptionResponse,
+  assumptionResponseSetSchema,
+  assumptionSetSchema,
+  type Question,
+  questionSetSchema,
+} from "./question.ts";
+
+/** 一度に届く質問と仮定のまとまり。 */
+export type QuestionSetContent = { questions: Question[]; assumptions: Assumption[] };
+
+/** 質問のまとまりへの人の応答。 */
+export type QuestionSetReply = { answers: Answer[]; assumptionResponses: AssumptionResponse[] };
 
 export type QuestionsValidation =
-  | { ok: true; questions: Question[] }
+  | ({ ok: true } & QuestionSetContent)
   | { ok: false; issues: string[] };
 
 export type AnswersValidation =
-  | { ok: true; answers: Answer[] }
+  | ({ ok: true } & QuestionSetReply)
   | { ok: false; issues: string[] };
 
 // 誤りの理由は zod 同梱の日本語ロケールに任せる。z.config() はアプリ側のメッセージまで変えるので使わない
 const parseOptions = { error: z.locales.ja().localeError };
 
-// パスは分解エージェントの出力（{ kind: "questions", questions }）の中の位置と合わせる
+// パスは分解エージェントの出力（{ kind: "questions", questions, assumptions }）の中の位置と合わせる
 function formatShapeIssues(root: string, issues: z.core.$ZodIssue[]): string[] {
   return issues.map((issue) => [root, ...issue.path].join(".") + `: ${issue.message}`);
 }
@@ -28,35 +43,17 @@ function duplicateIndexes(ids: string[]): number[] {
   return duplicates;
 }
 
-function checkRecommendation(question: Question, path: string, issues: string[]): void {
-  const { recommendation, options } = question;
-  if (recommendation === null) return;
-  const optionIds = new Set(options.map((option) => option.id));
-  const ids = recommendation.optionIds;
-  const at = `${path}.recommendation`;
-
-  ids.forEach((id, i) => {
-    if (!optionIds.has(id)) issues.push(`${at}.optionIds.${i}: 存在しない選択肢の id です: ${id}`);
-  });
-  for (const i of duplicateIndexes(ids)) {
-    issues.push(`${at}.optionIds.${i}: id が重複しています: ${ids[i]}`);
-  }
-
-  if (question.kind === "single" && ids.length !== 1) {
-    issues.push(`${at}.optionIds: single の推奨は選択肢 1 つです`);
-  } else if (question.kind === "multiple" && ids.length === 0) {
-    issues.push(`${at}.optionIds: multiple の推奨に選択肢がありません`);
-  } else if (question.kind === "free" && (ids.length > 0 || recommendation.text === null)) {
-    issues.push(`${at}.text: free の推奨は text で書きます`);
-  }
-}
-
-// id の重複と参照先の実在、kind ごとの約束を確かめる。形は通っている前提
-function checkQuestions(questions: Question[]): string[] {
+// id の重複と kind ごとの約束を確かめる。形は通っている前提。
+// 質問と仮定の id は成果物の decision が区別せずに指すので、互いにも重ねない
+function checkQuestions({ questions, assumptions }: QuestionSetContent): string[] {
   const issues: string[] = [];
 
-  for (const i of duplicateIndexes(questions.map((q) => q.id))) {
-    issues.push(`questions.${i}.id: id が重複しています: ${questions[i].id}`);
+  const ids = [
+    ...questions.map((q, i) => ({ id: q.id, at: `questions.${i}.id` })),
+    ...assumptions.map((a, i) => ({ id: a.id, at: `assumptions.${i}.id` })),
+  ];
+  for (const i of duplicateIndexes(ids.map((x) => x.id))) {
+    issues.push(`${ids[i].at}: id が重複しています: ${ids[i].id}`);
   }
 
   questions.forEach((question, i) => {
@@ -71,8 +68,6 @@ function checkQuestions(questions: Question[]): string[] {
     } else if (question.kind !== "free" && question.options.length === 0) {
       issues.push(`${path}.options: ${question.kind} の質問に選択肢がありません`);
     }
-
-    checkRecommendation(question, path, issues);
 
     question.materials.forEach((material, j) => {
       if (material.kind !== "table") return;
@@ -89,15 +84,21 @@ function checkQuestions(questions: Question[]): string[] {
   return issues;
 }
 
-/** 質問のまとまりを、形と整合性の両面から確かめる。例外は投げない。 */
-export function validateQuestions(input: unknown): QuestionsValidation {
-  const parsed = questionSetSchema.safeParse(input, parseOptions);
-  if (!parsed.success) {
-    return { ok: false, issues: formatShapeIssues("questions", parsed.error.issues) };
-  }
-  const issues = checkQuestions(parsed.data);
+/** 質問と仮定のまとまりを、形と整合性の両面から確かめる。例外は投げない。 */
+export function validateQuestions(
+  input: { questions: unknown; assumptions: unknown },
+): QuestionsValidation {
+  const questions = questionSetSchema.safeParse(input.questions, parseOptions);
+  const assumptions = assumptionSetSchema.safeParse(input.assumptions, parseOptions);
+  const shapeIssues = [
+    ...(questions.success ? [] : formatShapeIssues("questions", questions.error.issues)),
+    ...(assumptions.success ? [] : formatShapeIssues("assumptions", assumptions.error.issues)),
+  ];
+  if (!questions.success || !assumptions.success) return { ok: false, issues: shapeIssues };
+  const content = { questions: questions.data, assumptions: assumptions.data };
+  const issues = checkQuestions(content);
   if (issues.length > 0) return { ok: false, issues };
-  return { ok: true, questions: parsed.data };
+  return { ok: true, ...content };
 }
 
 /** 質問 1 件への答えが、種類ごとの約束（single は 1 つか other など）を満たすか。満たせば null */
@@ -117,6 +118,48 @@ export function answerChoiceIssue(question: Question, answer: Answer): string | 
     return "free の回答は other に書きます";
   }
   return null;
+}
+
+/** 仮定への応答 1 件が約束（書き直すなら内容がある）を満たすか。満たせば null */
+export function assumptionResponseIssue(response: AssumptionResponse): string | null {
+  if (response.verdict === "corrected" && response.correction.trim() === "") {
+    return "書き直した内容がありません";
+  }
+  return null;
+}
+
+// 仮定との照合。仮定は検証済みとして信頼する
+function checkAssumptionResponses(
+  assumptions: Assumption[],
+  responses: AssumptionResponse[],
+): string[] {
+  const issues: string[] = [];
+  const ids = new Set(assumptions.map((a) => a.id));
+  const responded = new Set<string>();
+
+  responses.forEach((response, i) => {
+    const path = `assumptionResponses.${i}`;
+    if (!ids.has(response.assumptionId)) {
+      issues.push(`${path}.assumptionId: 存在しない仮定の id です: ${response.assumptionId}`);
+      return;
+    }
+    if (responded.has(response.assumptionId)) {
+      issues.push(
+        `${path}.assumptionId: 同じ仮定への応答が重複しています: ${response.assumptionId}`,
+      );
+    }
+    responded.add(response.assumptionId);
+    const issue = assumptionResponseIssue(response);
+    if (issue !== null) issues.push(`${path}: ${issue}`);
+  });
+
+  for (const assumption of assumptions) {
+    if (!responded.has(assumption.id)) {
+      issues.push(`assumptionResponses: 応答がありません: ${assumption.id}`);
+    }
+  }
+
+  return issues;
 }
 
 // 質問との照合。質問は検証済みとして信頼する
@@ -159,14 +202,23 @@ function checkAnswers(questions: Question[], answers: Answer[]): string[] {
 }
 
 /**
- * 人の回答を、すでに検証を通った質問のまとまりに照らして確かめる。例外は投げない。
+ * 人の回答と仮定への応答を、すでに検証を通った質問のまとまりに照らして確かめる。例外は投げない。
  */
-export function validateAnswers(questions: Question[], input: unknown): AnswersValidation {
-  const parsed = answerSetSchema.safeParse(input, parseOptions);
-  if (!parsed.success) {
-    return { ok: false, issues: formatShapeIssues("answers", parsed.error.issues) };
-  }
-  const issues = checkAnswers(questions, parsed.data);
+export function validateAnswers(
+  set: QuestionSetContent,
+  input: { answers: unknown; assumptionResponses: unknown },
+): AnswersValidation {
+  const answers = answerSetSchema.safeParse(input.answers, parseOptions);
+  const responses = assumptionResponseSetSchema.safeParse(input.assumptionResponses, parseOptions);
+  const shapeIssues = [
+    ...(answers.success ? [] : formatShapeIssues("answers", answers.error.issues)),
+    ...(responses.success ? [] : formatShapeIssues("assumptionResponses", responses.error.issues)),
+  ];
+  if (!answers.success || !responses.success) return { ok: false, issues: shapeIssues };
+  const issues = [
+    ...checkAnswers(set.questions, answers.data),
+    ...checkAssumptionResponses(set.assumptions, responses.data),
+  ];
   if (issues.length > 0) return { ok: false, issues };
-  return { ok: true, answers: parsed.data };
+  return { ok: true, answers: answers.data, assumptionResponses: responses.data };
 }

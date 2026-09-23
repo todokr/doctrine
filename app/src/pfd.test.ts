@@ -2,7 +2,7 @@ import { describe, expect, test } from "vitest";
 import type { Pfd } from "../../shared/intake/pfd.ts";
 import type { ProcessStatus } from "../../shared/intake/processStatus.ts";
 import type { IntakeProcessView } from "../../shared/protocol.ts";
-import { ANSWERS, INTAKE_ACTIVE, PFD_LONG_LABELS, PFD_SAMPLE, PFD_STATUSES_A, PFD_STATUSES_B, QUESTIONS } from "./fixtures";
+import { INTAKE_ACTIVE, INTAKE_REVIEWING, PFD_LONG_LABELS, PFD_SAMPLE, PFD_STATUSES_A, PFD_STATUSES_B } from "./fixtures";
 import { buildPfdView, frozenIds, LOOK, statusCounts, textWidth, parsePfdKey, pfdElement, pfdKey, processStages, type PfdView } from "./pfd";
 
 /** 成果物 id の配列と、[id, 入力, 出力] の配列から PFD を作る。given は goal に無く、どのプロセスの出力でもない成果物 */
@@ -268,15 +268,29 @@ describe("pfdElement", () => {
   });
 
   test("決定の成果物は質問と回答の文を持つ", () => {
-    const policy = pfdElement(PFD_SAMPLE, "a:policy", [{ questions: QUESTIONS, answers: ANSWERS }]);
+    const policy = pfdElement(PFD_SAMPLE, "a:policy", INTAKE_REVIEWING.question_sets);
     if (policy?.kind !== "artifact") throw new Error("成果物のはず");
-    expect(policy.decision?.questionId).toBe("q1");
+    expect(policy.decision?.id).toBe("q1");
     expect(policy.decision?.prompt).toBe("書き込みをどう扱うか");
     expect(policy.decision?.answer).toContain("同期");
 
     const bare = pfdElement(PFD_SAMPLE, "a:policy");
     if (bare?.kind !== "artifact") throw new Error("成果物のはず");
-    expect(bare.decision).toEqual({ questionId: "q1", prompt: null, answer: null });
+    expect(bare.decision).toEqual({ id: "q1", prompt: null, answer: null });
+  });
+
+  test("仮定を指す決定の成果物は、仮定の結論と、書き直したかを持つ", () => {
+    const pfd = {
+      ...PFD_SAMPLE,
+      artifacts: PFD_SAMPLE.artifacts.map((a) => (a.id === "policy" ? { ...a, decision: "s2" } : a)),
+    };
+    const policy = pfdElement(pfd, "a:policy", INTAKE_REVIEWING.question_sets);
+    if (policy?.kind !== "artifact") throw new Error("成果物のはず");
+    expect(policy.decision).toEqual({
+      id: "s2",
+      prompt: "設定は既存の `settings.json` に足す",
+      answer: "人が書き直した: 設定は別のファイルに分ける（エージェントの仮定: 設定は既存の `settings.json` に足す）",
+    });
   });
 
   test("プロセスの段と入出力", () => {

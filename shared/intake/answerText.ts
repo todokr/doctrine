@@ -1,4 +1,5 @@
-import type { Answer, Question } from "./question.ts";
+import type { Answer, Assumption, AssumptionResponse, Question } from "./question.ts";
+import type { QuestionSetContent, QuestionSetReply } from "./validateQuestion.ts";
 
 function describeAnswer(q: Question, a: Answer | undefined): string[] {
   if (a === undefined) return ["回答なし"];
@@ -12,41 +13,78 @@ function describeAnswer(q: Question, a: Answer | undefined): string[] {
   return lines.length > 0 ? lines : ["回答なし"];
 }
 
+// 認めたか書き直したかを、下流の prompt でも見分けられる文にする
+function describeResponse(a: Assumption, r: AssumptionResponse): string {
+  return r.verdict === "accepted"
+    ? `エージェントの仮定を人が認めた: ${a.statement}`
+    : `人が書き直した: ${r.correction}（エージェントの仮定: ${a.statement}）`;
+}
+
 /**
- * 回答済みの質問のまとまりから、質問 id → 回答の文章 を作る。buildTaskPrompt の decisions に渡す。
- * 未回答のまとまり（answers が null）は飛ばす。
+ * 回答済みのまとまりから、質問 id・仮定 id → 決定の文章 を作る。buildTaskPrompt の decisions に渡す。
+ * 未回答のまとまり（reply が null）は飛ばす。
  */
 export function decisionTexts(
-  sets: readonly { questions: Question[]; answers: Answer[] | null }[],
+  sets: readonly (QuestionSetContent & { reply: QuestionSetReply | null })[],
 ): Record<string, string> {
   const texts: Record<string, string> = {};
   for (const set of sets) {
-    if (set.answers === null) continue;
+    if (set.reply === null) continue;
     for (const q of set.questions) {
-      const a = set.answers.find((x) => x.questionId === q.id);
+      const a = set.reply.answers.find((x) => x.questionId === q.id);
       if (a === undefined) continue;
       texts[q.id] = describeAnswer(q, a).join("、");
+    }
+    for (const a of set.assumptions) {
+      const r = set.reply.assumptionResponses.find((x) => x.assumptionId === a.id);
+      if (r === undefined) continue;
+      texts[a.id] = describeResponse(a, r);
     }
   }
   return texts;
 }
 
 /**
- * 人の回答を、分解の会話へ返す文面にする。画面のモーダルと同じ関数をデーモンが使う。
+ * 人の回答と仮定への応答を、分解の会話へ返す文面にする。画面のモーダルと同じ関数をデーモンが使う。
  * 回答の検証は validateAnswers の役目で、ここでは投げない。
  */
-export function buildAnswerText(questions: Question[], answers: Answer[]): string {
-  const lines = ["質問への回答です。", ""];
-  for (const q of questions) {
-    lines.push(`### ${q.id}: ${q.prompt}`, "");
-    const a = answers.find((x) => x.questionId === q.id);
-    for (const l of describeAnswer(q, a)) lines.push(`- ${l}`);
+export function buildAnswerText(set: QuestionSetContent, reply: QuestionSetReply): string {
+  const lines: string[] = [];
+  if (set.questions.length > 0) {
+    lines.push("## 質問への回答", "");
+    for (const q of set.questions) {
+      lines.push(`### ${q.id}: ${q.prompt}`, "");
+      const a = reply.answers.find((x) => x.questionId === q.id);
+      for (const l of describeAnswer(q, a)) lines.push(`- ${l}`);
+      lines.push("");
+    }
+  }
+
+  const responded = set.assumptions.flatMap((a) => {
+    const r = reply.assumptionResponses.find((x) => x.assumptionId === a.id);
+    return r === undefined ? [] : [{ a, r }];
+  });
+  const corrected = responded.filter(({ r }) => r.verdict === "corrected");
+  const accepted = responded.filter(({ r }) => r.verdict === "accepted");
+  if (corrected.length > 0) {
+    lines.push("## 人が書き直した仮定", "");
+    for (const { a, r } of corrected) {
+      lines.push(`### ${a.id}: ${a.statement}`, "");
+      if (r.verdict === "corrected") lines.push(`- 正しい内容: ${r.correction}`);
+      lines.push("");
+    }
+  }
+  if (accepted.length > 0) {
+    lines.push("## 人が認めた仮定", "");
+    for (const { a } of accepted) lines.push(`- ${a.id}: ${a.statement}`);
     lines.push("");
   }
+
   lines.push(
     '回答を踏まえて分解し、PFD を `kind: "pfd"` で返してください。' +
-      "決まった事項のうちプロセスの前提になるものは、`decision` にその質問の id を入れた " +
+      "決まった事項のうちプロセスの前提になるものは、`decision` にその質問か仮定の id を入れた " +
       "`given: true` の成果物として置きます。" +
+      "書き直された仮定は、書き直された内容を前提にします。" +
       "まだ人に決めてもらう事項が残るなら、質問を返してかまいません。",
   );
   return lines.join("\n");

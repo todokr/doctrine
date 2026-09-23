@@ -1,7 +1,7 @@
 import { test } from "@std/testing/bdd";
 import assert from "node:assert/strict";
 import { checkDecomposerOutput } from "../../src/intake/output.ts";
-import type { Question } from "../../../shared/intake/question.ts";
+import type { Assumption, Question } from "../../../shared/intake/question.ts";
 import { frozenPart } from "../../src/intake/pfd/validate.ts";
 import { example, withDecision } from "./pfd/fixture.ts";
 
@@ -13,29 +13,37 @@ const q = (id: string): Question => ({
     { id: "a", label: "案A", description: "d" },
     { id: "b", label: "案B", description: "d" },
   ],
-  recommendation: null,
   materials: [],
+});
+
+const s = (id: string): Assumption => ({
+  id,
+  statement: "集計は日次で足りる",
+  evidence: [{ kind: "code", path: "src/usage.ts", startLine: 1, endLine: 3, excerpt: "daily()" }],
+  impact: "集計のプロセスが変わる",
 });
 
 type Ctx = Parameters<typeof checkDecomposerOutput>[1];
 const ctx = (o: Partial<Ctx> = {}): Ctx => ({
   purpose: "decompose",
-  askedQuestionIds: new Set(),
-  answeredQuestionIds: new Set(),
+  askedIds: new Set(),
+  decisionIds: new Set(),
   feedbackCount: 0,
   revision: null,
   ...o,
 });
 
-const questionsOut = (questions: Question[]) => ({
+const questionsOut = (questions: Question[], assumptions: Assumption[] = []) => ({
   kind: "questions",
   questions,
+  assumptions,
   pfd: null,
   replies: null,
 });
 const pfdOut = (pfd: unknown, replies: unknown[] = []) => ({
   kind: "pfd",
   questions: null,
+  assumptions: null,
   pfd,
   replies,
 });
@@ -55,7 +63,13 @@ test("形が違えば違反（パスが付く）", () => {
 });
 
 test("kind と中身が食い違えば違反", () => {
-  const raw = { kind: "questions", questions: null, pfd: example(), replies: null };
+  const raw = {
+    kind: "questions",
+    questions: null,
+    assumptions: null,
+    pfd: example(),
+    replies: null,
+  };
   assert.ok(issuesOf(checkDecomposerOutput(raw, ctx())).length > 0);
 });
 
@@ -69,7 +83,7 @@ test("調査の実行が PFD を返したら違反", () => {
   const issues = issuesOf(
     checkDecomposerOutput(pfdOut(example()), ctx({ purpose: "investigate" })),
   );
-  assert.match(issues.join("\n"), /調査の実行は質問だけを返します/);
+  assert.match(issues.join("\n"), /調査の実行は質問と仮定だけを返します/);
 });
 
 test("調査の実行の空の質問は通る", () => {
@@ -79,14 +93,38 @@ test("調査の実行の空の質問は通る", () => {
 
 test("分解の実行の空の質問は違反", () => {
   const issues = issuesOf(checkDecomposerOutput(questionsOut([]), ctx()));
-  assert.match(issues.join("\n"), /質問が無ければ PFD を返します/);
+  assert.match(issues.join("\n"), /質問も仮定も無ければ PFD を返します/);
+});
+
+test("分解の実行でも、仮定だけのまとまりは通る", () => {
+  const r = checkDecomposerOutput(questionsOut([], [s("s1")]), ctx());
+  assert.equal(r.ok, true);
+  if (r.ok && r.output.kind === "questions") assert.deepEqual(r.output.assumptions, [s("s1")]);
 });
 
 test("前に出した質問と同じ id は違反", () => {
   const issues = issuesOf(
-    checkDecomposerOutput(questionsOut([q("q1")]), ctx({ askedQuestionIds: new Set(["q1"]) })),
+    checkDecomposerOutput(questionsOut([q("q1")]), ctx({ askedIds: new Set(["q1"]) })),
   );
-  assert.match(issues.join("\n"), /questions\.0\.id: 前に出した質問と id が重複しています: q1/);
+  assert.match(
+    issues.join("\n"),
+    /questions\.0\.id: 前に出した質問か仮定と id が重複しています: q1/,
+  );
+});
+
+test("前に出した仮定と同じ id は違反", () => {
+  const issues = issuesOf(
+    checkDecomposerOutput(questionsOut([], [s("s1")]), ctx({ askedIds: new Set(["s1"]) })),
+  );
+  assert.match(
+    issues.join("\n"),
+    /assumptions\.0\.id: 前に出した質問か仮定と id が重複しています: s1/,
+  );
+});
+
+test("kind が pfd なのに assumptions があれば違反", () => {
+  const raw = { ...pfdOut(example()), assumptions: [] };
+  assert.ok(issuesOf(checkDecomposerOutput(raw, ctx())).length > 0);
 });
 
 test("質問の整合性の違反を返す", () => {
@@ -104,7 +142,7 @@ test("PFD の規則違反を返す", () => {
 test("決定の成果物は答えのある質問を指せば通る", () => {
   const r = checkDecomposerOutput(
     pfdOut(withDecision()),
-    ctx({ answeredQuestionIds: new Set(["q1"]) }),
+    ctx({ decisionIds: new Set(["q1"]) }),
   );
   assert.equal(r.ok, true);
 });
