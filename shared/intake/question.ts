@@ -9,19 +9,6 @@ const optionSchema = z.strictObject({
   description: z.string().describe(`この選択肢を選ぶと何が起きるか。${prose}`),
 });
 
-const recommendationSchema = z.strictObject({
-  optionIds: z
-    .array(z.string())
-    .describe(
-      "推す選択肢の id。single は 1 つ、multiple は 1 つ以上、free は空配列",
-    ),
-  text: z
-    .string()
-    .nullable()
-    .describe(`free の質問で推す答え。それ以外は null でもよい。${prose}`),
-  reason: z.string().describe(`推す理由。${prose}`),
-});
-
 export const materialSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("text"),
@@ -62,27 +49,72 @@ export const questionSchema = z.strictObject({
   kind: z
     .enum(["single", "multiple", "free"])
     .describe("single: 1 つ選ぶ / multiple: 1 つ以上選ぶ / free: 選択肢を持たず文章で答える"),
-  options: z.array(optionSchema).describe("選択肢。free では空配列"),
-  recommendation: recommendationSchema
-    .nullable()
-    .describe("推奨とその理由。推奨が無ければ null"),
+  options: z.array(optionSchema).describe(
+    "選択肢。free では空配列。説明はどれかを推す書き方をしない",
+  ),
   materials: z.array(materialSchema).describe("判断の材料。無ければ空配列"),
 });
 
 /** 一度に届く質問のまとまり。空配列は「質問は無い」の意味で正しい。 */
 export const questionSetSchema = z.array(questionSchema);
 
+export const evidenceSchema = z.discriminatedUnion("kind", [
+  z.strictObject({
+    kind: z.literal("issue"),
+    commentUrl: z
+      .string()
+      .nullable()
+      .describe("根拠にした Issue のコメントの URL。本文なら null"),
+    quote: z.string().describe("根拠にした箇所の引用"),
+  }),
+  z.strictObject({
+    kind: z.literal("code"),
+    path: z.string().describe("リポジトリのルートからのファイルパス"),
+    startLine: z.number().int().nullable().describe("根拠の最初の行。ファイル全体なら null"),
+    endLine: z.number().int().nullable().describe("根拠の最後の行。ファイル全体なら null"),
+    excerpt: z.string().describe("根拠にしたコードの抜粋"),
+  }),
+  z.strictObject({
+    kind: z.literal("convention"),
+    body: z.string().describe(`根拠にした慣習。どこで何がそうなっているか。${prose}`),
+  }),
+]);
+
+/** Issue・コード・慣習から導いた論点の結論。人が根拠と照らして認めるか書き直す。 */
+export const assumptionSchema = z.strictObject({
+  id: z.string().describe("質問のまとまりの中で一意な id。質問の id とも重ねない"),
+  statement: z.string().describe(`導いた結論。${prose}`),
+  evidence: z.array(evidenceSchema).min(1).describe("結論の根拠。1 つ以上"),
+  impact: z.string().describe(`この仮定が崩れたとき、計画のどこが変わるか。${prose}`),
+});
+
+/** 一度に届く仮定のまとまり。崩れたときの影響が大きい順に並ぶ。 */
+export const assumptionSetSchema = z.array(assumptionSchema);
+
 export const answerSchema = z.strictObject({
   questionId: z.string().describe("答える質問の id"),
   optionIds: z.array(z.string()).describe("選んだ選択肢の id。選ばなければ空配列"),
   other: z.string().nullable().describe("選択肢以外の答え。無ければ null"),
-  note: z.string().nullable().describe("答えへの補足。無ければ null"),
+  note: z.string().nullable().describe("答えへの補足や選んだ理由。無ければ null"),
 });
 
 export const answerSetSchema = z.array(answerSchema);
 
+export const assumptionResponseSchema = z.discriminatedUnion("verdict", [
+  z.strictObject({ assumptionId: z.string(), verdict: z.literal("accepted") }),
+  z.strictObject({
+    assumptionId: z.string(),
+    verdict: z.literal("corrected"),
+    correction: z.string().describe("人が書き直した正しい内容"),
+  }),
+]);
+
+export const assumptionResponseSetSchema = z.array(assumptionResponseSchema);
+
 export type Question = z.infer<typeof questionSchema>;
 export type QuestionOption = z.infer<typeof optionSchema>;
-export type Recommendation = z.infer<typeof recommendationSchema>;
 export type Material = z.infer<typeof materialSchema>;
 export type Answer = z.infer<typeof answerSchema>;
+export type Evidence = z.infer<typeof evidenceSchema>;
+export type Assumption = z.infer<typeof assumptionSchema>;
+export type AssumptionResponse = z.infer<typeof assumptionResponseSchema>;

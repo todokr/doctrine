@@ -45,7 +45,7 @@ export async function loadRevisionConstraints(
  * retired_reused は PfdRule に足さない。validatePfd は案だけで決まる規則を持ち、これは DB の履歴で決まる。
  */
 export function revisionIssues(pfd: Pfd, c: RevisionConstraints): string[] {
-  const issues = validatePfd(pfd, { answeredQuestionIds: new Set(), frozen: c.frozen })
+  const issues = validatePfd(pfd, { decisionIds: new Set(), frozen: c.frozen })
     .filter((v) => v.rule === "frozen_changed")
     .map((v) => `${v.rule} ${v.id}: ${v.message}`);
   for (const p of pfd.processes) {

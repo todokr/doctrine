@@ -85,8 +85,14 @@ steps:
     run: "false"
     onFailure: { goto: a, maxAttempts: 2, onExhausted: suspend }
 `).workflow;
-  assert.equal(decide({ workflow: w, currentStepId: "b", outcome: "failed", attempts: 2 }).kind, "escalate");
-  assert.equal(decide({ workflow: w, currentStepId: "b", outcome: "failed", attempts: 1 }).kind, "goto");
+  assert.equal(
+    decide({ workflow: w, currentStepId: "b", outcome: "failed", attempts: 2 }).kind,
+    "escalate",
+  );
+  assert.equal(
+    decide({ workflow: w, currentStepId: "b", outcome: "failed", attempts: 1 }).kind,
+    "goto",
+  );
 });
 
 test("onFailure が無いステップの失敗は即 failed", () => {
@@ -1781,7 +1787,12 @@ steps:
 
 test("poll が 75 なら waiting で待ち、期限で戻ると同じ行を使い直して attempt を進めない", async () => {
   const { db, root, workflow } = await taskFixture(POLL_WF);
-  const deps = { db, adapter: createMockAdapter({ result: {} }), logRoot: join(root, "logs"), globalLimit: 4 };
+  const deps = {
+    db,
+    adapter: createMockAdapter({ result: {} }),
+    logRoot: join(root, "logs"),
+    globalLimit: 4,
+  };
   writeFileSync(join(root, "verdict"), "75");
 
   await runTask(db, "t1", workflow, deps);
@@ -1790,7 +1801,9 @@ test("poll が 75 なら waiting で待ち、期限で戻ると同じ行を使�
   assert.ok(Date.parse(waiting.waiting_until!) - Date.now() > 25_000, "interval ぶん先");
 
   // 2周目も「まだ」
-  assert.deepEqual(await releaseDueWaiting(db, new Date(Date.parse(waiting.waiting_until!) + 1)), ["t1"]);
+  assert.deepEqual(await releaseDueWaiting(db, new Date(Date.parse(waiting.waiting_until!) + 1)), [
+    "t1",
+  ]);
   await toRunning(db, "t1");
   await runTask(db, "t1", workflow, deps);
   assert.equal((await getTask(db, "t1"))?.state, "waiting");
@@ -1936,14 +1949,22 @@ test("上限に達すると、そのステップの awaiting の行を立てて 
   assert.equal(t.current_step_id, "check");
   assert.deepEqual(
     (await listStepRuns(db, "t1")).map((r) => [r.step_id, r.status]),
-    [["fix", "success"], ["check", "bounced"], ["fix", "success"], ["check", "failed"], ["check", "awaiting"]],
+    [["fix", "success"], ["check", "bounced"], ["fix", "success"], ["check", "failed"], [
+      "check",
+      "awaiting",
+    ]],
   );
 });
 
 test("上限到達の承認は回数を戻して goto 先から続け、feed を渡す", async () => {
   const { db, root, workflow } = await taskFixture(ESCALATE_WF);
   writeFileSync(join(root, "verdict"), "1");
-  const deps = { db, adapter: createMockAdapter({ result: {} }), logRoot: join(root, "logs"), globalLimit: 4 };
+  const deps = {
+    db,
+    adapter: createMockAdapter({ result: {} }),
+    logRoot: join(root, "logs"),
+    globalLimit: 4,
+  };
   await runTask(db, "t1", workflow, deps);
 
   await applyApproval(db, "t1", { approved: true, comment: "" }, workflow);

@@ -77,7 +77,9 @@ export function decide(o: {
   }
   if (o.attempts >= branch.maxAttempts) {
     const reason = `ステップ "${step.id}" が maxAttempts (${branch.maxAttempts}) を超えました`;
-    return branch.onExhausted === "suspend" ? { kind: "escalate", reason } : { kind: "fail", reason };
+    return branch.onExhausted === "suspend"
+      ? { kind: "escalate", reason }
+      : { kind: "fail", reason };
   }
   return { kind: "goto", stepId: branch.goto, feed: branch.feed ?? null };
 }
@@ -420,19 +422,17 @@ export async function runTask(
         // そのロールで resume してしまうのを防ぐ（project.setup は全ワークフローの
         // 先頭に command ステップとして入るので、これは常道の形で必ず踏む）。
         sessionUpsert: role ? { role, session_id: sessionId } : undefined,
-        ...(reopenRunId !== null
-          ? { stepRunReopen: { id: reopenRunId } }
-          : {
-            stepRun: {
-              step_id: step.id,
-              attempt,
-              status: "running",
-              exit_code: null,
-              started_at: new Date().toISOString(),
-              ended_at: null,
-              log_path: logPath,
-            },
-          }),
+        ...(reopenRunId !== null ? { stepRunReopen: { id: reopenRunId } } : {
+          stepRun: {
+            step_id: step.id,
+            attempt,
+            status: "running",
+            exit_code: null,
+            started_at: new Date().toISOString(),
+            ended_at: null,
+            log_path: logPath,
+          },
+        }),
       }))!;
     } catch (e) {
       if (e instanceof StateConflictError) return;
@@ -531,7 +531,11 @@ export async function runTask(
             ended_at: outcome.endedAt,
             duration_ms: outcome.durationMs,
           },
-          outputs: { last_stdout: outcome.stdout, last_stderr: outcome.stderr, exit_code: outcome.exitCode },
+          outputs: {
+            last_stdout: outcome.stdout,
+            last_stderr: outcome.stderr,
+            exit_code: outcome.exitCode,
+          },
         });
       } catch (e) {
         if (e instanceof StateConflictError) {
@@ -560,7 +564,11 @@ export async function runTask(
             ended_at: outcome.endedAt,
             duration_ms: outcome.durationMs,
           },
-          outputs: { last_stdout: outcome.stdout, last_stderr: outcome.stderr, exit_code: outcome.exitCode },
+          outputs: {
+            last_stdout: outcome.stdout,
+            last_stderr: outcome.stderr,
+            exit_code: outcome.exitCode,
+          },
         });
       } catch (e) {
         if (e instanceof StateConflictError) {

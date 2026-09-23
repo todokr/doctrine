@@ -127,7 +127,11 @@ test("PR が既にあれば open-pr は作り直さない", async () => {
 });
 
 test("open-pr: sync の記録があれば PR にコメントし、ファイルを消す", async () => {
-  const r = await runOpenPr({ url: null, parent_url: null }, true, "## develop を取り込んだ\n- a.ts\n");
+  const r = await runOpenPr(
+    { url: null, parent_url: null },
+    true,
+    "## develop を取り込んだ\n- a.ts\n",
+  );
   assert.equal(r.code, 0);
   assert.match(r.args.join(" "), /pr comment --body-file/);
   assert.equal(r.syncNotesLeft, false);
@@ -139,7 +143,11 @@ test("open-pr: sync の記録が無ければコメントしない", async () => 
 });
 
 test("open-pr: PR がまだ無く sync の記録があれば、PR を作ってからコメントし、ファイルを消す", async () => {
-  const r = await runOpenPr({ url: null, parent_url: null }, false, "## develop を取り込んだ\n- a.ts\n");
+  const r = await runOpenPr(
+    { url: null, parent_url: null },
+    false,
+    "## develop を取り込んだ\n- a.ts\n",
+  );
   assert.equal(r.code, 0);
   assert.match(r.args.join(" "), /pr create/);
   assert.match(r.args.join(" "), /pr comment --body-file/);

@@ -140,6 +140,7 @@ async function toReviewing(ctx: DaemonContext, call: Call): Promise<IntakeDetail
     intake_id: started.id,
     question_set_id: detail.question_sets[0].id,
     answers: answerQ1,
+    assumption_responses: [],
   });
   await tickUntil(ctx, started.id, "reviewing");
   return await call<IntakeDetail>("intake.get", { intake_id: started.id });
@@ -175,13 +176,14 @@ test("開始から承認までの一連の呼び出しが通る", async () => {
   await tickUntil(ctx, id, "answering");
   const answering = await call<IntakeDetail>("intake.get", { intake_id: id });
   assert.equal(answering.question_sets.length, 1);
-  assert.equal(answering.question_sets[0].answers, null);
+  assert.equal(answering.question_sets[0].reply, null);
   assert.equal(answering.needs_human, true);
 
   const answered = await call<IntakeSummary>("intake.answer", {
     intake_id: id,
     question_set_id: answering.question_sets[0].id,
     answers: answerQ1,
+    assumption_responses: [],
   });
   assert.equal(answered.state, "decomposing");
 
@@ -413,7 +415,13 @@ test("回答の検証に落ちると状態は変わらない", async () => {
   const question_set_id = detail.question_sets[0].id;
 
   await assert.rejects(
-    () => call("intake.answer", { intake_id: started.id, question_set_id, answers: [] }),
+    () =>
+      call("intake.answer", {
+        intake_id: started.id,
+        question_set_id,
+        answers: [],
+        assumption_responses: [],
+      }),
     /回答がありません: q1/,
   );
   await assert.rejects(() =>
@@ -421,13 +429,24 @@ test("回答の検証に落ちると状態は変わらない", async () => {
       intake_id: started.id,
       question_set_id,
       answers: [{ questionId: "q1", optionIds: ["zzz"], other: null, note: null }],
+      assumption_responses: [],
     })
   );
   assert.equal((await getIntake(ctx.db, started.id))!.state, "answering");
 
-  await call("intake.answer", { intake_id: started.id, question_set_id, answers: answerQ1 });
+  await call("intake.answer", {
+    intake_id: started.id,
+    question_set_id,
+    answers: answerQ1,
+    assumption_responses: [],
+  });
   await assert.rejects(() =>
-    call("intake.answer", { intake_id: started.id, question_set_id, answers: answerQ1 })
+    call("intake.answer", {
+      intake_id: started.id,
+      question_set_id,
+      answers: answerQ1,
+      assumption_responses: [],
+    })
   );
   assert.equal((await getIntake(ctx.db, started.id))!.state, "decomposing");
 });

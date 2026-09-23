@@ -281,7 +281,9 @@ const COLUMNS = {
     intake_id: true,
     run_id: true,
     questions: true,
+    assumptions: true,
     answers: true,
+    assumption_responses: true,
     created_at: true,
     answered_at: true,
   },
@@ -504,7 +506,8 @@ test("開き直してもマイグレーションは二度流れず、データ�
     "0009_intake",
     "0010_intake_revision",
     "0011_task_workflow_pin",
-    "0012_waiting",
+    "0012_intake_assumptions",
+    "0013_waiting",
   ]);
   await first.destroy();
 
@@ -522,7 +525,8 @@ test("開き直してもマイグレーションは二度流れず、データ�
       "0009_intake",
       "0010_intake_revision",
       "0011_task_workflow_pin",
-      "0012_waiting",
+      "0012_intake_assumptions",
+      "0013_waiting",
     ]);
     assert.equal((await second.selectFrom("projects").selectAll().execute()).length, 1);
   } finally {
@@ -560,7 +564,8 @@ test("pending_feed を足す前に作られたDBファイルは、行を保っ�
       "0009_intake",
       "0010_intake_revision",
       "0011_task_workflow_pin",
-      "0012_waiting",
+      "0012_intake_assumptions",
+      "0013_waiting",
     ]);
     const old = await getTask(d, "old");
     assert.equal(old?.state, "suspended", "既存の行は残る");
@@ -1278,7 +1283,7 @@ test("0011: insertTask は作成時の定義を書き戻せる", async () => {
   assert.equal(t2.workflow_setup, null);
 });
 
-test("0012: tasks.state と step_runs.status が waiting を受け付け、waiting_until が足される", async () => {
+test("0013: tasks.state と step_runs.status が waiting を受け付け、waiting_until が足される", async () => {
   const d = await openDb(":memory:");
   const pid = await insertProject(d, {
     path: "/repo",
@@ -1313,7 +1318,7 @@ test("0012: tasks.state と step_runs.status が waiting を受け付け、waiti
   assert.equal(t.waiting_until, "2026-09-22T00:01:00.000Z");
 });
 
-test("0012: 作り直しても既存の行・索引・外部キーが残る", async () => {
+test("0013: 作り直しても既存の行・索引・外部キーが残る", async () => {
   const d = await openDbOn(legacyWithChildren());
   const t = (await getTask(d, "t1"))!;
   assert.equal(t.waiting_until, null, "新しい列は NULL で足される");

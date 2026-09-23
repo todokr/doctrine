@@ -8,7 +8,7 @@ import type { Db } from "../../src/db/schema.ts";
 import { insertProject } from "../../src/db/tasks.ts";
 import { claimIntakeRun, type IntakeRunnerDeps, runIntakeRun } from "../../src/intake/runner.ts";
 import type { Pfd } from "../../../shared/intake/pfd.ts";
-import type { Question } from "../../../shared/intake/question.ts";
+import type { Answer, Assumption, Question } from "../../../shared/intake/question.ts";
 import { fakeTracker } from "../helpers/tracker.ts";
 import { makeRepo } from "../helpers/repo.ts";
 
@@ -79,17 +79,38 @@ export const question = (id: string): Question => ({
     { id: "a", label: "案A", description: "d" },
     { id: "b", label: "案B", description: "d" },
   ],
-  recommendation: null,
   materials: [],
 });
 
-export const questionsOut = (questions: Question[]) => ({
-  structuredOutput: { kind: "questions", questions, pfd: null, replies: null } as Record<
-    string,
-    unknown
-  >,
+export const assumption = (id: string): Assumption => ({
+  id,
+  statement: "集計は日次で足りる",
+  evidence: [{ kind: "convention", body: "既存の集計はすべて日次" }],
+  impact: "集計のプロセスの粒度が変わる",
+});
+
+export const questionsOut = (questions: Question[], assumptions: Assumption[] = []) => ({
+  structuredOutput: {
+    kind: "questions",
+    questions,
+    assumptions,
+    pfd: null,
+    replies: null,
+  } as Record<string, unknown>,
+});
+
+/** answerQuestionSet に渡す回答。仮定への応答は無し。 */
+export const reply = (answers: Answer[]) => ({
+  answers: JSON.stringify(answers),
+  assumption_responses: "[]",
 });
 
 export const pfdOut = (pfd: Pfd, replies: { commentId: number; reply: string }[] = []) => ({
-  structuredOutput: { kind: "pfd", questions: null, pfd, replies } as Record<string, unknown>,
+  structuredOutput: {
+    kind: "pfd",
+    questions: null,
+    assumptions: null,
+    pfd,
+    replies,
+  } as Record<string, unknown>,
 });

@@ -114,12 +114,12 @@ test("決定の成果物の回答を prompt に載せる", async () => {
     intake_id: "i1",
     run_id: runId,
     questions: JSON.stringify([question("q1")]),
+    assumptions: "[]",
   });
-  await answerQuestionSet(
-    db,
-    setId,
-    JSON.stringify([{ questionId: "q1", optionIds: ["a"], other: null, note: null }]),
-  );
+  await answerQuestionSet(db, setId, {
+    answers: JSON.stringify([{ questionId: "q1", optionIds: ["a"], other: null, note: null }]),
+    assumption_responses: "[]",
+  });
   await makeProcess2Ready(db, projectId);
   const report = await dispatchIntake(db, "i1", DEPS);
   assert.deepEqual(report.created.map((c) => c.processId), ["2"]);

@@ -35,12 +35,12 @@
 
 ---
 
-### Task 1: 状態 `waiting` とマイグレーション 0012
+### Task 1: 状態 `waiting` とマイグレーション 0013
 
 **Files:**
 - Modify: `core/src/domain/states.ts`
 - Modify: `core/src/db/schema.ts`（`TaskState`、`StepRunStatus`、`TasksTable.waiting_until`、`TaskRow` の `waiting_until`）
-- Modify: `core/src/db/migrations.ts`（`0012_waiting` を末尾に足す）
+- Modify: `core/src/db/migrations.ts`（`0013_waiting` を末尾に足す）
 - Modify: `core/src/db/boundary.ts`（`taskPatch` に `waiting_until`）
 - Modify: `shared/protocol.ts`（`TaskState`、`StepRun.status`、`TaskSummary.waiting_until`）
 - Modify: `app/src/types.ts`、`app/src/model.ts`（`TASK_STATES`、`RUN_PILL`）、`app/src/components/TaskView.tsx`（`STATE_PILL`）、`app/src/components/WorkflowRail.tsx`（`STATUS_CLASS`）
@@ -121,10 +121,10 @@ export function holdsProjectSlot(s: TaskState): boolean {
 
 - [ ] **Step 4: マイグレーションのテストを書く**
 
-`core/test/db/migrate.test.ts` の、マイグレーション名を並べている2つの配列の末尾に `"0012_waiting"` を足す。ファイル末尾に足す:
+`core/test/db/migrate.test.ts` の、マイグレーション名を並べている2つの配列の末尾に `"0013_waiting"` を足す。ファイル末尾に足す:
 
 ```ts
-test("0012: tasks.state と step_runs.status が waiting を受け付け、waiting_until が足される", async () => {
+test("0013: tasks.state と step_runs.status が waiting を受け付け、waiting_until が足される", async () => {
   const d = await openDb(":memory:");
   const pid = await insertProject(d, {
     path: "/repo",
@@ -159,7 +159,7 @@ test("0012: tasks.state と step_runs.status が waiting を受け付け、waiti
   assert.equal(t.waiting_until, "2026-09-22T00:01:00.000Z");
 });
 
-test("0012: 作り直しても既存の行・索引・外部キーが残る", async () => {
+test("0013: 作り直しても既存の行・索引・外部キーが残る", async () => {
   const d = await openDbOn(legacyWithChildren());
   const t = (await getTask(d, "t1"))!;
   assert.equal(t.waiting_until, null, "新しい列は NULL で足される");
@@ -178,7 +178,7 @@ test("0012: 作り直しても既存の行・索引・外部キーが残る", as
 
 （`legacyWithChildren` はこのファイルに既にある 0005 用の fixture。`insertProject` / `insertTask` / `getTask` / `sql` の import が無ければ足す。）
 
-- [ ] **Step 5: 0012 を書く**
+- [ ] **Step 5: 0013 を書く**
 
 0005 のように列を書き写すと、0009 と 0011 で増えた tasks の列と CHECK を落としやすい。そこで `sqlite_master` にある今の CREATE 文から CHECK の値だけを差し替えて作り直す。`migrations.ts` の `migrations` の前にヘルパーを置く:
 
@@ -219,7 +219,7 @@ async function rebuildWithCheck(db: Kysely<any>, table: string, from: string, to
    * 'waiting' を足し、次に確かめる時刻を tasks.waiting_until に持つ。
    * 外部キーの止め方と確かめ方は 0005 と同じ。
    */
-  "0012_waiting": {
+  "0013_waiting": {
     // deno-lint-ignore no-explicit-any
     async up(db: Kysely<any>) {
       await sql`PRAGMA foreign_keys = OFF`.execute(db);

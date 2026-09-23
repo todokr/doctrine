@@ -195,8 +195,12 @@ export interface IntakeQuestionSetsTable {
   intake_id: string;
   run_id: number;
   questions: string;
+  /** 0012_intake_assumptions で足した。既定は "[]"。 */
+  assumptions: Generated<string>;
   /** 回答前は null。 */
   answers: string | null;
+  /** 回答前は null。answers と同じときに書く。 */
+  assumption_responses: string | null;
   created_at: string;
   answered_at: string | null;
 }

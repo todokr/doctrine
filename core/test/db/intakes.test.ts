@@ -242,17 +242,28 @@ test("実行は queued で立て、閉じるときに結果を書く", async () 
 
 test("回答は一度だけ書ける", async () => {
   const { d, runId } = await fixture();
-  const id = await insertQuestionSet(d, { intake_id: "i1", run_id: runId, questions: '["q"]' });
+  const id = await insertQuestionSet(d, {
+    intake_id: "i1",
+    run_id: runId,
+    questions: '["q"]',
+    assumptions: "[]",
+  });
   const [unanswered] = await listQuestionSets(d, "i1");
   assert.equal(unanswered.answers, null);
   assert.equal(unanswered.answered_at, null);
 
-  assert.equal(await answerQuestionSet(d, id, '["a1"]'), true);
+  assert.equal(
+    await answerQuestionSet(d, id, { answers: '["a1"]', assumption_responses: "[]" }),
+    true,
+  );
   const [answered] = await listQuestionSets(d, "i1");
   assert.equal(answered.answers, '["a1"]');
   assert.notEqual(answered.answered_at, null);
 
-  assert.equal(await answerQuestionSet(d, id, '["a2"]'), false);
+  assert.equal(
+    await answerQuestionSet(d, id, { answers: '["a2"]', assumption_responses: "[]" }),
+    false,
+  );
   const [again] = await listQuestionSets(d, "i1");
   assert.equal(again.answers, '["a1"]');
   assert.equal(again.answered_at, answered.answered_at);

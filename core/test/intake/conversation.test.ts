@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import type {
   IntakeCommentRow,
   IntakeDraftRow,
-  IntakeQuestionSetRow,
   IntakeRunPurpose,
   IntakeRunRow,
   IntakeRunStatus,
@@ -13,6 +12,7 @@ import { buildNoQuestionsMessage } from "../../src/intake/prompt.ts";
 import { buildAnswerText } from "../../../shared/intake/answerText.ts";
 import { buildFeedback } from "../../../shared/intake/feedback.ts";
 import type { Answer, Question } from "../../../shared/intake/question.ts";
+import type { IntakeQuestionSet } from "../../../shared/protocol.ts";
 import { canonicalJson } from "../../../shared/intake/pfd.ts";
 import { example } from "./pfd/fixture.ts";
 
@@ -24,7 +24,6 @@ const q1: Question = {
     { id: "a", label: "案A", description: "d" },
     { id: "b", label: "案B", description: "d" },
   ],
-  recommendation: null,
   materials: [],
 };
 const answers: Answer[] = [{ questionId: "q1", optionIds: ["a"], other: null, note: "補足" }];
@@ -80,16 +79,28 @@ test("consecutiveInvalid: エージェント自体の失敗（issues なし）�
   assert.equal(consecutiveInvalid(runs, "decompose"), 1);
 });
 
-const questionsOutput = { kind: "questions", questions: [q1], pfd: null, replies: null };
-const emptyQuestionsOutput = { kind: "questions", questions: [], pfd: null, replies: null };
+const questionsOutput = {
+  kind: "questions",
+  questions: [q1],
+  assumptions: [],
+  pfd: null,
+  replies: null,
+};
+const emptyQuestionsOutput = {
+  kind: "questions",
+  questions: [],
+  assumptions: [],
+  pfd: null,
+  replies: null,
+};
 
-function questionSet(runId: number, withAnswers: boolean): IntakeQuestionSetRow {
+function questionSet(runId: number, withAnswers: boolean): IntakeQuestionSet {
   return {
     id: 1,
-    intake_id: "i1",
     run_id: runId,
-    questions: JSON.stringify([q1]),
-    answers: withAnswers ? JSON.stringify(answers) : null,
+    questions: [q1],
+    assumptions: [],
+    reply: withAnswers ? { answers, assumptionResponses: [] } : null,
     created_at: "",
     answered_at: withAnswers ? "" : null,
   };
@@ -134,7 +145,10 @@ test("continuationMessage: 回答のあとは buildAnswerText", () => {
     drafts: [],
     comments: [],
   });
-  assert.equal(text, buildAnswerText([q1], answers));
+  assert.equal(
+    text,
+    buildAnswerText({ questions: [q1], assumptions: [] }, { answers, assumptionResponses: [] }),
+  );
 });
 
 test("continuationMessage: 回答が無いまま続きを求めたら投げる", () => {

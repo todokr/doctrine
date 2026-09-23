@@ -805,6 +805,7 @@ export function createHandler(ctx: DaemonContext): Handler {
             intakeId: req(params, "intake_id"),
             questionSetId: reqNumber(params, "question_set_id"),
             answers: params.answers,
+            assumptionResponses: params.assumption_responses,
             logRoot: ctx.logRoot,
           }),
         );

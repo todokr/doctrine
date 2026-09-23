@@ -753,17 +753,41 @@ const migrations: Record<string, Migration> = {
   },
 
   /**
+   * 質問のまとまりに仮定と、仮定への応答を足す（Intake PRD Q-9）。既存の行は仮定を
+   * 持たないので assumptions は空配列にする。回答済みの既存の行の応答も空配列にし、
+   * 「answers が非 null なら assumption_responses も非 null」を保つ。
+   */
+  "0012_intake_assumptions": {
+    // deno-lint-ignore no-explicit-any
+    async up(db: Kysely<any>) {
+      await db.schema.alterTable("intake_question_sets")
+        .addColumn("assumptions", "text", (c) => c.notNull().defaultTo("[]"))
+        .execute();
+      await db.schema.alterTable("intake_question_sets")
+        .addColumn("assumption_responses", "text")
+        .execute();
+      await sql`UPDATE intake_question_sets SET assumption_responses = '[]'
+        WHERE answers IS NOT NULL`.execute(db);
+    },
+  },
+
+  /**
    * マージ待ち（spec 2026-09-22-merge-wait-design.md 3 章）。tasks.state と step_runs.status に
    * 'waiting' を足し、次に確かめる時刻を tasks.waiting_until に持つ。
    * 外部キーの止め方と確かめ方は 0005 と同じ。
    */
-  "0012_waiting": {
+  "0013_waiting": {
     // deno-lint-ignore no-explicit-any
     async up(db: Kysely<any>) {
       await sql`PRAGMA foreign_keys = OFF`.execute(db);
       await sql`PRAGMA defer_foreign_keys = ON`.execute(db);
 
-      await rebuildWithCheck(db, "tasks", "'paused','rate_limited'", "'paused','rate_limited','waiting'");
+      await rebuildWithCheck(
+        db,
+        "tasks",
+        "'paused','rate_limited'",
+        "'paused','rate_limited','waiting'",
+      );
       await rebuildWithCheck(
         db,
         "step_runs",

@@ -7,6 +7,7 @@ import type { ProcessStatus } from "../../shared/intake/processStatus.ts";
 import type { IntakeProcessView } from "../../shared/protocol.ts";
 import {
   ANSWERS,
+  ASSUMPTIONS,
   INTAKE_ACTIVE,
   INTAKE_ANSWERING,
   INTAKE_REVIEWING,
@@ -16,6 +17,7 @@ import {
   PFD_STATUSES_B,
   PROJECTS,
   QUESTIONS,
+  RESPONSES,
 } from "./fixtures";
 import { buildPfdView, LOOK } from "./pfd";
 import {
@@ -38,7 +40,7 @@ import {
   commentTarget,
   commentTargetLabel,
   countIntakeAttention,
-  draftAnswers,
+  draftReply,
   EMPTY_INTAKE_DRAFT,
   ghGuidance,
   intakeFace,
@@ -50,14 +52,17 @@ import {
   issueNumber,
   issueTarget,
   normalizeAnswers,
+  normalizeReply,
   openQuestionSet,
   parseIssueInput,
   rejectionText,
   setWholeComment,
   toggleOption,
   updateAnswer,
+  updateResponse,
   wholeComment,
 } from "./intake";
+import type { Answer, AssumptionResponse } from "../../shared/intake/question.ts";
 
 const [Q1, Q2] = QUESTIONS;
 
@@ -93,41 +98,67 @@ describe("normalizeAnswers", () => {
 });
 
 describe("answerIssues", () => {
-  test("そろった回答なら指摘なし", () => {
-    expect(answerIssues(QUESTIONS, ANSWERS)).toEqual([]);
+  const set = { questions: QUESTIONS, assumptions: ASSUMPTIONS };
+  const issuesOf = (answers: Answer[], assumptionResponses: AssumptionResponse[] = RESPONSES) =>
+    answerIssues(set, { answers, assumptionResponses });
+
+  test("そろった回答と応答なら指摘なし", () => {
+    expect(issuesOf(ANSWERS)).toEqual([]);
   });
 
   test("必須の質問に答えていなければ、その質問の指摘", () => {
     const answers = ANSWERS.filter((a) => a.questionId !== "q2");
-    expect(answerIssues(QUESTIONS, answers)).toEqual([
-      { questionId: "q2", message: "選択肢を 1 つ以上選ぶか、その他に書きます" },
+    expect(issuesOf(answers)).toEqual([
+      { targetId: "q2", message: "選択肢を 1 つ以上選ぶか、その他に書きます" },
     ]);
   });
 
-  test("回答が空なら全ての質問が指摘される", () => {
-    expect(answerIssues(QUESTIONS, []).map((i) => i.questionId)).toEqual(["q1", "q2", "q3"]);
+  test("回答も応答も空なら全ての質問と仮定が指摘される", () => {
+    expect(issuesOf([], []).map((i) => i.targetId)).toEqual(["q1", "q2", "q3", "s1", "s2"]);
   });
 
   test("single で選択肢とその他の両方は指摘", () => {
-    const issues = answerIssues(QUESTIONS, withAnswer("q1", { optionIds: ["a"], other: "別案" }));
+    const issues = issuesOf(withAnswer("q1", { optionIds: ["a"], other: "別案" }));
     expect(issues).toEqual([
-      { questionId: "q1", message: "選択肢を 1 つ選ぶか、その他に書きます" },
+      { targetId: "q1", message: "選択肢を 1 つ選ぶか、その他に書きます" },
     ]);
   });
 
   test("single でその他だけなら指摘なし", () => {
-    expect(answerIssues(QUESTIONS, withAnswer("q1", { optionIds: [], other: "別案" }))).toEqual([]);
+    expect(issuesOf(withAnswer("q1", { optionIds: [], other: "別案" }))).toEqual([]);
   });
 
   test("free のその他が空白だけなら未回答", () => {
-    expect(answerIssues(QUESTIONS, withAnswer("q3", { other: "   " }))).toEqual([
-      { questionId: "q3", message: "答えを書きます" },
+    expect(issuesOf(withAnswer("q3", { other: "   " }))).toEqual([
+      { targetId: "q3", message: "答えを書きます" },
     ]);
   });
 
   test("無い選択肢の id は指摘", () => {
-    expect(answerIssues(QUESTIONS, withAnswer("q1", { optionIds: ["zz"] }))).toEqual([
-      { questionId: "q1", message: "選択肢が見つかりません" },
+    expect(issuesOf(withAnswer("q1", { optionIds: ["zz"] }))).toEqual([
+      { targetId: "q1", message: "選択肢が見つかりません" },
+    ]);
+  });
+
+  test("応答の無い仮定と、空白だけの書き直しは指摘", () => {
+    const responses: AssumptionResponse[] = [{ assumptionId: "s2", verdict: "corrected", correction: "  " }];
+    expect(issuesOf(ANSWERS, responses)).toEqual([
+      { targetId: "s1", message: "認めるか書き直すかを選びます" },
+      { targetId: "s2", message: "正しい内容を書きます" },
+    ]);
+  });
+});
+
+describe("updateResponse と normalizeReply", () => {
+  test("同じ仮定の応答を置き換え、送るときは仮定の順にそろえて余りを落とす", () => {
+    const set = { questions: QUESTIONS, assumptions: ASSUMPTIONS };
+    let responses = updateResponse([], { assumptionId: "s2", verdict: "accepted" });
+    responses = updateResponse(responses, { assumptionId: "s1", verdict: "accepted" });
+    responses = updateResponse(responses, { assumptionId: "s2", verdict: "corrected", correction: "x" });
+    responses = updateResponse(responses, { assumptionId: "zz", verdict: "accepted" });
+    expect(normalizeReply(set, { answers: ANSWERS, assumptionResponses: responses }).assumptionResponses).toEqual([
+      { assumptionId: "s1", verdict: "accepted" },
+      { assumptionId: "s2", verdict: "corrected", correction: "x" },
     ]);
   });
 });
@@ -162,9 +193,10 @@ describe("toggleOption", () => {
   });
 });
 
-test("標本が質問と回答の検証を通る", () => {
-  expect(validateQuestions(QUESTIONS).ok).toBe(true);
-  expect(validateAnswers(QUESTIONS, ANSWERS).ok).toBe(true);
+test("標本が質問・仮定と回答・応答の検証を通る", () => {
+  const set = { questions: QUESTIONS, assumptions: ASSUMPTIONS };
+  expect(validateQuestions(set).ok).toBe(true);
+  expect(validateAnswers(set, { answers: ANSWERS, assumptionResponses: RESPONSES }).ok).toBe(true);
 });
 
 const REPO = { nameWithOwner: "o/r" };
@@ -522,16 +554,20 @@ describe("commentTargetLabel", () => {
   });
 });
 
-describe("openQuestionSet と draftAnswers", () => {
-  test("未回答のまとまりを返し、下書きの答えはまとまりが同じときだけ使う", () => {
+describe("openQuestionSet と draftReply", () => {
+  test("未回答のまとまりを返し、下書きの答えと応答はまとまりが同じときだけ使う", () => {
     const set = openQuestionSet(INTAKE_ANSWERING);
     expect(set?.id).toBe(2);
     expect(openQuestionSet(INTAKE_REVIEWING)).toBeNull();
 
-    const draft: IntakeDraft = { ...EMPTY_INTAKE_DRAFT, answers: { questionSetId: 2, answers: ANSWERS } };
-    expect(draftAnswers(draft, 3)).toEqual([]);
-    expect(draftAnswers(draft, 2)).toEqual(ANSWERS);
-    expect(draftAnswers(EMPTY_INTAKE_DRAFT, 2)).toEqual([]);
+    const draft: IntakeDraft = {
+      ...EMPTY_INTAKE_DRAFT,
+      answers: { questionSetId: 2, answers: ANSWERS, assumptionResponses: RESPONSES },
+    };
+    const empty = { answers: [], assumptionResponses: [] };
+    expect(draftReply(draft, 3)).toEqual(empty);
+    expect(draftReply(draft, 2)).toEqual({ answers: ANSWERS, assumptionResponses: RESPONSES });
+    expect(draftReply(EMPTY_INTAKE_DRAFT, 2)).toEqual(empty);
   });
 });
 
@@ -553,7 +589,7 @@ describe("intakeHistory", () => {
 
   test("起きた順に並べ、未回答のまとまりは入れない", () => {
     const answered = { ...base.question_sets[0], created_at: "2026-09-15T10:00:00+09:00" };
-    const open = { ...answered, id: 9, answers: null, created_at: "2026-09-15T13:59:00+09:00" };
+    const open = { ...answered, id: 9, reply: null, created_at: "2026-09-15T13:59:00+09:00" };
     const detail: IntakeDetail = {
       ...base,
       question_sets: [answered, open],

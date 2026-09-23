@@ -405,15 +405,18 @@ kbd{font-family:var(--mono);font-size:10.5px;border:1px solid var(--line);border
 .opt .lb{font-weight:500;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
 .opt .ds{grid-column:2;color:var(--ink-2);font-size:12px}
 .rec{font-size:10.5px;font-weight:500;color:var(--ok);border:1px solid var(--ok);border-radius:3px;padding:0 5px;line-height:16px}
-.opt .recwhy{color:var(--ok)}
-.opt.rec-row{cursor:default}
-.opt.readonly,.opt.rec-row{grid-template-columns:minmax(0,1fr)}
-.opt.readonly .ds,.opt.rec-row .ds{grid-column:1}
+.opt.readonly{grid-template-columns:minmax(0,1fr)}
+.opt.readonly .ds{grid-column:1}
 .qextra{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.qextra.single{grid-template-columns:1fr}
 .qextra label,.qextra .ro{display:grid;gap:3px;font-size:11.5px;color:var(--ink-3)}
 .qextra .ro .g-md{color:var(--ink)}
 .qextra textarea{min-height:40px}
 .qmissing{color:var(--danger);font-size:12px;margin:0}
+.qsection{margin:8px 0 0;font-size:13px}
+.qcard .impact{display:grid;gap:3px;font-size:11.5px;color:var(--ink-3)}
+.qcard .impact .g-md{color:var(--ink)}
+.evq{margin:0;padding:2px 0 2px 10px;border-left:3px solid var(--line);color:var(--ink-2);white-space:pre-wrap}
 
 /* Intake（prototype/intake-ui.html から移したもの） */
 .prog{font-family:var(--mono);font-size:11px;color:var(--ink-2)}

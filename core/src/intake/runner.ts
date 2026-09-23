@@ -12,10 +12,10 @@ import {
   listComments,
   listDrafts,
   listIntakeRuns,
-  listQuestionSets,
   updateIntake,
   updateIntakeRun,
 } from "../db/intakes.ts";
+import { loadQuestionSets, questionSetIds } from "./questionSet.ts";
 import { insertRateLimitSample, rateLimitsObservedSince } from "../db/rateLimits.ts";
 import type {
   Db,
@@ -53,7 +53,6 @@ import { decisionTexts } from "../../../shared/intake/answerText.ts";
 import { buildFeedback } from "../../../shared/intake/feedback.ts";
 import type { IssueDetail } from "../../../shared/intake/github.ts";
 import { canonicalJson } from "../../../shared/intake/pfd.ts";
-import type { Answer, Question } from "../../../shared/intake/question.ts";
 import { consecutiveInvalid, continuationMessage, MAX_INVALID_OUTPUTS } from "./conversation.ts";
 import { checkDecomposerOutput } from "./output.ts";
 import { pfdHash } from "./pfd/hash.ts";
@@ -255,12 +254,7 @@ async function firstPromptOf(
   if (run.purpose !== "revise") return buildInitialPrompt({ issue });
   const constraints = await loadRevisionConstraints(db, intake.id);
   const approved = constraints.approved.pfd;
-  const decisions = decisionTexts(
-    (await listQuestionSets(db, intake.id)).map((s) => ({
-      questions: JSON.parse(s.questions) as Question[],
-      answers: s.answers === null ? null : JSON.parse(s.answers) as Answer[],
-    })),
-  );
+  const decisions = decisionTexts(await loadQuestionSets(db, intake.id));
   return buildRevisionPrompt({
     issue,
     approved,
@@ -319,7 +313,7 @@ export async function runIntakeRun(db: Db, runId: number, deps: IntakeRunnerDeps
     const rows = await conversationRows(db, intake, run);
     const continuation = continuationMessage({
       closedRuns: rows.closedRuns,
-      questionSets: await listQuestionSets(db, intake.id),
+      questionSets: await loadQuestionSets(db, intake.id),
       drafts: rows.drafts,
       comments: rows.comments,
     });
@@ -451,18 +445,13 @@ async function settleOutput(
 ): Promise<void> {
   const { run, intake, result } = s;
 
-  const sets = await listQuestionSets(db, intake.id);
+  const sets = await loadQuestionSets(db, intake.id);
   const { closedRuns, feedback } = await conversationRows(db, intake, run);
 
   const checked = checkDecomposerOutput(result.structuredOutput, {
     purpose: run.purpose,
-    askedQuestionIds: new Set(
-      sets.flatMap((set) => (JSON.parse(set.questions) as Question[]).map((q) => q.id)),
-    ),
-    answeredQuestionIds: new Set(
-      sets.filter((set) => set.answers !== null)
-        .flatMap((set) => (JSON.parse(set.questions) as Question[]).map((q) => q.id)),
-    ),
+    askedIds: new Set(sets.flatMap(questionSetIds)),
+    decisionIds: new Set(sets.filter((set) => set.reply !== null).flatMap(questionSetIds)),
     feedbackCount: feedback.length,
     revision: run.purpose === "revise" ? await loadRevisionConstraints(db, intake.id) : null,
   });
@@ -506,7 +495,10 @@ async function settleOutput(
   const output: DecomposerOutput = checked.output;
   const runPatch: IntakeRunPatch = { status: "success", output: JSON.stringify(output) };
 
-  if (output.kind === "questions" && output.questions.length > 0) {
+  if (
+    output.kind === "questions" &&
+    (output.questions.length > 0 || output.assumptions.length > 0)
+  ) {
     await settle(db, deps, {
       run,
       intake,
@@ -518,6 +510,7 @@ async function settleOutput(
           intake_id: intake.id,
           run_id: run.id,
           questions: JSON.stringify(output.questions),
+          assumptions: JSON.stringify(output.assumptions),
         });
       },
     });

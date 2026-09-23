@@ -4,7 +4,8 @@ import type { FeedbackComment } from "./intake/feedback.ts";
 import type { GhStatus, IssueDetail, IssueSummary } from "./intake/github.ts";
 import type { Pfd } from "./intake/pfd.ts";
 import type { ProcessStatus } from "./intake/processStatus.ts";
-import type { Answer, Question } from "./intake/question.ts";
+import type { Answer, AssumptionResponse } from "./intake/question.ts";
+import type { QuestionSetContent, QuestionSetReply } from "./intake/validateQuestion.ts";
 import type { IntakeRunPurpose, IntakeRunStatus, IntakeState } from "./intake/state.ts";
 
 export type Request = { id: number; method: string; params?: Record<string, unknown> };
@@ -444,11 +445,11 @@ export type PfdDraft = {
   created_at: string;
 };
 
-export type IntakeQuestionSet = {
+export type IntakeQuestionSet = QuestionSetContent & {
   id: number;
   run_id: number;
-  questions: Question[];
-  answers: Answer[] | null;
+  /** 回答前は null。 */
+  reply: QuestionSetReply | null;
   created_at: string;
   answered_at: string | null;
 };
@@ -557,7 +558,12 @@ export type Methods = {
   };
   "intake.get": { params: { intake_id: string }; result: IntakeDetail };
   "intake.answer": {
-    params: { intake_id: string; question_set_id: number; answers: Answer[] };
+    params: {
+      intake_id: string;
+      question_set_id: number;
+      answers: Answer[];
+      assumption_responses: AssumptionResponse[];
+    };
     result: IntakeSummary;
   };
   "intake.reject": {
