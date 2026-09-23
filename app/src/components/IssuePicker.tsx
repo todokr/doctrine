@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
-import type { GhStatus, IssueDetail } from "../../../shared/intake/tracker.ts";
-import type { GithubIssue, IntakeSummary } from "../../../shared/protocol.ts";
+import type { IssueDetail, TrackerStatus } from "../../../shared/intake/tracker.ts";
+import type { IntakeSummary, TrackerIssue } from "../../../shared/protocol.ts";
 import { type Cached, ghCache, ghCacheKey, revalidate } from "../ghCache";
-import { ghGuidance, issueNumber, issueTarget, parseIssueInput, type IssueTarget } from "../intake";
+import { issueIdentifier, issueTarget, parseIssueInput, trackerGuidance, type IssueTarget } from "../intake";
 import { clock, type Loaded } from "../model";
 import { useIntakeRpc, useStore } from "../store";
 import { StatusDot } from "./StatusDot";
@@ -19,8 +19,8 @@ function initial<T>(key: string | null): Cached<T> {
   return { loaded: value === undefined ? { kind: "loading" } : { kind: "ok", value }, refreshing: true, refreshError: null };
 }
 
-/** key の値を手元のキャッシュから出し、gh から取り直す。key が null なら何も取らない。tick を変えると取り直す */
-function useGhCached<T>(key: string | null, fetch: () => Promise<T>, tick = 0): Cached<T> {
+/** key の値を手元のキャッシュから出し、トラッカーから取り直す。key が null なら何も取らない。tick を変えると取り直す */
+function useTrackerCached<T>(key: string | null, fetch: () => Promise<T>, tick = 0): Cached<T> {
   const [state, setState] = useState<{ key: string | null; cached: Cached<T> }>(() => ({ key, cached: initial(key) }));
   useEffect(() => {
     if (key === null) return;
@@ -36,10 +36,10 @@ function Refreshing({ refreshing, error }: { refreshing: boolean; error: string 
   return refreshing ? <span className="hint">更新中</span> : null;
 }
 
-export function GhUnavailable(
-  { status, onRetry }: { status: Extract<GhStatus, { ok: false }>; onRetry: () => void },
+export function TrackerUnavailable(
+  { status, onRetry }: { status: Extract<TrackerStatus, { ok: false }>; onRetry: () => void },
 ) {
-  const g = ghGuidance(status);
+  const g = trackerGuidance(status);
   return (
     <div className="box attn">
       <h2>{g.title}</h2>
@@ -55,7 +55,7 @@ export function GhUnavailable(
 
 export function IssueList(
   { issues, intakes, selected, onSelect }: {
-    issues: GithubIssue[];
+    issues: TrackerIssue[];
     intakes: IntakeSummary[];
     selected: string | null;
     onSelect: (url: string) => void;
@@ -70,7 +70,7 @@ export function IssueList(
           aria-current={selected === i.url}
           onClick={() => onSelect(i.url)}
         >
-          <span className="n">{`#${i.number}`}</span>
+          <span className="n">{i.identifier}</span>
           <span>{i.title}</span>
           {issueTarget(i.url, intakes).kind === "open" ? <StatusDot tone="idle" word="Intake あり" /> : <span />}
           <span className="sub">
@@ -85,7 +85,7 @@ export function IssueList(
 
 export function IssuePreview(
   { issue, detail, target, pending, onStart, onOpen }: {
-    issue: { url: string; number: number | null; title: string };
+    issue: { url: string; identifier: string | null; title: string };
     detail: Loaded<IssueDetail> | undefined;
     target: IssueTarget;
     pending: boolean;
@@ -96,7 +96,7 @@ export function IssuePreview(
   return (
     <div className="issue-body">
       <div className="headrow">
-        <h2>{issue.number !== null ? `#${issue.number} ${issue.title}` : issue.title}</h2>
+        <h2>{issue.identifier !== null ? `${issue.identifier} ${issue.title}` : issue.title}</h2>
       </div>
       <span className="mono hint">{issue.url}</span>
       {detail?.kind === "error" && <p className="hint">{detail.message}</p>}
@@ -123,7 +123,7 @@ export function IssuePreview(
   );
 }
 
-type Picked = { url: string; number: number | null; title: string };
+type Picked = { url: string; identifier: string | null; title: string };
 
 export function IssuePicker() {
   const { s, dispatch } = useStore();
@@ -144,16 +144,20 @@ export function IssuePicker() {
     setDirect("");
   }, [path]);
 
-  // gh が使えるかはプロジェクトごとに違うので、状態もプロジェクトごとに持つ
-  const statusCached = useGhCached(path ? ghCacheKey.status(path) : null, () => api.ghStatus(path!), statusTick);
+  // トラッカーが使えるかはプロジェクトごとに違うので、状態もプロジェクトごとに持つ
+  const statusCached = useTrackerCached(
+    path ? ghCacheKey.status(path) : null,
+    () => api.trackerStatus(path!),
+    statusTick,
+  );
   const status = statusCached.loaded;
-  const ghOk = status.kind === "ok" && status.value.ok;
-  const issuesCached = useGhCached(
-    path && ghOk ? ghCacheKey.issues(path, assignee, search) : null,
+  const trackerOk = status.kind === "ok" && status.value.ok;
+  const issuesCached = useTrackerCached(
+    path && trackerOk ? ghCacheKey.issues(path, assignee, search) : null,
     () => api.issues(path!, { assignee, search }),
   );
   const issues = issuesCached.loaded;
-  const detailCached = useGhCached(
+  const detailCached = useTrackerCached(
     path && picked ? ghCacheKey.issue(path, picked.url) : null,
     () => api.issue(path!, picked!.url),
   );
@@ -192,16 +196,15 @@ export function IssuePicker() {
     return (
       <div className="pad">
         {head}
-        <GhUnavailable status={status.value} onRetry={() => setStatusTick((t) => t + 1)} />
+        <TrackerUnavailable status={status.value} onRetry={() => setStatusTick((t) => t + 1)} />
       </div>
     );
   }
-  const repo = status.value.repo;
+  const target = status.value.target;
 
   const choose = (url: string) => {
     const listed = issues.kind === "ok" ? issues.value.find((i) => i.url === url) : undefined;
-    const n = issueNumber(url);
-    setPicked({ url, number: listed?.number ?? (n === null ? null : Number(n)), title: listed?.title ?? "" });
+    setPicked({ url, identifier: listed?.identifier ?? issueIdentifier(url), title: listed?.title ?? "" });
   };
   const title = picked?.title || (detail?.kind === "ok" ? detail.value.title : "");
 
@@ -252,7 +255,7 @@ export function IssuePicker() {
               <button
                 className="btn sm"
                 onClick={() => {
-                  const url = parseIssueInput(direct, repo);
+                  const url = parseIssueInput(direct, target);
                   if (url === null) dispatch({ type: "toast", message: "番号か URL を読めません" });
                   else choose(url);
                 }}
@@ -264,7 +267,7 @@ export function IssuePicker() {
         </div>
         {picked && (
           <IssuePreview
-            issue={{ url: picked.url, number: picked.number, title }}
+            issue={{ url: picked.url, identifier: picked.identifier, title }}
             detail={detail}
             target={issueTarget(picked.url, s.intakes)}
             pending={pending}

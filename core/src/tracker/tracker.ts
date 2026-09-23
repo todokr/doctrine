@@ -1,8 +1,8 @@
 import type {
-  GhStatus,
   IssueDetail,
   IssueRef,
   IssueSummary,
+  TrackerStatus,
 } from "../../../shared/intake/tracker.ts";
 import type { PrFact } from "../../../shared/intake/processStatus.ts";
 
@@ -10,7 +10,7 @@ export type SubIssue = { ref: IssueRef; body: string; state: "OPEN" | "CLOSED" }
 
 /** Issue の参照は URL で持ち、番号を前提にしない（PRD 11 章）。 */
 export interface Tracker {
-  status(projectPath: string): Promise<GhStatus>;
+  status(projectPath: string): Promise<TrackerStatus>;
   listIssues(
     projectPath: string,
     o: { assignee: "me" | "any"; search?: string },

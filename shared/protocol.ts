@@ -1,7 +1,7 @@
 import type { Guide } from "./guide/schema.ts";
 import type { AttentionReason, CommentReply } from "./intake/decomposer.ts";
 import type { FeedbackComment } from "./intake/feedback.ts";
-import type { GhStatus, IssueDetail, IssueSummary } from "./intake/tracker.ts";
+import type { IssueDetail, IssueSummary, TrackerStatus } from "./intake/tracker.ts";
 import type { Pfd } from "./intake/pfd.ts";
 import type { ProcessStatus } from "./intake/processStatus.ts";
 import type { Answer, AssumptionResponse } from "./intake/question.ts";
@@ -491,7 +491,7 @@ export type IntakeDetail = IntakeSummary & {
   runs: IntakeRun[];
 };
 
-export type GithubIssue = IssueSummary & { intake_id: string | null };
+export type TrackerIssue = IssueSummary & { intake_id: string | null };
 
 /**
  * UI が呼ぶメソッドの表。増えたらここに足す。Rust の中継はこの表を知らない
@@ -542,12 +542,12 @@ export type Methods = {
     result: { removed: string };
   };
   "ratelimit.recent": { params: { limit?: number }; result: RateLimitSample[] };
-  "github.status": { params: { project: string }; result: GhStatus };
-  "github.issues": {
+  "tracker.status": { params: { project: string }; result: TrackerStatus };
+  "tracker.issues": {
     params: { project: string; assignee?: "me" | "any"; search?: string };
-    result: GithubIssue[];
+    result: TrackerIssue[];
   };
-  "github.issue": { params: { project: string; url: string }; result: IssueDetail };
+  "tracker.issue": { params: { project: string; url: string }; result: IssueDetail };
   "intake.start": {
     params: { project: string; issue_url: string };
     result: IntakeSummary & { alreadyActive: boolean };

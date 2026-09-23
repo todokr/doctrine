@@ -1,6 +1,6 @@
 import type { CommentReply } from "../../shared/intake/decomposer.ts";
 import { buildFeedback } from "../../shared/intake/feedback.ts";
-import type { GhStatus } from "../../shared/intake/tracker.ts";
+import type { TrackerStatus } from "../../shared/intake/tracker.ts";
 import type { Pfd, Process } from "../../shared/intake/pfd.ts";
 import type { PrFact, ProcessStatus } from "../../shared/intake/processStatus.ts";
 import type { Answer, AssumptionResponse, Question } from "../../shared/intake/question.ts";
@@ -185,6 +185,12 @@ export function issueNumber(url: string): string | null {
   return /\/issues\/(\d+)\/?$/.exec(url)?.[1] ?? null;
 }
 
+/** GitHub の Issue の URL のときだけ "#<番号>" を返す。ほかのトラッカーの URL は null */
+export function issueIdentifier(url: string): string | null {
+  const m = /^https:\/\/github\.com\/[^/]+\/[^/]+\/issues\/(\d+)(?:[/#?].*)?$/.exec(url);
+  return m ? `#${m[1]}` : null;
+}
+
 export function intakeProgress(i: IntakeSummary): string | null {
   return i.progress.total > 0 ? `${i.progress.done}/${i.progress.total}` : null;
 }
@@ -348,19 +354,19 @@ export function intakeHistory(detail: IntakeDetail): IntakeHistoryEntry[] {
 }
 
 /** `#123`・`123`・Issue の URL を、そのリポジトリの Issue の URL にする。読めなければ null */
-export function parseIssueInput(input: string, repo: { nameWithOwner: string }): string | null {
+export function parseIssueInput(input: string, target: { name: string }): string | null {
   const text = input.trim();
   const short = /^#?(\d+)$/.exec(text);
-  if (short) return `https://github.com/${repo.nameWithOwner}/issues/${short[1]}`;
+  if (short) return `https://github.com/${target.name}/issues/${short[1]}`;
   const url = /^https:\/\/github\.com\/([^/]+\/[^/]+)\/issues\/(\d+)(?:[/#?].*)?$/.exec(text);
-  if (url && url[1].toLowerCase() === repo.nameWithOwner.toLowerCase()) {
-    return `https://github.com/${repo.nameWithOwner}/issues/${url[2]}`;
+  if (url && url[1].toLowerCase() === target.name.toLowerCase()) {
+    return `https://github.com/${target.name}/issues/${url[2]}`;
   }
   return null;
 }
 
-export function ghGuidance(
-  status: Extract<GhStatus, { ok: false }>,
+export function trackerGuidance(
+  status: Extract<TrackerStatus, { ok: false }>,
 ): { title: string; fix: string; command: string | null } {
   switch (status.reason) {
     case "not_installed":
@@ -379,6 +385,12 @@ export function ghGuidance(
       return {
         title: "このリポジトリに GitHub の remote がありません",
         fix: "GitHub の remote を持つリポジトリで使う",
+        command: null,
+      };
+    default:
+      return {
+        title: "Issue トラッカーを使えません",
+        fix: "下の出力を見て直す",
         command: null,
       };
   }

@@ -74,7 +74,7 @@ export function fakeTracker(): FakeTracker {
 
   const tracker: Tracker = {
     // calls に積まない。積むと subIssueSync.test.ts の calls の検査が崩れる
-    status: () => Promise.resolve({ ok: true, repo: { id: "R_1", nameWithOwner: "o/r" } }),
+    status: () => Promise.resolve({ ok: true, target: { id: "R_1", name: "o/r" } }),
     listIssues: unexpected("listIssues"),
     readIssue: (_projectPath, url) =>
       Promise.resolve({ url, nodeId: "I_1", title: "T", body: "B", comments: [] }),
