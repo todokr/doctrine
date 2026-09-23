@@ -454,7 +454,13 @@ test("回答の検証に落ちると状態は変わらない", async () => {
 test("tracker.issues は進行中の Intake に印を付ける", async () => {
   const tracker = fakeTracker({}, {
     issues: [
-      { url: ISSUE, identifier: "#1", title: "one", assignees: [], updatedAt: "2026-09-21T00:00:00Z" },
+      {
+        url: ISSUE,
+        identifier: "#1",
+        title: "one",
+        assignees: [],
+        updatedAt: "2026-09-21T00:00:00Z",
+      },
       {
         url: "https://github.com/o/r/issues/2",
         identifier: "#2",
