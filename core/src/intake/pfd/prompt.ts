@@ -8,7 +8,7 @@ export type TaskPromptInput = {
   subIssueUrl: string | null;
   /** 人のプロセスの id → 完了の記録の note。 */
   humanNotes: Readonly<Record<string, string>>;
-  /** 質問の id → 回答を文章にしたもの。回答の文章化は呼び出し側が行う。 */
+  /** 質問・仮定の id → 決定を文章にしたもの（decisionTexts）。文章化は呼び出し側が行う。 */
   decisions: Readonly<Record<string, string>>;
 };
 
@@ -35,7 +35,9 @@ export function buildTaskPrompt(input: TaskPromptInput): string {
     if (a.decision !== undefined) {
       const answer = input.decisions[a.decision];
       if (!answer) {
-        throw new Error(`成果物「${a.name}」の決定（質問 ${a.decision} の回答）がありません`);
+        throw new Error(
+          `成果物「${a.name}」の決定（質問か仮定 ${a.decision} への回答）がありません`,
+        );
       }
       decided.push(`- ${a.name}: ${answer}`);
     } else if (by !== undefined) {

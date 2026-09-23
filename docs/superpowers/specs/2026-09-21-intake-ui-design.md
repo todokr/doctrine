@@ -202,7 +202,7 @@ Q-7（過去の質問と回答、仮定と応答の読み返し）は、面の�
 
   | kind | 描き方 |
   | --- | --- |
-  | `issue` | 引用（`quote`）を引用のブロックで出し、`commentUrl` があればコメントへの外部リンク、無ければ「Issue の本文」と添える |
+  | `issue` | 引用（`quote`）を引用のブロックで出し、`commentUrl` があれば「Issue のコメント」と URL を等幅で（Intake の見出しの `issue_url` と同じ作法）、無ければ「Issue の本文」と添える |
   | `code` | `path` と行の範囲（あれば）を見出しにし、`excerpt` を `highlightLines` による等幅ブロックで出す。言語はパスの拡張子から決める |
   | `convention` | `Markdown` で出す |
 
