@@ -1,8 +1,8 @@
 #!/usr/bin/env -S deno run --allow-all
 import { socketPath } from "../daemon/server.ts";
-import type { Response, ServerEvent, TaskLogs } from "../../../shared/protocol.ts";
+import type { IntakeLogs, Response, ServerEvent, TaskLogs } from "../../../shared/protocol.ts";
 
-const NUMERIC = new Set(["priority", "limit", "tail", "step_run_id"]);
+const NUMERIC = new Set(["priority", "limit", "tail", "step_run_id", "run_id"]);
 const BOOLEAN = new Set(["force", "follow", "include_closed"]);
 
 /** 最初の応答を待つ最大時間。`followLogs` は末尾の応答を受け取った後は
@@ -68,6 +68,7 @@ export const USAGE = `使い方: dctl <コマンド> [引数]
 Intake
   intake ls [--project <path>] [--include_closed]
   intake get <intake-id>
+  intake logs <intake-id> [--tail <n>] [--run_id <n>] [--follow]
   開始・回答・差し戻し・承認・中止はアプリから行う
 
 worktree
@@ -120,6 +121,8 @@ export function parseArgv(argv: string[]): { method: string; params: Record<stri
           return { method: "intake.list", params: flags };
         case "get":
           return { method: "intake.get", params: { intake_id: intakeId } };
+        case "logs":
+          return { method: "intake.logs", params: { intake_id: intakeId, ...flags } };
         default:
           throw new Error(`未知のコマンドです: intake ${sub ?? ""}\n\n${USAGE}`);
       }
@@ -274,13 +277,26 @@ function closeQuietly(conn: Deno.UnixConn): void {
   } catch { /* 既に閉じている */ }
 }
 
+/** 追従できるメソッドと、その追従先の 1 行を流すイベントから行を取り出す読み方。 */
+const FOLLOWED_LINE = {
+  "task.logs": (ev: ServerEvent, params: Record<string, unknown>) =>
+    ev.event === "log.line" && ev.task_id === params.task_id ? ev.line : null,
+  "intake.logs": (ev: ServerEvent, params: Record<string, unknown>) =>
+    ev.event === "intake.logLine" && ev.intake_id === params.intake_id ? ev.line : null,
+};
+
+export type FollowMethod = keyof typeof FOLLOWED_LINE;
+
+const isFollowMethod = (method: string): method is FollowMethod => method in FOLLOWED_LINE;
+
 /**
- * task.logs を follow: true で送り、返ってきた末尾を 1 行ずつ out に渡した後、
- * 同じ接続に届く、このタスクの log.line を 1 行ずつ out に渡し続ける。
+ * task.logs / intake.logs を follow: true で送り、返ってきた末尾を 1 行ずつ out に渡した後、
+ * 同じ接続に届く、追従先の 1 行（log.line / intake.logLine）を 1 行ずつ out に渡し続ける。
  * signal が中断されたら接続を閉じて resolve する。デーモンが接続を閉じたら reject する。
  */
 export async function followLogs(
   path: string,
+  method: FollowMethod,
   params: Record<string, unknown>,
   out: (line: string) => void,
   signal: AbortSignal,
@@ -306,16 +322,15 @@ export async function followLogs(
   let answered = false;
   try {
     if (signal.aborted) return;
-    await send(conn, requestId, "task.logs", params);
+    await send(conn, requestId, method, params);
     for await (const msg of readMessages(conn)) {
       if (signal.aborted) return;
       if (answered) {
-        if (isEvent(msg) && msg.event === "log.line" && msg.task_id === params.task_id) {
-          out(msg.line);
-        }
+        const line = isEvent(msg) ? FOLLOWED_LINE[method](msg, params) : null;
+        if (line !== null) out(line);
         continue;
       }
-      // 応答より前の log.line は捨てる（末尾と重なるため）
+      // 応答より前の行は捨てる（末尾と重なるため）
       if (isEvent(msg)) continue;
       if (msg.id === null) throw new Error(msg.ok ? "不明なプロトコルエラーです" : msg.error);
       if (msg.id !== requestId) continue;
@@ -323,7 +338,7 @@ export async function followLogs(
       timer = undefined;
       if (!msg.ok) throw new Error(msg.error);
       answered = true;
-      const lines = (msg.result as TaskLogs).lines;
+      const lines = (msg.result as TaskLogs | IntakeLogs).lines;
       // ファイルが改行で終わると split で末尾に空要素が 1 つ付く
       const tail = lines.at(-1) === "" ? lines.slice(0, -1) : lines;
       for (const line of tail) out(line);
@@ -349,12 +364,12 @@ export async function main(argv: string[]): Promise<number> {
   try {
     const { method, params } = parseArgv(argv);
     const path = Deno.env.get("DOCTRINE_SOCKET") ?? socketPath();
-    if (method === "task.logs" && params.follow === true) {
+    if (isFollowMethod(method) && params.follow === true) {
       const controller = new AbortController();
       const onSigint = () => controller.abort();
       Deno.addSignalListener("SIGINT", onSigint);
       try {
-        await followLogs(path, params, (line) => console.log(line), controller.signal);
+        await followLogs(path, method, params, (line) => console.log(line), controller.signal);
       } finally {
         Deno.removeSignalListener("SIGINT", onSigint);
       }

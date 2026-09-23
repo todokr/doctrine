@@ -40,6 +40,13 @@ test("dctl intake ls / get", () => {
   );
 });
 
+test("dctl intake logs", () => {
+  assert.deepEqual(
+    parseArgv(["intake", "logs", "i1", "--tail", "5", "--follow"]),
+    { method: "intake.logs", params: { intake_id: "i1", tail: 5, follow: true } },
+  );
+});
+
 test("dctl に Intake の操作は無い", () => {
   for (
     const argv of [
@@ -274,6 +281,7 @@ test("followLogs: 末尾を出した後、そのタスクの log.line だけを�
   await assert.rejects(
     followLogs(
       sock,
+      "task.logs",
       { task_id: "t1", follow: true },
       (l) => got.push(l),
       new AbortController().signal,
@@ -304,7 +312,7 @@ test("followLogs: 中断すると接続を閉じて resolve する", async () =>
   });
   const controller = new AbortController();
   const got: string[] = [];
-  await followLogs(sock, { task_id: "t1", follow: true }, (l) => {
+  await followLogs(sock, "task.logs", { task_id: "t1", follow: true }, (l) => {
     got.push(l);
     if (l === "b") controller.abort();
   }, controller.signal);
@@ -316,7 +324,14 @@ test("followLogs: 最初の応答が来ないとタイムアウトする", async
     // 何も書き込まない。応答を返さないデーモンを模す。
   });
   await assert.rejects(
-    followLogs(sock, { task_id: "t1", follow: true }, () => {}, new AbortController().signal, 50),
+    followLogs(
+      sock,
+      "task.logs",
+      { task_id: "t1", follow: true },
+      () => {},
+      new AbortController().signal,
+      50,
+    ),
     /応答がありません/,
   );
 });
@@ -331,6 +346,7 @@ test("followLogs: 失敗の応答はそのまま投げる", async () => {
   await assert.rejects(
     followLogs(
       sock,
+      "task.logs",
       { task_id: "t1", follow: true },
       (l) => got.push(l),
       new AbortController().signal,
@@ -338,4 +354,44 @@ test("followLogs: 失敗の応答はそのまま投げる", async () => {
     /ステップ実行がありません/,
   );
   assert.deepEqual(got, []);
+});
+
+test("followLogs: intake.logs では、その Intake の intake.logLine だけを出す", async () => {
+  let request: unknown;
+  const intakeLine = (intake_id: string, line: string) =>
+    JSON.stringify({ event: "intake.logLine", intake_id, run_id: 1, line }) + "\n";
+  await fakeDaemon((socket) => {
+    onRequest(socket, (req) => {
+      request = req;
+      socket.write(
+        JSON.stringify({
+          id: 1,
+          ok: true,
+          result: { run_id: 1, log_path: "/x", lines: ["a", ""] },
+        }) +
+          "\n",
+      );
+      socket.write(intakeLine("i1", "b"));
+      socket.write(logLine("i1", 1, "タスクの行"));
+      socket.write(intakeLine("i2", "他の Intake"));
+      socket.end();
+    });
+  });
+  const got: string[] = [];
+  await assert.rejects(
+    followLogs(
+      sock,
+      "intake.logs",
+      { intake_id: "i1", follow: true },
+      (l) => got.push(l),
+      new AbortController().signal,
+    ),
+    /デーモンが接続を閉じました/,
+  );
+  assert.deepEqual(got, ["a", "b"]);
+  assert.deepEqual(request, {
+    id: 1,
+    method: "intake.logs",
+    params: { intake_id: "i1", follow: true },
+  });
 });

@@ -14,7 +14,12 @@ import { createWorktree, worktreePathFor } from "../../src/domain/worktree.ts";
 import { createMockAdapter } from "../../src/adapter/mock.ts";
 import type { AgentAdapter } from "../../src/adapter/types.ts";
 import { createWarningLog } from "../../src/daemon/warnings.ts";
-import type { IntakeDetail, IntakeSummary, ServerEvent } from "../../../shared/protocol.ts";
+import type {
+  IntakeDetail,
+  IntakeLogs,
+  IntakeSummary,
+  ServerEvent,
+} from "../../../shared/protocol.ts";
 import type { PrFact } from "../../../shared/intake/github.ts";
 import type { IntakeState } from "../../../shared/intake/state.ts";
 import type { PrWatcher, Tracker } from "../../src/github/tracker.ts";
@@ -1077,5 +1082,114 @@ test("改訂の RPC は状態とコメントを確かめる", async () => {
   await assert.rejects(
     () => activeCall("intake.abandonRevision", { intake_id: id }),
     /改訂中ではありません/,
+  );
+});
+
+// --- intake.logs（#183） ------------------------------------------------------
+
+/** standardAdapter と同じ結果を返し、実行ごとに 1 行を出力する。 */
+function talkingAdapter(): AgentAdapter {
+  return createMockAdapter({
+    result: {},
+    events: [{ kind: "assistant", text: "Issue を読んでいます" }],
+    sequence: [
+      questionsOut([question("q1")]),
+      pfdOut(example()),
+    ],
+  });
+}
+
+test("intake.logs は run_id を省くと最新の実行の末尾を返し、指定すればその実行を返す", async () => {
+  const { ctx, call } = await setup({ adapter: talkingAdapter() });
+  const started = await toAnswering(ctx, call);
+  const detail = await call<IntakeDetail>("intake.get", { intake_id: started.id });
+  await call("intake.answer", {
+    intake_id: started.id,
+    question_set_id: detail.question_sets[0].id,
+    answers: answerQ1,
+    assumption_responses: [],
+  });
+  await tickUntil(ctx, started.id, "reviewing");
+  const runs = await listIntakeRuns(ctx.db, started.id);
+  assert.ok(runs.length >= 2, "調査と分解の 2 回は走っている");
+
+  const latest = await call<IntakeLogs>("intake.logs", { intake_id: started.id });
+  assert.equal(latest.run_id, runs.at(-1)!.id);
+  assert.equal(latest.log_path, runs.at(-1)!.log_path);
+  assert.ok(latest.lines.some((l) => l !== ""), "ログファイルの中身が返る");
+
+  const first = await call<IntakeLogs>("intake.logs", {
+    intake_id: started.id,
+    run_id: runs[0].id,
+  });
+  assert.equal(first.run_id, runs[0].id);
+
+  const tail = await call<IntakeLogs>("intake.logs", { intake_id: started.id, tail: 1 });
+  assert.equal(tail.lines.length, 1);
+});
+
+test("intake.logs は、ほかの Intake の実行や無い実行を指すと拒む", async () => {
+  const { ctx, call } = await setup();
+  const started = await toAnswering(ctx, call);
+  const other = await call<IntakeSummary>("intake.start", {
+    project: repo,
+    issue_url: "https://github.com/o/r/issues/2",
+  });
+  const otherRun = (await listIntakeRuns(ctx.db, other.id))[0];
+  await assert.rejects(
+    () => call("intake.logs", { intake_id: started.id, run_id: otherRun.id }),
+    /実行がありません/,
+  );
+  await assert.rejects(
+    () => call("intake.logs", { intake_id: started.id, run_id: 99999 }),
+    /実行がありません/,
+  );
+  await assert.rejects(() => call("intake.logs", { intake_id: "nope" }), /Intake がありません/);
+});
+
+test("intake.logs の follow は接続の追従先をこの Intake に移し、false でやめる", async () => {
+  const { ctx, call } = await setup();
+  const h = createHandler(ctx);
+  let following: string | null = null;
+  const conn = {
+    follow: (id: string) => following = id,
+    unfollow: () => following = null,
+    isFollowing: (id: string) => following === id,
+  };
+  const started = await call<IntakeSummary>("intake.start", { project: repo, issue_url: ISSUE });
+  await h("intake.logs", { intake_id: started.id, follow: true }, conn);
+  assert.equal(following, started.id);
+  await h("intake.logs", { intake_id: "other", follow: false }, conn).catch(() => {});
+  assert.equal(following, started.id, "ほかをやめる指示では外れない");
+  await h("intake.logs", { intake_id: started.id, follow: false }, conn);
+  assert.equal(following, null);
+});
+
+test("実行中の出力は intake.logLine として、その Intake を追従している接続にだけ流す", async () => {
+  const events: ServerEvent[] = [];
+  const keys: (string | undefined)[] = [];
+  const ctx = await context(events, { adapter: talkingAdapter() });
+  ctx.broadcast = (ev, opts) => {
+    events.push(ev);
+    if (ev.event === "intake.logLine") keys.push(opts?.followersOnly ? opts.followKey : "全員");
+  };
+  const call: Call = <T>(method: string, params: Record<string, unknown> = {}) =>
+    createHandler(ctx)(method, params, NOOP_CONN) as Promise<T>;
+  await call("project.add", { path: repo });
+  const started = await toAnswering(ctx, call);
+  const run = (await listIntakeRuns(ctx.db, started.id))[0];
+
+  const lines = events.filter((e) => e.event === "intake.logLine");
+  assert.ok(lines.length > 0, "出力が配信されている");
+  for (const e of lines) {
+    assert.equal(e.intake_id, started.id);
+    assert.equal(e.run_id, run.id);
+  }
+  assert.ok(keys.every((k) => k === started.id), "追従している接続にだけ流す");
+  const logs = await call<IntakeLogs>("intake.logs", { intake_id: started.id, run_id: run.id });
+  assert.deepEqual(
+    lines.map((e) => e.line),
+    logs.lines.filter((l) => l !== ""),
+    "ファイルと同じ文字列を流す",
   );
 });

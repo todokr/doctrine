@@ -498,6 +498,9 @@ export type Editing = LineComment & { task: string };
 /** 画面が持つログ。step_run_id が変われば別のステップの実行なので入れ替える */
 export type LogView = { stepRunId: number | null; lines: string[] };
 
+/** Intake の画面が持つログ。run_id（intake_runs.id）が変われば別の実行なので入れ替える */
+export type IntakeLogView = { runId: number | null; lines: string[] };
+
 /** ログの保持行数。追従したまま放置しても増え続けないように上限を持つ */
 export const LOG_LINES_KEPT = 2000;
 
@@ -543,6 +546,7 @@ export type State = {
   showClosedIntakes: boolean;
   /** intake.get の結果。選んだ Intake ぶんだけ持つ */
   intakeDetails: Record<string, Loaded<IntakeDetail>>;
+  intakeLogs: Record<string, IntakeLogView>;
   intakeGen: Record<string, number>;
   /** 進行中の面で改訂に入るモードにしている Intake の id。詳細を捨てても消えないよう、面の外に持つ */
   intakeRevise: string | null;
@@ -672,6 +676,7 @@ export type Action =
   | { type: "cancel" }
   | { type: "detail"; id: string; detail: TaskDetail }
   | { type: "logs"; id: string; logs: LogView }
+  | { type: "intake.logs"; id: string; logs: IntakeLogView }
   | { type: "toast"; message: string | null }
   | { type: "sync"; tasks: Task[]; projects: Project[]; now: number }
   | { type: "limits.recent"; samples: RateLimitWindow[] }
@@ -691,11 +696,21 @@ function appendLog(
   current: LogView | undefined,
   ev: { step_run_id: number; line: string },
 ): LogView {
-  const lines = current && current.stepRunId === ev.step_run_id ? [...current.lines, ev.line] : [
-    ev.line,
-  ];
-  return { stepRunId: ev.step_run_id, lines: lines.slice(-LOG_LINES_KEPT) };
+  const same = current?.stepRunId === ev.step_run_id;
+  return { stepRunId: ev.step_run_id, lines: appendLine(same ? current.lines : [], ev.line) };
 }
+
+/** Intake の実行の 1 行。appendLog と同じく、run_id が変われば入れ替える */
+function appendIntakeLog(
+  current: IntakeLogView | undefined,
+  ev: { run_id: number; line: string },
+): IntakeLogView {
+  const same = current?.runId === ev.run_id;
+  return { runId: ev.run_id, lines: appendLine(same ? current.lines : [], ev.line) };
+}
+
+const appendLine = (lines: string[], line: string): string[] =>
+  [...lines, line].slice(-LOG_LINES_KEPT);
 
 const updateTask = (s: State, id: string, patch: Partial<Task>): Task[] =>
   s.tasks.map((t) => (t.id === id ? { ...t, ...patch } : t));
@@ -913,6 +928,7 @@ export function reduce(s: State, a: Action): State {
         intakes: a.intakes,
         intakeRevise: s.intakeRevise !== null && (ids.has(s.intakeRevise) || s.intakeRevise === s.intakeSel) ? s.intakeRevise : null,
         intakeDetails: keep(s.intakeDetails),
+        intakeLogs: keep(s.intakeLogs),
         intakeGen: keep(s.intakeGen),
         intakeDrafts: keep(s.intakeDrafts),
       };
@@ -967,6 +983,8 @@ export function reduce(s: State, a: Action): State {
       return { ...s, detail: { ...s.detail, [a.id]: a.detail } };
     case "logs":
       return { ...s, logs: { ...s.logs, [a.id]: a.logs } };
+    case "intake.logs":
+      return { ...s, intakeLogs: { ...s.intakeLogs, [a.id]: a.logs } };
     case "toast":
       return { ...s, toast: a.message };
     case "sync": {
@@ -1036,6 +1054,13 @@ export function reduce(s: State, a: Action): State {
       }
       if (ev.event === "intake.updated") {
         return { ...s, ...invalidateIntake(s, ev.intake_id) };
+      }
+      if (ev.event === "intake.logLine") {
+        if (!s.intakes.some((i) => i.id === ev.intake_id)) return s;
+        return {
+          ...s,
+          intakeLogs: { ...s.intakeLogs, [ev.intake_id]: appendIntakeLog(s.intakeLogs[ev.intake_id], ev) },
+        };
       }
       if (ev.event === "stepRun.started") {
         if (!s.tasks.some((x) => x.id === ev.task_id)) return s;

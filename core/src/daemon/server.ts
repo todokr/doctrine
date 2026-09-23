@@ -3,14 +3,15 @@ import type { Request, Response, ServerEvent } from "../../../shared/protocol.ts
 import { stateRoot } from "../util/home.ts";
 
 /**
- * 追従先は1接続につき1タスク（レビューアプリ設計spec 9章）。アプリは1本の接続を
- * 画面全体で共有するので、複数タスクを同時に追従できると、画面を切り替えた
+ * 追従先は1接続につき1つ（レビューアプリ設計spec 9章）。アプリは1本の接続を
+ * 画面全体で共有するので、複数を同時に追従できると、画面を切り替えた
  * ぶんだけ追従先が増え、見ていないタスクのログまで流れ続ける。
+ * 追従先はタスクの id か Intake の id で、どちらも UUID なので同じ枠を分け合う。
  */
 export type Connection = {
-  follow(taskId: string): void;
+  follow(key: string): void;
   unfollow(): void;
-  isFollowing(taskId: string): boolean;
+  isFollowing(key: string): boolean;
 };
 
 export type Handler = (
@@ -159,8 +160,8 @@ export function createServer(handler: Handler) {
         }
       })();
     },
-    broadcast(ev: ServerEvent, opts: { taskId?: string; followersOnly?: boolean } = {}): void {
-      const key = opts.taskId ?? ("task_id" in ev ? ev.task_id : undefined);
+    broadcast(ev: ServerEvent, opts: { followKey?: string; followersOnly?: boolean } = {}): void {
+      const key = opts.followKey ?? ("task_id" in ev ? ev.task_id : undefined);
       for (const client of clients) {
         if (opts.followersOnly && (key === undefined || client.following !== key)) continue;
         write(client, ev);

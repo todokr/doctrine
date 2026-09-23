@@ -55,7 +55,9 @@ export type ServerEvent =
     revising: boolean;
   }
   /** 状態以外（プロセスの状態・sub-issue・観測した PR・見張りの失敗）が変わった。アプリは intake.get を取り直す。 */
-  | { event: "intake.updated"; intake_id: string };
+  | { event: "intake.updated"; intake_id: string }
+  /** 調査・分解のエージェントの出力 1 行。intake.logs で追従している接続にだけ流れる。 */
+  | { event: "intake.logLine"; intake_id: string; run_id: number; line: string };
 
 export type TaskState =
   | "queued"
@@ -236,6 +238,9 @@ export type WorkflowSaveResult =
   | { ok: false; issues: WorkflowSaveIssue[] };
 
 export type TaskLogs = { step_run_id: number | null; log_path: string | null; lines: string[] };
+
+/** intake.logs の応答。run_id は読んだ intake_runs の行で、まだ実行が無ければ null。 */
+export type IntakeLogs = { run_id: number | null; log_path: string | null; lines: string[] };
 
 /** daemon.warnings が返す1件。イベントの daemon.warning と同じ形。 */
 export type Warning = { at: string; message: string; task_id?: string };
@@ -607,6 +612,14 @@ export type Methods = {
   };
   /** completed の Intake の親 Issue を閉じる（W-11）。 */
   "intake.closeIssue": { params: { intake_id: string }; result: IntakeSummary };
+  /**
+   * 調査・分解の実行ログの末尾。run_id を省くと最新の実行を読む。
+   * follow の意味は task.logs と同じで、追従先は task.logs と 1 つの枠を分け合う。
+   */
+  "intake.logs": {
+    params: { intake_id: string; run_id?: number; tail?: number; follow?: boolean };
+    result: IntakeLogs;
+  };
 };
 
 export type Method = keyof Methods;

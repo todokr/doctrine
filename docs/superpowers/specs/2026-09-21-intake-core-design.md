@@ -528,7 +528,7 @@ export type ProcessStatus =
 | `intake.setDispatchPaused` | `{ intake_id; paused: boolean }` | `IntakeSummary` | W-10 |
 | `intake.cancel` | `{ intake_id; mode: "leave" \| "stop" }` | `IntakeSummary` | C-7・C-8 |
 | `intake.closeIssue` | `{ intake_id }` | `IntakeSummary`（`completed` のときだけ） | W-11 |
-| `intake.logs` | `{ intake_id; run_id?; tail? }` | `TaskLogs` と同じ形 | 調査・分解の経過 |
+| `intake.logs` | `{ intake_id; run_id?; tail?; follow? }` | `{ run_id; log_path; lines }`（`run_id` を省くと最新の実行。`follow` は `task.logs` と同じで、追従先の枠をタスクと分け合う） | 調査・分解の経過（#183） |
 
 - `intake.start` を失敗にしないのは、`shared/protocol.ts` の失敗応答が `error: string` しか持てず、既存の id を返せないためと、
   S-3 が「開始の代わりにその Intake を開く」ためである。`project.add` の `alreadyRegistered` と同じ作法である。
@@ -547,8 +547,11 @@ export type ProcessStatus =
 - イベント（`ServerEvent` に足す）:
   - `{ event: "intake.stateChanged"; intake_id: string; from: IntakeState; to: IntakeState; revising: boolean }`
   - `{ event: "intake.updated"; intake_id: string }` — 状態以外（プロセスの状態・sub-issue・観測した PR・見張りの失敗）が変わった。アプリは `intake.get` を取り直す
+  - `{ event: "intake.logLine"; intake_id: string; run_id: number; line: string }` — 実行中のエージェントの出力 1 行。`intake.logs` で追従している接続にだけ配る（#183）。
+    タスクの `log.line` を広げないのは、`task_id` を前提に読むアプリと `dctl` の側を濁さないためである
   - タスク側は既存のイベントのままにする。Intake 由来のタスクの状態変化で Intake の表示が変わるときは、デーモンが `intake.updated` も配る
-- N-2: `dctl intake ls` は `intake.list` を表示するだけである。開始・承認・差し戻しのコマンドは作らない
+- N-2: `dctl intake ls` は `intake.list` を表示するだけである。開始・承認・差し戻しのコマンドは作らない。
+  読むだけのコマンドとして `dctl intake logs <id> [--follow]` は持つ（#183）
 
 ## 14. デーモン再起動時の復旧
 
@@ -665,7 +668,6 @@ S の要求は、扱うものを同じ表に入れる。
 - Intake の作り方そのもの（PRD 13 章の最後の項目。分解の進め方と `pfd/` の削除時期）
 - Linear
 - PR のマージの自動化（#61）、定時起動（#59）
-- Intake の実行ログのライブ配信（`log.line` 相当）。`intake.logs` で読むだけにする
 - 移行と後方互換の仕掛け。doctrine にはまだ利用者がいないので、旧タイトル接頭辞（`[pfd:…]`）の読み替えも、`pfd` の状態ディレクトリの引き継ぎも作らない
 
 ## 18. 決めていないこと

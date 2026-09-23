@@ -7,6 +7,7 @@ import { useIntakeRpc, useStore } from "../store";
 import { INTAKE_TONE } from "../tone";
 import type { Project } from "../types";
 import { AnswerFace } from "./AnswerFace";
+import { IntakeLog } from "./IntakeLog";
 import { IntakeProgress, CancelDialog } from "./IntakeProgress";
 import { IssuePicker } from "./IssuePicker";
 import { PlanReview } from "./PlanReview";
@@ -157,7 +158,12 @@ export function IntakeView() {
       {band}
       <div className="pad">
         {heading}
-        {face === "questions" ? <AnswerFace detail={detail.value} /> : <IntakeFacePlaceholder intake={detail.value} />}
+        {face === "questions" ? <AnswerFace detail={detail.value} /> : (
+          <>
+            <IntakeFacePlaceholder intake={detail.value} />
+            <IntakeLog detail={detail.value} />
+          </>
+        )}
       </div>
       {dialog}
     </>
