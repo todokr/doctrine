@@ -235,16 +235,16 @@ export function stepRunHistory(detail?: TaskDetail): StepRun[] {
   return detail ? [...detail.stepRuns].reverse() : [];
 }
 
-/** 実行履歴の状態の表示名とクラス。interrupted は人やデーモンの停止で外から閉じた実行で、失敗ではない */
-export const RUN_PILL: Record<StepRun["status"], [string, string]> = {
-  running: ["実行中", "p-run"],
-  awaiting: ["レビュー待ち", "p-attn"],
-  success: ["成功", "p-ok"],
-  failed: ["失敗", "p-danger"],
-  interrupted: ["中断", "p-muted"],
-  bounced: ["差し戻し", "p-muted"],
-  rate_limited: ["上限待ち", "p-muted"],
-  waiting: ["マージ待ち", "p-muted"],
+/** 実行履歴の状態の表示名。interrupted は人やデーモンの停止で外から閉じた実行で、失敗ではない */
+export const RUN_WORD: Record<StepRun["status"], string> = {
+  running: "実行中",
+  awaiting: "レビュー待ち",
+  success: "成功",
+  failed: "失敗",
+  interrupted: "中断",
+  bounced: "差し戻し",
+  rate_limited: "上限待ち",
+  waiting: "マージ待ち",
 };
 
 /** 拒否1件を「ツール名 + 主要引数」の並びにする。引数は切り詰めない（コマンドを読むため）。 */
@@ -270,6 +270,14 @@ export const reviewRound = (c: TaskContext) =>
 /** 差し戻された回だけ。画面はここにコメントを並べる */
 export const rejections = (c: TaskContext) =>
   c.reviews.filter((r): r is ReviewEntry & { status: "rejected" } => r.status === "rejected");
+
+export type RejectedReview = ReturnType<typeof rejections>[number];
+
+/** 前回のフィードバックと、それより前の差し戻し（新しい順）。reviews は step_runs の id の昇順で届く */
+export function feedbackOf(c: TaskContext): { latest: RejectedReview | null; earlier: RejectedReview[] } {
+  const past = rejections(c);
+  return { latest: past.at(-1) ?? null, earlier: past.slice(0, -1).reverse() };
+}
 
 /**
  * 「前回レビュー以降」を出してよいか。記録（review_tree）の無い回は

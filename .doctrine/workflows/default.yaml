@@ -50,7 +50,7 @@ steps:
   - id: plan
     type: agent
     session: planner
-    model: claude-opus-5
+    model: claude-opus-5-5
     permissionMode: acceptEdits
     allowedTools:
       - "Bash(git status:*)"
@@ -108,7 +108,7 @@ steps:
   - id: plan-review
     type: agent
     session: plan-reviewer
-    model: claude-opus-5
+    model: claude-opus-5-5
     permissionMode: acceptEdits
     allowedTools:
       - "Bash(git status:*)"
@@ -270,7 +270,7 @@ steps:
   - id: agent-review
     type: agent
     session: code-reviewer
-    model: claude-opus-5
+    model: claude-opus-5-5
     permissionMode: acceptEdits
     allowedTools:
       - "Bash(git status:*)"
@@ -350,7 +350,7 @@ steps:
   - id: guide
     type: guide
     session: guide
-    model: claude-opus-5
+    model: claude-opus-5-5
     permissionMode: acceptEdits
     allowedTools:
       - "Bash(git status:*)"

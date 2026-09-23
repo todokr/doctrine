@@ -1,6 +1,13 @@
 // テスト用の標本。画面はこれを使わない（画面のデータはデーモンから来る）
 import type { Project, Task, TaskDiff } from "./types";
-import type { GithubIssue, IntakeDetail, IntakeSummary, ServerEvent } from "../../shared/protocol.ts";
+import type {
+  GithubIssue,
+  IntakeDetail,
+  IntakeSummary,
+  ServerEvent,
+  WorkflowDetail,
+  WorkflowListEntry,
+} from "../../shared/protocol.ts";
 import type { Pfd } from "../../shared/intake/pfd.ts";
 import type { PrFact, ProcessStatus } from "../../shared/intake/processStatus.ts";
 import type { Answer, Question } from "../../shared/intake/question.ts";
@@ -392,6 +399,111 @@ export const GITHUB_ISSUES: GithubIssue[] = [
     updatedAt: at(90),
     intake_id: null,
   },
+];
+
+/** ワークフローの定義の標本。.doctrine/workflows/default.yaml と同じ形の 10 ステップ。 */
+export const WORKFLOW_DEFAULT = {
+  name: "default",
+  ok: true,
+  warnings: ["open-pr: 再実行で二重に効くコマンドがあります"],
+  steps: [
+    {
+      id: "plan",
+      type: "agent",
+      prompt: "計画を立ててください\n{{ task.prompt }}",
+      session: "planner",
+      model: "claude-opus-5",
+      permissionMode: "acceptEdits",
+      allowedTools: ["Bash(git diff:*)", "Bash(grep:*)"],
+      branch: null,
+    },
+    {
+      id: "plan-review",
+      type: "agent",
+      prompt: "計画をレビューしてください",
+      session: "plan-reviewer",
+      model: "claude-opus-5",
+      permissionMode: null,
+      allowedTools: null,
+      branch: null,
+    },
+    {
+      id: "plan-gate",
+      type: "command",
+      run: "grep -q '^verdict: approve' .doctrine-out/plan-review.md",
+      branch: {
+        goto: "plan",
+        maxAttempts: 3,
+        feed: "計画がレビューで却下された:\n{{ steps.plan-gate.last_stdout }}",
+        implicit: false,
+      },
+    },
+    {
+      id: "implement",
+      type: "agent",
+      prompt: "計画に沿って実装してください",
+      session: "implementer",
+      model: "claude-sonnet-5",
+      permissionMode: null,
+      allowedTools: null,
+      branch: null,
+    },
+    {
+      id: "verify",
+      type: "command",
+      run: "mise run app:test",
+      branch: {
+        goto: "implement",
+        maxAttempts: 3,
+        feed: "テストが落ちた:\n{{ steps.verify.last_stdout }}",
+        implicit: false,
+      },
+    },
+    {
+      id: "agent-review",
+      type: "agent",
+      prompt: "変更をレビューしてください",
+      session: null,
+      model: "claude-opus-5",
+      permissionMode: null,
+      allowedTools: null,
+      branch: null,
+    },
+    {
+      id: "review-gate",
+      type: "command",
+      run: "grep -q '^verdict: approve' .doctrine-out/agent-review.md",
+      branch: { goto: "implement", maxAttempts: 3, feed: null, implicit: false },
+    },
+    {
+      id: "guide",
+      type: "guide",
+      session: "guide",
+      model: "claude-opus-5",
+      permissionMode: "acceptEdits",
+      allowedTools: ["Bash(git diff:*)"],
+      branch: { goto: "guide", maxAttempts: 3, feed: "{{ steps.guide.last_stderr }}", implicit: true },
+    },
+    {
+      id: "review",
+      type: "approval",
+      title: "変更を確認してください",
+      reviewFiles: [".doctrine-out/review.md", ".doctrine-out/plan.md"],
+      branch: { goto: "implement", maxAttempts: 5, feed: "差し戻されました:\n{{ steps.review.reason }}", implicit: false },
+    },
+    {
+      id: "open-pr",
+      type: "command",
+      run: "git push -u origin HEAD",
+      branch: null,
+    },
+  ],
+} satisfies WorkflowDetail;
+
+export const WORKFLOW_LIST: WorkflowListEntry[] = [
+  { name: "broken", ok: false, issues: ["steps[1].goto: 存在しないステップ nowhere を指しています"] },
+  { name: "default", ok: true },
+  { name: "light", ok: true },
 ];
 
 const INTAKE_1 = INTAKES.find((i) => i.id === "i1")!;

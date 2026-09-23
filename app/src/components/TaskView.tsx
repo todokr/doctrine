@@ -12,28 +12,30 @@ import {
   hm,
   isTerminal,
   omittedDenials,
-  RUN_PILL,
+  RUN_WORD,
   stepRunHistory,
   stopReasons,
 } from "../model";
 import { useDecide, useNotYet, useStore } from "../store";
 import { isAtBottom } from "../tailStick";
+import { RUN_TONE, TASK_TONE } from "../tone";
 import type { Task, TaskState } from "../types";
+import { StatusDot } from "./StatusDot";
 import { Crumbs, OpenInEditor } from "./ReviewView";
 import { RemoveWorktreeButton } from "./WorktreeView";
 import { WorkflowRail } from "./WorkflowRail";
 
-export const STATE_PILL: Record<TaskState, [string, string]> = {
-  suspended: ["レビュー待ち", "p-attn"],
-  running: ["実行中", "p-run"],
-  queued: ["待ち", "p-muted"],
-  paused: ["一時停止", "p-muted"],
-  rate_limited: ["上限待ち", "p-muted"],
-  waiting: ["マージ待ち", "p-muted"],
-  failed: ["失敗", "p-danger"],
-  completed: ["完了", "p-ok"],
-  canceled: ["中止", "p-muted"],
-  unknown: ["不明な状態", "p-danger"],
+export const STATE_WORD: Record<TaskState, string> = {
+  suspended: "レビュー待ち",
+  running: "実行中",
+  queued: "待ち",
+  paused: "一時停止",
+  rate_limited: "上限待ち",
+  waiting: "マージ待ち",
+  failed: "失敗",
+  completed: "完了",
+  canceled: "中止",
+  unknown: "不明な状態",
 };
 
 /** 末尾を一度に何行もらうか。task.logs の既定と揃える */
@@ -46,7 +48,7 @@ const TAIL = 200;
  * タスクの状態やステップが動いたら取り直す。log.line のような流れ続ける
  * イベントでは取り直さない（毎行 task.get を投げることになる）。
  */
-function useTaskDetail(t: Task) {
+export function useTaskDetail(t: Task) {
   const { dispatch } = useStore();
   useEffect(() => {
     let alive = true;
@@ -173,7 +175,6 @@ export function TaskView({ t }: { t: Task }) {
     if (el) el.scrollTop = el.scrollHeight;
   }, [t.id, log?.stepRunId]);
 
-  const [stateName, stateCls] = STATE_PILL[t.state];
   // 今のステップが何回目か。履歴の先頭が今の（または最後の）実行にあたる
   const attempt = history[0]?.attempt ?? 1;
   // t.worktree（DB の worktree_path）と worktree.list の path は文字列として一致するとは
@@ -185,10 +186,10 @@ export function TaskView({ t }: { t: Task }) {
 
   return (
     <div className="pad">
-      <Crumbs t={t} />
+      <Crumbs t={t} kind="Task" />
       <h1>{t.title}</h1>
       <div className="headrow">
-        <span className={`pill ${stateCls}`}>{stateName}</span>
+        <StatusDot tone={TASK_TONE[t.state]} word={STATE_WORD[t.state]} />
         {t.step && (
           <span>
             ステップ <span className="mono">{t.step}</span>
@@ -289,19 +290,20 @@ export function TaskView({ t }: { t: Task }) {
       </TaskActions>
       {t.worktree && <p className="mono hint">{t.worktree}</p>}
 
-      {detail && <WorkflowRail detail={detail} />}
+      {detail && (
+        <div className="blk">
+          <div className="headrow"><span className="lbl">Workflow</span><span className="mono hint">{t.wf}</span></div>
+          <WorkflowRail detail={detail} legend />
+        </div>
+      )}
 
       <div className="headrow">
-        <b>ログ</b>
+        <span className="lbl">Log</span>
         <span className="mono hint">
           {history.find((r) => r.id === log?.stepRunId)?.step_id ?? ""}
         </span>
         <span className="spacer" />
-        <span className="hint">
-          {following
-            ? <><span className="spin" style={{ display: "inline-block", verticalAlign: -2 }} /> 追従中</>
-            : `末尾 ${TAIL} 行`}
-        </span>
+        {!following && <span className="hint">末尾 {TAIL} 行</span>}
       </div>
       {log && log.lines.some((l) => l !== "")
         ? (
@@ -327,7 +329,7 @@ export function TaskView({ t }: { t: Task }) {
 
       {history.length > 0 && (
         <details className="runs">
-          <summary>実行履歴</summary>
+          <summary><span className="lbl">History</span> 実行履歴</summary>
           <div className="runtable">
             <table>
               <thead>
@@ -335,7 +337,6 @@ export function TaskView({ t }: { t: Task }) {
               </thead>
               <tbody>
                 {history.map((r) => {
-                  const [name, cls] = RUN_PILL[r.status];
                   const denials = r.permission_denials;
                   const open = denials !== null && openDenials === r.id;
                   return (
@@ -347,15 +348,15 @@ export function TaskView({ t }: { t: Task }) {
                           {denials
                             ? (
                               <button
-                                className={`pill ${cls}`}
+                                className="st-btn"
                                 aria-expanded={open}
                                 title="拒否された操作を見る"
                                 onClick={() => setOpenDenials(open ? null : r.id)}
                               >
-                                {name}
+                                <StatusDot tone={RUN_TONE[r.status]} word={RUN_WORD[r.status]} />
                               </button>
                             )
-                            : <span className={`pill ${cls}`}>{name}</span>}
+                            : <StatusDot tone={RUN_TONE[r.status]} word={RUN_WORD[r.status]} />}
                         </td>
                         <td className="hint">{clock(Date.parse(r.started_at))}</td>
                         <td className="hint">

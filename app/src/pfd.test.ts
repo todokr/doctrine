@@ -3,7 +3,7 @@ import type { Pfd } from "../../shared/intake/pfd.ts";
 import type { ProcessStatus } from "../../shared/intake/processStatus.ts";
 import type { IntakeProcessView } from "../../shared/protocol.ts";
 import { ANSWERS, INTAKE_ACTIVE, PFD_LONG_LABELS, PFD_SAMPLE, PFD_STATUSES_A, PFD_STATUSES_B, QUESTIONS } from "./fixtures";
-import { buildPfdView, frozenIds, LOOK, textWidth, parsePfdKey, pfdElement, pfdKey, processStages, type PfdView } from "./pfd";
+import { buildPfdView, frozenIds, LOOK, statusCounts, textWidth, parsePfdKey, pfdElement, pfdKey, processStages, type PfdView } from "./pfd";
 
 /** 成果物 id の配列と、[id, 入力, 出力] の配列から PFD を作る。given は goal に無く、どのプロセスの出力でもない成果物 */
 const pfd = (artifacts: string[], processes: [string, string[], string[]][], goal: string[]): Pfd => {
@@ -152,7 +152,6 @@ describe("buildPfdView", () => {
       done: "完了（人）",
       needs_attention: "要確認",
     });
-    for (const [state, look] of Object.entries(LOOK)) expect(look.cls).toBe(`pfd-${state}`);
   });
 
   test("成果物の look は常に null", () => {
@@ -324,5 +323,31 @@ describe("frozenIds", () => {
     const v = buildPfdView(PFD_SAMPLE, { frozen });
     expect(node(v, "p:design").frozen).toBe(true);
     expect(node(v, "p:ship").frozen).toBe(false);
+  });
+});
+
+describe("statusCounts", () => {
+  test("merged 以外の状態を定義順に、件数 0 も含めて返す", () => {
+    const view = buildPfdView(PFD_SAMPLE, { statuses: PFD_STATUSES_A });
+    const { counts } = statusCounts(view);
+    expect(counts.map((c) => c.look)).toEqual([
+      "waiting", "ready", "running", "pr_open", "your_turn", "done", "needs_attention",
+    ]);
+    const expected = (look: string) =>
+      Object.values(PFD_STATUSES_A).filter((s) => s.state === look).length;
+    for (const c of counts) expect(c.count).toBe(expected(c.look));
+  });
+
+  test("マージ済みの分母は全プロセス数", () => {
+    const view = buildPfdView(PFD_SAMPLE, { statuses: PFD_STATUSES_A });
+    const { merged, total } = statusCounts(view);
+    expect(total).toBe(PFD_SAMPLE.processes.length);
+    expect(merged).toBe(Object.values(PFD_STATUSES_A).filter((s) => s.state === "merged").length);
+  });
+
+  test("承認前（状態が無い）ならすべて 0", () => {
+    const { counts, merged } = statusCounts(buildPfdView(PFD_SAMPLE));
+    expect(counts.every((c) => c.count === 0)).toBe(true);
+    expect(merged).toBe(0);
   });
 });

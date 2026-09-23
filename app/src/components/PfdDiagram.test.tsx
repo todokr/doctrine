@@ -2,6 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test } from "vitest";
 import { PFD_SAMPLE, PFD_STATUSES_A } from "../fixtures";
 import { buildPfdView, LOOK, type PfdView } from "../pfd";
+import { PROCESS_TONE, toneClass } from "../tone";
 import { PfdDiagram } from "./PfdDiagram";
 
 const render = (view: PfdView, selected: string | null = null) =>
@@ -82,20 +83,17 @@ describe("PfdDiagram", () => {
     expect(openTag(block(html, "成果物", "同名の成果物"))).not.toContain("selected");
   });
 
-  test("状態で塗り分ける", () => {
+  test("状態をプロセスの上端のバーのトーンで示す", () => {
     const html = render(buildPfdView(PFD_SAMPLE, { statuses: PFD_STATUSES_A }));
     for (const p of PFD_SAMPLE.processes) {
-      const look = LOOK[PFD_STATUSES_A[p.id].state];
+      const state = PFD_STATUSES_A[p.id].state;
       const b = block(html, "プロセス", p.name);
-      expect(openTag(b)).toContain(look.cls);
-      expect(openTag(b)).toContain(look.word);
-      if (look.mark) expect(b).toContain(look.mark);
+      expect(openTag(b)).toContain(LOOK[state].word);
+      expect(b).toContain(`class="pfd-bar ${toneClass(PROCESS_TONE[state].tone)}${PROCESS_TONE[state].dashed ? " dashed" : ""}"`);
     }
     const plain = render(buildPfdView(PFD_SAMPLE));
-    for (const l of Object.values(LOOK)) {
-      expect(plain).not.toContain(l.cls);
-      expect(plain).not.toContain(l.word);
-    }
+    expect(plain).not.toContain("pfd-bar");
+    for (const l of Object.values(LOOK)) expect(plain).not.toContain(l.word);
   });
 
   test("揃っている成果物を塗る", () => {

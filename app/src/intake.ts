@@ -88,15 +88,15 @@ export const INTAKE_SECTIONS: { key: IntakeSection; name: string }[] = [
   { key: "closed", name: "終了" },
 ];
 
-export const INTAKE_STATE: Record<IntakeState, { word: string; cls: string }> = {
-  investigating: { word: "調査中", cls: "p-run" },
-  decomposing: { word: "分解中", cls: "p-run" },
-  answering: { word: "回答待ち", cls: "p-attn" },
-  reviewing: { word: "レビュー待ち", cls: "p-attn" },
-  needs_attention: { word: "要確認", cls: "p-danger" },
-  active: { word: "進行中", cls: "p-muted" },
-  completed: { word: "完了", cls: "p-ok" },
-  canceled: { word: "中止", cls: "p-muted" },
+export const INTAKE_WORD: Record<IntakeState, string> = {
+  investigating: "調査中",
+  decomposing: "分解中",
+  answering: "回答待ち",
+  reviewing: "レビュー待ち",
+  needs_attention: "要確認",
+  active: "進行中",
+  completed: "完了",
+  canceled: "中止",
 };
 
 export function isClosedIntake(state: IntakeState): boolean {

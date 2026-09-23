@@ -24,12 +24,20 @@ import { buildDiff } from "./patch";
 import type { GhStatus, IssueDetail } from "../../shared/intake/github.ts";
 import type { Answer } from "../../shared/intake/question.ts";
 import type {
+  DaemonSlots,
   GithubIssue,
   IntakeDetail,
   IntakeSummary,
   NewComment,
   PfdDraft,
+  ProjectConfig,
+  ProjectConfigInput,
+  ProjectSummary,
   Warning,
+  WorkflowDetail,
+  WorkflowListEntry,
+  WorkflowSaveResult,
+  WorkflowStepChange,
   WorktreeEntry,
 } from "../../shared/protocol.ts";
 import {
@@ -485,6 +493,46 @@ export function useIntakeRpc() {
 /** 設定を書く。成否の判定は呼び出し側が sendDecision で行う */
 export function useSettingsRpc(): { save: (settings: AppSettings) => Promise<void> } {
   return { save: (settings: AppSettings) => saveSettings(settings) };
+}
+
+/** project.yaml の読み書きとワークフローの一覧。useIntakeRpc と同じくここでは catch しない。project は Project.path */
+export type ProjectConfigRpc = {
+  get: (project: string) => Promise<ProjectConfig>;
+  workflows: (project: string) => Promise<WorkflowListEntry[]>;
+  save: (project: string, config: ProjectConfigInput) => Promise<ProjectSummary>;
+};
+
+export function useProjectConfigRpc(): ProjectConfigRpc {
+  return {
+    get: (project: string) => rpc("project.config.get", { project }),
+    workflows: (project: string) => rpc("workflow.list", { project }),
+    save: (project: string, config: ProjectConfigInput) => rpc("project.config.save", { project, config }),
+  };
+}
+
+/** ワークフローの定義の読み書き。成否の判定は呼び出し側で行う */
+export type WorkflowRpc = {
+  get: (project: string, name: string) => Promise<WorkflowDetail>;
+  save: (project: string, name: string, changes: WorkflowStepChange[]) => Promise<WorkflowSaveResult>;
+};
+
+export function useWorkflowRpc(): WorkflowRpc {
+  return {
+    get: (project: string, name: string) => rpc("workflow.get", { project, name }),
+    save: (project: string, name: string, changes: WorkflowStepChange[]) =>
+      rpc("workflow.save", { project, name, changes }),
+  };
+}
+
+/** 全体の実行枠の読み書き。成否の判定は呼び出し側で行う */
+export function useSlotsRpc(): {
+  load: () => Promise<DaemonSlots>;
+  setGlobalLimit: (globalLimit: number) => Promise<DaemonSlots>;
+} {
+  return {
+    load: () => rpc("daemon.slots", {}),
+    setGlobalLimit: (globalLimit: number) => rpc("daemon.setGlobalLimit", { global_limit: globalLimit }),
+  };
 }
 
 /** 第2段階に回した操作のボタンが押されたときに出す */
