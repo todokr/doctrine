@@ -1,4 +1,4 @@
-import { Fragment, type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Fragment, type ReactNode, useEffect, useState } from "react";
 import { rpc } from "../daemon/client";
 import { sendDecision } from "../decision";
 import {
@@ -17,10 +17,10 @@ import {
   stopReasons,
 } from "../model";
 import { useDecide, useNotYet, useStore } from "../store";
-import { isAtBottom } from "../tailStick";
 import { RUN_TONE, TASK_TONE } from "../tone";
 import type { Task, TaskState } from "../types";
 import { StatusDot } from "./StatusDot";
+import { LogBlock } from "./LogBlock";
 import { Crumbs, OpenInEditor } from "./ReviewView";
 import { RemoveWorktreeButton } from "./WorktreeView";
 import { WorkflowRail } from "./WorkflowRail";
@@ -128,9 +128,6 @@ export function TaskView({ t }: { t: Task }) {
   const [pending, setPending] = useState<Pending>(null);
   // 実行履歴で拒否の一覧を開いている行（step_runs.id）
   const [openDenials, setOpenDenials] = useState<number | null>(null);
-  const logRef = useRef<HTMLPreElement>(null);
-  // 末尾に貼り付いているか。ターミナルと同じく、遡ったら止まり、末尾に戻せばまた追う
-  const stick = useRef(true);
 
   useTaskDetail(t);
   useTaskLogs(t);
@@ -161,19 +158,6 @@ export function TaskView({ t }: { t: Task }) {
   const history = stepRunHistory(detail);
   const log = s.logs[t.id];
   const following = t.state === "running";
-
-  // 行が増えたら末尾へ。遡っている間は動かさない（stick は人のスクロールで決まる）
-  useLayoutEffect(() => {
-    const el = logRef.current;
-    if (el && stick.current) el.scrollTop = el.scrollHeight;
-  }, [log]);
-
-  // 別のタスク・別のステップ実行を開いたときは、走っていなくても末尾から見せる
-  useLayoutEffect(() => {
-    const el = logRef.current;
-    stick.current = true;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [t.id, log?.stepRunId]);
 
   // 今のステップが何回目か。履歴の先頭が今の（または最後の）実行にあたる
   const attempt = history[0]?.attempt ?? 1;
@@ -305,27 +289,13 @@ export function TaskView({ t }: { t: Task }) {
         <span className="spacer" />
         {!following && <span className="hint">末尾 {TAIL} 行</span>}
       </div>
-      {log && log.lines.some((l) => l !== "")
-        ? (
-          <pre
-            className="block"
-            ref={logRef}
-            onScroll={(e) => {
-              stick.current = isAtBottom(e.currentTarget);
-            }}
-          >
-            {log.lines.join("\n")}
-          </pre>
-        )
-        : (
-          <div className="box quiet">
-            <p>
-              {t.state === "queued"
-                ? "まだ1つもステップが走っていません。"
-                : "このステップ実行のログは残っていません。"}
-            </p>
-          </div>
-        )}
+      <LogBlock
+        lines={log?.lines}
+        resetKey={`${t.id}:${log?.stepRunId}`}
+        empty={t.state === "queued"
+          ? "まだ1つもステップが走っていません。"
+          : "このステップ実行のログは残っていません。"}
+      />
 
       {history.length > 0 && (
         <details className="runs">

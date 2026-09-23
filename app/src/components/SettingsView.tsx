@@ -7,12 +7,10 @@ import { useSettingsRpc, useSlotsRpc, useStore } from "../store";
 import { ProjectConfigSection } from "./ProjectConfigSection";
 import { WorkflowSettings } from "./WorkflowSettings";
 import type { DaemonSlots } from "../../../shared/protocol.ts";
-import type { IntakeRunPurpose } from "../../../shared/intake/state.ts";
+import { RUN_PURPOSE_WORD } from "../intake";
 
 /** 取りこぼしを吸収する保険。store.tsx の REFRESH_MS と同じ値 */
 const REFRESH_MS = 15_000;
-
-const PURPOSE_LABEL: Record<IntakeRunPurpose, string> = { investigate: "調査", decompose: "分解", revise: "改訂" };
 
 /** props だけで描く。テストはこちらを描く */
 export function SettingsFields(props: {
@@ -184,7 +182,7 @@ export function SlotsFields(props: {
               {okSlots.waiting_intake_runs.map((r) => (
                 <li key={r.id}>
                   <button className="btn sm" onClick={() => onOpenIntake(r.intake_id)}>{r.issue_title}</button>
-                  <span className="hint">{PURPOSE_LABEL[r.purpose]}</span>
+                  <span className="hint">{RUN_PURPOSE_WORD[r.purpose]}</span>
                 </li>
               ))}
             </ul>
