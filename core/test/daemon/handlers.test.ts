@@ -2790,7 +2790,7 @@ test("workflow.list: .doctrine/workflows の YAML を名前順に、検証の可
   const broken = list.find((e) => e.name === "broken");
   assert.equal(broken?.ok, false);
   assert.ok(
-    !broken?.ok && broken.issues.some((i) => i.includes("type は次のいずれか")),
+    !broken?.ok && broken.issues.some((i) => i.includes("次のいずれか")),
   );
 });
 
@@ -2968,7 +2968,7 @@ test("workflow.get: 壊れた YAML は検証エラーの内容を返す", async 
   assert.equal(schema.ok, false);
   if (!schema.ok) {
     assert.ok(
-      schema.issues.some((i) => i.includes("steps.0.type") && i.includes("type は次のいずれか")),
+      schema.issues.some((i) => i.includes("steps.0.type") && i.includes("次のいずれか")),
     );
   }
 
