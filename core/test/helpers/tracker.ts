@@ -1,5 +1,5 @@
-import type { GhStatus, IssueDetail, IssueSummary } from "../../../shared/intake/github.ts";
-import type { Tracker } from "../../src/github/tracker.ts";
+import type { GhStatus, IssueDetail, IssueSummary } from "../../../shared/intake/tracker.ts";
+import type { Tracker } from "../../src/tracker/tracker.ts";
 
 type ListOptions = Parameters<Tracker["listIssues"]>[1];
 

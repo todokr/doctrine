@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { GhStatus, IssueDetail } from "../../../shared/intake/github.ts";
+import type { GhStatus, IssueDetail } from "../../../shared/intake/tracker.ts";
 import type { GithubIssue, IntakeSummary } from "../../../shared/protocol.ts";
 import { type Cached, ghCache, ghCacheKey, revalidate } from "../ghCache";
 import { ghGuidance, issueNumber, issueTarget, parseIssueInput, type IssueTarget } from "../intake";

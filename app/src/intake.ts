@@ -1,6 +1,6 @@
 import type { CommentReply } from "../../shared/intake/decomposer.ts";
 import { buildFeedback } from "../../shared/intake/feedback.ts";
-import type { GhStatus } from "../../shared/intake/github.ts";
+import type { GhStatus } from "../../shared/intake/tracker.ts";
 import type { Pfd, Process } from "../../shared/intake/pfd.ts";
 import type { PrFact, ProcessStatus } from "../../shared/intake/processStatus.ts";
 import type { Answer, AssumptionResponse, Question } from "../../shared/intake/question.ts";

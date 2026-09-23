@@ -1,7 +1,7 @@
 import { z } from "zod";
-import type { GhStatus, IssueRef } from "../../../shared/intake/github.ts";
+import type { GhStatus, IssueRef } from "../../../shared/intake/tracker.ts";
 import { defaultGhRun, type GhRun, graphqlArgs, parseGhJson } from "./gh.ts";
-import type { SubIssue, Tracker } from "./tracker.ts";
+import type { SubIssue, Tracker } from "../tracker/tracker.ts";
 
 const repoSchema = z.object({ id: z.string(), nameWithOwner: z.string() });
 const repoIdSchema = z.object({ id: z.string() });

@@ -1,4 +1,4 @@
-import type { PrFact } from "../../../shared/intake/github.ts";
+import type { PrFact } from "../../../shared/intake/processStatus.ts";
 import type { WatchHealth } from "../../../shared/protocol.ts";
 import {
   getPrObservation,
@@ -10,7 +10,7 @@ import {
 import type { Db, ProjectRow } from "../db/schema.ts";
 import { getProject, listProjects } from "../db/tasks.ts";
 import { assertIntakeTransition } from "../domain/intakeStates.ts";
-import type { PrWatcher, Tracker } from "../github/tracker.ts";
+import type { PrWatcher, Tracker } from "../tracker/tracker.ts";
 import { containsCommit, fetchBaseBranch, originRef } from "../domain/worktree.ts";
 import type { IntakeTransition } from "./commands.ts";
 import { dispatchIntake, loadApprovedPlan } from "./dispatch.ts";

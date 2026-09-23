@@ -1,5 +1,5 @@
-import type { IssueRef } from "../../../shared/intake/github.ts";
-import type { SubIssue, Tracker } from "../../src/github/tracker.ts";
+import type { IssueRef } from "../../../shared/intake/tracker.ts";
+import type { SubIssue, Tracker } from "../../src/tracker/tracker.ts";
 
 export type FakeIssue = {
   ref: IssueRef;

@@ -63,7 +63,7 @@ import {
 import { previewTaskPrompt, redispatchProcess } from "../intake/dispatch.ts";
 import { intakeDraft, toIntakeDetail, toIntakeSummary } from "../intake/view.ts";
 import type { IntakeWatcher } from "../intake/watch.ts";
-import type { Tracker } from "../github/tracker.ts";
+import type { Tracker } from "../tracker/tracker.ts";
 import { applyApproval, runTask } from "../domain/engine.ts";
 import {
   branchNameFor,

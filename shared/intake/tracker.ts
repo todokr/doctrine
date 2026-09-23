@@ -19,12 +19,3 @@ export type IssueComment = { author: string | null; body: string; createdAt: str
 
 /** Issue の本文とコメント（S-2・Q-1）。 */
 export type IssueDetail = IssueRef & { title: string; body: string; comments: IssueComment[] };
-
-export type PrFact = {
-  number: number;
-  url: string;
-  state: "OPEN" | "MERGED" | "CLOSED";
-  baseRef: string;
-  mergedAt: string | null;
-  mergeCommit: string | null;
-};

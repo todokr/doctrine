@@ -1,5 +1,5 @@
 import type { IntakeRunPurpose } from "../db/schema.ts";
-import type { IssueDetail } from "../../../shared/intake/github.ts";
+import type { IssueDetail } from "../../../shared/intake/tracker.ts";
 import type { Pfd } from "../../../shared/intake/pfd.ts";
 import type { FrozenPart } from "./pfd/validate.ts";
 

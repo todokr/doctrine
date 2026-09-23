@@ -3,8 +3,8 @@ import type {
   IssueDetail,
   IssueRef,
   IssueSummary,
-  PrFact,
-} from "../../../shared/intake/github.ts";
+} from "../../../shared/intake/tracker.ts";
+import type { PrFact } from "../../../shared/intake/processStatus.ts";
 
 export type SubIssue = { ref: IssueRef; body: string; state: "OPEN" | "CLOSED" };
 

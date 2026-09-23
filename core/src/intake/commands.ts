@@ -20,7 +20,7 @@ import { getProject, type TaskState } from "../db/tasks.ts";
 import { cancelTask } from "../domain/cancelTask.ts";
 import { assertIntakeTransition, isIntakeTerminal } from "../domain/intakeStates.ts";
 import { killStaleChild, type ProcessProbe } from "../domain/recovery.ts";
-import type { Tracker } from "../github/tracker.ts";
+import type { Tracker } from "../tracker/tracker.ts";
 import type { Pfd } from "../../../shared/intake/pfd.ts";
 import { validateAnswers } from "../../../shared/intake/validateQuestion.ts";
 import { loadApprovedPlan } from "./dispatch.ts";

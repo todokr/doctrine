@@ -1,7 +1,7 @@
 import type { Guide } from "./guide/schema.ts";
 import type { AttentionReason, CommentReply } from "./intake/decomposer.ts";
 import type { FeedbackComment } from "./intake/feedback.ts";
-import type { GhStatus, IssueDetail, IssueSummary } from "./intake/github.ts";
+import type { GhStatus, IssueDetail, IssueSummary } from "./intake/tracker.ts";
 import type { Pfd } from "./intake/pfd.ts";
 import type { ProcessStatus } from "./intake/processStatus.ts";
 import type { Answer, AssumptionResponse } from "./intake/question.ts";

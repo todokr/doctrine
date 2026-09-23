@@ -21,7 +21,7 @@ import {
 } from "./daemon/client";
 import { receiveGuide } from "./guide";
 import { buildDiff } from "./patch";
-import type { GhStatus, IssueDetail } from "../../shared/intake/github.ts";
+import type { GhStatus, IssueDetail } from "../../shared/intake/tracker.ts";
 import type { QuestionSetReply } from "../../shared/intake/validateQuestion.ts";
 import type {
   DaemonSlots,
