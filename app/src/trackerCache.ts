@@ -17,7 +17,8 @@ export function memoryStore(): CacheStore {
   };
 }
 
-const DB_NAME = "doctrine-gh-cache";
+// 旧 doctrine-gh-cache には repo と number を持つ形の値が残っているので名前を変えた
+const DB_NAME = "doctrine-tracker-cache";
 const STORE = "entries";
 
 function request<T>(r: IDBRequest<T>): Promise<T> {
@@ -48,10 +49,10 @@ export function indexedDbStore(): CacheStore {
   };
 }
 
-export type GhCache = ReturnType<typeof createGhCache>;
+export type TrackerCache = ReturnType<typeof createTrackerCache>;
 
 /** 裏の保存先の前にメモリを置く。同じ起動の中で開き直したときは、peek でその場で出せる */
-export function createGhCache(store: CacheStore) {
+export function createTrackerCache(store: CacheStore) {
   const mem = new Map<string, unknown>();
   return {
     peek(key: string): unknown {
@@ -70,24 +71,24 @@ export function createGhCache(store: CacheStore) {
   };
 }
 
-export const ghCacheKey = {
+export const trackerCacheKey = {
   status: (project: string) => JSON.stringify(["status", project]),
   issues: (project: string, assignee: "me" | "any", search: string) =>
     JSON.stringify(["issues", project, assignee, search]),
   issue: (project: string, url: string) => JSON.stringify(["issue", project, url]),
 };
 
-/** refreshing は gh から取り直している最中。refreshError は、手元の値を出したまま取り直しに失敗したときの理由 */
+/** refreshing はトラッカーから取り直している最中。refreshError は、手元の値を出したまま取り直しに失敗したときの理由 */
 export type Cached<T> = { loaded: Loaded<T>; refreshing: boolean; refreshError: string | null };
 
 const errorMessage = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 /**
- * 手元にある値をすぐ出し、gh から取り直して置き換える。emit は最初の 1 回をその場で呼ぶ。
+ * 手元にある値をすぐ出し、トラッカーから取り直して置き換える。emit は最初の 1 回をその場で呼ぶ。
  * 戻り値で取り消すと、以後は emit しない（取れた値の保存はする）。
  */
 export function revalidate<T>(
-  cache: GhCache,
+  cache: TrackerCache,
   key: string,
   fetch: () => Promise<T>,
   emit: (c: Cached<T>) => void,
@@ -126,4 +127,4 @@ export function revalidate<T>(
   };
 }
 
-export const ghCache = createGhCache(indexedDbStore());
+export const trackerCache = createTrackerCache(indexedDbStore());

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { createGhCache, ghCacheKey, memoryStore, revalidate, type Cached, type CacheStore } from "./ghCache";
+import { createTrackerCache, memoryStore, revalidate, trackerCacheKey, type Cached, type CacheStore } from "./trackerCache";
 
 function deferred<T>() {
   let resolve!: (v: T) => void;
@@ -13,26 +13,26 @@ function deferred<T>() {
 
 const flush = () => new Promise((r) => setTimeout(r, 0));
 
-describe("ghCacheKey", () => {
+describe("trackerCacheKey", () => {
   test("一覧のキーはプロジェクト・担当・検索語で分かれる", () => {
     const keys = new Set([
-      ghCacheKey.issues("/a", "me", ""),
-      ghCacheKey.issues("/a", "any", ""),
-      ghCacheKey.issues("/a", "me", "x"),
-      ghCacheKey.issues("/b", "me", ""),
+      trackerCacheKey.issues("/a", "me", ""),
+      trackerCacheKey.issues("/a", "any", ""),
+      trackerCacheKey.issues("/a", "me", "x"),
+      trackerCacheKey.issues("/b", "me", ""),
     ]);
     expect(keys.size).toBe(4);
   });
 
   test("状態・一覧・本文のキーは重ならない", () => {
-    expect(ghCacheKey.status("/a")).not.toBe(ghCacheKey.issues("/a", "me", ""));
-    expect(ghCacheKey.issue("/a", "u")).not.toBe(ghCacheKey.status("/a"));
+    expect(trackerCacheKey.status("/a")).not.toBe(trackerCacheKey.issues("/a", "me", ""));
+    expect(trackerCacheKey.issue("/a", "u")).not.toBe(trackerCacheKey.status("/a"));
   });
 });
 
-describe("createGhCache", () => {
+describe("createTrackerCache", () => {
   test("保存したものはその場で peek できる", async () => {
-    const cache = createGhCache(memoryStore());
+    const cache = createTrackerCache(memoryStore());
     expect(cache.peek("k")).toBeUndefined();
     await cache.save("k", 1);
     expect(cache.peek("k")).toBe(1);
@@ -41,7 +41,7 @@ describe("createGhCache", () => {
   test("peek に無くても、裏の保存先にあれば load で取れ、以後は peek できる", async () => {
     const store = memoryStore();
     await store.set("k", "v");
-    const cache = createGhCache(store);
+    const cache = createTrackerCache(store);
     expect(cache.peek("k")).toBeUndefined();
     expect(await cache.load("k")).toBe("v");
     expect(cache.peek("k")).toBe("v");
@@ -52,7 +52,7 @@ describe("createGhCache", () => {
       get: () => Promise.reject(new Error("x")),
       set: () => Promise.reject(new Error("x")),
     };
-    const cache = createGhCache(broken);
+    const cache = createTrackerCache(broken);
     expect(await cache.load("k")).toBeUndefined();
     await cache.save("k", 1);
     expect(cache.peek("k")).toBe(1);
@@ -60,14 +60,14 @@ describe("createGhCache", () => {
 });
 
 describe("revalidate", () => {
-  function run<T>(cache: ReturnType<typeof createGhCache>, fetch: () => Promise<T>) {
+  function run<T>(cache: ReturnType<typeof createTrackerCache>, fetch: () => Promise<T>) {
     const seen: Cached<T>[] = [];
     const cancel = revalidate(cache, "k", fetch, (c) => seen.push(c));
     return { seen, cancel };
   }
 
   test("手元に無ければ読み込み中から始め、取れたら出して保存する", async () => {
-    const cache = createGhCache(memoryStore());
+    const cache = createTrackerCache(memoryStore());
     const { seen } = run(cache, () => Promise.resolve(["a"]));
     expect(seen[0]).toEqual({ loaded: { kind: "loading" }, refreshing: true, refreshError: null });
     await flush();
@@ -76,7 +76,7 @@ describe("revalidate", () => {
   });
 
   test("手元にあれば最初からそれを出し、取り直したもので置き換える", async () => {
-    const cache = createGhCache(memoryStore());
+    const cache = createTrackerCache(memoryStore());
     await cache.save("k", ["old"]);
     const { seen } = run(cache, () => Promise.resolve(["new"]));
     expect(seen[0]).toEqual({ loaded: { kind: "ok", value: ["old"] }, refreshing: true, refreshError: null });
@@ -88,7 +88,7 @@ describe("revalidate", () => {
   test("裏の保存先から読めたら、取り直しを待たずに出す", async () => {
     const store = memoryStore();
     await store.set("k", ["stored"]);
-    const cache = createGhCache(store);
+    const cache = createTrackerCache(store);
     const fresh = deferred<string[]>();
     const { seen } = run(cache, () => fresh.promise);
     expect(seen[0].loaded).toEqual({ kind: "loading" });
@@ -102,7 +102,7 @@ describe("revalidate", () => {
   test("取り直しが先に届いたら、遅れて読めた保存先の値で巻き戻さない", async () => {
     const stored = deferred<unknown>();
     const store: CacheStore = { get: () => stored.promise, set: () => Promise.resolve() };
-    const cache = createGhCache(store);
+    const cache = createTrackerCache(store);
     const { seen } = run(cache, () => Promise.resolve(["new"]));
     await flush();
     stored.resolve(["stored"]);
@@ -111,7 +111,7 @@ describe("revalidate", () => {
   });
 
   test("取り直しに失敗しても、手元の値は出したままにして失敗を添える", async () => {
-    const cache = createGhCache(memoryStore());
+    const cache = createTrackerCache(memoryStore());
     await cache.save("k", ["old"]);
     const { seen } = run(cache, () => Promise.reject(new Error("gh が落ちた")));
     await flush();
@@ -123,14 +123,14 @@ describe("revalidate", () => {
   });
 
   test("手元に無いまま失敗したら error にする", async () => {
-    const cache = createGhCache(memoryStore());
+    const cache = createTrackerCache(memoryStore());
     const { seen } = run(cache, () => Promise.reject(new Error("gh が落ちた")));
     await flush();
     expect(seen.at(-1)).toEqual({ loaded: { kind: "error", message: "gh が落ちた" }, refreshing: false, refreshError: null });
   });
 
   test("取り消したあとは何も出さないが、取れた値は保存する", async () => {
-    const cache = createGhCache(memoryStore());
+    const cache = createTrackerCache(memoryStore());
     const fresh = deferred<string[]>();
     const { seen, cancel } = run(cache, () => fresh.promise);
     const before = seen.length;

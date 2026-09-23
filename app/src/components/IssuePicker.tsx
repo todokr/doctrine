@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { IssueDetail, TrackerStatus } from "../../../shared/intake/tracker.ts";
 import type { IntakeSummary, TrackerIssue } from "../../../shared/protocol.ts";
-import { type Cached, ghCache, ghCacheKey, revalidate } from "../ghCache";
+import { type Cached, revalidate, trackerCache, trackerCacheKey } from "../trackerCache";
 import { issueIdentifier, issueTarget, parseIssueInput, trackerGuidance, type IssueTarget } from "../intake";
 import { clock, type Loaded } from "../model";
 import { useIntakeRpc, useStore } from "../store";
@@ -15,7 +15,7 @@ const IDLE: Cached<never> = { loaded: { kind: "loading" }, refreshing: false, re
 // 描画の時点で手元にあるものを出す。前の key の値を 1 度でも出さないように、key が変わった描画から使う
 function initial<T>(key: string | null): Cached<T> {
   if (key === null) return IDLE;
-  const value = ghCache.peek(key) as T | undefined;
+  const value = trackerCache.peek(key) as T | undefined;
   return { loaded: value === undefined ? { kind: "loading" } : { kind: "ok", value }, refreshing: true, refreshError: null };
 }
 
@@ -24,7 +24,7 @@ function useTrackerCached<T>(key: string | null, fetch: () => Promise<T>, tick =
   const [state, setState] = useState<{ key: string | null; cached: Cached<T> }>(() => ({ key, cached: initial(key) }));
   useEffect(() => {
     if (key === null) return;
-    return revalidate(ghCache, key, fetch, (cached: Cached<T>) => setState({ key, cached }));
+    return revalidate(trackerCache, key, fetch, (cached: Cached<T>) => setState({ key, cached }));
     // fetch は毎回作り直されるので、key と tick だけで決める
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, tick]);
@@ -146,19 +146,19 @@ export function IssuePicker() {
 
   // トラッカーが使えるかはプロジェクトごとに違うので、状態もプロジェクトごとに持つ
   const statusCached = useTrackerCached(
-    path ? ghCacheKey.status(path) : null,
+    path ? trackerCacheKey.status(path) : null,
     () => api.trackerStatus(path!),
     statusTick,
   );
   const status = statusCached.loaded;
   const trackerOk = status.kind === "ok" && status.value.ok;
   const issuesCached = useTrackerCached(
-    path && trackerOk ? ghCacheKey.issues(path, assignee, search) : null,
+    path && trackerOk ? trackerCacheKey.issues(path, assignee, search) : null,
     () => api.issues(path!, { assignee, search }),
   );
   const issues = issuesCached.loaded;
   const detailCached = useTrackerCached(
-    path && picked ? ghCacheKey.issue(path, picked.url) : null,
+    path && picked ? trackerCacheKey.issue(path, picked.url) : null,
     () => api.issue(path!, picked!.url),
   );
   const detail: Loaded<IssueDetail> | undefined = picked ? detailCached.loaded : undefined;
