@@ -52,6 +52,7 @@ const BRANCH_HEADING: Record<WorkflowStepDetail["type"], string> = {
   command: "onFailure",
   agent: "onFailure",
   guide: "onFailure",
+  poll: "onFailure",
 };
 
 /** props だけで描く。テンプレート変数の手引き（core/src/workflow/template.ts が受け付けるもの） */
@@ -72,7 +73,8 @@ export function TemplateVarsHint(props: { stepIds: string[] }): React.JSX.Elemen
 }
 
 function stepHasTemplateField(step: WorkflowStepDetail): boolean {
-  return step.type === "agent" || step.type === "command" || step.branch !== null;
+  return step.type === "agent" || step.type === "command" || step.type === "poll" ||
+    step.branch !== null;
 }
 
 /** props だけで描く。1 ステップの入力欄と保存。テストはこちらを描く */
@@ -153,7 +155,14 @@ export function StepFields(props: {
         </>
       )}
 
-      {step.type === "command" && (
+      {step.type === "poll" && (
+        <dl className="wf-props">
+          <dt>interval</dt>
+          <dd className="mono">{step.interval}</dd>
+        </dl>
+      )}
+
+      {(step.type === "command" || step.type === "poll") && (
         <div className="settings-field">
           <label className="hint" htmlFor="wf-edit-run">run</label>
           <textarea

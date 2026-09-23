@@ -26,6 +26,7 @@ const waitingTask: TaskSummary = {
   branch: "doctrine/t-91e0",
   worktree_path: null,
   rate_limited_until: null,
+  waiting_until: null,
   priority: 2,
   created_at: "2026-09-15T05:00:00.000Z",
   updated_at: "2026-09-15T05:00:00.000Z",

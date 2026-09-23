@@ -202,6 +202,7 @@ const COLUMNS = {
     child_started_at: true,
     pending_feed: true,
     rate_limited_until: true,
+    waiting_until: true,
     priority: true,
     resumed: true,
     created_at: true,
@@ -506,6 +507,7 @@ test("開き直してもマイグレーションは二度流れず、データ�
     "0010_intake_revision",
     "0011_task_workflow_pin",
     "0012_intake_assumptions",
+    "0013_waiting",
   ]);
   await first.destroy();
 
@@ -524,6 +526,7 @@ test("開き直してもマイグレーションは二度流れず、データ�
       "0010_intake_revision",
       "0011_task_workflow_pin",
       "0012_intake_assumptions",
+      "0013_waiting",
     ]);
     assert.equal((await second.selectFrom("projects").selectAll().execute()).length, 1);
   } finally {
@@ -562,6 +565,7 @@ test("pending_feed を足す前に作られたDBファイルは、行を保っ�
       "0010_intake_revision",
       "0011_task_workflow_pin",
       "0012_intake_assumptions",
+      "0013_waiting",
     ]);
     const old = await getTask(d, "old");
     assert.equal(old?.state, "suspended", "既存の行は残る");
@@ -1277,4 +1281,55 @@ test("0011: insertTask は作成時の定義を書き戻せる", async () => {
   const t2 = (await getTask(d, "t2"))!;
   assert.equal(t2.workflow_yaml, null);
   assert.equal(t2.workflow_setup, null);
+});
+
+test("0013: tasks.state と step_runs.status が waiting を受け付け、waiting_until が足される", async () => {
+  const d = await openDb(":memory:");
+  const pid = await insertProject(d, {
+    path: "/repo",
+    default_workflow: "f",
+    max_concurrent: 1,
+    base_branch: "main",
+    setup: null,
+  });
+  await insertTask(d, {
+    id: "t1",
+    project_id: pid,
+    title: "T",
+    prompt: "P",
+    workflow_name: "f",
+    branch: "b",
+    priority: 2,
+  });
+  await d.updateTable("tasks").set({ state: "waiting", waiting_until: "2026-09-22T00:01:00.000Z" })
+    .where("id", "=", "t1").execute();
+  await d.insertInto("step_runs").values({
+    task_id: "t1",
+    step_id: "wait-merge",
+    attempt: 1,
+    status: "waiting",
+    exit_code: 75,
+    started_at: "2026-09-22T00:00:00.000Z",
+    ended_at: "2026-09-22T00:00:01.000Z",
+    log_path: "",
+  }).execute();
+  const t = (await getTask(d, "t1"))!;
+  assert.equal(t.state, "waiting");
+  assert.equal(t.waiting_until, "2026-09-22T00:01:00.000Z");
+});
+
+test("0013: 作り直しても既存の行・索引・外部キーが残る", async () => {
+  const d = await openDbOn(legacyWithChildren());
+  const t = (await getTask(d, "t1"))!;
+  assert.equal(t.waiting_until, null, "新しい列は NULL で足される");
+  const outputs = await d.selectFrom("step_outputs").selectAll().execute();
+  assert.deepEqual(outputs.map((o) => [o.step_run_id, o.last_stdout]), [[1, "out"]]);
+  const { rows } = await sql<{ name: string }>`
+    SELECT name FROM sqlite_master WHERE type='index' AND tbl_name IN ('tasks','step_runs')
+      AND name LIKE 'idx_%' ORDER BY name
+  `.execute(d);
+  assert.ok(rows.some((r) => r.name === "idx_tasks_state"));
+  assert.ok(rows.some((r) => r.name === "idx_step_runs_task"));
+  const { rows: violations } = await sql`PRAGMA foreign_key_check`.execute(d);
+  assert.deepEqual(violations, []);
 });

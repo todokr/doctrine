@@ -84,7 +84,7 @@ describe("isStaleWorktree", () => {
 
 describe("canRemoveWorktree", () => {
   test("非終端のタスクの worktree は消させない", () => {
-    for (const state of ["queued", "running", "suspended", "paused", "rate_limited"] as const) {
+    for (const state of ["queued", "running", "suspended", "paused", "rate_limited", "waiting"] as const) {
       expect(canRemoveWorktree(entry({ task_state: state }), [])).toBe(false);
     }
   });

@@ -6,7 +6,9 @@ import {
   branchOf,
   type CommandStep,
   type GuideStep,
+  intervalMs,
   parseWorkflow,
+  type PollStep,
   WorkflowValidationError,
 } from "../../src/workflow/schema.ts";
 
@@ -427,4 +429,93 @@ test("guide ステップに書いた onFailure は既定を上書きする", () 
       goto: implement
       maxAttempts: 1`));
   assert.deepEqual(branchOf(workflow.steps[1]), { goto: "implement", maxAttempts: 1 });
+});
+
+test("poll ステップは interval を省略すると 1m になる", () => {
+  const { workflow } = parseWorkflow(`
+name: f
+steps:
+  - id: wait
+    type: poll
+    run: "exit 0"
+`);
+  const step = workflow.steps[0] as PollStep;
+  assert.equal(step.type, "poll");
+  assert.equal(step.interval, "1m");
+});
+
+test("interval は 30 秒未満や読めない書式を弾く", () => {
+  for (const bad of ["10s", "1d", "5", "m"]) {
+    assert.throws(
+      () =>
+        parseWorkflow(`
+name: f
+steps:
+  - id: wait
+    type: poll
+    run: "exit 0"
+    interval: "${bad}"
+`),
+      WorkflowValidationError,
+      bad,
+    );
+  }
+});
+
+test("intervalMs は s / m / h をミリ秒にする", () => {
+  assert.equal(intervalMs("30s"), 30_000);
+  assert.equal(intervalMs("5m"), 300_000);
+  assert.equal(intervalMs("2h"), 7_200_000);
+});
+
+test("onExhausted は fail / suspend だけを受け付ける", () => {
+  const yaml = (v: string) => `
+name: f
+steps:
+  - id: a
+    type: command
+    run: "true"
+  - id: b
+    type: command
+    run: "false"
+    onFailure: { goto: a, maxAttempts: 2, onExhausted: ${v} }
+`;
+  assert.equal(branchOf(parseWorkflow(yaml("suspend")).workflow.steps[1])?.onExhausted, "suspend");
+  assert.throws(() => parseWorkflow(yaml("retry")), WorkflowValidationError);
+});
+
+test("approval の onReject に onExhausted: suspend は書けない", () => {
+  const yaml = `
+name: f
+steps:
+  - id: implement
+    type: agent
+    prompt: "p"
+  - id: review
+    type: approval
+    title: "見て"
+    onReject: { goto: implement, maxAttempts: 2, onExhausted: suspend }
+`;
+  assert.throws(
+    () => parseWorkflow(yaml),
+    (e: unknown) => {
+      assert.ok(e instanceof WorkflowValidationError);
+      assert.match(e.message, /review.+onReject.+onExhausted: suspend/s);
+      return true;
+    },
+  );
+});
+
+test("poll ステップの二重に効くコマンドにも警告を出し、gh pr comment も対象にする", () => {
+  const { warnings } = parseWorkflow(`
+name: f
+steps:
+  - id: a
+    type: command
+    run: "gh pr comment --body x"
+  - id: wait
+    type: poll
+    run: "git push"
+`);
+  assert.equal(warnings.length, 2);
 });

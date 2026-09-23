@@ -31,6 +31,7 @@ export const STATE_WORD: Record<TaskState, string> = {
   queued: "待ち",
   paused: "一時停止",
   rate_limited: "上限待ち",
+  waiting: "マージ待ち",
   failed: "失敗",
   completed: "完了",
   canceled: "中止",
@@ -249,6 +250,14 @@ export function TaskView({ t }: { t: Task }) {
           <p>
             Claude の利用上限に達したので、{t.resumeAt ? `${hm(t.resumeAt)} ` : ""}枠が明けるのを待っています。
             待っている間は他のタスクも始めません。明けたら同じ会話の続きから自動で再開します。
+          </p>
+        </section>
+      )}
+      {t.state === "waiting" && (
+        <section className="box quiet">
+          <p>
+            PR のマージを待っています。{t.checkAt ? `次は ${hm(t.checkAt)} に確認します。` : ""}
+            ベースブランチと conflict したら、取り込み直して push し直します。
           </p>
         </section>
       )}

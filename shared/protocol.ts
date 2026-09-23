@@ -63,6 +63,7 @@ export type TaskState =
   | "suspended"
   | "paused"
   | "rate_limited"
+  | "waiting"
   | "completed"
   | "failed"
   | "canceled";
@@ -83,6 +84,8 @@ export type TaskSummary = {
   worktree_path: string | null;
   /** state が rate_limited の間だけ入る、再開してよい時刻（ISO 8601）。 */
   rate_limited_until: string | null;
+  /** state が waiting の間だけ入る、次に確かめる時刻（ISO 8601）。 */
+  waiting_until: string | null;
   priority: number;
   created_at: string;
   updated_at: string;
@@ -114,7 +117,7 @@ export type StepRun = {
   id: number;
   step_id: string;
   attempt: number;
-  /** step_runs.status。bounced は差し戻し、rate_limited は利用上限で打ち切られ再開待ち。 */
+  /** step_runs.status。bounced は差し戻し、rate_limited は利用上限で打ち切られ再開待ち、waiting は poll が「まだ」と答えた待ちの1周。 */
   status:
     | "running"
     | "awaiting"
@@ -122,7 +125,8 @@ export type StepRun = {
     | "failed"
     | "interrupted"
     | "bounced"
-    | "rate_limited";
+    | "rate_limited"
+    | "waiting";
   exit_code: number | null;
   started_at: string;
   ended_at: string | null;
@@ -140,7 +144,7 @@ export type StepRun = {
  */
 export type StepView = {
   id: string;
-  type: "command" | "agent" | "approval" | "guide";
+  type: "command" | "agent" | "approval" | "guide" | "poll";
   title?: string;
 };
 
@@ -174,6 +178,7 @@ export type WorkflowStepDetail =
       allowedTools: string[] | null;
     }
     | { type: "approval"; title: string; reviewFiles: string[] | null }
+    | { type: "poll"; run: string; interval: string }
     | {
       type: "guide";
       session: string;
@@ -398,6 +403,8 @@ export type TaskContext = {
   lastCommand: CommandResult | null;
   lastAgentMessage: string | null;
   reviewFiles: ReviewFile[];
+  /** 上限到達（onExhausted: suspend）で止まっているときだけ入る。承認で goto 先からやり直す。 */
+  escalation: { stepId: string; goto: string; maxAttempts: number } | null;
 };
 
 /** 見張りの健康状態（spec 11.6）。プロジェクトごとにメモリに持ち、再起動で消える。 */

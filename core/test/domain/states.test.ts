@@ -100,8 +100,8 @@ test("全体枠を握るのは running だけ", () => {
   }
 });
 
-test("プロジェクト枠は suspended / paused / rate_limited でも保持される", () => {
-  for (const s of ["running", "suspended", "paused", "rate_limited"] as const) {
+test("プロジェクト枠は suspended / paused / rate_limited / waiting でも保持される", () => {
+  for (const s of ["running", "suspended", "paused", "rate_limited", "waiting"] as const) {
     assert.ok(holdsProjectSlot(s), s);
   }
   for (const s of ["queued", "completed", "failed", "canceled"] as const) {
@@ -112,4 +112,21 @@ test("プロジェクト枠は suspended / paused / rate_limited でも保持さ
 test("終端判定", () => {
   assert.ok(isTerminal("completed") && isTerminal("failed") && isTerminal("canceled"));
   assert.equal(isTerminal("queued"), false);
+});
+
+test("running から waiting へ入り、解放で queued に戻れる", () => {
+  assert.ok(canTransition("running", "waiting"));
+  assert.ok(canTransition("waiting", "queued"));
+});
+
+test("マージ待ちのタスクも人の操作と tick の失敗経路で外へ出られる", () => {
+  for (const to of ["paused", "canceled", "failed"] as const) {
+    assert.ok(canTransition("waiting", to), `waiting -> ${to}`);
+  }
+});
+
+test("waiting から直接 running / suspended / completed へは行けない", () => {
+  for (const to of ["running", "suspended", "completed"] as const) {
+    assert.equal(canTransition("waiting", to), false, `waiting -> ${to}`);
+  }
 });

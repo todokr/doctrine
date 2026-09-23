@@ -69,7 +69,7 @@ export function toStepForm(step: WorkflowStepDetail): StepForm {
     reviewFiles: "",
     branch: toBranchForm(step.branch),
   };
-  if (step.type === "command") {
+  if (step.type === "command" || step.type === "poll") {
     return { ...base, run: step.run };
   }
   if (step.type === "agent") {
@@ -136,7 +136,7 @@ export function diffStepForm(step: WorkflowStepDetail, form: StepForm): Workflow
     if (session !== step.session) change.session = session;
     const allowedTools = splitLines(form.allowedTools);
     if (!sameArray(step.allowedTools, allowedTools)) change.allowedTools = allowedTools.length > 0 ? allowedTools : null;
-  } else if (step.type === "command") {
+  } else if (step.type === "command" || step.type === "poll") {
     if (form.run !== step.run) change.run = form.run;
   } else if (step.type === "approval") {
     const reviewFiles = splitLines(form.reviewFiles);

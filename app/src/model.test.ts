@@ -136,6 +136,9 @@ describe("groupOf", () => {
   test("unknown（版のずれで知らない state になったタスク）は要確認に入る", () => {
     expect(groupOf(t({ state: "unknown" }))).toBe("check");
   });
+  test("waiting はマージ待ちの区分に入り、要確認には入れない", () => {
+    expect(groupOf(t({ state: "waiting" }))).toBe("waiting");
+  });
 });
 
 describe("isTerminal", () => {
@@ -145,18 +148,21 @@ describe("isTerminal", () => {
 });
 
 describe("canPause / canResume", () => {
-  test("一時停止は queued・running・rate_limited のときだけ", () => {
-    for (const s of ["queued", "running", "rate_limited"] as const) {
+  test("一時停止は queued・running・rate_limited・waiting のときだけ", () => {
+    for (const s of ["queued", "running", "rate_limited", "waiting"] as const) {
       expect(canPause(s)).toBe(true);
     }
     for (const s of ["suspended", "paused", "completed", "failed", "canceled", "unknown"] as const) {
       expect(canPause(s)).toBe(false);
     }
   });
+  test("マージ待ちは一時停止できる", () => {
+    expect(canPause("waiting")).toBe(true);
+  });
   test("再開は paused のときだけ", () => {
     expect(canResume("paused")).toBe(true);
     for (
-      const s of ["queued", "running", "rate_limited", "suspended", "completed", "failed", "canceled", "unknown"] as const
+      const s of ["queued", "running", "rate_limited", "waiting", "suspended", "completed", "failed", "canceled", "unknown"] as const
     ) {
       expect(canResume(s)).toBe(false);
     }
@@ -256,7 +262,7 @@ describe("経緯", () => {
     ({ stepRunId: 1, stepId: "review", attempt: 1, startedAt: "2026-09-18T00:00:00.000Z", reviewTree: "abc",
        endedAt: "2026-09-18T00:05:00.000Z", comment: "直してください", ...o }) as ReviewEntry;
   const ctx = (reviews: ReviewEntry[]): TaskContext =>
-    ({ prompt: "p", reviews, lastCommand: null, lastAgentMessage: null, reviewFiles: [] });
+    ({ prompt: "p", reviews, lastCommand: null, lastAgentMessage: null, reviewFiles: [], escalation: null });
 
   test("今が何回目かは、決着した回に1を足した数（今待っている回は数えない）", () => {
     expect(reviewRound(ctx([entry({ status: "awaiting" })]))).toBe(1);
@@ -424,6 +430,7 @@ const row = (o: Partial<TaskSummary> = {}): TaskSummary => ({
   branch: "doctrine/t-1",
   worktree_path: null,
   rate_limited_until: null,
+  waiting_until: null,
   priority: 2,
   created_at: "2026-09-18T00:00:00.000Z",
   updated_at: "2026-09-18T00:10:00.000Z",
@@ -489,6 +496,13 @@ describe("toProject / toTask", () => {
     expect(groupOf(t1({ state: "failed", worktree_path: null }))).toBe("done");
   });
 
+  test("toTask は waiting_until を checkAt に写し、読めない値は落とす", () => {
+    expect(t1({ waiting_until: "2026-09-22T03:20:00.000Z" }).checkAt)
+      .toBe(Date.parse("2026-09-22T03:20:00.000Z"));
+    expect(t1({ waiting_until: null }).checkAt).toBeNull();
+    expect(t1({ waiting_until: "いつか" }).checkAt).toBeNull();
+  });
+
   test("差し戻しの通知は 15 秒ごとの取り直しで消えない", () => {
     const bounce = { step: "test", goto: "implement", attempt: 1 };
     const before = { ...t1({ state: "running" }), bounce };
@@ -513,7 +527,7 @@ describe("toProject / toTask", () => {
 
   test("知っている状態はそのまま通す", () => {
     // 「全部 unknown にする」という壊し方を、既存のテストは捕まえられない
-    for (const state of ["queued", "running", "suspended", "paused", "rate_limited", "completed", "failed", "canceled"] as const) {
+    for (const state of ["queued", "running", "suspended", "paused", "rate_limited", "waiting", "completed", "failed", "canceled"] as const) {
       expect(t1({ state }).state).toBe(state);
     }
   });

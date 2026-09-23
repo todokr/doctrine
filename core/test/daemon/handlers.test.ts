@@ -1527,6 +1527,7 @@ const TASK_SUMMARY_SHAPE: Record<keyof TaskSummary, (v: unknown) => boolean> = {
   branch: isString,
   worktree_path: nullable(isString),
   rate_limited_until: nullable(isString),
+  waiting_until: nullable(isString),
   priority: isNumber,
   created_at: isString,
   updated_at: isString,
@@ -2812,7 +2813,7 @@ test("workflow.list: 未登録のプロジェクトは失敗する", async () =>
   );
 });
 
-test("workflow.get: default.yaml の 10 ステップの設定と分岐を返す", async () => {
+test("workflow.get: default.yaml の 13 ステップの設定と分岐を返す", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
   await h("project.add", { path: repo }, NOOP_CONN);
@@ -2838,7 +2839,10 @@ test("workflow.get: default.yaml の 10 ステップの設定と分岐を返す"
       ["review-gate", "command"],
       ["guide", "guide"],
       ["review", "approval"],
+      ["sync", "agent"],
+      ["verify-sync", "command"],
       ["open-pr", "command"],
+      ["wait-merge", "poll"],
     ],
   );
 
@@ -2905,6 +2909,15 @@ test("workflow.get: default.yaml の 10 ステップの設定と分岐を返す"
   assert.ok(openPr.type === "command");
   if (openPr.type === "command") assert.ok(openPr.run.includes("gh pr create"));
   assert.equal(openPr.branch, null);
+
+  const waitMerge = byId("wait-merge");
+  assert.ok(waitMerge.type === "poll");
+  if (waitMerge.type === "poll") {
+    assert.equal(waitMerge.interval, "1m");
+    assert.ok(waitMerge.run.includes("gh pr view"));
+  }
+  assert.equal(waitMerge.branch?.goto, "sync");
+  assert.equal(waitMerge.branch?.maxAttempts, 10);
 
   assert.ok(detail.warnings.length > 0);
   assert.deepEqual(ctx.warnings.recent(), []);

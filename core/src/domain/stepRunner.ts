@@ -176,7 +176,7 @@ async function drain(
 }
 
 export async function runCommandStep(
-  step: CommandStep,
+  step: Pick<CommandStep, "id" | "run">,
   ctx: TemplateContext,
   o: { cwd: string; taskId: string; attempt: number; deps: RunnerDeps },
 ): Promise<StepOutcome> {

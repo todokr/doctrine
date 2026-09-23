@@ -292,6 +292,38 @@ test("ワークフロー定義が引けないとき、実行中の行は例外�
   assert.deepEqual(ctx.reviews, []);
 });
 
+const ESCALATE_WORKFLOW = parseWorkflow(`
+name: f
+steps:
+  - id: fix
+    type: command
+    run: "true"
+  - id: check
+    type: command
+    run: "false"
+    onFailure: { goto: fix, maxAttempts: 2, onExhausted: suspend }
+`).workflow;
+
+test("approval 以外のステップで止まっていれば escalation を返す", async () => {
+  const db = await fixture();
+  await db.updateTable("tasks").set({ state: "suspended", current_step_id: "check" })
+    .where("id", "=", "t1").execute();
+  await run(db, { stepId: "check", status: "awaiting", endedAt: null });
+
+  const c = await buildTaskContext(db, (await getTask(db, "t1"))!, ESCALATE_WORKFLOW);
+  assert.deepEqual(c.escalation, { stepId: "check", goto: "fix", maxAttempts: 2 });
+});
+
+test("approval で止まっていれば escalation は null", async () => {
+  const db = await fixture();
+  await db.updateTable("tasks").set({ state: "suspended", current_step_id: "review" })
+    .where("id", "=", "t1").execute();
+  await run(db, { stepId: "review", status: "awaiting", endedAt: null });
+
+  const c = await buildTaskContext(db, (await getTask(db, "t1"))!, WORKFLOW);
+  assert.equal(c.escalation, null);
+});
+
 test("ワークフロー定義が引けないとき、同じステップidに実行中の行と本物のレビュー行が混ざっても拾うのはレビューらしい status だけ", async () => {
   const db = await fixture();
   await db.updateTable("tasks").set({ state: "suspended", current_step_id: "review" })

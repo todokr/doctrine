@@ -34,6 +34,7 @@ export type StepBoundary = {
       | "resumed"
       | "pending_feed"
       | "rate_limited_until"
+      | "waiting_until"
     >
   >;
   /** ステップ開始時: status "running" / ended_at null で挿入し、返り値の id を持っておく。 */
@@ -53,6 +54,11 @@ export type StepBoundary = {
     /** status が "bounced" のときだけ渡す（差し戻し先のステップid）。 */
     goto_step_id?: string | null;
   };
+  /**
+   * poll の待ちから戻ったとき: 閉じた waiting の行を running に戻して使い直す。
+   * 待ちの1周に1行にするため、新しい行は足さない。
+   */
+  stepRunReopen?: { id: number };
   /** ステップ終了時: 開始時の行を同じトランザクションで更新する。 */
   stepRunUpdate?: {
     id: number;
@@ -168,6 +174,15 @@ export function commitStepBoundary(db: Db, b: StepBoundary): Promise<number | nu
         })
         .executeTakeFirstOrThrow();
       stepRunId = Number(inserted.insertId);
+    }
+
+    if (b.stepRunReopen) {
+      // started_at は戻さない: この行が指す attempt は最初に waiting へ入ったときに始まっている。
+      await trx.updateTable("step_runs")
+        .set({ status: "running", ended_at: null, exit_code: null })
+        .where("id", "=", b.stepRunReopen.id)
+        .execute();
+      stepRunId = b.stepRunReopen.id;
     }
 
     if (b.stepRunUpdate) {

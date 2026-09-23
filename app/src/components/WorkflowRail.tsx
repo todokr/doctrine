@@ -165,6 +165,7 @@ const KIND_LABEL: Record<WorkflowStepDetail["type"], string> = {
   agent: "agent",
   approval: "approval",
   guide: "guide",
+  poll: "poll",
 };
 
 /**

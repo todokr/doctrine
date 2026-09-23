@@ -17,6 +17,7 @@ export const TASK_TONE: Record<TaskState, Tone> = {
   queued: "idle",
   paused: "idle",
   rate_limited: "idle",
+  waiting: "idle",
   failed: "danger",
   completed: "ok",
   canceled: "idle",
@@ -32,6 +33,7 @@ export const RUN_TONE: Record<RailStatus, Tone> = {
   bounced: "danger",
   interrupted: "idle",
   rate_limited: "idle",
+  waiting: "idle",
   pending: "idle",
 };
 
@@ -65,6 +67,7 @@ export function groupTone(g: Group, t: Task): Tone {
     case "check": return "danger";
     case "running": return "run";
     case "limited":
+    case "waiting":
     case "queued":
     case "paused": return "idle";
     case "done": return t.state === "completed" ? "ok" : "idle";

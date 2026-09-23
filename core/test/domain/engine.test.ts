@@ -5,7 +5,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { applyApproval, decide, type EngineDeps, runTask } from "../../src/domain/engine.ts";
-import { releaseDueRateLimited } from "../../src/domain/scheduler.ts";
+import { releaseDueRateLimited, releaseDueWaiting } from "../../src/domain/scheduler.ts";
 import type { AgentEvent, AgentResult } from "../../src/adapter/types.ts";
 import { parseWorkflow } from "../../src/workflow/schema.ts";
 import { DatabaseSync } from "node:sqlite";
@@ -71,6 +71,28 @@ test("maxAttempts を超えたら failed", () => {
   const d = decide({ workflow: wf, currentStepId: "test", outcome: "failed", attempts: 3 });
   assert.equal(d.kind, "fail");
   assert.match((d as { reason: string }).reason, /maxAttempts/);
+});
+
+test("onExhausted: suspend なら maxAttempts を超えても failed にせず escalate", () => {
+  const w = parseWorkflow(`
+name: f
+steps:
+  - id: a
+    type: command
+    run: "true"
+  - id: b
+    type: command
+    run: "false"
+    onFailure: { goto: a, maxAttempts: 2, onExhausted: suspend }
+`).workflow;
+  assert.equal(
+    decide({ workflow: w, currentStepId: "b", outcome: "failed", attempts: 2 }).kind,
+    "escalate",
+  );
+  assert.equal(
+    decide({ workflow: w, currentStepId: "b", outcome: "failed", attempts: 1 }).kind,
+    "goto",
+  );
 });
 
 test("onFailure が無いステップの失敗は即 failed", () => {
@@ -1747,4 +1769,230 @@ test("上限待ちに入るはずだった実行を止めても、行を running
   assert.equal(task.state, "paused");
   assert.equal(task.rate_limited_until, null);
   assert.deepEqual(events.onStepRunFinished, ["implement:interrupted"]);
+});
+
+// --- poll ステップ ---------------------------------------------------------
+
+const POLL_WF = `
+name: f
+steps:
+  - id: wait
+    type: poll
+    run: "exit $(cat verdict)"
+    interval: 30s
+  - id: after
+    type: command
+    run: "true"
+`;
+
+test("poll が 75 なら waiting で待ち、期限で戻ると同じ行を使い直して attempt を進めない", async () => {
+  const { db, root, workflow } = await taskFixture(POLL_WF);
+  const deps = {
+    db,
+    adapter: createMockAdapter({ result: {} }),
+    logRoot: join(root, "logs"),
+    globalLimit: 4,
+  };
+  writeFileSync(join(root, "verdict"), "75");
+
+  await runTask(db, "t1", workflow, deps);
+  const waiting = (await getTask(db, "t1"))!;
+  assert.equal(waiting.state, "waiting");
+  assert.ok(Date.parse(waiting.waiting_until!) - Date.now() > 25_000, "interval ぶん先");
+
+  // 2周目も「まだ」
+  assert.deepEqual(await releaseDueWaiting(db, new Date(Date.parse(waiting.waiting_until!) + 1)), [
+    "t1",
+  ]);
+  await toRunning(db, "t1");
+  await runTask(db, "t1", workflow, deps);
+  assert.equal((await getTask(db, "t1"))?.state, "waiting");
+
+  // 3周目でマージされた
+  writeFileSync(join(root, "verdict"), "0");
+  await releaseDueWaiting(db, new Date(Date.now() + 60_000));
+  await toRunning(db, "t1");
+  await runTask(db, "t1", workflow, deps);
+
+  const t = (await getTask(db, "t1"))!;
+  assert.equal(t.state, "completed");
+  const runs = (await listStepRuns(db, "t1")).filter((r) => r.step_id === "wait");
+  assert.deepEqual(runs.map((r) => [r.status, r.attempt]), [["success", 1]], "待ちの1周は1行");
+  assert.equal(JSON.parse(t.attempt_counts).wait, 1);
+});
+
+test("poll が 2 なら分岐せずに canceled になり、行は interrupted で閉じる", async () => {
+  const { db, root, workflow } = await taskFixture(POLL_WF);
+  writeFileSync(join(root, "verdict"), "2");
+  await runTask(db, "t1", workflow, {
+    db,
+    adapter: createMockAdapter({ result: {} }),
+    logRoot: join(root, "logs"),
+    globalLimit: 4,
+  });
+  assert.equal((await getTask(db, "t1"))?.state, "canceled");
+  assert.deepEqual((await listStepRuns(db, "t1")).map((r) => r.status), ["interrupted"]);
+});
+
+test("poll がそれ以外で落ちたら onFailure へ差し戻す", async () => {
+  const { db, root, workflow } = await taskFixture(`
+name: f
+steps:
+  - id: fix
+    type: command
+    run: "echo 0 > verdict"
+  - id: wait
+    type: poll
+    run: "exit $(cat verdict)"
+    onFailure: { goto: fix, maxAttempts: 3 }
+`);
+  writeFileSync(join(root, "verdict"), "1");
+  // wait から始め、1回目は落ちて fix へ戻る。fix が verdict を 0 にするので2回目は通る
+  await db.updateTable("tasks").set({ current_step_id: "wait" }).where("id", "=", "t1").execute();
+  await runTask(db, "t1", workflow, {
+    db,
+    adapter: createMockAdapter({ result: {} }),
+    logRoot: join(root, "logs"),
+    globalLimit: 4,
+  });
+  assert.equal((await getTask(db, "t1"))?.state, "completed");
+  assert.deepEqual(
+    (await listStepRuns(db, "t1")).map((r) => [r.step_id, r.status]),
+    [["wait", "bounced"], ["fix", "success"], ["wait", "success"]],
+  );
+});
+
+test("poll が 75 で waiting に入るはずだった実行を止めても、行は running のまま残らず interrupted で閉じる", async () => {
+  const { db, root, workflow } = await taskFixture(`
+name: f
+steps:
+  - id: wait
+    type: poll
+    run: "sleep 0.2; exit $(cat verdict)"
+    interval: 30s
+`);
+  writeFileSync(join(root, "verdict"), "75");
+  const { events, deps } = recorder();
+
+  const done = runTask(db, "t1", workflow, {
+    db,
+    adapter: createMockAdapter({ result: {} }),
+    logRoot: join(root, "logs"),
+    globalLimit: 4,
+    ...deps,
+  });
+  await stopMidFlight(db, done, "paused");
+
+  const runs = await listStepRuns(db, "t1");
+  assert.deepEqual(runs.map((r) => r.status), ["interrupted"]);
+  const task = (await getTask(db, "t1"))!;
+  assert.equal(task.state, "paused");
+  assert.equal(task.waiting_until, null, "waiting へは書き換わっていない");
+  assert.deepEqual(events.onStepRunFinished, ["wait:interrupted"]);
+  assert.deepEqual(events.onStateChanged, [], "waiting への遷移イベントは出ていない");
+});
+
+test("poll が 2 で canceled にするはずだった実行を止めても、タスクの状態は上書きされない", async () => {
+  const { db, root, workflow } = await taskFixture(`
+name: f
+steps:
+  - id: wait
+    type: poll
+    run: "sleep 0.2; exit $(cat verdict)"
+    interval: 30s
+`);
+  writeFileSync(join(root, "verdict"), "2");
+  const { events, deps } = recorder();
+
+  const done = runTask(db, "t1", workflow, {
+    db,
+    adapter: createMockAdapter({ result: {} }),
+    logRoot: join(root, "logs"),
+    globalLimit: 4,
+    ...deps,
+  });
+  await stopMidFlight(db, done, "paused");
+
+  const runs = await listStepRuns(db, "t1");
+  assert.deepEqual(runs.map((r) => r.status), ["interrupted"]);
+  const task = (await getTask(db, "t1"))!;
+  assert.equal(task.state, "paused", "canceled には上書きされない");
+  assert.deepEqual(events.onStepRunFinished, ["wait:interrupted"]);
+  assert.deepEqual(events.onStateChanged, [], "canceled への遷移イベントは出ていない");
+});
+
+// --- onExhausted: suspend ---------------------------------------------
+
+const ESCALATE_WF = `
+name: f
+steps:
+  - id: fix
+    type: command
+    run: "true"
+  - id: check
+    type: command
+    run: "echo こわれた; exit $(cat verdict)"
+    onFailure: { goto: fix, maxAttempts: 2, feed: "直して: {{ steps.check.last_stdout }}", onExhausted: suspend }
+`;
+
+test("上限に達すると、そのステップの awaiting の行を立てて suspended になる", async () => {
+  const { db, root, workflow } = await taskFixture(ESCALATE_WF);
+  writeFileSync(join(root, "verdict"), "1");
+  await runTask(db, "t1", workflow, {
+    db,
+    adapter: createMockAdapter({ result: {} }),
+    logRoot: join(root, "logs"),
+    globalLimit: 4,
+  });
+  const t = (await getTask(db, "t1"))!;
+  assert.equal(t.state, "suspended");
+  assert.equal(t.current_step_id, "check");
+  assert.deepEqual(
+    (await listStepRuns(db, "t1")).map((r) => [r.step_id, r.status]),
+    [["fix", "success"], ["check", "bounced"], ["fix", "success"], ["check", "failed"], [
+      "check",
+      "awaiting",
+    ]],
+  );
+});
+
+test("上限到達の承認は回数を戻して goto 先から続け、feed を渡す", async () => {
+  const { db, root, workflow } = await taskFixture(ESCALATE_WF);
+  writeFileSync(join(root, "verdict"), "1");
+  const deps = {
+    db,
+    adapter: createMockAdapter({ result: {} }),
+    logRoot: join(root, "logs"),
+    globalLimit: 4,
+  };
+  await runTask(db, "t1", workflow, deps);
+
+  await applyApproval(db, "t1", { approved: true, comment: "" }, workflow);
+  const t = (await getTask(db, "t1"))!;
+  assert.equal(t.state, "queued");
+  assert.equal(t.current_step_id, "fix");
+  assert.equal(JSON.parse(t.attempt_counts).check, undefined, "check の回数を戻す");
+  // last_stdout は失敗した check の実行の出力のまま（承認が outputs を上書きしていない証拠）。
+  assert.equal(t.pending_feed, "直して: こわれた\n");
+  const last = (await listStepRuns(db, "t1")).at(-1)!;
+  assert.deepEqual([last.step_id, last.status, last.goto_step_id], ["check", "bounced", "fix"]);
+
+  writeFileSync(join(root, "verdict"), "0");
+  await toRunning(db, "t1");
+  await runTask(db, "t1", workflow, deps);
+  assert.equal((await getTask(db, "t1"))?.state, "completed");
+});
+
+test("上限到達の却下は failed で終える", async () => {
+  const { db, root, workflow } = await taskFixture(ESCALATE_WF);
+  writeFileSync(join(root, "verdict"), "1");
+  await runTask(db, "t1", workflow, {
+    db,
+    adapter: createMockAdapter({ result: {} }),
+    logRoot: join(root, "logs"),
+    globalLimit: 4,
+  });
+  await applyApproval(db, "t1", { approved: false, comment: "手で直す" }, workflow);
+  assert.equal((await getTask(db, "t1"))?.state, "failed");
+  assert.equal((await listStepRuns(db, "t1")).at(-1)?.status, "failed");
 });
