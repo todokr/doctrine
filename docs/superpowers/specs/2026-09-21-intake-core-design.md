@@ -23,14 +23,14 @@ Intake の PRD は要求だけを定め、テーブル定義・RPC の形・エ�
 | --- | --- | --- |
 | 置き場所 | `core/src/intake/`（ドメイン）、`core/src/github/`（`gh`）、`shared/intake/`（アプリと共有する型と純関数） | 3 |
 | GitHub への口 | `Tracker` と `PrWatcher` の 2 つの interface に閉じる。Issue の参照は URL で持つ | 3 |
-| データ | 追記だけの表（案・質問・回答・コメント・承認）と、進行の表（`intakes`・`intake_processes`）に分ける。マイグレーションは `0009_intake` と、改訂の範囲の列を足す `0010_intake_revision` | 4 |
+| データ | 追記だけの表（案・質問・回答・コメント・承認）と、進行の表（`intakes`・`intake_processes`）に分ける。マイグレーションは `0009_intake` と、改訂の範囲の列を足す `0010_intake_revision`、仮定の列を足す `0012_intake_assumptions` | 4 |
 | 同じ Issue の Intake | 終わっていないものは 1 つだけ。部分 unique index で固める | 4 |
 | 状態 | `IntakeState` 8 値と `revising` フラグ。「改訂中」は状態にしない | 5 |
 | 進行中の失敗 | sub-issue や `gh` の失敗は Intake の状態を変えない。見張りのエラーとプロセスの状態で見せる | 5・10・11 |
 | 人の対応が要るか | 状態から計算する関数で、列に持たない | 5 |
 | PFD の正本 | `intake_drafts.pfd`（正規化した JSON）。書いたら変えない | 6 |
 | 承認 | 案の id とハッシュを受け、最新の案・ハッシュ一致・レビュー待ちをトランザクションの中で確かめる | 6 |
-| 決定の成果物 | `decision` を持つ成果物の中身はデーモンが回答から埋める。エージェントは書き換えられない | 6 |
+| 決定の成果物 | `decision` を持つ成果物の中身はデーモンが回答と仮定への応答から埋める。エージェントは書き換えられない | 6 |
 | 改訂の固定 | 投入済み・完了記録済みのプロセスと、その入出力の成果物は、正規化した JSON が同じでなければならない | 6 |
 | 作業ディレクトリ | Intake ごとの専用 worktree（ブランチを作らない `--detach`）。Intake の間ずっと同じパス | 7 |
 | 許す道具 | 読むだけの道具。書き込み・`gh`・`dctl` は許さない。実行後に `git status` で書き換えを検出する | 7 |
@@ -38,7 +38,8 @@ Intake の PRD は要求だけを定め、テーブル定義・RPC の形・エ�
 | 検証落ちのやり直し | 同じ会話へ違反を返し、同じ種類の実行で検証落ちが 3 回続いたら要確認 | 7 |
 | 実行枠 | 全体枠だけを取り、プロジェクト枠は取らない。タスクより先に受け付ける | 7 |
 | 上限待ち | タスクと同じ判定。`rate_limited_until` の列と tick で表し、同じ会話で再開する | 7 |
-| 質問の形 | 判断材料を構造化する。図は Review Guide の図を再利用し、表とコード片を足す | 8 |
+| 質問の形 | 推奨を持たない。判断材料を構造化する。図は Review Guide の図を再利用し、表とコード片を足す | 8 |
+| 仮定の形 | 結論・根拠・崩れたときの影響を持つ。人は認めるか書き直す。質問と同じまとまりで届く | 8 |
 | 差し戻しの文面 | 純関数 `buildFeedback` を画面とデーモンが共有する | 9 |
 | sub-issue の作成 | GraphQL の `createIssue` に `parentIssueId` を渡す 1 回の呼び出し | 10 |
 | sub-issue の重複防止 | 本文の目印で探して採用する。代わりの表現（タスクリスト）は持たない | 10 |
@@ -99,7 +100,7 @@ export type PrFact = {
 | --- | --- | --- |
 | `intakes` | Intake 1 件 | `id`(uuid) `project_id` `issue_url` `issue_node_id` `issue_title` `state` `revising`(0/1) `attention_reason`(null 可) `dispatch_paused`(0/1) `worktree_path` `claude_session_id` `child_pid` `child_started_at` `rate_limited_until` `revision_run_id`(今の改訂の最初の `revise` 実行。改訂中でなければ null。`0010_intake_revision`) `created_at` `updated_at` `ended_at` |
 | `intake_runs` | 分解エージェントの実行 1 回（`step_runs` に当たる） | `id` `intake_id` `purpose`(`investigate`/`decompose`/`revise`) `attempt` `status`(`queued`/`running`/`success`/`failed`/`rate_limited`/`interrupted`) `started_at` `ended_at` `log_path` `cost_usd` `num_turns` `duration_ms` `output`(検証を通った JSON) `issues`(検証に落ちた理由) `permission_denials` |
-| `intake_question_sets` | 一度に届いた質問のまとまり（Q-2・Q-6） | `id` `intake_id` `run_id` `questions`(JSON) `answers`(JSON、回答前は null) `answered_at` |
+| `intake_question_sets` | 一度に届いた質問と仮定のまとまり（Q-2・Q-6・Q-9） | `id` `intake_id` `run_id` `questions`(JSON) `assumptions`(JSON。`0012_intake_assumptions`) `answers`(JSON、回答前は null) `assumption_responses`(JSON、回答前は null。`0012_intake_assumptions`) `answered_at` |
 | `intake_drafts` | PFD の案 1 回分。**書いたら変えない** | `id` `intake_id` `seq` `run_id` `pfd`(正規化した JSON 文字列) `hash` `replies`(R-7、コメントへの返答の JSON) `created_at` |
 | `intake_comments` | 差し戻し・改訂のコメント 1 件（R-4） | `id` `intake_id` `draft_id`(改訂の開始時は承認済みの案) `target_kind`(`artifact`/`process`/`whole`) `target_id`(`whole` は null) `body` `run_id`(改訂の開始コメントだけが、その改訂の最初の実行を指す。それ以外は null。`0010_intake_revision`) `created_at` |
 | `intake_approvals` | 承認 1 回（R-8・R-10） | `id` `intake_id` `draft_id` `hash` `approved_at` |
@@ -115,7 +116,7 @@ export type PrFact = {
   再承認では、増えたプロセスを挿入し、消えたプロセスに `retired_at` を入れ、残るプロセスはそのままにする。
   これが「承認 → sub-issue → 投入」（W-1）の最初の一歩になる
 - 回答・コメント・案・承認はすべて行を足すだけで上書きしない。これが R-10・Q-7（経緯を後から読める）を満たす
-- 「決定の記録」（Q-5）は `intake_question_sets.answers` そのものである。別表にしない
+- 「決定の記録」（Q-5）は `intake_question_sets.answers` と `assumption_responses` そのものである。別表にしない
 
 ## 5. Intake の状態と遷移
 
@@ -140,11 +141,11 @@ export type IntakeState =
 
 | from | to | 契機（章） |
 | --- | --- | --- |
-| investigating | answering | 調査の実行が質問を返した（7・8） |
-| investigating | decomposing | 調査の実行が空の質問を返した（Q-4。7） |
+| investigating | answering | 調査の実行が質問か仮定を返した（7・8） |
+| investigating | decomposing | 調査の実行が質問も仮定も空で返した（Q-4。7） |
 | investigating | needs_attention | エージェントの失敗・検証落ち 3 回・書き換えの検出（7） |
 | answering | decomposing | `intake.answer`（8） |
-| decomposing | answering | 分解の実行が質問を返した（Q-6。7） |
+| decomposing | answering | 分解の実行が質問か仮定を返した（Q-6。7） |
 | decomposing | reviewing | 検証を通った案を保存した（R-1。6・9） |
 | decomposing | needs_attention | エージェントの失敗・検証落ち 3 回・書き換えの検出（7） |
 | reviewing | decomposing | `intake.reject`（9） |
@@ -192,8 +193,8 @@ export type IntakeState =
 モデルは `pfd/src/model.ts` から次を変える。
 
 - `issue`（番号）を消す。Issue の参照は `intakes` が持つ（PRD 11 章）
-- 成果物に `decision?: string`（質問の id）を足す。`decision` を持つ成果物は `given: true` でなければならず、
-  **中身はエージェントではなくデーモンが回答から埋める**。エージェントが決定の内容を書き換える経路を持たない（Q-5）
+- 成果物に `decision?: string`（質問か仮定の id）を足す。`decision` を持つ成果物は `given: true` でなければならず、
+  **中身はエージェントではなくデーモンが回答と仮定への応答から埋める**。エージェントが決定の内容を書き換える経路を持たない（Q-5）
 
 ```ts
 export type Artifact = {
@@ -232,7 +233,7 @@ export type Pfd = { title: string; goal: string[]; artifacts: Artifact[]; proces
   `undefined_artifact` / `multiple_producers` / `given_has_producer` / `no_producer` / `unused_artifact` / `no_verify` /
   `missing_definition` / `cycle` / `goal_unreachable`）をそのまま引き継ぎ、次を足す。
   - `decision_not_given`: `decision` を持つ成果物が `given: true` でない
-  - `unknown_decision`: `decision` が、答えのある質問を指していない
+  - `unknown_decision`: `decision` が、答えのある質問も、応答のある仮定も指していない
   - `frozen_changed`: 改訂のとき、固定された部分が変わっている（下記）
 - **改訂の固定（C-3）**: 固定集合は「`current_task_id` を持つか `human_done_at` のあるプロセス」と「それらの入力と出力の成果物」である。
   新しい案は、固定集合の各要素を**正規化した JSON が同じ**形で含まなければならない（id・中身・入出力とも）。違えば `frozen_changed` で弾く。
@@ -253,8 +254,8 @@ export type Pfd = { title: string; goal: string[]; artifacts: Artifact[]; proces
 | 許す道具 | `Read` `Grep` `Glob` と、`core/src/workflow/scaffold.ts` の `READ_ONLY_TOOLS`（`git status` / `git diff` / `git log` / `git show` / `grep` / `cat` / `ls` / `find` / `sed -n` など。export して共有する）。`permissionMode` は指定しない。`Write` `Edit` `gh` `dctl` は許さない | `--permission-prompts none` の下で、許可に無い道具は拒否される |
 | Issue の渡し方 | デーモンが `Tracker.readIssue` で本文とコメントを取り、prompt に埋める。エージェントに `gh` を持たせない | ネットワークの呼び出しを 1 か所（デーモン）に閉じる |
 | 書き換えない保証（D-4） | 道具の制限に加え、実行の後に `git status --porcelain` を見る。変更があれば出力を捨て、worktree を `git checkout -- .` と `git clean -fd` で戻し、`needs_attention`（`wrote_repository`）にする | 道具の許可は先頭一致なので、抜け道を 2 重に塞ぐ |
-| PFD と質問の受け取り方 | `--json-schema` の構造化出力。ファイルに書かせない。形は下の `DecomposerOutput` | `core/src/domain/stepRunner.ts` の `runGuideStep` と同じ型である。ファイルを読む経路（realpath の検査など）が要らず、書き込みの道具を許さずに済む |
-| 実行の種類（`purpose`） | `investigate`: 開始時と、調査で落ちた後のやり直し。`questions` だけを許す。`decompose`: 回答の後・差し戻しの後・分解で落ちた後のやり直し。`questions` と `pfd` のどちらも許す。`revise`: 改訂に入った後。`decompose` と同じ出力を許し、prompt に承認済みの計画と固定集合を載せる | 調査で落ちたものを `decompose` で再開すると、質問を一度も出さずに分解へ入る（5 章で `needs_attention → investigating` を持つ理由） |
+| PFD と質問・仮定の受け取り方 | `--json-schema` の構造化出力。ファイルに書かせない。形は下の `DecomposerOutput` | `core/src/domain/stepRunner.ts` の `runGuideStep` と同じ型である。ファイルを読む経路（realpath の検査など）が要らず、書き込みの道具を許さずに済む |
+| 実行の種類（`purpose`） | `investigate`: 開始時と、調査で落ちた後のやり直し。`questions`（質問と仮定）だけを許す。`decompose`: 回答の後・差し戻しの後・分解で落ちた後のやり直し。`questions` と `pfd` のどちらも許す。`revise`: 改訂に入った後。`decompose` と同じ出力を許し、prompt に承認済みの計画と固定集合を載せる | 調査で落ちたものを `decompose` で再開すると、質問を一度も出さずに分解へ入る（5 章で `needs_attention → investigating` を持つ理由） |
 | 会話 | 開始から最初の承認までは 1 つの会話（調査 → 回答 → 分解 → 差し戻し）。改訂に入るときに新しい会話を始め、承認済みの計画・固定集合・決定の記録・改訂のコメントを prompt に載せる。`intake.retry` は同じ会話を続ける（会話が作られる前に落ちたなら新しく始める）。最初の呼び出しが上限で弾かれたら、会話の記録を消して新しい id で始め直す（`engine.ts` のタスクと同じ） | R-6（差し戻しは同じ会話の続き）。改訂は数日後で baseBranch も進んでいるので、古い会話を続けない。改訂の会話の範囲は `revision_run_id` 以降の実行と案で、開始コメントは `intake_comments.run_id` で選ぶ（改訂をやめて入り直したとき、前の改訂の実行・案・コメントを持ち込まない） |
 | 検証に通らないとき | 違反の一覧を同じ会話へ返して直させる。やり直しは毎回 `adapter.resume` の新しい子プロセスなので、`intake_runs` の行が 1 回ごとに立つ。**同じ `purpose` の行を新しい順に見て、検証落ち（`status = 'failed'` かつ `issues` あり）が 3 行続いたら** `needs_attention`（`invalid_output`）にする。上限待ちの行（`rate_limited`）は数えず、連続も切らない。`attempt` は実行を新しく立てるたびに進め、上限待ちからの再開では進めない（ログのパスを実行ごとに分けるため） | Review Guide の既定（自分へ戻る・3 回）と揃える。数え方は `core/src/domain/rateLimit.ts` の `consecutiveRateLimited` が `step_runs` の連続を数えるのと同じ形である |
 | エージェント自体の失敗 | result が ok でない、または子が落ちた場合は、ただちに `needs_attention`（`agent_failed`）にする。やり直しは人が `intake.retry` で行う | PRD 8 章の「エージェントの失敗 → 要確認」 |
@@ -268,7 +269,7 @@ export type Pfd = { title: string; goal: string[]; artifacts: Artifact[]; proces
  * kind による判別はデーモンの zod で行う（トップレベルの oneOf を渡せるかは未確認）。
  */
 export type DecomposerOutput =
-  | { kind: "questions"; questions: Question[] }        // 空配列なら「質問は無い」（Q-4）
+  | { kind: "questions"; questions: Question[]; assumptions: Assumption[] } // どちらも空配列なら「論点は無い」（Q-4）
   | { kind: "pfd"; pfd: Pfd; replies: CommentReply[] }; // replies は差し戻しのコメントへの返答（R-7）
 export type CommentReply = { commentId: number; reply: string };
 ```
@@ -279,13 +280,16 @@ export type CommentReply = { commentId: number; reply: string };
   本 spec はこれを前提として引き継ぎ、実測して直す（18 章）
 - prompt は `core/src/intake/prompt.ts` がデーモンの側で組み立てる（`domain/guidePrompt.ts` と同じ扱い）。載せるものは次のとおり。
   Issue の本文とコメント。PFD の規則（PFD spec 6 章）と粒度の 4 条件・割りすぎの基準（D-3・D-7。`pfd/skill/pfd-decompose/SKILL.md` の文面を移す）。
-  「Issue・コード・慣習から導けることは質問にしない」（Q-4）。「実行しないと決められないことは人のプロセスにする」（Q-8）。
+  「PFD を作るうえでの論点を、自分で決められるものも含めてすべて洗い出す」（Q-1）。
+  「Issue・コード・慣習から導けることは質問にせず、根拠を添えた仮定にする。仮定は崩れたときの影響が大きい順に並べる」（Q-4・Q-9）。
+  「質問に推奨を書かない。選択肢の説明と判断材料でも、どれかを推さない」（Q-2）。
+  「実行しないと決められないことは人のプロセスにする」（Q-8）。
   「分解の形だけを左右した決定は成果物にしない」（Q-5）
 - システムプロンプトは `BUILTIN_APPEND_SYSTEM_PROMPT`（`core/src/domain/systemPrompt.ts`）を渡す
 
-## 8. 質問と回答の形式
+## 8. 質問・仮定と回答の形式
 
-PRD 13 章「質問の形式」への答えである。
+PRD 13 章「質問と仮定の形式」への答えである。
 
 ```ts
 export type Question = {
@@ -294,8 +298,6 @@ export type Question = {
   kind: "single" | "multiple" | "free";
   /** free では空配列。 */
   options: { id: string; label: string; description: string }[];
-  /** 推奨が無ければ null。free のときは text で推す。 */
-  recommendation: { optionIds: string[]; text: string | null; reason: string } | null;
   materials: Material[];
 };
 
@@ -306,18 +308,48 @@ export type Material =
   | { kind: "code"; caption: string; language: string; path: string | null; code: string }
   | { kind: "diagram"; caption: string; diagram: Diagram };
 
-/** 回答 1 件（Q-3: 選択肢以外の答えと補足を書ける）。 */
+/** 回答 1 件（Q-3: 選択肢以外の答えと補足を書ける。Q-10: note は選んだ理由も兼ねる）。 */
 export type Answer = { questionId: string; optionIds: string[]; other: string | null; note: string | null };
+
+/** 仮定 1 件（Q-9）。id は同じまとまりの質問の id とも重ならない（`decision` が両方を指すため）。 */
+export type Assumption = {
+  id: string;
+  /** エージェントが導いた結論。 */
+  statement: string;
+  /** 1 つ以上。 */
+  evidence: Evidence[];
+  /** 崩れたときに計画のどこが変わるか。 */
+  impact: string;
+};
+
+/** 根拠。Issue の箇所・コードの箇所・慣習のどれか。 */
+export type Evidence =
+  | { kind: "issue"; commentUrl: string | null; quote: string } // commentUrl が null なら本文
+  | { kind: "code"; path: string; startLine: number | null; endLine: number | null; excerpt: string }
+  | { kind: "convention"; body: string };
+
+/** 仮定への応答 1 件。 */
+export type AssumptionResponse =
+  | { assumptionId: string; verdict: "accepted" }
+  | { assumptionId: string; verdict: "corrected"; correction: string };
 ```
 
 - **決定: 判断材料は構造化データとして持つ。** 図は Review Guide の 4 種（sequence と、graph の relation・dependency・state）を再利用できる。
   比較表とコード片は Review Guide に型が無いので、Intake 側に足す。型は `shared/intake/` に置き、アプリと共有する
-- 質問の検証（デーモン）: 質問 id と選択肢 id の重複がないこと、`recommendation.optionIds` が選択肢にあること、
-  `single` の推奨が 1 つであること、`free` は選択肢を持たないこと、表の各行の列数が `columns` と同じであること。
+- **決定: 質問は推奨を持たない**（PRD 5.4・Q-2）。型に場所が無いので、エージェントが推奨を書く経路も無い。
+  選択肢の説明や判断材料の中で推す書き方は型では防げないので、prompt で禁じる（7 章）
+- **決定: 仮定の結論は伏せずに見せる**（PRD 5.4・Q-9）。人は根拠と照らして認めるか書き直す。並びはエージェントが返した順を保つ。
+  影響の大きさはデーモンには判定できないので、並べるのはエージェントの役目である（7 章の prompt）
+- 質問と仮定の検証（デーモン）: 質問 id・仮定 id・選択肢 id の重複がないこと（質問 id と仮定 id も互いに重ならない）、
+  `free` は選択肢を持たないこと、表の各行の列数が `columns` と同じであること、仮定の `evidence` が 1 つ以上あること。
   違反は 7 章の「検証に通らないとき」と同じ扱いにする
-- 回答の検証（`intake.answer`）: すべての質問に答えがあること、`single` は選択が 1 つか `other` があること、選択肢 id が存在すること
-- 質問は 1 回の実行で `questions` としてまとめて届き、`intake_question_sets` の 1 行になる（Q-2・Q-6）。回答も 1 回でまとめて返す
-- 人が答えた内容を分解の会話へ返す文面は、`shared/intake/` の純関数で作る（9 章と同じく、送る前に画面で確かめられるようにする）
+- 回答の検証（`intake.answer`）: すべての質問に答えがあること、`single` は選択が 1 つか `other` があること、選択肢 id が存在すること。
+  すべての仮定に応答があること、`corrected` の `correction` が空白だけでないこと
+- 質問と仮定は 1 回の実行で `questions` としてまとめて届き、`intake_question_sets` の 1 行になる（Q-2・Q-6）。回答と応答も 1 回でまとめて返す
+- 人が答えた内容を分解の会話へ返す文面は、`shared/intake/` の純関数で作る（9 章と同じく、送る前に画面で確かめられるようにする）。
+  仮定は、認めたものと書き直したもの（書き直した内容つき）を分けて載せる
+- 決定の成果物の中身（6 章）とタスクの prompt の `人が決めたこと:`（11.5）では、書き直した仮定は書き直した内容を、
+  認めた仮定は「エージェントの仮定を人が認めた」と分かる形で結論を載せる。認めたか書き直したかは記録に残す（Q-9）
 
 ## 9. 計画レビュー
 
@@ -438,7 +470,7 @@ export type ProcessStatus =
   タイトルはプロセスの `name`（接頭辞なし。W-8）、優先度は既定の 2、ワークフローはプロジェクトの既定（PRD 12 章）。
   W-7 のとおり、Intake は枠を予約しない
 - **prompt（W-6・H-3）**: `pfd/src/prompt.ts` を引き継ぎ、先頭に親 Issue と sub-issue の URL を並べ、
-  `人が決めたこと:` に、決定の成果物（回答）と人のプロセスの `note` を載せる。R-3 のプレビューも同じ関数で作る
+  `人が決めたこと:` に、決定の成果物（回答と仮定への応答。8 章）と人のプロセスの `note` を載せる。R-3 のプレビューも同じ関数で作る
 
 ### 11.6 人のプロセスと一時的な失敗
 
@@ -483,7 +515,7 @@ export type ProcessStatus =
 | `intake.start` | `{ project; issue_url }` | `IntakeSummary & { alreadyActive: boolean }`（進行中があれば新しく作らず、成功としてそれを返す） | S-2〜S-4 |
 | `intake.list` | `{ project?; include_closed?: boolean }` | `IntakeSummary[]` | V-2・V-3・V-7 |
 | `intake.get` | `{ intake_id }` | `IntakeDetail` | V-4・V-5・Q-7・R-10 |
-| `intake.answer` | `{ intake_id; question_set_id; answers: Answer[] }` | `IntakeSummary` | Q-3・Q-5 |
+| `intake.answer` | `{ intake_id; question_set_id; answers: Answer[]; assumption_responses: AssumptionResponse[] }` | `IntakeSummary` | Q-3・Q-5・Q-9 |
 | `intake.reject` | `{ intake_id; draft_id; comments: NewComment[] }` | `IntakeSummary` | R-4〜R-6 |
 | `intake.approve` | `{ intake_id; draft_id; hash }` | `IntakeSummary` | R-8・R-9・C-4 |
 | `intake.revise` | `{ intake_id; comments: NewComment[] }` | `IntakeSummary` | C-1・C-2 |
@@ -551,14 +583,16 @@ S の要求は、扱うものを同じ表に入れる。
 | S-4 | 4 |
 | S-5 | 10（`GhStatus`）、13（`github.status`） |
 | S-6（S） | 6・11（プロセスが 1 つの案も検証を通り、そのまま投入される） |
-| Q-1 | 7（Issue の渡し方・`investigate`）、10 |
-| Q-2 | 8（`Question`）、4（`intake_question_sets`） |
+| Q-1 | 7（Issue の渡し方・`investigate`・prompt）、10 |
+| Q-2 | 8（`Question`。推奨を持たない）、7（prompt）、4（`intake_question_sets`） |
 | Q-3 | 8（`Answer` の `other` と `note`） |
-| Q-4 | 7（`investigate` の空の質問・prompt）、5（`investigating → decomposing`） |
+| Q-4 | 7（`investigate` の空の質問と仮定・prompt）、5（`investigating → decomposing`） |
 | Q-5 | 4（決定の記録）、6（`decision` の成果物）、11.5（prompt） |
 | Q-6 | 5（`decomposing → answering`）、7 |
 | Q-7 | 4（追記だけ）、13（`intake.get`） |
 | Q-8 | 7（prompt）、11.6 |
+| Q-9 | 8（`Assumption` と `AssumptionResponse`）、4（`assumptions` と `assumption_responses`）、6（`decision`）、7（prompt） |
+| Q-10（S） | 8（`Answer.note`）、11.5（prompt） |
 | D-1 | 6（`Pfd`） |
 | D-2 | 6、11.4 |
 | D-3 | 7（prompt） |
@@ -615,7 +649,7 @@ S の要求は、扱うものを同じ表に入れる。
 | PRD 13 章の項目 | 答え | 章 |
 | --- | --- | --- |
 | 分解エージェントの走らせ方 | 専用の worktree、読むだけの道具、構造化出力、実行枠は全体枠だけ | 7 |
-| 質問の形式 | 判断材料を構造化する。図は Review Guide の 4 種を再利用し、表とコード片は Intake 側に足す | 8 |
+| 質問と仮定の形式 | 判断材料を構造化する。図は Review Guide の 4 種を再利用し、表とコード片は Intake 側に足す。仮定の根拠は Issue のコメントの URL と引用、ファイルと行の範囲、慣習の文で指す | 8 |
 | PFD の図の描き方 | 範囲外。アプリの spec が決める。コアは `Pfd` と `ProcessStatus` を渡すだけである | 17 |
 | 見張りの周期と `gh` の抑え方 | 120 秒。プロジェクトごとに 1 周期 1 回の GraphQL | 11 |
 | sub-issue の作り方と代わりの表現 | GraphQL `createIssue` の `parentIssueId`、目印で冪等にする。代わりの表現は持たない | 10 |
@@ -656,3 +690,6 @@ S の要求は、扱うものを同じ表に入れる。
 - **ブランチごとに `gh pr list` を叩く。** 呼び出しが Intake の数 × プロセスの数になる
 - **分解エージェントをプロジェクト枠に数える。** 同じリポジトリを読むだけの分解が、そのプロジェクトのタスクを止める
 - **分解エージェントにファイル（`.doctrine-out/pfd.json` など）を書かせる。** 書き込みの道具を許すことになり、D-4 の保証が弱まる
+- **質問にエージェントの推奨を付ける。** 人が選択肢を比べる前に答えを差し出し、熟慮を飛ばさせる（PRD 5.4）
+- **推奨を人が答えるまで伏せ、答えた後に開く。** 推奨を出さないことにしたので要らない（PRD 5.4）
+- **仮定の結論を伏せ、人に一から書かせる。** 根拠から導ける事実まで人が書くことになる。結論と根拠を並べて照合させれば足りる（PRD 5.4）
