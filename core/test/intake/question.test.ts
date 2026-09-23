@@ -48,7 +48,6 @@ function question1(over: Obj = {}): Obj {
       { id: "a", label: "同期", description: "呼び出しの中で書く" },
       { id: "b", label: "非同期", description: "キューに積む" },
     ],
-    recommendation: { optionIds: ["a"], text: null, reason: "単純で十分速い" },
     materials: q1Materials(),
     ...over,
   };
@@ -64,7 +63,6 @@ function question2(over: Obj = {}): Obj {
       { id: "b", label: "B", description: "説明 B" },
       { id: "c", label: "C", description: "説明 C" },
     ],
-    recommendation: { optionIds: ["a", "c"], text: null, reason: "使われているため" },
     materials: [{
       kind: "diagram",
       caption: "状態",
@@ -89,7 +87,6 @@ function question3(over: Obj = {}): Obj {
     prompt: "ほかに考慮すべきことは",
     kind: "free",
     options: [],
-    recommendation: { optionIds: [], text: "特に無い", reason: "範囲が小さいため" },
     materials: [],
     ...over,
   };
@@ -97,6 +94,34 @@ function question3(over: Obj = {}): Obj {
 
 function validQuestions(): Obj[] {
   return [question1(), question2(), question3()];
+}
+
+function assumption1(over: Obj = {}): Obj {
+  return {
+    id: "s1",
+    statement: "書き込みは 1 秒に数回に収まる",
+    evidence: [
+      { kind: "issue", commentUrl: null, quote: "利用者は社内の数人" },
+      {
+        kind: "code",
+        path: "core/src/x.ts",
+        startLine: 10,
+        endLine: 12,
+        excerpt: "await write(x);",
+      },
+      { kind: "convention", body: "既存の書き込みはすべて同期" },
+    ],
+    impact: "書き込みのプロセスにキューが要るかが変わる",
+    ...over,
+  };
+}
+
+function validAssumptions(): Obj[] {
+  return [assumption1(), assumption1({ id: "s2", evidence: [{ kind: "convention", body: "x" }] })];
+}
+
+function content(questions: unknown = validQuestions(), assumptions: unknown = validAssumptions()) {
+  return { questions, assumptions };
 }
 
 function validAnswers(): Obj[] {
@@ -107,22 +132,46 @@ function validAnswers(): Obj[] {
   ];
 }
 
-function questionIssuesOf(input: unknown): string[] {
-  const result = validateQuestions(input);
+function validResponses(): Obj[] {
+  return [
+    { assumptionId: "s1", verdict: "accepted" },
+    { assumptionId: "s2", verdict: "corrected", correction: "1 秒に数百回になりうる" },
+  ];
+}
+
+function questionIssuesOf(questions: unknown, assumptions: unknown = []): string[] {
+  const result = validateQuestions({ questions, assumptions });
   assert.equal(result.ok, false);
   return result.ok ? [] : result.issues;
 }
 
-function parsedQuestions() {
-  const result = validateQuestions(validQuestions());
+function assumptionIssuesOf(assumptions: unknown): string[] {
+  const result = validateQuestions({ questions: validQuestions(), assumptions });
+  assert.equal(result.ok, false);
+  return result.ok ? [] : result.issues;
+}
+
+function parsedContent() {
+  const result = validateQuestions(content());
   assert.equal(result.ok, true);
-  return result.ok ? result.questions : [];
+  return result.ok ? result : { questions: [], assumptions: [] };
 }
 
-function answerIssuesOf(input: unknown): string[] {
-  const result = validateAnswers(parsedQuestions(), input);
+function validateReply(answers: unknown, assumptionResponses: unknown = validResponses()) {
+  return validateAnswers(parsedContent(), { answers, assumptionResponses });
+}
+
+function answerIssuesOf(
+  answers: unknown,
+  assumptionResponses: unknown = validResponses(),
+): string[] {
+  const result = validateReply(answers, assumptionResponses);
   assert.equal(result.ok, false);
   return result.ok ? [] : result.issues;
+}
+
+function responseIssuesOf(assumptionResponses: unknown): string[] {
+  return answerIssuesOf(validAnswers(), assumptionResponses);
 }
 
 function answersWith(index: number, over: Obj): Obj[] {
@@ -131,24 +180,35 @@ function answersWith(index: number, over: Obj): Obj[] {
   return answers;
 }
 
-// 質問の形
+// 質問と仮定の形
 
-test("spec の型に沿った質問のまとまりが ok になり、そのまま返る", () => {
-  const input = validQuestions();
+test("spec の型に沿った質問と仮定のまとまりが ok になり、そのまま返る", () => {
+  const input = content();
   const result = validateQuestions(input);
   assert.equal(result.ok, true);
-  if (result.ok) assert.deepEqual(result.questions, input);
+  if (result.ok) {
+    assert.deepEqual(result.questions, input.questions);
+    assert.deepEqual(result.assumptions, input.assumptions);
+  }
 });
 
-test("質問が無い空のまとまりは ok になる", () => {
-  assert.equal(validateQuestions([]).ok, true);
+test("質問も仮定も無い空のまとまりは ok になる", () => {
+  assert.equal(validateQuestions(content([], [])).ok, true);
 });
 
 test("形が壊れた入力でも例外を投げずに落ちる", () => {
   for (const input of [null, undefined, "質問", {}]) {
     assert.ok(questionIssuesOf(input).length >= 1);
+    assert.ok(assumptionIssuesOf(input).length >= 1);
   }
   assert.ok(questionIssuesOf({}).some((s) => s.startsWith("questions")));
+  assert.ok(assumptionIssuesOf({}).some((s) => s.startsWith("assumptions")));
+});
+
+test("質問は推奨を持てない", () => {
+  const recommendation = { optionIds: ["a"], text: null, reason: "単純で十分速い" };
+  const issues = questionIssuesOf([question1({ recommendation })]);
+  assert.ok(issues.some((s) => s.startsWith("questions.0") && s.includes("recommendation")));
 });
 
 test("知らないキーがあったら落ちる", () => {
@@ -163,17 +223,14 @@ test("kind が 3 つ以外なら落ちる", () => {
 
 test("判断材料の kind が 4 つ以外なら落ちる", () => {
   const input = [question1({ materials: [{ kind: "image", caption: "x" }] })];
-  assert.equal(validateQuestions(input).ok, false);
+  assert.ok(questionIssuesOf(input).length > 0);
 });
 
-test("推奨の text と code の path は null を書く必要があり、省けない", () => {
-  const withoutText = question1({ recommendation: { optionIds: ["a"], reason: "理由" } });
-  assert.equal(validateQuestions([withoutText]).ok, false);
-
+test("code の path は null を書く必要があり、省けない", () => {
   const materials = q1Materials();
   const { path: _path, ...codeWithoutPath } = materials[3];
   materials[3] = codeWithoutPath;
-  assert.equal(validateQuestions([question1({ materials })]).ok, false);
+  assert.ok(questionIssuesOf([question1({ materials })]).length > 0);
 });
 
 test("図の材料は Review Guide の図の形だけを許す", () => {
@@ -183,18 +240,39 @@ test("図の材料は Review Guide の図の形だけを許す", () => {
     caption: "x",
     diagram: { id: "g1", title: "流れ", body: { shape: "flow" } },
   };
-  assert.equal(validateQuestions([question1({ materials })]).ok, false);
+  assert.ok(questionIssuesOf([question1({ materials })]).length > 0);
 });
 
-// 質問の整合性
+test("根拠の無い仮定は落ちる", () => {
+  const issues = assumptionIssuesOf([assumption1({ evidence: [] })]);
+  assert.ok(issues.some((s) => s.startsWith("assumptions.0.evidence")));
+});
+
+test("根拠の kind が 3 つ以外なら落ちる", () => {
+  const issues = assumptionIssuesOf([assumption1({ evidence: [{ kind: "guess", body: "x" }] })]);
+  assert.ok(issues.some((s) => s.startsWith("assumptions.0.evidence.0")));
+});
+
+test("コードの根拠の行は null を書く必要があり、省けない", () => {
+  const evidence = [{ kind: "code", path: "core/src/x.ts", excerpt: "x" }];
+  const issues = assumptionIssuesOf([assumption1({ evidence })]);
+  assert.ok(issues.some((s) => s.startsWith("assumptions.0.evidence.0")));
+});
+
+test("仮定の知らないキーは落ちる", () => {
+  const issues = assumptionIssuesOf([assumption1({ recommendation: "x" })]);
+  assert.ok(issues.some((s) => s.startsWith("assumptions.0") && s.includes("recommendation")));
+});
+
+// 質問と仮定の整合性
 
 test("選択肢が無い single は落ちる", () => {
-  const issues = questionIssuesOf([question1({ options: [], recommendation: null })]);
+  const issues = questionIssuesOf([question1({ options: [] })]);
   assert.ok(issues.some((s) => s.startsWith("questions.0.options")));
 });
 
 test("選択肢が無い multiple は落ちる", () => {
-  const issues = questionIssuesOf([question1(), question2({ options: [], recommendation: null })]);
+  const issues = questionIssuesOf([question1(), question2({ options: [] })]);
   assert.ok(issues.some((s) => s.startsWith("questions.1.options")));
 });
 
@@ -204,50 +282,19 @@ test("free が選択肢を持っていたら落ちる", () => {
   assert.ok(issues.some((s) => s.startsWith("questions.2.options")));
 });
 
-test("推奨が選択肢に無ければ落ちる", () => {
-  const recommendation = { optionIds: ["z"], text: null, reason: "理由" };
-  const issues = questionIssuesOf([question1({ recommendation })]);
-  assert.ok(
-    issues.some((s) => s.startsWith("questions.0.recommendation.optionIds.0") && s.includes("z")),
-  );
-});
-
-test("single の推奨が 2 つなら落ちる", () => {
-  const recommendation = { optionIds: ["a", "b"], text: null, reason: "理由" };
-  const issues = questionIssuesOf([question1({ recommendation })]);
-  assert.ok(issues.some((s) => s.startsWith("questions.0.recommendation.optionIds")));
-});
-
-test("multiple の推奨に選択肢が無ければ落ちる", () => {
-  const recommendation = { optionIds: [], text: null, reason: "理由" };
-  const issues = questionIssuesOf([question1(), question2({ recommendation })]);
-  assert.ok(issues.some((s) => s.startsWith("questions.1.recommendation.optionIds")));
-});
-
-test("推奨の選択肢 id が重複したら落ちる", () => {
-  const recommendation = { optionIds: ["a", "a"], text: null, reason: "理由" };
-  const issues = questionIssuesOf([question1(), question2({ recommendation })]);
-  assert.ok(
-    issues.some((s) =>
-      s.startsWith("questions.1.recommendation.optionIds.1") && s.includes("重複")
-    ),
-  );
-});
-
-test("free の推奨に text が無ければ落ちる", () => {
-  const recommendation = { optionIds: [], text: null, reason: "理由" };
-  const issues = questionIssuesOf([question1(), question2(), question3({ recommendation })]);
-  assert.ok(issues.some((s) => s.startsWith("questions.2.recommendation.text")));
-});
-
-test("推奨が null なら推奨の規則を検査しない", () => {
-  const input = validQuestions().map((q) => ({ ...q, recommendation: null }));
-  assert.equal(validateQuestions(input).ok, true);
-});
-
 test("質問 id が重複したら落ちる", () => {
   const issues = questionIssuesOf([question1(), question2({ id: "q1" })]);
   assert.ok(issues.some((s) => s.startsWith("questions.1.id") && s.includes("重複")));
+});
+
+test("仮定 id が質問 id と重なったら落ちる", () => {
+  const issues = assumptionIssuesOf([assumption1({ id: "q2" })]);
+  assert.ok(issues.some((s) => s.startsWith("assumptions.0.id") && s.includes("重複")));
+});
+
+test("仮定 id が重複したら落ちる", () => {
+  const issues = assumptionIssuesOf([assumption1(), assumption1()]);
+  assert.ok(issues.some((s) => s.startsWith("assumptions.1.id") && s.includes("重複")));
 });
 
 test("質問の中で選択肢 id が重複したら落ちる", () => {
@@ -272,42 +319,39 @@ test("表の行の列数が columns と違えば落ちる", () => {
 });
 
 test("違反が複数あればすべて返す", () => {
-  const recommendation = { optionIds: ["z"], text: null, reason: "理由" };
-  const issues = questionIssuesOf([question1({ recommendation }), question2({ id: "q1" })]);
-  assert.ok(issues.length >= 2);
-  assert.ok(issues.some((s) => s.startsWith("questions.0.recommendation.optionIds.0")));
+  const issues = questionIssuesOf(
+    [question1({ options: [] }), question2({ id: "q1" })],
+    [assumption1({ id: "q1" })],
+  );
+  assert.ok(issues.some((s) => s.startsWith("questions.0.options")));
   assert.ok(issues.some((s) => s.startsWith("questions.1.id")));
+  assert.ok(issues.some((s) => s.startsWith("assumptions.0.id")));
 });
 
 // 回答
 
-test("すべての質問に正しく答えた回答が ok になり、そのまま返る", () => {
-  const input = validAnswers();
-  const result = validateAnswers(parsedQuestions(), input);
+test("すべての質問に正しく答え、すべての仮定に応じた回答が ok になり、そのまま返る", () => {
+  const result = validateReply(validAnswers());
   assert.equal(result.ok, true);
-  if (result.ok) assert.deepEqual(result.answers, input);
+  if (result.ok) {
+    assert.deepEqual(result.answers, validAnswers());
+    assert.deepEqual(result.assumptionResponses, validResponses());
+  }
 });
 
 test("single は選択肢の代わりに other で答えられる", () => {
-  const result = validateAnswers(
-    parsedQuestions(),
-    answersWith(0, { optionIds: [], other: "別案" }),
-  );
-  assert.equal(result.ok, true);
+  assert.equal(validateReply(answersWith(0, { optionIds: [], other: "別案" })).ok, true);
 });
 
 test("multiple は選択と other を併せて答えられる", () => {
-  const result = validateAnswers(
-    parsedQuestions(),
-    answersWith(1, { optionIds: ["a"], other: "別案" }),
-  );
-  assert.equal(result.ok, true);
+  assert.equal(validateReply(answersWith(1, { optionIds: ["a"], other: "別案" })).ok, true);
 });
 
 test("形が壊れた回答は例外を投げずに落ちる", () => {
   assert.ok(answerIssuesOf(null).length >= 1);
   const issues = answerIssuesOf([{ questionId: "q1" }]);
   assert.ok(issues.some((s) => s.startsWith("answers.0")));
+  assert.ok(responseIssuesOf(null).some((s) => s.startsWith("assumptionResponses")));
 });
 
 test("答えていない質問があれば落ちる", () => {
@@ -364,4 +408,36 @@ test("free で other が無ければ落ちる", () => {
 test("free で選択肢を選んだら落ちる", () => {
   const issues = answerIssuesOf(answersWith(2, { optionIds: ["a"], other: "x" }));
   assert.ok(issues.some((s) => s.startsWith("answers.2")));
+});
+
+test("応答の無い仮定があれば落ちる", () => {
+  const issues = responseIssuesOf(validResponses().slice(0, 1));
+  assert.ok(issues.some((s) => s.includes("応答がありません") && s.includes("s2")));
+});
+
+test("存在しない仮定への応答は落ちる", () => {
+  const extra = { assumptionId: "s9", verdict: "accepted" };
+  const issues = responseIssuesOf([...validResponses(), extra]);
+  assert.ok(issues.some((s) => s.startsWith("assumptionResponses.2.assumptionId")));
+});
+
+test("同じ仮定への応答が重複したら落ちる", () => {
+  const issues = responseIssuesOf([...validResponses(), validResponses()[0]]);
+  assert.ok(issues.some((s) => s.includes("重複") && s.includes("s1")));
+});
+
+test("書き直すなら内容が要る", () => {
+  const issues = responseIssuesOf([
+    validResponses()[0],
+    { assumptionId: "s2", verdict: "corrected", correction: "  " },
+  ]);
+  assert.ok(issues.some((s) => s.startsWith("assumptionResponses.1") && s.includes("書き直した")));
+});
+
+test("認める応答は内容を持てない", () => {
+  const issues = responseIssuesOf([
+    { assumptionId: "s1", verdict: "accepted", correction: "x" },
+    validResponses()[1],
+  ]);
+  assert.ok(issues.some((s) => s.startsWith("assumptionResponses.0")));
 });

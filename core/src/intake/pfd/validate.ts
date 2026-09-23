@@ -29,8 +29,8 @@ export type Violation = { rule: PfdRule; id: string; message: string };
 export type FrozenPart = { artifacts: Artifact[]; processes: Process[] };
 
 export type ValidateContext = {
-  /** 答えのある質問の id。decision はこの中を指さなければならない。 */
-  answeredQuestionIds: ReadonlySet<string>;
+  /** 答えのある質問と、応答のある仮定の id。decision はこの中を指さなければならない。 */
+  decisionIds: ReadonlySet<string>;
   /** 改訂でないときは null。 */
   frozen: FrozenPart | null;
 };
@@ -177,14 +177,14 @@ export function validatePfd(pfd: Pfd, ctx: ValidateContext): Violation[] {
       add(
         "decision_not_given",
         a.id,
-        `成果物 ${a.id} は decision（質問 ${a.decision} の回答）を持つので given: true でなければなりません`,
+        `成果物 ${a.id} は decision（質問か仮定 ${a.decision} の決定）を持つので given: true でなければなりません`,
       );
     }
-    if (!ctx.answeredQuestionIds.has(a.decision)) {
+    if (!ctx.decisionIds.has(a.decision)) {
       add(
         "unknown_decision",
         a.id,
-        `成果物 ${a.id} の decision が、答えのある質問を指していません: ${a.decision}`,
+        `成果物 ${a.id} の decision が、答えのある質問も応答のある仮定も指していません: ${a.decision}`,
       );
     }
   }

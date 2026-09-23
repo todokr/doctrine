@@ -221,6 +221,7 @@ test("改訂中の回答は revise の実行を立てる", async () => {
     intakeId: "i1",
     questionSetId: set.id,
     answers: [{ questionId: "q2", optionIds: ["a"], other: null, note: null }],
+    assumptionResponses: [],
     logRoot: f.logRoot,
   });
   const queued = (await listIntakeRuns(f.db, "i1")).filter((r) => r.status === "queued");

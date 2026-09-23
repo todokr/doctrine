@@ -1,14 +1,14 @@
 import type {
   IntakeCommentRow,
   IntakeDraftRow,
-  IntakeQuestionSetRow,
   IntakeRunPurpose,
   IntakeRunRow,
 } from "../db/schema.ts";
 import { buildAnswerText } from "../../../shared/intake/answerText.ts";
 import { buildFeedback } from "../../../shared/intake/feedback.ts";
 import type { Pfd } from "../../../shared/intake/pfd.ts";
-import type { Answer, Question } from "../../../shared/intake/question.ts";
+import type { Assumption, Question } from "../../../shared/intake/question.ts";
+import type { IntakeQuestionSet } from "../../../shared/protocol.ts";
 import { buildInvalidOutputMessage, buildNoQuestionsMessage } from "./prompt.ts";
 
 /** 同じ purpose で検証落ちが何行続いたらあきらめるか（spec 7 章）。 */
@@ -51,7 +51,7 @@ function isSkipped(r: IntakeRunRow): boolean {
 export function continuationMessage(input: {
   /** この Intake の閉じた実行（queued / running を除く）。id 昇順。 */
   closedRuns: readonly IntakeRunRow[];
-  questionSets: readonly IntakeQuestionSetRow[];
+  questionSets: readonly IntakeQuestionSet[];
   drafts: readonly IntakeDraftRow[];
   comments: readonly IntakeCommentRow[];
 }): string | null {
@@ -64,21 +64,20 @@ export function continuationMessage(input: {
   }
 
   const output = JSON.parse(last.output ?? "null") as
-    | { kind: "questions"; questions: Question[] }
+    | { kind: "questions"; questions: Question[]; assumptions: Assumption[] }
     | { kind: "pfd"; pfd: Pfd }
     | null;
   if (output === null) throw new Error(`実行 ${last.id} に出力がありません`);
 
   if (output.kind === "questions") {
-    if (output.questions.length === 0) return buildNoQuestionsMessage();
+    if (output.questions.length === 0 && output.assumptions.length === 0) {
+      return buildNoQuestionsMessage();
+    }
     const set = input.questionSets.find((s) => s.run_id === last.id);
-    if (set === undefined || set.answers === null) {
+    if (set === undefined || set.reply === null) {
       throw new Error(`実行 ${last.id} の質問に回答がありません`);
     }
-    return buildAnswerText(
-      JSON.parse(set.questions) as Question[],
-      JSON.parse(set.answers) as Answer[],
-    );
+    return buildAnswerText(set, set.reply);
   }
 
   const draft = input.drafts.find((d) => d.run_id === last.id);

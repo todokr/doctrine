@@ -22,7 +22,7 @@ import {
 import { receiveGuide } from "./guide";
 import { buildDiff } from "./patch";
 import type { GhStatus, IssueDetail } from "../../shared/intake/github.ts";
-import type { Answer } from "../../shared/intake/question.ts";
+import type { QuestionSetReply } from "../../shared/intake/validateQuestion.ts";
 import type {
   DaemonSlots,
   GithubIssue,
@@ -459,8 +459,13 @@ export function useIntakeRpc() {
       issueUrl: string,
     ): Promise<IntakeSummary & { alreadyActive: boolean }> =>
       rpc("intake.start", { project: projectPath, issue_url: issueUrl }),
-    answer: (intakeId: string, questionSetId: number, answers: Answer[]): Promise<IntakeSummary> =>
-      rpc("intake.answer", { intake_id: intakeId, question_set_id: questionSetId, answers }),
+    answer: (intakeId: string, questionSetId: number, reply: QuestionSetReply): Promise<IntakeSummary> =>
+      rpc("intake.answer", {
+        intake_id: intakeId,
+        question_set_id: questionSetId,
+        answers: reply.answers,
+        assumption_responses: reply.assumptionResponses,
+      }),
     reject: (intakeId: string, draftId: number, comments: NewComment[]): Promise<IntakeSummary> =>
       rpc("intake.reject", { intake_id: intakeId, draft_id: draftId, comments }),
     approve: (intakeId: string, draftId: number, hash: string): Promise<IntakeSummary> =>

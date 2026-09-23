@@ -6,12 +6,12 @@ import { AnswerPreview } from "./components/AnswerFace";
 import { HistoryEntryView } from "./components/IntakeHistory";
 import { PfdElementPanel } from "./components/PfdElementPanel";
 import { PlanDecide, RejectPreview } from "./components/PlanReview";
-import { ANSWERS, INTAKE_REVIEWING, PFD_SAMPLE, QUESTIONS } from "./fixtures";
+import { ANSWERS, ASSUMPTIONS, INTAKE_REVIEWING, PFD_SAMPLE, QUESTIONS, RESPONSES } from "./fixtures";
 import { EMPTY_INTAKE_DRAFT, intakeHistory, rejectionText } from "./intake";
 import { pfdElement } from "./pfd";
 
 const noop = () => {};
-const SETS = [{ questions: QUESTIONS, answers: ANSWERS }];
+const SETS = INTAKE_REVIEWING.question_sets;
 
 function panel(key: string, o: Partial<Parameters<typeof PfdElementPanel>[0]> = {}) {
   return renderToStaticMarkup(
@@ -124,7 +124,10 @@ describe("RejectPreview", () => {
 
 describe("AnswerPreview", () => {
   test("回答の文面を出す", () => {
-    const text = buildAnswerText(QUESTIONS, ANSWERS);
+    const text = buildAnswerText(
+      { questions: QUESTIONS, assumptions: ASSUMPTIONS },
+      { answers: ANSWERS, assumptionResponses: RESPONSES },
+    );
     const html = renderToStaticMarkup(<AnswerPreview text={text} pending={false} onSend={noop} onClose={noop} />);
     expect(html).toContain("### q1: 書き込みをどう扱うか");
   });
@@ -140,7 +143,7 @@ describe("HistoryEntryView", () => {
 
   test("質問の行は件数と読み返しの印を出す", () => {
     const html = renderToStaticMarkup(<HistoryEntryView entry={entry("questions")} draft={undefined} onOpen={noop} />);
-    expect(html).toContain("質問に答えた（3 件）");
+    expect(html).toContain("質問 3 件と仮定 2 件に答えた");
     expect(html).toContain("選んだ");
   });
 

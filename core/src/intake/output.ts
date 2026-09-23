@@ -23,10 +23,10 @@ export function checkDecomposerOutput(
   raw: Record<string, unknown> | null,
   ctx: {
     purpose: IntakeRunPurpose;
-    /** これまでのまとまりにある質問の id。新しい質問の id と重なってはならない。 */
-    askedQuestionIds: ReadonlySet<string>;
-    /** 答えのある質問の id（validatePfd の answeredQuestionIds）。 */
-    answeredQuestionIds: ReadonlySet<string>;
+    /** これまでのまとまりにある質問と仮定の id。新しい質問と仮定の id と重なってはならない。 */
+    askedIds: ReadonlySet<string>;
+    /** 答えのある質問と応答のある仮定の id（validatePfd の decisionIds）。 */
+    decisionIds: ReadonlySet<string>;
     /**
      * 最新の案（latestDraft）に draft_id で付いているコメントの数。案が無ければ 0。
      * 「直前に送った文面が差し戻しか」では決めない。差し戻し → 検証落ち → やり直し、
@@ -56,30 +56,41 @@ export function checkDecomposerOutput(
   const out = parsed.data;
 
   if (out.kind === "questions") {
-    if (out.questions === null || out.pfd !== null || out.replies !== null) {
+    if (
+      out.questions === null || out.assumptions === null || out.pfd !== null ||
+      out.replies !== null
+    ) {
       return {
         ok: false,
         issues: [
-          'kind が "questions" のときは、questions を入れ、pfd と replies は null にしてください。',
+          'kind が "questions" のときは、questions と assumptions を入れ、pfd と replies は null にしてください。',
         ],
       };
     }
-    return checkQuestions(out.questions, ctx);
+    return checkQuestions({ questions: out.questions, assumptions: out.assumptions }, ctx);
   }
 
-  if (out.pfd === null || out.replies === null || out.questions !== null) {
+  if (
+    out.pfd === null || out.replies === null || out.questions !== null ||
+    out.assumptions !== null
+  ) {
     return {
       ok: false,
-      issues: ['kind が "pfd" のときは、pfd と replies を入れ、questions は null にしてください。'],
+      issues: [
+        'kind が "pfd" のときは、pfd と replies を入れ、questions と assumptions は null にしてください。',
+      ],
     };
   }
   if (ctx.purpose === "investigate") {
-    return { ok: false, issues: ["調査の実行は質問だけを返します。PFD は返さないでください。"] };
+    return {
+      ok: false,
+      issues: ["調査の実行は質問と仮定だけを返します。PFD は返さないでください。"],
+    };
   }
 
   const issues: string[] = [];
   for (
-    const v of validatePfd(out.pfd, { answeredQuestionIds: ctx.answeredQuestionIds, frozen: null })
+    const v of validatePfd(out.pfd, { decisionIds: ctx.decisionIds, frozen: null })
   ) {
     issues.push(`${v.rule} ${v.id}: ${v.message}`);
   }
@@ -100,13 +111,15 @@ export function checkDecomposerOutput(
 }
 
 function checkQuestions(
-  raw: unknown[],
-  ctx: { purpose: IntakeRunPurpose; askedQuestionIds: ReadonlySet<string> },
+  raw: { questions: unknown[]; assumptions: unknown[] },
+  ctx: { purpose: IntakeRunPurpose; askedIds: ReadonlySet<string> },
 ): OutputCheck {
-  if (raw.length === 0 && ctx.purpose !== "investigate") {
+  if (raw.questions.length === 0 && raw.assumptions.length === 0 && ctx.purpose !== "investigate") {
     return {
       ok: false,
-      issues: ["分解の実行では、質問が無ければ PFD を返します。空の質問は返さないでください。"],
+      issues: [
+        "分解の実行では、質問も仮定も無ければ PFD を返します。空のまとまりは返さないでください。",
+      ],
     };
   }
   const validation = validateQuestions(raw);
@@ -114,10 +127,22 @@ function checkQuestions(
 
   const issues: string[] = [];
   validation.questions.forEach((q, i) => {
-    if (ctx.askedQuestionIds.has(q.id)) {
-      issues.push(`questions.${i}.id: 前に出した質問と id が重複しています: ${q.id}`);
+    if (ctx.askedIds.has(q.id)) {
+      issues.push(`questions.${i}.id: 前に出した質問か仮定と id が重複しています: ${q.id}`);
+    }
+  });
+  validation.assumptions.forEach((a, i) => {
+    if (ctx.askedIds.has(a.id)) {
+      issues.push(`assumptions.${i}.id: 前に出した質問か仮定と id が重複しています: ${a.id}`);
     }
   });
   if (issues.length > 0) return { ok: false, issues };
-  return { ok: true, output: { kind: "questions", questions: validation.questions } };
+  return {
+    ok: true,
+    output: {
+      kind: "questions",
+      questions: validation.questions,
+      assumptions: validation.assumptions,
+    },
+  };
 }

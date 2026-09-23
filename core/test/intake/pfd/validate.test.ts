@@ -106,7 +106,7 @@ test("validatePfd: goal に given から辿り着けない", () => {
   assert.ok(rules(pfd).includes("goal_unreachable:feature"));
 });
 
-const answered: ValidateContext = { answeredQuestionIds: new Set(["q1"]), frozen: null };
+const answered: ValidateContext = { decisionIds: new Set(["q1"]), frozen: null };
 
 test("validatePfd: 答えのある質問を指す decision は通る", () => {
   assert.deepEqual(validatePfd(withDecision(), answered), []);
@@ -125,7 +125,7 @@ test("validatePfd: 答えの無い質問を指す decision", () => {
 });
 
 function revising(): ValidateContext {
-  return { answeredQuestionIds: new Set(), frozen: frozenPart(example(), new Set(["1"])) };
+  return { decisionIds: new Set(), frozen: frozenPart(example(), new Set(["1"])) };
 }
 
 test("validatePfd: 改訂でも固定された部分が同じなら通る", () => {

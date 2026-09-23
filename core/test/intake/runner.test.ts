@@ -35,6 +35,7 @@ import {
   pfdOut,
   question,
   questionsOut,
+  reply,
 } from "./runnerHelper.ts";
 import { example, withDecision } from "./pfd/fixture.ts";
 
@@ -118,7 +119,7 @@ test("(a) 回答のあとは回答の文面が同じ会話に届く", async () =
 
   const answers: Answer[] = [{ questionId: "q1", optionIds: ["a"], other: null, note: "補足" }];
   const [set] = await listQuestionSets(f.db, "i1");
-  await answerQuestionSet(f.db, set.id, JSON.stringify(answers));
+  await answerQuestionSet(f.db, set.id, reply(answers));
   await updateIntake(f.db, "i1", { state: "decomposing" });
   await enqueueIntakeRun(f.db, "i1", "decompose", opts());
   await drive(f.db, deps);
@@ -126,7 +127,13 @@ test("(a) 回答のあとは回答の文面が同じ会話に届く", async () =
   assert.equal((await getIntake(f.db, "i1"))!.state, "reviewing");
   assert.equal(adapter.calls[1].kind, "resume");
   assert.equal(adapter.calls[1].sessionId, adapter.calls[0].sessionId);
-  assert.equal(adapter.calls[1].prompt, buildAnswerText([question("q1")], answers));
+  assert.equal(
+    adapter.calls[1].prompt,
+    buildAnswerText(
+      { questions: [question("q1")], assumptions: [] },
+      { answers, assumptionResponses: [] },
+    ),
+  );
 });
 
 test("(a) 分解の途中の質問で回答待ちに戻る", async () => {
@@ -139,7 +146,7 @@ test("(a) 分解の途中の質問で回答待ちに戻る", async () => {
   await drive(f.db, deps);
   const [set] = await listQuestionSets(f.db, "i1");
   const answers: Answer[] = [{ questionId: "q1", optionIds: ["a"], other: null, note: null }];
-  await answerQuestionSet(f.db, set.id, JSON.stringify(answers));
+  await answerQuestionSet(f.db, set.id, reply(answers));
   await updateIntake(f.db, "i1", { state: "decomposing" });
   await enqueueIntakeRun(f.db, "i1", "decompose", opts());
   await drive(f.db, deps);

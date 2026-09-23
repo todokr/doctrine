@@ -98,7 +98,7 @@ export function revised(): Pfd {
   return pfd;
 }
 
-export const noContext: ValidateContext = { answeredQuestionIds: new Set(), frozen: null };
+export const noContext: ValidateContext = { decisionIds: new Set(), frozen: null };
 
 /** example() に、質問 q1 の回答を指す成果物 policy を足し、プロセス 2 の入力に加えたもの。 */
 export function withDecision(): Pfd {

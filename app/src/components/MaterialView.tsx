@@ -4,6 +4,23 @@ import { highlightLines, languageOf } from "../highlight";
 import { DiagramView } from "./Diagrams";
 import { Markdown } from "./text";
 
+/** 色付けした等幅のコード。判断材料と仮定の根拠が使う */
+export function CodeBlock(p: { code: string; language: string | null }) {
+  return (
+    <pre className="code">
+      {highlightLines(p.code, p.language).map((pieces, li) => (
+        <div key={li}>
+          {pieces.map((piece, pi) => (
+            piece.cls
+              ? <span key={pi} className={`tk-${piece.cls}`}>{piece.text}</span>
+              : <Fragment key={pi}>{piece.text}</Fragment>
+          ))}
+        </div>
+      ))}
+    </pre>
+  );
+}
+
 export function MaterialView({ material }: { material: Material }) {
   return (
     <div className="material">
@@ -33,18 +50,10 @@ export function MaterialView({ material }: { material: Material }) {
             {material.caption}
             {material.path && <> <span className="mono">{material.path}</span></>}
           </span>
-          <pre className="code">
-            {highlightLines(
-              material.code,
-              material.path ? languageOf(material.path) ?? material.language : material.language,
-            ).map((pieces, li) => (
-              <div key={li}>
-                {pieces.map((p, pi) => (
-                  p.cls ? <span key={pi} className={`tk-${p.cls}`}>{p.text}</span> : <Fragment key={pi}>{p.text}</Fragment>
-                ))}
-              </div>
-            ))}
-          </pre>
+          <CodeBlock
+            code={material.code}
+            language={material.path ? languageOf(material.path) ?? material.language : material.language}
+          />
         </>
       )}
       {material.kind === "diagram" && (

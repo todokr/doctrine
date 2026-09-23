@@ -2,8 +2,7 @@
 import { decisionTexts } from "../../shared/intake/answerText.ts";
 import type { Artifact, Pfd, Process } from "../../shared/intake/pfd.ts";
 import type { ProcessStatus } from "../../shared/intake/processStatus.ts";
-import type { Answer, Question } from "../../shared/intake/question.ts";
-import type { IntakeProcessView } from "../../shared/protocol.ts";
+import type { IntakeProcessView, IntakeQuestionSet } from "../../shared/protocol.ts";
 import { layoutGraph, type Change } from "./diagram";
 
 export type PfdNodeKind = "artifact" | "process";
@@ -351,8 +350,11 @@ export type PfdElementInfo =
       producers: Process[];
       /** この成果物を入力に取るプロセス（後続） */
       consumers: Process[];
-      /** 決定の成果物なら、その質問の文と回答の文。回答が無ければ answer は null */
-      decision: { questionId: string; prompt: string | null; answer: string | null } | null;
+      /**
+       * 決定の成果物なら、指す質問の文か仮定の結論（見つからなければ null）と、決定の文。
+       * 回答が無ければ answer は null
+       */
+      decision: { id: string; prompt: string | null; answer: string | null } | null;
     }
   | { kind: "process"; key: string; process: Process; stage: number; inputs: Artifact[]; outputs: Artifact[] };
 
@@ -360,7 +362,7 @@ export type PfdElementInfo =
 export function pfdElement(
   pfd: Pfd,
   key: string,
-  questionSets: readonly { questions: Question[]; answers: Answer[] | null }[] = [],
+  questionSets: readonly IntakeQuestionSet[] = [],
 ): PfdElementInfo | null {
   const parsed = parsePfdKey(key);
   if (!parsed) return null;
@@ -377,9 +379,10 @@ export function pfdElement(
   if (!artifact) return null;
   let decision: Extract<PfdElementInfo, { kind: "artifact" }>["decision"] = null;
   if (artifact.decision !== undefined) {
-    const questionId = artifact.decision;
-    const asked = questionSets.flatMap((s) => s.questions).find((q) => q.id === questionId);
-    decision = { questionId, prompt: asked?.prompt ?? null, answer: decisionTexts(questionSets)[questionId] ?? null };
+    const id = artifact.decision;
+    const asked = questionSets.flatMap((s) => s.questions).find((q) => q.id === id)?.prompt ??
+      questionSets.flatMap((s) => s.assumptions).find((a) => a.id === id)?.statement;
+    decision = { id, prompt: asked ?? null, answer: decisionTexts(questionSets)[id] ?? null };
   }
   return {
     kind: "artifact",

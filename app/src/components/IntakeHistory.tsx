@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import type { Pfd } from "../../../shared/intake/pfd.ts";
-import type { IntakeComment, IntakeDetail, PfdDraft } from "../../../shared/protocol.ts";
+import type { IntakeComment, IntakeDetail, IntakeQuestionSet, PfdDraft } from "../../../shared/protocol.ts";
 import { commentReplies, commentTargetLabel, intakeHistory, type IntakeHistoryEntry } from "../intake";
 import { clock, type Loaded } from "../model";
 import { buildPfdView, pfdElement } from "../pfd";
@@ -48,6 +48,14 @@ function CommentRows(p: { title: string; rows: { comment: IntakeComment; reply?:
   );
 }
 
+function answeredTitle(set: IntakeQuestionSet): string {
+  const parts = [
+    set.questions.length > 0 && `質問 ${set.questions.length} 件`,
+    set.assumptions.length > 0 && `仮定 ${set.assumptions.length} 件`,
+  ].filter(Boolean);
+  return `${parts.join("と")}に答えた`;
+}
+
 /** 1 件の行。props だけで描く */
 export function HistoryEntryView(p: {
   entry: IntakeHistoryEntry;
@@ -63,10 +71,10 @@ export function HistoryEntryView(p: {
     return (
       <div className="hist-row">
         <div className="hist-head">
-          <b>{`質問に答えた（${entry.set.questions.length} 件）`}</b>
+          <b>{answeredTitle(entry.set)}</b>
           <span className="hint">{when}</span>
         </div>
-        <QuestionForm questions={entry.set.questions} answers={entry.set.answers ?? []} readOnly />
+        <QuestionForm set={entry.set} reply={entry.set.reply ?? { answers: [], assumptionResponses: [] }} readOnly />
       </div>
     );
   }

@@ -7,14 +7,13 @@ import {
   listDrafts,
   listIntakeRuns,
   listProcesses,
-  listQuestionSets,
 } from "../db/intakes.ts";
+import { loadQuestionSets } from "./questionSet.ts";
 import type { Db, IntakeDraftRow, IntakeRow } from "../db/schema.ts";
 import { getProject, getTask } from "../db/tasks.ts";
 import type { AttentionReason, CommentReply } from "../../../shared/intake/decomposer.ts";
 import type { Pfd } from "../../../shared/intake/pfd.ts";
 import type { PrFact, ProcessStatus } from "../../../shared/intake/processStatus.ts";
-import type { Answer, Question } from "../../../shared/intake/question.ts";
 import type { IntakeState } from "../../../shared/intake/state.ts";
 import type {
   IntakeDetail,
@@ -178,14 +177,7 @@ export async function toIntakeDetail(
         approved_at: approval.approved_at,
       }
       : null,
-    question_sets: (await listQuestionSets(db, row.id)).map((q) => ({
-      id: q.id,
-      run_id: q.run_id,
-      questions: JSON.parse(q.questions) as Question[],
-      answers: q.answers === null ? null : JSON.parse(q.answers) as Answer[],
-      created_at: q.created_at,
-      answered_at: q.answered_at,
-    })),
+    question_sets: await loadQuestionSets(db, row.id),
     comments: (await listComments(db, row.id)).map((c) => ({
       id: c.id,
       draft_id: c.draft_id,

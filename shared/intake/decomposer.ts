@@ -1,6 +1,11 @@
 import { z } from "zod/v4";
 import { pfdSchema } from "./pfd.ts";
-import { type Question, questionSetSchema } from "./question.ts";
+import {
+  type Assumption,
+  assumptionSetSchema,
+  type Question,
+  questionSetSchema,
+} from "./question.ts";
 import type { Pfd } from "./pfd.ts";
 
 export const commentReplySchema = z.strictObject({
@@ -17,10 +22,17 @@ export const commentReplySchema = z.strictObject({
 export const decomposerOutputSchema = z.strictObject({
   kind: z
     .enum(["questions", "pfd"])
-    .describe("質問を返すなら questions、PFD を返すなら pfd"),
+    .describe("質問と仮定を返すなら questions、PFD を返すなら pfd"),
   questions: questionSetSchema
     .nullable()
-    .describe("kind が questions のときの質問のまとまり。質問が無ければ空配列。pfd のときは null"),
+    .describe(
+      "kind が questions のときの、人の判断が要る論点の質問。無ければ空配列。pfd のときは null",
+    ),
+  assumptions: assumptionSetSchema
+    .nullable()
+    .describe(
+      "kind が questions のときの、Issue・コード・慣習から導いた論点の仮定。崩れたときの影響が大きい順に並べる。無ければ空配列。pfd のときは null",
+    ),
   pfd: pfdSchema.nullable().describe("kind が pfd のときの PFD。questions のときは null"),
   replies: z
     .array(commentReplySchema)
@@ -33,7 +45,7 @@ export const decomposerOutputSchema = z.strictObject({
 export type CommentReply = z.infer<typeof commentReplySchema>;
 
 export type DecomposerOutput =
-  | { kind: "questions"; questions: Question[] }
+  | { kind: "questions"; questions: Question[]; assumptions: Assumption[] }
   | { kind: "pfd"; pfd: Pfd; replies: CommentReply[] };
 
 /** spec 5 章。intakes.attention_reason に JSON で入る。 */

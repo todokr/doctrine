@@ -10,7 +10,7 @@ import type {
 } from "../../shared/protocol.ts";
 import type { Pfd } from "../../shared/intake/pfd.ts";
 import type { PrFact, ProcessStatus } from "../../shared/intake/processStatus.ts";
-import type { Answer, Question } from "../../shared/intake/question.ts";
+import type { Answer, Assumption, AssumptionResponse, Question } from "../../shared/intake/question.ts";
 import examplePatch from "../../shared/guide/examples/step-artifacts.patch?raw";
 
 export const NOW = Date.parse("2026-09-15T15:00:00+09:00");
@@ -288,7 +288,6 @@ export const QUESTIONS: Question[] = [
       { id: "a", label: "同期", description: "呼び出しの中で書く" },
       { id: "b", label: "非同期", description: "キューに積む" },
     ],
-    recommendation: { optionIds: ["a"], text: null, reason: "単純で十分速い" },
     materials: [
       { kind: "text", body: "現状は **同期** で書き込んでいる" },
       {
@@ -315,7 +314,6 @@ export const QUESTIONS: Question[] = [
       { id: "b", label: "B", description: "説明 B" },
       { id: "c", label: "C", description: "説明 C" },
     ],
-    recommendation: { optionIds: ["a", "c"], text: null, reason: "使われているため" },
     materials: [{
       kind: "diagram",
       caption: "状態",
@@ -336,9 +334,33 @@ export const QUESTIONS: Question[] = [
     prompt: "ほかに考慮すべきことは",
     kind: "free",
     options: [],
-    recommendation: { optionIds: [], text: "特に無い", reason: "範囲が小さいため" },
     materials: [],
   },
+];
+
+/** 仮定の標本。3 種の根拠をすべて含む */
+export const ASSUMPTIONS: Assumption[] = [
+  {
+    id: "s1",
+    statement: "書き込みは 1 秒に数回に収まる",
+    evidence: [
+      { kind: "issue", commentUrl: null, quote: "利用者は社内の数人" },
+      { kind: "code", path: "core/src/x.ts", startLine: 10, endLine: 12, excerpt: "await write(x);" },
+    ],
+    impact: "書き込みのプロセスにキューが要るかが変わる",
+  },
+  {
+    id: "s2",
+    statement: "設定は既存の `settings.json` に足す",
+    evidence: [{ kind: "convention", body: "設定はすべて `settings.json` にある" }],
+    impact: "設定の読み込みのプロセスが増える",
+  },
+];
+
+/** ASSUMPTIONS への応答。1 つは認め、1 つは書き直す */
+export const RESPONSES: AssumptionResponse[] = [
+  { assumptionId: "s1", verdict: "accepted" },
+  { assumptionId: "s2", verdict: "corrected", correction: "設定は別のファイルに分ける" },
 ];
 
 /** QUESTIONS へのそろった回答。その他と補足を含む */
@@ -529,7 +551,8 @@ export const INTAKE_REVIEWING: IntakeDetail = {
     id: 1,
     run_id: 1,
     questions: QUESTIONS,
-    answers: ANSWERS,
+    assumptions: ASSUMPTIONS,
+    reply: { answers: ANSWERS, assumptionResponses: RESPONSES },
     created_at: at(200),
     answered_at: at(180),
   }],
@@ -572,7 +595,8 @@ export const INTAKE_ANSWERING: IntakeDetail = {
       id: 1,
       run_id: 1,
       questions: QUESTIONS,
-      answers: ANSWERS,
+      assumptions: ASSUMPTIONS,
+      reply: { answers: ANSWERS, assumptionResponses: RESPONSES },
       created_at: at(200),
       answered_at: at(180),
     },
@@ -580,7 +604,8 @@ export const INTAKE_ANSWERING: IntakeDetail = {
       id: 2,
       run_id: 2,
       questions: QUESTIONS.slice(0, 1),
-      answers: null,
+      assumptions: ASSUMPTIONS.slice(0, 1).map((a) => ({ ...a, id: "s3" })),
+      reply: null,
       created_at: at(20),
       answered_at: null,
     },

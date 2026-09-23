@@ -30,7 +30,8 @@ RPC・イベント（コア設計 13 章）を前提にし、アプリ（`app/sr
 | ビューの構成 | サイドバーが Intake の一覧、main が状態で振り分ける面。すべての面に共通の見出しを置く | 3 |
 | Issue の選択 | 面の上端でプロジェクトを選び、gh から取った open な Issue の一覧と本文を並べる。番号・URL の直接入力も持つ | 4 |
 | gh が使えないとき | 一覧の代わりに理由と直し方の箱を出す。gh の出力は等幅でそのまま添える | 4 |
-| 質問の面 | 1 回分の質問を縦に並べ、全部に答えてから一度に送る。判断材料を選択肢より先に出す。推奨は選択肢の中に理由付きで示し、初めから選ばない | 5 |
+| 質問の面 | 1 回分の質問を縦に並べ、その下に仮定を並べる。全部に答えてから一度に送る。判断材料を選択肢より先に出す。推奨は出さない。どの選択肢も初めから選ばない | 5 |
+| 仮定の見せ方 | 結論・根拠・崩れたときの影響をカードで出し、「認める」「書き直す」を 1 件ずつ選ばせる。初めから選ばず、まとめて認める操作も持たない | 5 |
 | 回答の送信 | 確認のモーダルに `buildAnswerText` の文面を出し、その文面が会話に届く | 5 |
 | PFD の図の描き方 | **Intake 専用の描画にする。** Review Guide の図の 5 つ目の種類にはしない。配置だけ `layoutGraph` を借りる | 6 |
 | 状態の塗り分け | 承認後だけ、塗り・枠・印・語の 4 つで 8 状態を区別する。既存のトークンだけを使う | 6 |
@@ -45,7 +46,7 @@ RPC・イベント（コア設計 13 章）を前提にし、アプリ（`app/sr
 | 全タスクでの見せ方 | サイドバーの行に「Intake #N」の印、見出しに Intake へ戻るリンクを足す | 10 |
 | 下書きの永続化 | `drafts.json` の中身を `{ tasks; intakes }` に変える。Rust は変えない | 11 |
 | 部品の境界 | 純関数（`pfd.ts` `intake.ts`）と、props だけの表示部品（図・要素の欄・質問・判断材料）に分ける。図と質問はフィクスチャだけで作れる | 12 |
-| コアへの追加 | `intake.draft`（案 1 件を中身込みで返す RPC）と `buildAnswerText`（回答の文面の純関数） | 13 |
+| コアへの追加 | `intake.draft`（案 1 件を中身込みで返す RPC）と `buildAnswerText`（回答と仮定への応答の文面の純関数） | 13 |
 
 ## 3. 画面の構成とレールの入口（V-1・V-2・V-3・V-4・V-7・C-8）
 
@@ -161,12 +162,13 @@ gh の呼び出しは 1 回ごとに待ちがあり、しかも `github.status` 
 - 「Intake あり」の印と、選んだ Issue で開始するか開くかは、`intake_id` を見ず `s.intakes` の進行中の Intake で決める。手元の一覧の `intake_id` は、取ったあとに始めた Intake も、取ったあとに終わった Intake も知らないためである
 - 期限切れや件数の上限は持たない。どのキーも開けば取り直して上書きされる
 
-## 5. 質問に答える面（Q-2・Q-3・Q-6）
+## 5. 質問に答える面（Q-2・Q-3・Q-6・Q-9・Q-10）
 
 `answering` の Intake は、`intake_question_sets` の未回答の 1 行を面にする。Q-1・Q-4・Q-5・Q-8 はコアが担う。
-Q-7（過去の質問と回答の読み返し）は、面の下に畳んだ経緯として出す。
+Q-7（過去の質問と回答、仮定と応答の読み返し）は、面の下に畳んだ経緯として出す。
 
-- 1 回分の質問を縦に並べ、全部に答えてから一度に送る（Q-2・Q-6）。小出しに送る操作は持たない
+- 1 回分の質問を縦に並べ、その下に仮定を並べる。全部に答えてから一度に送る（Q-2・Q-6）。小出しに送る操作は持たない
+- 質問を仮定より先に置く。人の判断が要るのは質問のほうで、仮定の数が多いときに、読み疲れる前に質問へ答えられるようにするためである
 - 質問 1 件のカードが持つもの: 番号、`prompt`、種類の語（**単一選択**／**複数選択**／**自由記述**）、判断材料、選択肢、「その他」、補足
 
 ### 5.1 判断材料の見せ方
@@ -182,22 +184,38 @@ Q-7（過去の質問と回答の読み返し）は、面の下に畳んだ経�
 
 `MaterialView({ material })` は props だけで描く（12 章）。`DiagramView` は store を読まないので、そのまま入れられる。
 
-### 5.2 選択肢と推奨
+### 5.2 選択肢
 
 - `single` はラジオ、`multiple` はチェックで、各選択肢に `label` と `description` を出す。`free` は textarea である
-- **推奨の理由（`recommendation.reason`）は、推奨の選択肢の中に出す。** その選択肢の `label` と `description` の下に「推奨」の印と理由を置く。
-  `multiple` で推奨が複数あれば、推奨の選択肢それぞれに同じ理由を出す。カードの下にはまとめて出さない
-- `free` に推奨があれば、推奨の答え（`recommendation.text`）と理由を、選択肢と同じ形の行で出す（`label` に当たる位置に答え、その下に「推奨」の印と理由）。この行は選べない。答えは textarea に自分で書く
-- **推奨を、初めから選んだ状態にしない。** 押すだけで通る形は、推奨を読まずに承認する癖を作るためである。
-  レビューアプリ設計 6 章が「見た」印を入れなかった理由と同じである。推奨を選ぶための専用のボタンも置かない。推奨の選択肢も、ほかと同じ操作で選ぶ
-- どの質問にも「その他（選択肢以外の答え）」と「補足」の欄を持つ（Q-3）。`Answer` の `other` と `note` に対応する
+- **推奨は出さない**（PRD 5.4・Q-2）。`Question` に推奨の項目が無いので、画面に出すものも無い。選択肢はエージェントが返した順に並べ、どれかを目立たせない
+- **どの選択肢も、初めから選んだ状態にしない。** 押すだけで通る形は、読まずに答える癖を作るためである。
+  レビューアプリ設計 6 章が「見た」印を入れなかった理由と同じである
+- どの質問にも「その他（選択肢以外の答え）」と「補足・選んだ理由」の欄を持つ（Q-3・Q-10）。`Answer` の `other` と `note` に対応する。
+  理由は任意であり、書かなくても送れる
 
-### 5.3 送る前の確かめ
+### 5.3 仮定（Q-9）
 
-- 送れるかは純関数 `answerIssues(questions: Question[], answers: Answer[]): { questionId: string; message: string }[]` で決める。
-  規則はコア設計 8 章の回答の検証と同じである（全問に答えがある、`single` は 1 つか `other`、選択肢 id が存在する）。
-  空でなければ送信ボタンを止め、足りない質問のカードに印を付ける。デーモンが弾く前に画面で気づけるようにするためである
-- 「回答を送る…」で確認のモーダルを開く。モーダルは `buildAnswerText(questions, answers)`（13 章）の文面を `<pre>` で出し、「送る」で `intake.answer` を呼ぶ。
+質問の下に「エージェントの仮定」の見出しを置き、`assumptions` を返された順（影響の大きい順。コア設計 8 章）に並べる。
+
+- 仮定 1 件のカードが持つもの: 番号、`statement`（結論）、根拠、`impact`（崩れたときに計画のどこが変わるか）、応答
+- 根拠 `Evidence` の描き方:
+
+  | kind | 描き方 |
+  | --- | --- |
+  | `issue` | 引用（`quote`）を引用のブロックで出し、`commentUrl` があれば「Issue のコメント」と URL を等幅で（Intake の見出しの `issue_url` と同じ作法）、無ければ「Issue の本文」と添える |
+  | `code` | `path` と行の範囲（あれば）を見出しにし、`excerpt` を `highlightLines` による等幅ブロックで出す。言語はパスの拡張子から決める |
+  | `convention` | `Markdown` で出す |
+
+- 応答はラジオの「認める」「書き直す」で選ぶ。「書き直す」を選ぶと textarea が開き、正しい内容を書く。空白だけでは送れない
+- **初めから「認める」を選んだ状態にしない。「すべて認める」の操作も持たない。** 根拠を読まずに認める癖を作るためである（PRD 5.4）
+- 仮定を質問に格上げする操作は持たない。違うと思えば、書き直した内容がそのまま決定になる（Q-9）
+
+### 5.4 送る前の確かめ
+
+- 送れるかは純関数 `answerIssues(set: { questions: Question[]; assumptions: Assumption[] }, input: { answers: Answer[]; assumptionResponses: AssumptionResponse[] }): { targetId: string; message: string }[]` で決める。
+  規則はコア設計 8 章の回答の検証と同じである（全問に答えがある、`single` は 1 つか `other`、選択肢 id が存在する、全部の仮定に応答がある、書き直しが空白だけでない）。
+  空でなければ送信ボタンを止め、足りない質問・仮定のカードに印を付ける。デーモンが弾く前に画面で気づけるようにするためである
+- 「回答を送る…」で確認のモーダルを開く。モーダルは `buildAnswerText(set, input)`（13 章）の文面を `<pre>` で出し、「送る」で `intake.answer` を呼ぶ。
   差し戻しの確認と同じ作法で、送る前に会話へ届く文面を見せる。送れたときだけ下書きを消す（11 章）
 - 回答中の入力は下書きに残し、アプリを閉じても消えない
 
@@ -351,7 +369,7 @@ export function PfdDiagram(p: {
 
 | 要素 | 出すもの |
 | --- | --- |
-| 成果物 | 名前・id・`description`・`verify`（確かめ方）・`given` か決定か（決定なら、その質問と回答の文を出す）・**前段**（その成果物を作るプロセス）・**後続**（その成果物を使うプロセス）。前段と後続は、押すとそのプロセスを選ぶ。該当が無いときは「なし」とだけ出す |
+| 成果物 | 名前・id・`description`・`verify`（確かめ方）・`given` か決定か（決定なら、その質問と回答の文、または仮定と応答の文を出す。認めた仮定か書き直した仮定かを見分けられるようにする）・**前段**（その成果物を作るプロセス）・**後続**（その成果物を使うプロセス）。前段と後続は、押すとそのプロセスを選ぶ。該当が無いときは「なし」とだけ出す |
 | プロセス | 名前・id・担い手・`purpose`・`steps`・`done_when`・入力と出力（押すと選ぶ）・段 |
 
 - エージェントのプロセスは、「タスクのプロンプト」を畳んで置く。開いたときに `intake.processPrompt { intake_id, draft_id, process_id }` を取る。
@@ -482,8 +500,8 @@ sub-issue の失敗にはこの面を使わず、8.3 の箱で見せる。`intak
 export type IntakeDraft = {
   /** 計画レビュー・改訂のコメント（NewComment と同じ形） */
   comments: { target_kind: "artifact" | "process" | "whole"; target_id: string | null; body: string }[];
-  /** 回答中の答え。question_set_id が変わったら捨てる */
-  answers: { questionSetId: number; answers: Answer[] } | null;
+  /** 回答中の答えと仮定への応答。question_set_id が変わったら捨てる */
+  answers: { questionSetId: number; answers: Answer[]; assumptionResponses: AssumptionResponse[] } | null;
   /** 人のプロセスの「決めた内容」。キーは process_id */
   notes: Record<string, string>;
 };
@@ -501,7 +519,7 @@ export type IntakeDraft = {
 | 層 | 置き場所 | 条件 |
 | --- | --- | --- |
 | 純関数 | `app/src/pfd.ts`（図のモデル）、`app/src/intake.ts`（`countIntakeAttention` `intakeOrder` `parseIssueInput` `answerIssues` `canRejectIntake` `ghGuidance` など画面の導出） | 副作用を持たず、vitest でテストする |
-| 表示だけの部品 | `PfdDiagram`、`PfdElementPanel`、`QuestionCard` / `QuestionForm`（`{ questions; answers; onChange }`）、`MaterialView`（`{ material }`） | store を読まず props だけで完結する |
+| 表示だけの部品 | `PfdDiagram`、`PfdElementPanel`、`QuestionCard` / `AssumptionCard` / `QuestionForm`（`{ questions; assumptions; answers; assumptionResponses; onChange }`）、`MaterialView`（`{ material }`）、`EvidenceView`（`{ evidence }`） | store を読まず props だけで完結する |
 | 画面 | `IntakeView`（状態で面を振り分ける）、`IssuePicker`、`PlanReview`、`IntakeProgress`、Intake のサイドバー（`Sidebar.tsx` の中で `view === "intake"` のとき）、モーダル（回答の確認・差し戻しの確認・中止） | store を読み、RPC を呼ぶ |
 
 - 「フィクスチャで作れる」とは、store を読まず props だけで完結し、描く中身を純関数で作ってテストできる形のことである。
@@ -513,7 +531,7 @@ export type IntakeDraft = {
   | 単位 | 中身 | 互いに待つもの |
   | --- | --- | --- |
   | 図の部品 | `pfd.ts`・`PfdDiagram`・`PfdElementPanel` | `shared/intake/` の型だけ |
-  | 質問の部品 | `intake.ts` の `answerIssues`・`QuestionForm`・`MaterialView` | `shared/intake/` の型だけ |
+  | 質問の部品 | `intake.ts` の `answerIssues`・`QuestionForm`・`AssumptionCard`・`MaterialView`・`EvidenceView` | `shared/intake/` の型だけ |
   | 画面の骨格とストア | `View`・`State`・`refresh`・サイドバー・面の振り分け・`IssuePicker`・下書き | コアの RPC の型 |
   | タスク側の紐づけ | `Task.intake`・`toTask`・`Item` の印・`Crumbs` のリンク | コアの `TaskSummary` の列 |
 
@@ -529,7 +547,7 @@ export type IntakeDraft = {
   - 改訂中に、承認済みの案と新しい案を並べて見ること（8.2・8.5）
 
   `IntakeDetail` に全部の案の中身を載せると、取り直しのたびに重くなる。そのため 1 件ずつ取る形にする
-- **`buildAnswerText(questions: Question[], answers: Answer[]): string`** — `shared/intake/` の純関数。
+- **`buildAnswerText(set: { questions: Question[]; assumptions: Assumption[] }, input: { answers: Answer[]; assumptionResponses: AssumptionResponse[] }): string`** — `shared/intake/` の純関数。
   コア設計 8 章の「人が答えた内容を会話へ返す文面は `shared/intake/` の純関数で作る」に名前を与える。画面のモーダルとデーモンが同じ関数を使う
 
 ## 14. テスト
@@ -555,6 +573,7 @@ export type IntakeDraft = {
 - 「intakeOrder: 対応が要るものが先頭」— 区分の順と、既定で終了を含まないこと
 - 「parseIssueInput: 番号と URL」— `#12` / `12` / 同じリポジトリの URL → URL、別リポジトリの URL・空文字 → null
 - 「answerIssues: 未回答と single の複数選択」— 1 問未回答 → その質問の指摘 1 件、`single` で 2 つ選択 → 指摘、`single` で `other` だけ → 指摘なし
+- 「answerIssues: 仮定の未応答と空の書き直し」— 応答の無い仮定 → その仮定の指摘 1 件、`corrected` で `correction` が空白だけ → 指摘、`accepted` → 指摘なし
 - 「canRejectIntake: コメントが無いと押せない」— コメント 0 → false、全体へのコメント 1 → true
 - 「ghGuidance: 理由ごとの直し方」— 3 つの reason → 4.2 の表の見出しと直し方
 
@@ -584,13 +603,15 @@ PRD 7 章の V・S・Q・R・H・C の要求について、画面が担うもの
 | S-5 | 4.2（直し方の表） |
 | S-6（S） | 4.3（特別扱いを持たない）。判定はコア（コア設計 6・11） |
 | Q-1 | コア（コア設計 7・10）。画面は 9.1 の経過の面 |
-| Q-2 | 5（まとめて 1 回で答える） |
+| Q-2 | 5（まとめて 1 回で答える）、5.2（推奨を出さない） |
 | Q-3 | 5.2（その他と補足） |
 | Q-4 | コア（コア設計 7）。画面は質問の面を経ずに分解中へ進むだけ |
 | Q-5 | コア（コア設計 4・6）。画面は 7.2 の要素の欄で決定の成果物を示す |
 | Q-6 | 5（まとめて答える）。起こすのはコア（コア設計 5・7） |
 | Q-7 | 面の下に畳んだ経緯として出す（経緯はコアが追記だけの表で保持する。コア設計 4・13） |
 | Q-8 | コア（コア設計 7）。画面は 6.5 の人のプロセスの形 |
+| Q-9 | 5.3（仮定のカードと応答）、7.2（決定の成果物に仮定と応答を出す） |
+| Q-10（S） | 5.2（「補足・選んだ理由」の欄） |
 | R-1 | コア（コア設計 5・9）。画面は 3.2 の一覧と点 |
 | R-2 | 6（専用の描画、6.9 のネットワーク無し） |
 | R-3 | 7.2（要素の欄と `intake.processPrompt`） |
@@ -645,8 +666,9 @@ PRD 7 章の V・S・Q・R・H・C の要求について、画面が担うもの
 
 - **Review Guide の図に 5 つ目の種類（`pfd`）を足す。** ガイドの書き手への指示を兼ねるスキーマに、書き手が出してはいけない形が混ざる。PFD のノードは `Diagram` の同質なノードに載らない（6.1）
 - **Mermaid で描く。** CDN から読むのでネットワークが要る。バンドルすれば新しい依存になる（6.1）
-- **推奨の選択肢を初めから選んでおく。** 推奨を読まずに承認する癖を作る（5.2）
-- **「推奨を選ぶ」ボタンを置く。** 推奨の選択肢を、ほかの選択肢と別の操作で選ばせる理由が無い。推奨は選択肢の中に理由付きで見せれば足りる（5.2）
+- **推奨を選択肢の中に理由付きで示す。** 人が選択肢を比べる前に答えを差し出し、熟慮を飛ばさせる（PRD 5.4。5.2）
+- **仮定を初めから「認める」にしておく、「すべて認める」の操作を置く。** 根拠を読まずに認める癖を作る（5.3）
+- **仮定を質問より先に置く。** 仮定が多いと、人の判断が要る質問に届く前に読み疲れる（5 章）
 - **図の文章版と、図の下の「着手の順」の一覧を置く。** 段は図の中の数字で読めれば足りる。状態は印と語で区別する（6.4・6.6）
 - **画面の挙動を説明する文を添える。** 判断と操作に要らない（1 章）
 - **Intake をサイドバーのタスクの一覧に混ぜる。** Intake はタスクではない（PRD 5.2）。混ぜると `sel` の意味が崩れる。Intake 由来のタスクだけを通常のタスクとして並べ、印で戻れるようにする（10 章）

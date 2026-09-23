@@ -184,7 +184,7 @@ export function listIntakeRuns(db: Db, intakeId: string): Promise<IntakeRunRow[]
 
 export async function insertQuestionSet(
   db: Db,
-  q: { intake_id: string; run_id: number; questions: string },
+  q: { intake_id: string; run_id: number; questions: string; assumptions: string },
 ): Promise<number> {
   const inserted = await db.insertInto("intake_question_sets")
     .values({ ...q, created_at: new Date().toISOString() })
@@ -193,9 +193,13 @@ export async function insertQuestionSet(
 }
 
 /** 回答は一度だけ書く（追記だけの原則）。すでに回答があれば書かずに false を返す。 */
-export async function answerQuestionSet(db: Db, id: number, answers: string): Promise<boolean> {
+export async function answerQuestionSet(
+  db: Db,
+  id: number,
+  reply: { answers: string; assumption_responses: string },
+): Promise<boolean> {
   const updated = await db.updateTable("intake_question_sets")
-    .set({ answers, answered_at: new Date().toISOString() })
+    .set({ ...reply, answered_at: new Date().toISOString() })
     .where("id", "=", id)
     .where("answers", "is", null)
     .executeTakeFirstOrThrow();

@@ -1,14 +1,13 @@
 import { decisionTexts } from "../../../shared/intake/answerText.ts";
 import type { Pfd } from "../../../shared/intake/pfd.ts";
-import type { Answer, Question } from "../../../shared/intake/question.ts";
 import {
   getDraft,
   getIntake,
   latestApproval,
   listProcesses,
-  listQuestionSets,
   replaceCurrentTask,
 } from "../db/intakes.ts";
+import { loadQuestionSets } from "./questionSet.ts";
 import type { Db, IntakeProcessRow, IntakeRow, ProjectRow } from "../db/schema.ts";
 import { getProject, insertTask, type NewTask } from "../db/tasks.ts";
 import { branchNameFor } from "../domain/worktree.ts";
@@ -87,12 +86,7 @@ async function loadDispatchSource(db: Db, intake: IntakeRow, pfd: Pfd): Promise<
   for (const r of rows.values()) {
     if (r.human_done_at !== null) humanNotes[r.process_id] = r.human_note ?? "";
   }
-  const decisions = decisionTexts(
-    (await listQuestionSets(db, intake.id)).map((q) => ({
-      questions: JSON.parse(q.questions) as Question[],
-      answers: q.answers === null ? null : JSON.parse(q.answers) as Answer[],
-    })),
-  );
+  const decisions = decisionTexts(await loadQuestionSets(db, intake.id));
   return { intake, project, pfd, rows, humanNotes, decisions };
 }
 
