@@ -4,7 +4,7 @@ import type { TrackerStatus } from "../../shared/intake/tracker.ts";
 import type { Pfd, Process } from "../../shared/intake/pfd.ts";
 import type { PrFact, ProcessStatus } from "../../shared/intake/processStatus.ts";
 import type { Answer, AssumptionResponse, Question } from "../../shared/intake/question.ts";
-import type { IntakeState } from "../../shared/intake/state.ts";
+import type { IntakeRunPurpose, IntakeState } from "../../shared/intake/state.ts";
 import {
   answerChoiceIssue,
   assumptionResponseIssue,
@@ -125,6 +125,13 @@ export const INTAKE_SECTIONS: { key: IntakeSection; name: string }[] = [
   { key: "active", name: "進行中" },
   { key: "closed", name: "終了" },
 ];
+
+/** intake_runs.purpose の語 */
+export const RUN_PURPOSE_WORD: Record<IntakeRunPurpose, string> = {
+  investigate: "調査",
+  decompose: "分解",
+  revise: "改訂",
+};
 
 export const INTAKE_WORD: Record<IntakeState, string> = {
   investigating: "調査中",

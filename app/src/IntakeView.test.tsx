@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
+import { IntakeLogPanel } from "./components/IntakeLog";
 import { IntakeFacePlaceholder, IntakeHeading, RevisingBand } from "./components/IntakeView";
 import { IssueList, IssuePreview, TrackerUnavailable } from "./components/IssuePicker";
 import { GITHUB_ISSUES, INTAKES, PROJECTS } from "./fixtures";
@@ -150,5 +151,41 @@ describe("IntakeView の部品", () => {
     expect(html).toContain(reviewing.issue_title);
     expect(html).toContain("レビュー待ち");
     expect(html).toContain(reviewing.issue_url);
+  });
+});
+
+describe("IntakeLogPanel", () => {
+  const run = {
+    id: 7,
+    purpose: "decompose" as const,
+    attempt: 2,
+    status: "running" as const,
+    started_at: null,
+    ended_at: null,
+    cost_usd: null,
+    num_turns: null,
+    duration_ms: null,
+    issues: null,
+    permission_denials: null,
+  };
+  const panel = (o: Partial<Parameters<typeof IntakeLogPanel>[0]>) =>
+    renderToStaticMarkup(
+      <IntakeLogPanel intakeId="i1" log={undefined} runs={[run]} following={true} {...o} />,
+    );
+
+  test("実行の目的と何回目かを添えてログを出す", () => {
+    const html = panel({ log: { runId: 7, lines: ["12:00:00 Issue を読んでいます", ""] } });
+    expect(html).toContain("分解 2 回目");
+    expect(html).toContain("Issue を読んでいます");
+    expect(html).not.toContain("末尾 200 行");
+  });
+
+  test("追っていないときは末尾だけであることを示す", () => {
+    expect(panel({ log: { runId: 7, lines: ["x"] }, following: false })).toContain("末尾 200 行");
+  });
+
+  test("行が無ければ、実行が無いのかログが無いのかを出し分ける", () => {
+    expect(panel({ log: { runId: null, lines: [] } })).toContain("まだ実行がありません");
+    expect(panel({ log: { runId: 7, lines: [""] } })).toContain("この実行のログはまだありません");
   });
 });

@@ -111,7 +111,7 @@ test("log.line は follow 中のクライアントにだけ流れる", async () 
   await follower.next((o) => o.id === 1);
   s.broadcast(
     { event: "log.line", task_id: "t1", step_run_id: 1, line: "hello" },
-    { taskId: "t1", followersOnly: true },
+    { followKey: "t1", followersOnly: true },
   );
   await follower.next((o) => o.event === "log.line");
   await assert.rejects(() => idle.next((o) => o.event === "log.line", 200));
@@ -165,7 +165,7 @@ test("close: 使ったパスをファイルシステムから実際に解放す�
   await assert.rejects(() => stat(sock));
 });
 
-test("followersOnly は opts.taskId が省略されてもイベント自身の task_id で絞り込む", async () => {
+test("followersOnly は opts.followKey が省略されてもイベント自身の task_id で絞り込む", async () => {
   const s = createServer(async (method, params, conn) => {
     if (method === "task.logs" && params.follow) conn.follow(String(params.task_id));
     return "ok";
@@ -176,7 +176,7 @@ test("followersOnly は opts.taskId が省略されてもイベント自身の t
   const idle = client(sock);
   follower.send({ id: 1, method: "task.logs", params: { task_id: "t1", follow: true } });
   await follower.next((o) => o.id === 1);
-  // opts.taskId を渡さない呼び出し（呼び出し側の指定漏れを想定）。
+  // opts.followKey を渡さない呼び出し（呼び出し側の指定漏れを想定）。
   // task_id を持たないイベントで followersOnly を使う場合は誰にも配らない（fail closed）。
   s.broadcast(
     { event: "ratelimit.sample", window: "1h", utilization: 0.5, resets_at: null },
@@ -186,7 +186,7 @@ test("followersOnly は opts.taskId が省略されてもイベント自身の t
     () => follower.next((o) => o.event === "ratelimit.sample", 200),
     /タイムアウト/,
   );
-  // task_id を持つイベントなら、opts.taskId 省略でもイベント自身の task_id で絞り込まれる。
+  // task_id を持つイベントなら、opts.followKey 省略でもイベント自身の task_id で絞り込まれる。
   s.broadcast(
     { event: "log.line", task_id: "t1", step_run_id: 1, line: "hi" },
     { followersOnly: true },

@@ -40,7 +40,9 @@ import {
 import { validateGlobalLimit, writeDaemonConfig } from "./config.ts";
 import {
   getIntake,
+  getIntakeRun,
   type IntakeRow,
+  lastIntakeRun,
   listIntakes,
   updateIntake,
   updateIntakeRun,
@@ -88,6 +90,7 @@ import type { AgentAdapter } from "../adapter/types.ts";
 import type { Handler } from "./server.ts";
 import type {
   DaemonSlots,
+  IntakeLogs,
   RateLimitSample,
   ServerEvent,
   StepRunDenials,
@@ -108,7 +111,7 @@ export type DaemonContext = {
   adapter: AgentAdapter;
   logRoot: string;
   globalLimit: number;
-  broadcast(ev: ServerEvent, opts?: { taskId?: string; followersOnly?: boolean }): void;
+  broadcast(ev: ServerEvent, opts?: { followKey?: string; followersOnly?: boolean }): void;
   /** 作成時（task.create）と、作成時の定義を持たない行の読み込みに使う。 */
   loadWorkflow: WorkflowLoader;
   /** タスクが従うワークフロー（setup を差し込んだ後）。tick・承認・読み取りの経路はすべてここを通る。 */
@@ -593,12 +596,10 @@ export function createHandler(ctx: DaemonContext): Handler {
         if (params.step_run_id !== undefined && !run) throw new Error("ステップ実行がありません");
         // まだ1度もステップが走っていないタスク（queued）。追従だけ張って空で返す。
         if (!run) return { step_run_id: null, log_path: null, lines: [] } satisfies TaskLogs;
-        const text = await Deno.readTextFile(run.log_path).catch(() => "");
-        const tailLines = typeof params.tail === "number" ? params.tail : 200;
         return {
           step_run_id: run.id,
           log_path: run.log_path,
-          lines: text.split("\n").slice(-tailLines),
+          lines: await readLogTail(run.log_path, params.tail),
         } satisfies TaskLogs;
       }
       case "task.diff": {
@@ -938,10 +939,37 @@ export function createHandler(ctx: DaemonContext): Handler {
         return await toIntakeSummary(ctx.db, row, ctx.intakeWatcher.health(row.project_id));
       }
 
+      case "intake.logs": {
+        const intakeId = req(params, "intake_id");
+        if (!await getIntake(ctx.db, intakeId)) throw new Error("Intake がありません");
+        // 追従の作法は task.logs と同じ。追従先の枠もタスクと分け合う
+        if (params.follow === true) conn.follow(intakeId);
+        else if (params.follow === false && conn.isFollowing(intakeId)) conn.unfollow();
+        let run;
+        if (params.run_id === undefined) {
+          run = await lastIntakeRun(ctx.db, intakeId);
+        } else {
+          run = await getIntakeRun(ctx.db, Number(params.run_id));
+          if (run?.intake_id !== intakeId) throw new Error("実行がありません");
+        }
+        if (!run) return { run_id: null, log_path: null, lines: [] } satisfies IntakeLogs;
+        return {
+          run_id: run.id,
+          log_path: run.log_path,
+          lines: await readLogTail(run.log_path, params.tail),
+        } satisfies IntakeLogs;
+      }
+
       default:
         throw new Error(`未知のメソッドです: ${method}`);
     }
   };
+}
+
+/** ログファイルの末尾 tail 行（既定 200）。まだファイルが無い実行は空で返す。 */
+async function readLogTail(path: string, tail: unknown): Promise<string[]> {
+  const text = await Deno.readTextFile(path).catch(() => "");
+  return text.split("\n").slice(-(typeof tail === "number" ? tail : 200));
 }
 
 /** <project>/.doctrine/workflows/*.yaml から拡張子を除いた名前を昇順で。ディレクトリが無ければ []。 */
@@ -1267,6 +1295,11 @@ async function startIntakeRuns(ctx: DaemonContext): Promise<void> {
       logRoot: ctx.logRoot,
       onStateChanged: (intakeId, from, to, revising) =>
         ctx.broadcast({ event: "intake.stateChanged", intake_id: intakeId, from, to, revising }),
+      onLogLine: (line) =>
+        ctx.broadcast(
+          { event: "intake.logLine", intake_id: run.intake_id, run_id: run.id, line },
+          { followKey: run.intake_id, followersOnly: true },
+        ),
     })
       .catch(async (e) => {
         // 実行の途中の例外を握りつぶすと .finally() が同じ理由で再 reject し、
@@ -1431,7 +1464,7 @@ async function tickOnce(ctx: DaemonContext): Promise<void> {
         onLogLine: (line) =>
           ctx.broadcast(
             { event: "log.line", task_id: task.id, step_run_id: currentStepRunId, line },
-            { taskId: task.id, followersOnly: true },
+            { followKey: task.id, followersOnly: true },
           ),
       })
         .then(() => cleanupAfterRun(ctx, task.id))

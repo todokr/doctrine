@@ -85,6 +85,7 @@ function initialState(): State {
     intakeSel: null,
     showClosedIntakes: false,
     intakeDetails: {},
+    intakeLogs: {},
     intakeGen: {},
     intakeRevise: null,
     drafts: {},

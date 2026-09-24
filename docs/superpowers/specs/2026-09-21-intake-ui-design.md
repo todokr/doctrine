@@ -470,7 +470,8 @@ export function PfdDiagram(p: {
 
 - 走っている実行の `purpose`（調査・分解・改訂）と、経過時間
 - 上限待ちなら、`rate_limited_until` の時刻
-- `intake.logs` の末尾。「読み込み直す」ボタンと `intake.updated` で取り直す。ライブ配信は範囲外である（16 章）
+- Log 欄。`intake.logs` で末尾を取り、`follow` で追って `intake.logLine` を積む。実行（`run_id`）が変われば入れ替える。
+  面を離れる・調査中でも分解中でもなくなったら追従をやめる（追従の枠はタスク画面と分け合う）。過去の実行を選ぶ操作は持たない（#183）
 
 ### 9.2 要確認の面
 
@@ -482,7 +483,7 @@ export function PfdDiagram(p: {
 | `invalid_output` | 違反（`issues`）の一覧 |
 | `wrote_repository` | 書き換えたパス（`paths`）の一覧 |
 
-どの種類にも「やり直す」ボタン（`intake.retry`）とログを出す。改訂中の `needs_attention` でも同じ面である。
+どの種類にも「やり直す」ボタン（`intake.retry`）とログ（9.1 と同じ Log 欄。追わずに末尾だけ）を出す。改訂中の `needs_attention` でも同じ面である。
 sub-issue の失敗にはこの面を使わず、8.3 の箱で見せる。`intake.retry` は sub-issue の失敗には使えない（コア設計 13 章）。
 
 ## 10. 全タスクでの Intake 由来のタスク（V-6）
@@ -652,7 +653,6 @@ PRD 7 章の V・S・Q・R・H・C の要求について、画面が担うもの
 - `dctl` の表示（N-2）
 - PFD を画面で直接編集すること（PRD 12 章）
 - 図の拡大・パン・ドラッグ、交差を最小にする高度な配置
-- Intake の実行ログのライブ配信（`intake.logs` で読むだけにする）
 - Linear
 - 実装そのもの（本 spec はコードを含まない）
 
