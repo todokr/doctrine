@@ -5,7 +5,7 @@ import { existsSync } from "node:fs";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { openDb, openDbOn } from "../../src/db/migrate.ts";
 import { getTask, insertTask, listTasks } from "../../src/db/tasks.ts";
@@ -2790,7 +2790,7 @@ test("workflow.list: .doctrine/workflows の YAML を名前順に、検証の可
   const broken = list.find((e) => e.name === "broken");
   assert.equal(broken?.ok, false);
   assert.ok(
-    !broken?.ok && broken.issues.some((i) => i.includes("type は次のいずれか")),
+    !broken?.ok && broken.issues.some((i) => i.includes("次のいずれか")),
   );
 });
 
@@ -2968,7 +2968,7 @@ test("workflow.get: 壊れた YAML は検証エラーの内容を返す", async 
   assert.equal(schema.ok, false);
   if (!schema.ok) {
     assert.ok(
-      schema.issues.some((i) => i.includes("steps.0.type") && i.includes("type は次のいずれか")),
+      schema.issues.some((i) => i.includes("steps.0.type") && i.includes("次のいずれか")),
     );
   }
 
@@ -3122,6 +3122,16 @@ test("daemon.setGlobalLimit は値を設定ファイルに保存する", async (
   await h("daemon.setGlobalLimit", { global_limit: 5 }, NOOP_CONN);
   const saved = JSON.parse(await readFile(ctx.configPath, "utf8"));
   assert.deepEqual(saved, { globalLimit: 5 });
+});
+
+test("daemon.setGlobalLimit は設定ファイルの linearApiKey を残す", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  await mkdir(dirname(ctx.configPath), { recursive: true });
+  await writeFile(ctx.configPath, JSON.stringify({ globalLimit: 4, linearApiKey: "lin_api_x" }));
+  await h("daemon.setGlobalLimit", { global_limit: 5 }, NOOP_CONN);
+  const saved = JSON.parse(await readFile(ctx.configPath, "utf8"));
+  assert.deepEqual(saved, { globalLimit: 5, linearApiKey: "lin_api_x" });
 });
 
 test("daemon.setGlobalLimit は 1 未満や整数でない値を拒み、何も変えない", async () => {

@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   readDaemonConfig,
+  saveGlobalLimit,
   validateGlobalLimit,
   writeDaemonConfig,
 } from "../../src/daemon/config.ts";
@@ -88,6 +89,61 @@ test("writeDaemonConfig は既存のファイルを置き換える", async () =>
   const path = join(root, "config.json");
   await writeDaemonConfig(path, { globalLimit: 3 });
   await writeDaemonConfig(path, { globalLimit: 5 });
+  const text = await readFile(path, "utf8");
+  assert.deepEqual(JSON.parse(text), { globalLimit: 5 });
+});
+
+test("linearApiKey があれば読む", async () => {
+  const path = join(root, "config.json");
+  await writeFile(path, JSON.stringify({ globalLimit: 7, linearApiKey: "lin_api_x" }));
+  const got = await readDaemonConfig(path);
+  assert.deepEqual(got, { config: { globalLimit: 7, linearApiKey: "lin_api_x" }, warning: null });
+});
+
+test("linearApiKey だけの設定ファイルは globalLimit を既定値にして読む", async () => {
+  const path = join(root, "config.json");
+  await writeFile(path, JSON.stringify({ linearApiKey: "lin_api_x" }));
+  const got = await readDaemonConfig(path);
+  assert.deepEqual(got, { config: { globalLimit: 4, linearApiKey: "lin_api_x" }, warning: null });
+});
+
+for (const bad of ["", 123, null]) {
+  test(`不正な linearApiKey (${JSON.stringify(bad)}) は既定値にして警告を返す`, async () => {
+    const path = join(root, "config.json");
+    await writeFile(path, JSON.stringify({ linearApiKey: bad }));
+    const got = await readDaemonConfig(path);
+    assert.equal(got.config.linearApiKey, undefined);
+    assert.equal(got.config.globalLimit, 4);
+    assert.ok(got.warning !== null);
+  });
+}
+
+test("writeDaemonConfig は設定ファイルを 0o600 で作る", async () => {
+  const path = join(root, "config.json");
+  await writeDaemonConfig(path, { globalLimit: 3 });
+  const fileStat = await stat(path);
+  assert.equal(fileStat.mode & 0o777, 0o600);
+});
+
+test("writeDaemonConfig は既存の 0o644 のファイルを 0o600 で置き換える", async () => {
+  const path = join(root, "config.json");
+  await writeFile(path, "{}", { mode: 0o644 });
+  await writeDaemonConfig(path, { globalLimit: 3 });
+  const fileStat = await stat(path);
+  assert.equal(fileStat.mode & 0o777, 0o600);
+});
+
+test("saveGlobalLimit は linearApiKey を残す", async () => {
+  const path = join(root, "config.json");
+  await writeFile(path, JSON.stringify({ globalLimit: 2, linearApiKey: "lin_api_x" }));
+  await saveGlobalLimit(path, 5);
+  const text = await readFile(path, "utf8");
+  assert.deepEqual(JSON.parse(text), { globalLimit: 5, linearApiKey: "lin_api_x" });
+});
+
+test("saveGlobalLimit はファイルが無ければ globalLimit だけを書く", async () => {
+  const path = join(root, "config.json");
+  await saveGlobalLimit(path, 5);
   const text = await readFile(path, "utf8");
   assert.deepEqual(JSON.parse(text), { globalLimit: 5 });
 });

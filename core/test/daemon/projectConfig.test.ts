@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, test } from "@std/testing/bdd";
 import assert from "node:assert/strict";
-import { readdir, readFile, rm } from "node:fs/promises";
+import { readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -69,7 +69,12 @@ test("project.config.get は project.yaml の設定を返す", async () => {
   const h = createHandler(ctx);
   await h("project.add", { path: repo }, NOOP_CONN);
   const cfg = await h("project.config.get", { project: repo }, NOOP_CONN) as ProjectConfig;
-  assert.deepEqual(cfg, { defaultWorkflow: "feature", maxConcurrent: 1, baseBranch: "main" });
+  assert.deepEqual(cfg, {
+    defaultWorkflow: "feature",
+    maxConcurrent: 1,
+    baseBranch: "main",
+    tracker: { kind: "github" },
+  });
 });
 
 test("project.config.save は project.yaml と projects の行の両方を変え、コメントを残す", async () => {
@@ -101,6 +106,7 @@ test("project.config.save は project.yaml と projects の行の両方を変え
     maxConcurrent: 3,
     baseBranch: "develop",
     setup: "pnpm i",
+    tracker: { kind: "github" },
   });
 
   const entries = await readdir(join(repo, ".doctrine"));
@@ -131,6 +137,24 @@ test("project.config.save で setup を空にすると project.yaml から setup
   assert.equal(result.setup, null);
   const text = await readFile(join(repo, ".doctrine", "project.yaml"), "utf8");
   assert(!text.includes("setup:"));
+});
+
+test("project.config.save は project.yaml の tracker を残す", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  await h("project.add", { path: repo }, NOOP_CONN);
+  await writeFile(
+    join(repo, ".doctrine", "project.yaml"),
+    HEADER_YAML + "tracker:\n  kind: linear\n  team: ENG\n",
+  );
+
+  await h("project.config.save", {
+    project: repo,
+    config: { defaultWorkflow: "other", maxConcurrent: 2, baseBranch: "main" },
+  }, NOOP_CONN);
+
+  const text = await readFile(join(repo, ".doctrine", "project.yaml"), "utf8");
+  assert.deepEqual(parseProjectConfig(text).tracker, { kind: "linear", team: "ENG" });
 });
 
 test("project.config.save は maxConcurrent が0なら書かずにエラーを返す", async () => {

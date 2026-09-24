@@ -111,6 +111,27 @@ maxConcurrent: 1
 baseBranch: main
 ```
 
+Issue を GitHub Issues ではなく Linear から取り込みたいときは、`project.yaml` に
+`tracker` を書く（`team` は Linear のチームのキー。例 `ENG`）。書かなければ GitHub Issues
+を使う。1 つのプロジェクトで両方を混ぜることはできない。
+
+```yaml
+# .doctrine/project.yaml
+tracker:
+  kind: linear
+  team: ENG
+```
+
+Linear の Personal API key は、状態ディレクトリ（既定は `~/.local/state/doctrine`。
+`DOCTRINE_STATE_DIR` で変わる）の `config.json` に `linearApiKey` として置く。
+
+```json
+{ "linearApiKey": "lin_api_..." }
+```
+
+平文で置くので、手で作るときは `chmod 600` にする。dctld が書き直すときは 0o600 で作る。
+画面の設定から全体の実行枠を変えても、このキーは残る。
+
 雛形の `default.yaml` は、計画 → 計画レビュー → 実装 → 検証 → コードレビュー → ガイド → 人のレビュー
 の順に並んでいる。役割ごとに `session` を分け（`planner` / `plan-reviewer` / `implementer` /
 `code-reviewer` / `guide`）、役割の間は `.doctrine-out/` の下のファイル

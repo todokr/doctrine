@@ -254,7 +254,7 @@ function translateZodIssue(issue: z.ZodIssueOptionalMessage & { message?: string
       return message ?? "文字列の形式が不正です";
     }
     case z.ZodIssueCode.invalid_union_discriminator: {
-      return `type は次のいずれかである必要があります: ${issue.options.join(", ")}`;
+      return `次のいずれかである必要があります: ${issue.options.join(", ")}`;
     }
     case z.ZodIssueCode.invalid_enum_value: {
       return `値が不正です。次のいずれかである必要があります: ${issue.options.join(", ")}`;

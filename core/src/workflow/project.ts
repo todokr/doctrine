@@ -9,18 +9,30 @@ import {
 } from "./schema.ts";
 import { writeTextFileAtomic } from "../util/atomicWrite.ts";
 
+/** Issue をどこから取るか。1 つのプロジェクトは 1 つのトラッカーだけを使う。 */
+export type TrackerConfig =
+  | { kind: "github" }
+  | { kind: "linear"; team: string };
+
 export type ProjectConfig = {
   setup?: string;
   defaultWorkflow: string;
   maxConcurrent: number;
   baseBranch: string;
+  tracker: TrackerConfig;
 };
+
+const trackerSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("github") }).strict(),
+  z.object({ kind: z.literal("linear"), team: z.string().min(1) }).strict(),
+]);
 
 const schema = z.object({
   setup: z.string().min(1).optional(),
   defaultWorkflow: z.string().min(1),
   maxConcurrent: z.number().int().min(1).default(1),
   baseBranch: z.string().min(1).default("main"),
+  tracker: trackerSchema.default({ kind: "github" }),
 }).strict();
 
 export function parseProjectConfig(yamlText: string): ProjectConfig {

@@ -37,7 +37,7 @@ import {
   selectAdmissibleIntakeRuns,
   slotsSnapshot,
 } from "../domain/scheduler.ts";
-import { validateGlobalLimit, writeDaemonConfig } from "./config.ts";
+import { saveGlobalLimit, validateGlobalLimit } from "./config.ts";
 import {
   getIntake,
   getIntakeRun,
@@ -710,7 +710,7 @@ export function createHandler(ctx: DaemonContext): Handler {
         const globalLimit = validateGlobalLimit(params.global_limit);
         ctx.globalLimit = globalLimit;
         try {
-          await writeDaemonConfig(ctx.configPath, { globalLimit });
+          await saveGlobalLimit(ctx.configPath, globalLimit);
         } catch (e) {
           const message = (e as Error).message;
           ctx.warnings.push(
