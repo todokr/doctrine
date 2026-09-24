@@ -7,7 +7,7 @@ import { findOrphans } from "../domain/worktree.ts";
 import { getProject, listProjects, listTasks, type TaskRow } from "../db/tasks.ts";
 import { listIntakes } from "../db/intakes.ts";
 import { ghPrWatcher } from "../github/ghPrWatcher.ts";
-import { ghTracker } from "../github/ghTracker.ts";
+import { trackerFor } from "./tracker.ts";
 import { createIntakeWatcher, gitBaseSync, WATCH_INTERVAL_MS } from "../intake/watch.ts";
 import type { Db } from "../db/schema.ts";
 import { defaultConfigPath, readDaemonConfig } from "./config.ts";
@@ -128,7 +128,7 @@ export async function startDaemon(o: {
   const configPath = o.configPath ?? defaultConfigPath();
   const { config, warning: configWarning } = await readDaemonConfig(configPath);
 
-  const tracker = ghTracker();
+  const trackerOf = trackerFor({ linearApiKey: config.linearApiKey });
   const ctx: DaemonContext = {
     db,
     adapter: createClaudeAdapter(),
@@ -139,12 +139,12 @@ export async function startDaemon(o: {
     loadWorkflow: loadWorkflowFromDisk,
     workflowOf: (task, project) => taskWorkflow(task, project, loadWorkflowFromDisk),
     running: new Set(),
-    tracker,
+    trackerOf,
     runningIntakeRuns: new Set(),
     // broadcast は後で差し替わるので、間接に呼ぶ
     intakeWatcher: createIntakeWatcher({
       db,
-      tracker,
+      trackerOf,
       prWatcher: ghPrWatcher(),
       baseSync: gitBaseSync,
       loadWorkflow: loadWorkflowFromDisk,

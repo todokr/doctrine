@@ -1,7 +1,7 @@
 import type { Guide } from "./guide/schema.ts";
 import type { AttentionReason, CommentReply } from "./intake/decomposer.ts";
 import type { FeedbackComment } from "./intake/feedback.ts";
-import type { IssueDetail, IssueSummary, TrackerStatus } from "./intake/tracker.ts";
+import type { IssueDetail, IssueSummary, ProjectTrackerStatus } from "./intake/tracker.ts";
 import type { Pfd } from "./intake/pfd.ts";
 import type { ProcessStatus } from "./intake/processStatus.ts";
 import type { Answer, AssumptionResponse } from "./intake/question.ts";
@@ -547,7 +547,7 @@ export type Methods = {
     result: { removed: string };
   };
   "ratelimit.recent": { params: { limit?: number }; result: RateLimitSample[] };
-  "tracker.status": { params: { project: string }; result: TrackerStatus };
+  "tracker.status": { params: { project: string }; result: ProjectTrackerStatus };
   "tracker.issues": {
     params: { project: string; assignee?: "me" | "any"; search?: string };
     result: TrackerIssue[];

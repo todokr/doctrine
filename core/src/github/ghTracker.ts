@@ -75,6 +75,7 @@ export function ghTracker(run: GhRun = defaultGhRun): Tracker {
   }
 
   return {
+    kind: "github",
     async status(projectPath): Promise<TrackerStatus> {
       try {
         await run(["--version"], projectPath);

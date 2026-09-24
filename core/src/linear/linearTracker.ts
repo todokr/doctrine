@@ -127,6 +127,7 @@ export function linearTracker(o: {
   }
 
   return {
+    kind: "linear",
     async status(): Promise<TrackerStatus> {
       if (o.apiKey === undefined) {
         return { ok: false, reason: "no_api_key", message: NO_API_KEY };

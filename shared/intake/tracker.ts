@@ -6,6 +6,12 @@ export type TrackerStatus =
   | { ok: true; target: { id: string; name: string } }
   | { ok: false; reason: string; message: string };
 
+/** トラッカーの種類。project.yaml の tracker.kind と同じ値 */
+export type TrackerKind = "github" | "linear";
+
+/** tracker.status の応答。画面が種類で表示を分ける */
+export type ProjectTrackerStatus = TrackerStatus & { kind: TrackerKind };
+
 /** Issue の一覧の 1 行（S-1）。identifier は表示のためだけに持つ（GitHub は "#112"） */
 export type IssueSummary = {
   url: string;

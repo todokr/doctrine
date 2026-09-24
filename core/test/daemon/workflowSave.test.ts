@@ -14,7 +14,7 @@ import { loadWorkflowFromDisk, taskWorkflow } from "../../src/workflow/load.ts";
 import { parseWorkflow } from "../../src/workflow/schema.ts";
 import type { ServerEvent, WorkflowDetail, WorkflowSaveResult } from "../../../shared/protocol.ts";
 import { makeRepo } from "../helpers/repo.ts";
-import { fakeTracker } from "../helpers/tracker.ts";
+import { constTrackerOf, fakeTracker } from "../helpers/tracker.ts";
 import { noopWatcher } from "../helpers/watcher.ts";
 
 const runGit = promisify(execFile);
@@ -61,7 +61,7 @@ async function context(events: ServerEvent[] = []): Promise<DaemonContext> {
     loadWorkflow: loadWorkflowFromDisk,
     workflowOf: (t, p) => taskWorkflow(t, p, loadWorkflowFromDisk),
     running: new Set(),
-    tracker: fakeTracker(),
+    trackerOf: constTrackerOf(fakeTracker()),
     runningIntakeRuns: new Set(),
     intakeWatcher: noopWatcher(),
   };
