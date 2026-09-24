@@ -11,7 +11,7 @@ export type IssueSummary = {
   url: string;
   identifier: string;
   title: string;
-  assignees: string[]; // login
+  assignees: string[]; // 表示名（GitHub は login、Linear は displayName）
   updatedAt: string;
 };
 

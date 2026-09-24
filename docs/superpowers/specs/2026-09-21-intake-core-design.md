@@ -381,7 +381,7 @@ export type AssumptionResponse =
 - **sub-issue の作成（I-1）: GraphQL の `createIssue` に `parentIssueId` を渡す 1 回の呼び出し**（`gh api graphql`）。
   REST では、Issue を作り、その内部 id を取り、その id を渡して親に紐づける、という 3 回の呼び出しになる。途中で落ちると「作ったが紐づいていない Issue」が残る。
   GraphQL なら作成と紐づけが 1 回で済む。`repositoryId` は `GhStatus.repo.id`、親の node id は `intakes.issue_node_id` を使う
-- **重複を作らない（I-5）**: sub-issue の本文の末尾に、目印 `<!-- doctrine:intake=<intake_id> process=<process_id> -->` を入れる。
+- **重複を作らない（I-5）**: sub-issue の本文の末尾に、目印 `doctrine:intake=<intake_id> process=<process_id>` を入れる。Linear は HTML コメントも本文として表示するため、隠さずに素のテキストで置く。
   作る前に `intake_processes.sub_issue_url` を見る。無ければ親の sub-issue 一覧を取って目印で探し、見つかれば採用して DB に書く。
   見つからないときだけ作る。別の手段で紐づけ直すことがあれば、同じ親子の二重の紐づけは 422 で拒まれるので、
   422 は「すでに紐づいている」として成功に数える

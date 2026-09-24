@@ -2,11 +2,11 @@ import type { Artifact, Pfd } from "./pfd.ts";
 
 export type SubIssueContent = { title: string; body: string };
 
-const MARKER = /<!-- doctrine:intake=(\S+) process=(\S+) -->/g;
+const MARKER = /doctrine:intake=([\w-]+) process=([\w-]+)/g;
 
-/** 本文の末尾に置く目印。`<!-- doctrine:intake=<intakeId> process=<processId> -->` */
+/** 本文の末尾に置く目印。`doctrine:intake=<intakeId> process=<processId>` */
 export function subIssueMarker(intakeId: string, processId: string): string {
-  return `<!-- doctrine:intake=${intakeId} process=${processId} -->`;
+  return `doctrine:intake=${intakeId} process=${processId}`;
 }
 
 /** 本文から目印を読む。複数あれば最後のもの。無ければ null。 */

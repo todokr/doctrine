@@ -34,6 +34,23 @@ test("parseSubIssueMarker: process=1 と process=10 を取り違えない", () =
   assert.equal(found?.processId, "10");
 });
 
+test("subIssueMarker: HTML コメントではなく素の 1 行", () => {
+  assert.equal(subIssueMarker("i1", "2"), "doctrine:intake=i1 process=2");
+});
+
+test("parseSubIssueMarker: Markdown で記号に囲まれても値に巻き込まない", () => {
+  assert.deepEqual(parseSubIssueMarker("本文\n`doctrine:intake=i1 process=2`"), {
+    intakeId: "i1",
+    processId: "2",
+  });
+});
+
+test("parseSubIssueMarker: UUID の intakeId を読める", () => {
+  const id = "0b8f3c1e-5d2a-4c7b-9e1f-2a6d8b4c0f13";
+  const found = parseSubIssueMarker(`本文\n\n${subIssueMarker(id, "3")}`);
+  assert.equal(found?.intakeId, id);
+});
+
 test("upstreamProcessIds: 入力を作るプロセスを返し、given は数えない", () => {
   const pfd = example();
   assert.deepEqual(upstreamProcessIds(pfd, "2"), ["1", "3"]);
