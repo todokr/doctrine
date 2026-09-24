@@ -176,6 +176,12 @@ export function getIntakeRun(db: Db, id: number): Promise<IntakeRunRow | undefin
   return db.selectFrom("intake_runs").selectAll().where("id", "=", id).executeTakeFirst();
 }
 
+/** いちばん新しく立てた実行。intake.logs が run_id を省かれたときに読む先。 */
+export function lastIntakeRun(db: Db, intakeId: string): Promise<IntakeRunRow | undefined> {
+  return db.selectFrom("intake_runs").selectAll().where("intake_id", "=", intakeId)
+    .orderBy("id", "desc").executeTakeFirst();
+}
+
 /** id の昇順。検証落ちの連続を数える側は新しい順に読み直す。 */
 export function listIntakeRuns(db: Db, intakeId: string): Promise<IntakeRunRow[]> {
   return db.selectFrom("intake_runs").selectAll().where("intake_id", "=", intakeId)

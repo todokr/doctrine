@@ -88,6 +88,7 @@ const base = (overrides: Partial<State> = {}): State => ({
   intakeSel: null,
   showClosedIntakes: false,
   intakeDetails: {},
+  intakeLogs: {},
   intakeGen: {},
   intakeRevise: null,
   drafts: {},
@@ -1705,6 +1706,32 @@ describe("Intake のイベント", () => {
     });
     const after = reduce(s, { type: "connection", conn: { status: "connected" } });
     expect(Object.keys(after.intakeDetails)).toEqual(["b"]);
+  });
+
+  const logLine = (s: State, intake_id: string, run_id: number, line: string) =>
+    intakeEv({ event: "intake.logLine", intake_id, run_id, line }, s);
+
+  test("intake.logLine は同じ実行の間だけ積み上がり、実行が変わったら入れ替える", () => {
+    const same = logLine(logLine(withRow(), "a", 3, "一行目"), "a", 3, "二行目");
+    expect(same.intakeLogs.a).toEqual({ runId: 3, lines: ["一行目", "二行目"] });
+    const next = logLine(same, "a", 4, "分解");
+    expect(next.intakeLogs.a).toEqual({ runId: 4, lines: ["分解"] });
+  });
+
+  test("一覧に無い Intake の intake.logLine は捨てる", () => {
+    const s = withRow();
+    expect(logLine(s, "z", 1, "x")).toEqual(s);
+  });
+
+  test("intake.logs で取った末尾に置き換え、一覧から消えたら捨てる", () => {
+    const s = reduce(withRow(), {
+      type: "intake.logs",
+      id: "a",
+      logs: { runId: 2, lines: ["末尾"] },
+    });
+    expect(s.intakeLogs.a).toEqual({ runId: 2, lines: ["末尾"] });
+    const synced = reduce(s, { type: "intakes.sync", intakes: [] });
+    expect(synced.intakeLogs.a).toBeUndefined();
   });
 });
 
