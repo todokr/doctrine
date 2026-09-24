@@ -2,7 +2,7 @@ import { describe, expect, test } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { IntakeLogPanel } from "./components/IntakeLog";
 import { IntakeFacePlaceholder, IntakeHeading, RevisingBand } from "./components/IntakeView";
-import { GhUnavailable, IssueList, IssuePreview } from "./components/IssuePicker";
+import { IssueList, IssuePreview, TrackerUnavailable } from "./components/IssuePicker";
 import { GITHUB_ISSUES, INTAKES, PROJECTS } from "./fixtures";
 
 const noop = () => {};
@@ -11,7 +11,7 @@ const URL = "https://github.com/o/r/issues/8";
 function preview(o: Partial<Parameters<typeof IssuePreview>[0]>) {
   return renderToStaticMarkup(
     <IssuePreview
-      issue={{ url: URL, number: 8, title: "Issue 8 のタイトル" }}
+      issue={{ url: URL, identifier: "#8", title: "Issue 8 のタイトル" }}
       detail={undefined}
       target={{ kind: "start", url: URL }}
       pending={false}
@@ -25,6 +25,12 @@ function preview(o: Partial<Parameters<typeof IssuePreview>[0]>) {
 const reviewing = INTAKES.find((i) => i.state === "reviewing")!;
 
 describe("IssuePreview", () => {
+  test("見出しに識別子とタイトルを出す", () => {
+    expect(preview({})).toContain("#8 Issue 8 のタイトル");
+    const noIdentifier = preview({ issue: { url: URL, identifier: null, title: "T" } });
+    expect(noIdentifier).toContain("<h2>T</h2>");
+  });
+
   test("Intake のある Issue は開始の代わりに開くボタンを出す", () => {
     const html = preview({ target: { kind: "open", intakeId: "i1" } });
     expect(html).toContain("進行中の Intake を開く");
@@ -58,6 +64,20 @@ describe("IssuePreview", () => {
 });
 
 describe("IssueList", () => {
+  test("行に識別子を出す", () => {
+    const html = renderToStaticMarkup(
+      <IssueList issues={GITHUB_ISSUES} intakes={INTAKES} selected={null} onSelect={noop} />,
+    );
+    expect(html).toContain("#5");
+    expect(html).toContain("#8");
+    const linear = [{ ...GITHUB_ISSUES[0], identifier: "ENG-123" }];
+    const linearHtml = renderToStaticMarkup(
+      <IssueList issues={linear} intakes={INTAKES} selected={null} onSelect={noop} />,
+    );
+    expect(linearHtml).toContain("ENG-123");
+    expect(linearHtml).not.toContain("#ENG-123");
+  });
+
   test("一覧の行に Intake ありの印を付ける", () => {
     const html = renderToStaticMarkup(
       <IssueList issues={GITHUB_ISSUES} intakes={INTAKES} selected={null} onSelect={noop} />,
@@ -79,10 +99,10 @@ describe("IssueList", () => {
   });
 });
 
-describe("GhUnavailable", () => {
+describe("TrackerUnavailable", () => {
   test("gh が使えないときは理由と直し方と gh の出力を出す", () => {
     const html = renderToStaticMarkup(
-      <GhUnavailable
+      <TrackerUnavailable
         status={{ ok: false, reason: "not_logged_in", message: "You are not logged into any GitHub hosts." }}
         onRetry={noop}
       />,

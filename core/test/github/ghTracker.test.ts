@@ -7,13 +7,13 @@ const P = "/repo";
 const isRepoView = (a: string[]) => a[0] === "repo" && a[1] === "view";
 const isGraphql = (a: string[]) => a[0] === "api" && a[1] === "graphql";
 
-test("status: 3 つとも通れば repo を返す", async () => {
+test("status: 3 つとも通れば repo を target として返す", async () => {
   const { run, calls } = fakeGh((a) => {
     if (a[0] === "--version" || a[0] === "auth") return "";
     if (isRepoView(a)) return JSON.stringify({ id: "R_1", nameWithOwner: "o/r" });
   });
   const s = await ghTracker(run).status(P);
-  assert.deepEqual(s, { ok: true, repo: { id: "R_1", nameWithOwner: "o/r" } });
+  assert.deepEqual(s, { ok: true, target: { id: "R_1", name: "o/r" } });
   assert.deepEqual(calls.map((c) => c.args), [
     ["--version"],
     ["auth", "status"],
@@ -80,7 +80,13 @@ test("listIssues: 既定は自分の担当で絞る", async () => {
   const rows = await ghTracker(run).listIssues(P, { assignee: "me" });
   assert.deepEqual(calls[0].args, [...LIST_ARGS, "--assignee", "@me"]);
   assert.equal(calls[0].cwd, P);
-  assert.deepEqual(rows, [{ ...issueRow, assignees: ["a"] }]);
+  assert.deepEqual(rows, [{
+    url: issueRow.url,
+    identifier: "#1",
+    title: issueRow.title,
+    assignees: ["a"],
+    updatedAt: issueRow.updatedAt,
+  }]);
 });
 
 test("listIssues: any なら担当者で絞らず、検索語を渡す", async () => {

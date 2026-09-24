@@ -1,10 +1,10 @@
 // テスト用の標本。画面はこれを使わない（画面のデータはデーモンから来る）
 import type { Project, Task, TaskDiff } from "./types";
 import type {
-  GithubIssue,
   IntakeDetail,
   IntakeSummary,
   ServerEvent,
+  TrackerIssue,
   WorkflowDetail,
   WorkflowListEntry,
 } from "../../shared/protocol.ts";
@@ -404,10 +404,10 @@ export const INTAKES: IntakeSummary[] = [
 ];
 
 /** intake_id のあるもの（進行中の Intake の Issue）と無いもの */
-export const GITHUB_ISSUES: GithubIssue[] = [
+export const GITHUB_ISSUES: TrackerIssue[] = [
   {
     url: "https://github.com/o/r/issues/5",
-    number: 5,
+    identifier: "#5",
     title: "Issue 5 のタイトル",
     assignees: ["me"],
     updatedAt: at(30),
@@ -415,7 +415,7 @@ export const GITHUB_ISSUES: GithubIssue[] = [
   },
   {
     url: "https://github.com/o/r/issues/8",
-    number: 8,
+    identifier: "#8",
     title: "Issue 8 のタイトル",
     assignees: [],
     updatedAt: at(90),

@@ -65,7 +65,7 @@ import {
 import { previewTaskPrompt, redispatchProcess } from "../intake/dispatch.ts";
 import { intakeDraft, toIntakeDetail, toIntakeSummary } from "../intake/view.ts";
 import type { IntakeWatcher } from "../intake/watch.ts";
-import type { Tracker } from "../github/tracker.ts";
+import type { Tracker } from "../tracker/tracker.ts";
 import { applyApproval, runTask } from "../domain/engine.ts";
 import {
   branchNameFor,
@@ -736,11 +736,11 @@ export function createHandler(ctx: DaemonContext): Handler {
         }));
       }
 
-      case "github.status": {
+      case "tracker.status": {
         const project = await reqProject(ctx, params);
         return await ctx.tracker.status(project.path);
       }
-      case "github.issues": {
+      case "tracker.issues": {
         const project = await reqProject(ctx, params);
         const assignee = params.assignee === "any" ? "any" : "me";
         const search = typeof params.search === "string" ? params.search : undefined;
@@ -748,9 +748,11 @@ export function createHandler(ctx: DaemonContext): Handler {
           assignee,
           ...(search === undefined ? {} : { search }),
         }).catch(async (e) => {
-          // 理由が分かる失敗は、gh の生のエラーより先に返す。
+          // 理由が分かる失敗は、トラッカーの生のエラーより先に返す。
           const status = await ctx.tracker.status(project.path);
-          if (!status.ok) throw new Error(`gh が使えません（${status.reason}）: ${status.message}`);
+          if (!status.ok) {
+            throw new Error(`Issue トラッカーを使えません（${status.reason}）: ${status.message}`);
+          }
           throw e;
         });
         const open = new Map(
@@ -759,7 +761,7 @@ export function createHandler(ctx: DaemonContext): Handler {
         );
         return issues.map((i) => ({ ...i, intake_id: open.get(i.url) ?? null }));
       }
-      case "github.issue": {
+      case "tracker.issue": {
         const project = await reqProject(ctx, params);
         return await ctx.tracker.readIssue(project.path, req(params, "url"));
       }

@@ -42,7 +42,7 @@ import {
   intakeWorktreePathFor,
   restoreWorktree,
 } from "../domain/worktree.ts";
-import type { Tracker } from "../github/tracker.ts";
+import type { Tracker } from "../tracker/tracker.ts";
 import { READ_ONLY_TOOLS } from "../workflow/scaffold.ts";
 import {
   type AttentionReason,
@@ -51,7 +51,7 @@ import {
 } from "../../../shared/intake/decomposer.ts";
 import { decisionTexts } from "../../../shared/intake/answerText.ts";
 import { buildFeedback } from "../../../shared/intake/feedback.ts";
-import type { IssueDetail } from "../../../shared/intake/github.ts";
+import type { IssueDetail } from "../../../shared/intake/tracker.ts";
 import { canonicalJson } from "../../../shared/intake/pfd.ts";
 import { consecutiveInvalid, continuationMessage, MAX_INVALID_OUTPUTS } from "./conversation.ts";
 import { checkDecomposerOutput } from "./output.ts";

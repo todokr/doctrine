@@ -1,7 +1,7 @@
 import { z } from "zod";
-import type { GhStatus, IssueRef } from "../../../shared/intake/github.ts";
+import type { IssueRef, TrackerStatus } from "../../../shared/intake/tracker.ts";
 import { defaultGhRun, type GhRun, graphqlArgs, parseGhJson } from "./gh.ts";
-import type { SubIssue, Tracker } from "./tracker.ts";
+import type { SubIssue, Tracker } from "../tracker/tracker.ts";
 
 const repoSchema = z.object({ id: z.string(), nameWithOwner: z.string() });
 const repoIdSchema = z.object({ id: z.string() });
@@ -75,7 +75,7 @@ export function ghTracker(run: GhRun = defaultGhRun): Tracker {
   }
 
   return {
-    async status(projectPath): Promise<GhStatus> {
+    async status(projectPath): Promise<TrackerStatus> {
       try {
         await run(["--version"], projectPath);
       } catch (e) {
@@ -94,7 +94,7 @@ export function ghTracker(run: GhRun = defaultGhRun): Tracker {
       }
       const repo = parseGhJson(repoSchema, out, "gh repo view");
       repoIds.set(projectPath, repo.id);
-      return { ok: true, repo };
+      return { ok: true, target: { id: repo.id, name: repo.nameWithOwner } };
     },
 
     async listIssues(projectPath, o) {
@@ -111,7 +111,11 @@ export function ghTracker(run: GhRun = defaultGhRun): Tracker {
       if (o.assignee === "me") args.push("--assignee", "@me");
       if (o.search) args.push("--search", o.search);
       const rows = parseGhJson(listSchema, await run(args, projectPath), "gh issue list");
-      return rows.map((r) => ({ ...r, assignees: r.assignees.map((a) => a.login) }));
+      return rows.map(({ number, ...r }) => ({
+        ...r,
+        identifier: `#${number}`,
+        assignees: r.assignees.map((a) => a.login),
+      }));
     },
 
     async readIssue(projectPath, url) {

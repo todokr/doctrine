@@ -1,4 +1,4 @@
-import type { IssueRef } from "../../../shared/intake/github.ts";
+import type { IssueRef } from "../../../shared/intake/tracker.ts";
 import { canonicalJson, type Pfd, type Process } from "../../../shared/intake/pfd.ts";
 import {
   buildSubIssue,
@@ -8,7 +8,7 @@ import {
 } from "../../../shared/intake/subIssue.ts";
 import { type IntakeRow, listProcesses, updateProcess } from "../db/intakes.ts";
 import type { Db } from "../db/schema.ts";
-import type { SubIssue, Tracker } from "../github/tracker.ts";
+import type { SubIssue, Tracker } from "../tracker/tracker.ts";
 import { sha256Hex } from "./pfd/hash.ts";
 import { processProgressOf } from "./view.ts";
 

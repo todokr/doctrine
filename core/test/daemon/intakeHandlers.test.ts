@@ -20,9 +20,9 @@ import type {
   IntakeSummary,
   ServerEvent,
 } from "../../../shared/protocol.ts";
-import type { PrFact } from "../../../shared/intake/github.ts";
+import type { PrFact } from "../../../shared/intake/processStatus.ts";
 import type { IntakeState } from "../../../shared/intake/state.ts";
-import type { PrWatcher, Tracker } from "../../src/github/tracker.ts";
+import type { PrWatcher, Tracker } from "../../src/tracker/tracker.ts";
 import { createIntakeWatcher } from "../../src/intake/watch.ts";
 import { loadWorkflowFromDisk, taskWorkflow } from "../../src/workflow/load.ts";
 import { fakeTracker as statefulTracker } from "../helpers/fakeTracker.ts";
@@ -456,13 +456,19 @@ test("回答の検証に落ちると状態は変わらない", async () => {
   assert.equal((await getIntake(ctx.db, started.id))!.state, "decomposing");
 });
 
-test("github.issues は進行中の Intake に印を付ける", async () => {
+test("tracker.issues は進行中の Intake に印を付ける", async () => {
   const tracker = fakeTracker({}, {
     issues: [
-      { url: ISSUE, number: 1, title: "one", assignees: [], updatedAt: "2026-09-21T00:00:00Z" },
+      {
+        url: ISSUE,
+        identifier: "#1",
+        title: "one",
+        assignees: [],
+        updatedAt: "2026-09-21T00:00:00Z",
+      },
       {
         url: "https://github.com/o/r/issues/2",
-        number: 2,
+        identifier: "#2",
         title: "two",
         assignees: [],
         updatedAt: "2026-09-21T00:00:00Z",
@@ -472,23 +478,23 @@ test("github.issues は進行中の Intake に印を付ける", async () => {
   const { call } = await setup({ tracker });
   const started = await call<IntakeSummary>("intake.start", { project: repo, issue_url: ISSUE });
 
-  const issues = await call<{ url: string; intake_id: string | null }[]>("github.issues", {
+  const issues = await call<{ url: string; intake_id: string | null }[]>("tracker.issues", {
     project: repo,
   });
   assert.deepEqual(issues.map((i) => i.intake_id), [started.id, null]);
-  await call("github.issues", { project: repo, assignee: "any", search: "x" });
+  await call("tracker.issues", { project: repo, assignee: "any", search: "x" });
   assert.deepEqual(tracker.listCalls, [{ assignee: "me" }, { assignee: "any", search: "x" }]);
 });
 
-test("gh が使えないとき github.issues は理由を返して失敗する", async () => {
+test("トラッカーが使えないとき tracker.issues は理由を返して失敗する", async () => {
   const tracker = fakeTracker({}, {
     failList: true,
     status: { ok: false, reason: "not_logged_in", message: "gh auth login を" },
   });
   const { call } = await setup({ tracker });
   await assert.rejects(
-    () => call("github.issues", { project: repo }),
-    /not_logged_in.*gh auth login を/,
+    () => call("tracker.issues", { project: repo }),
+    /Issue トラッカーを使えません（not_logged_in）: gh auth login を/,
   );
 });
 
@@ -812,18 +818,18 @@ test("完了していない Intake の親 Issue は閉じられない", async ()
   assert.deepEqual(tracker.closes, []);
 });
 
-test("github.status は tracker の結果を返す", async () => {
+test("tracker.status は tracker の結果を返す", async () => {
   const { call } = await setup();
-  assert.deepEqual(await call("github.status", { project: repo }), {
+  assert.deepEqual(await call("tracker.status", { project: repo }), {
     ok: true,
-    repo: { id: "R1", nameWithOwner: "o/r" },
+    target: { id: "R1", name: "o/r" },
   });
 });
 
-test("github.issue は tracker から本文を読む", async () => {
+test("tracker.issue は tracker から本文を読む", async () => {
   const tracker = fakeTracker({ title: "T1", body: "本文" });
   const { call } = await setup({ tracker });
-  const detail = await call<{ url: string; title: string; body: string }>("github.issue", {
+  const detail = await call<{ url: string; title: string; body: string }>("tracker.issue", {
     project: repo,
     url: ISSUE,
   });
@@ -833,10 +839,10 @@ test("github.issue は tracker から本文を読む", async () => {
   assert.deepEqual(tracker.reads, [ISSUE]);
 });
 
-test("github.issue は未登録のプロジェクトを拒む", async () => {
+test("tracker.issue は未登録のプロジェクトを拒む", async () => {
   const { call } = await setup();
   await assert.rejects(
-    () => call("github.issue", { project: "/not-registered", url: ISSUE }),
+    () => call("tracker.issue", { project: "/not-registered", url: ISSUE }),
     /未登録のプロジェクトです/,
   );
 });

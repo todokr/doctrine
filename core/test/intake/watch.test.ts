@@ -1,7 +1,7 @@
 import { fakeBaseSync, fakeWorkflowLoader } from "../helpers/watcher.ts";
 import { test } from "@std/testing/bdd";
 import assert from "node:assert/strict";
-import type { PrFact } from "../../../shared/intake/github.ts";
+import type { PrFact } from "../../../shared/intake/processStatus.ts";
 import type { Pfd } from "../../../shared/intake/pfd.ts";
 import {
   getIntake,

@@ -1,5 +1,5 @@
-import type { GhStatus, IssueDetail, IssueSummary } from "../../../shared/intake/github.ts";
-import type { Tracker } from "../../src/github/tracker.ts";
+import type { IssueDetail, IssueSummary, TrackerStatus } from "../../../shared/intake/tracker.ts";
+import type { Tracker } from "../../src/tracker/tracker.ts";
 
 type ListOptions = Parameters<Tracker["listIssues"]>[1];
 
@@ -11,7 +11,7 @@ type ListOptions = Parameters<Tracker["listIssues"]>[1];
 export function fakeTracker(
   issue: Partial<IssueDetail> = {},
   o: {
-    status?: GhStatus;
+    status?: TrackerStatus;
     issues?: IssueSummary[];
     failList?: boolean;
     failClose?: boolean;
@@ -44,7 +44,7 @@ export function fakeTracker(
     },
     status: () =>
       Promise.resolve(
-        o.status ?? { ok: true, repo: { id: "R1", nameWithOwner: "o/r" } },
+        o.status ?? { ok: true, target: { id: "R1", name: "o/r" } },
       ),
     listIssues: (_projectPath, listOptions) => {
       listCalls.push(listOptions);

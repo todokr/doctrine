@@ -1,5 +1,5 @@
-import type { PrFact } from "../../../shared/intake/github.ts";
-import type { PrWatcher } from "../../src/github/tracker.ts";
+import type { PrFact } from "../../../shared/intake/processStatus.ts";
+import type { PrWatcher } from "../../src/tracker/tracker.ts";
 
 export function fakePrWatcher(): {
   prWatcher: PrWatcher;

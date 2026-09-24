@@ -1,7 +1,7 @@
 import { z } from "zod";
-import type { PrFact } from "../../../shared/intake/github.ts";
+import type { PrFact } from "../../../shared/intake/processStatus.ts";
 import { defaultGhRun, type GhRun, graphqlArgs, parseGhJson } from "./gh.ts";
-import type { PrWatcher } from "./tracker.ts";
+import type { PrWatcher } from "../tracker/tracker.ts";
 
 /** 1 クエリに並べる別名の上限（spec 11.2 章）。 */
 export const PR_ALIASES_PER_QUERY = 50;

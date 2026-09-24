@@ -21,11 +21,10 @@ import {
 } from "./daemon/client";
 import { receiveGuide } from "./guide";
 import { buildDiff } from "./patch";
-import type { GhStatus, IssueDetail } from "../../shared/intake/github.ts";
+import type { IssueDetail, TrackerStatus } from "../../shared/intake/tracker.ts";
 import type { QuestionSetReply } from "../../shared/intake/validateQuestion.ts";
 import type {
   DaemonSlots,
-  GithubIssue,
   IntakeDetail,
   IntakeSummary,
   NewComment,
@@ -33,6 +32,7 @@ import type {
   ProjectConfig,
   ProjectConfigInput,
   ProjectSummary,
+  TrackerIssue,
   Warning,
   WorkflowDetail,
   WorkflowListEntry,
@@ -442,19 +442,19 @@ export function useDecide() {
  */
 export function useIntakeRpc() {
   return {
-    ghStatus: (projectPath: string): Promise<GhStatus> =>
-      rpc("github.status", { project: projectPath }),
+    trackerStatus: (projectPath: string): Promise<TrackerStatus> =>
+      rpc("tracker.status", { project: projectPath }),
     issues: (
       projectPath: string,
       o: { assignee: "me" | "any"; search?: string },
-    ): Promise<GithubIssue[]> =>
-      rpc("github.issues", {
+    ): Promise<TrackerIssue[]> =>
+      rpc("tracker.issues", {
         project: projectPath,
         assignee: o.assignee,
         ...(o.search ? { search: o.search } : {}),
       }),
     issue: (projectPath: string, url: string): Promise<IssueDetail> =>
-      rpc("github.issue", { project: projectPath, url }),
+      rpc("tracker.issue", { project: projectPath, url }),
     start: (
       projectPath: string,
       issueUrl: string,

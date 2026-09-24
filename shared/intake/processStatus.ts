@@ -1,4 +1,4 @@
-// spec 3 章は PrFact を core/src/github/tracker.ts に置くと書いているが、
+// spec 3 章は PrFact を core/src/tracker/tracker.ts に置くと書いているが、
 // IntakeDetail.processes でアプリへ渡るので shared に置く。tracker.ts はここから import する。
 export type PrFact = {
   number: number;

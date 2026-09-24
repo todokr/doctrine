@@ -42,10 +42,10 @@ import {
   countIntakeAttention,
   draftReply,
   EMPTY_INTAKE_DRAFT,
-  ghGuidance,
   intakeFace,
   intakeHistory,
   type IntakeDraft,
+  issueIdentifier,
   intakeOrder,
   intakeProgress,
   intakeSection,
@@ -58,6 +58,7 @@ import {
   rejectionText,
   setWholeComment,
   toggleOption,
+  trackerGuidance,
   updateAnswer,
   updateResponse,
   wholeComment,
@@ -199,7 +200,7 @@ test("標本が質問・仮定と回答・応答の検証を通る", () => {
   expect(validateAnswers(set, { answers: ANSWERS, assumptionResponses: RESPONSES }).ok).toBe(true);
 });
 
-const REPO = { nameWithOwner: "o/r" };
+const TARGET = { name: "o/r" };
 const sections = (list: typeof INTAKES) => list.map(intakeSection);
 const times = (list: typeof INTAKES) => list.map((i) => Date.parse(i.updated_at));
 
@@ -422,36 +423,53 @@ describe("parseIssueInput", () => {
   test.each(["#12", "12", " 12 ", url, "https://github.com/O/R/issues/12#issuecomment-1"])(
     "%s は URL にする",
     (input) => {
-      expect(parseIssueInput(input, REPO)).toBe(url);
+      expect(parseIssueInput(input, TARGET)).toBe(url);
     },
   );
 
   test.each(["https://github.com/x/y/issues/12", "", "abc", "#", "https://github.com/o/r/pull/12"])(
     "%s は null",
     (input) => {
-      expect(parseIssueInput(input, REPO)).toBeNull();
+      expect(parseIssueInput(input, TARGET)).toBeNull();
     },
   );
 });
 
-describe("ghGuidance", () => {
+describe("trackerGuidance", () => {
   test("gh が無い", () => {
-    const g = ghGuidance({ ok: false, reason: "not_installed", message: "" });
+    const g = trackerGuidance({ ok: false, reason: "not_installed", message: "" });
     expect(g.title).toBe("gh が見つかりません");
     expect(g.fix).toContain("https://cli.github.com");
     expect(g.command).toBeNull();
   });
 
   test("ログインしていない", () => {
-    const g = ghGuidance({ ok: false, reason: "not_logged_in", message: "" });
+    const g = trackerGuidance({ ok: false, reason: "not_logged_in", message: "" });
     expect(g.title).toBe("gh にログインしていません");
     expect(g.command).toBe("gh auth login");
   });
 
   test("GitHub の remote が無い", () => {
-    const g = ghGuidance({ ok: false, reason: "no_github_remote", message: "" });
+    const g = trackerGuidance({ ok: false, reason: "no_github_remote", message: "" });
     expect(g.title).toBe("このリポジトリに GitHub の remote がありません");
     expect(g.command).toBeNull();
+  });
+
+  test("知らない理由は汎用の案内と null のコマンド", () => {
+    const g = trackerGuidance({ ok: false, reason: "unknown", message: "" });
+    expect(g.title).toBe("Issue トラッカーを使えません");
+    expect(g.command).toBeNull();
+  });
+});
+
+describe("issueIdentifier", () => {
+  test("GitHub の Issue の URL は #番号", () => {
+    expect(issueIdentifier("https://github.com/o/r/issues/12")).toBe("#12");
+  });
+
+  test("GitHub でない URL は null", () => {
+    expect(issueIdentifier("https://linear.app/acme/issue/ENG-1/x")).toBeNull();
+    expect(issueIdentifier("https://example.com/o/r/issues/12")).toBeNull();
   });
 });
 
