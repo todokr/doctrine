@@ -1,4 +1,4 @@
-import type { IssueRef } from "../../../shared/intake/tracker.ts";
+import type { IssuePhase, IssueRef, TrackerKind } from "../../../shared/intake/tracker.ts";
 import type { SubIssue, Tracker } from "../../src/tracker/tracker.ts";
 
 export type FakeIssue = {
@@ -14,7 +14,8 @@ export type TrackerCall =
   | { op: "createSubIssue"; parentUrl: string; title: string; body: string }
   | { op: "findSubIssues"; parentUrl: string }
   | { op: "updateIssue"; url: string; title: string; body: string }
-  | { op: "closeIssue"; url: string; reason: "completed" | "not_planned" };
+  | { op: "closeIssue"; url: string; reason: "completed" | "not_planned" }
+  | { op: "advanceIssue"; url: string; phase: IssuePhase };
 
 type CreateCall = Extract<TrackerCall, { op: "createSubIssue" }>;
 
@@ -34,7 +35,7 @@ export type FakeTracker = {
 };
 
 /** Tracker を直接実装した、状態を持つ偽物。listIssues は使わない。 */
-export function fakeTracker(): FakeTracker {
+export function fakeTracker(o: { kind?: TrackerKind } = {}): FakeTracker {
   const issues: FakeIssue[] = [];
   const calls: TrackerCall[] = [];
   let failing: ((call: TrackerCall) => boolean) | null = null;
@@ -73,7 +74,7 @@ export function fakeTracker(): FakeTracker {
   const settle = <T>(f: () => T): Promise<T> => new Promise((resolve) => resolve(f()));
 
   const tracker: Tracker = {
-    kind: "github",
+    kind: o.kind ?? "github",
     // calls に積まない。積むと subIssueSync.test.ts の calls の検査が崩れる
     status: () => Promise.resolve({ ok: true, target: { id: "R_1", name: "o/r" } }),
     listIssues: unexpected("listIssues"),
@@ -111,6 +112,10 @@ export function fakeTracker(): FakeTracker {
         const target = find(issue);
         target.state = "CLOSED";
         target.closeReason = reason;
+      }),
+    advanceIssue: (_projectPath, issue, phase) =>
+      settle(() => {
+        record({ op: "advanceIssue", url: issue.url, phase });
       }),
   };
 

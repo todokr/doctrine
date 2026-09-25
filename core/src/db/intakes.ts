@@ -95,6 +95,7 @@ export type IntakePatch = Partial<
     | "child_started_at"
     | "rate_limited_until"
     | "revision_run_id"
+    | "issue_phase"
     | "ended_at"
   >
 >;
@@ -347,6 +348,7 @@ export type IntakeProcessPatch = Partial<
     | "sub_issue_node_id"
     | "sub_issue_hash"
     | "sub_issue_closed"
+    | "sub_issue_phase"
     | "human_note"
     | "human_done_at"
     | "retired_at"

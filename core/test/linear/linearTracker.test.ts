@@ -279,6 +279,94 @@ test("closeIssue: その種類の状態が無ければ投げる", async () => {
   assert.equal(calls.some((c) => has(c.query, "issueUpdate")), false);
 });
 
+const S = {
+  backlog: { id: "s-backlog", name: "Backlog", type: "backlog", position: 0 },
+  todo: { id: "s-todo", name: "Todo", type: "unstarted", position: 0 },
+  inprog: { id: "s-inprog", name: "In Progress", type: "started", position: 1 },
+  review: { id: "s-review", name: "In Review", type: "started", position: 2 },
+  done: { id: "s-done", name: "Done", type: "completed", position: 0 },
+  cancel: { id: "s-cancel", name: "Canceled", type: "canceled", position: 0 },
+};
+const ALL = Object.values(S);
+const advanceFake = (current: object, nodes: object[] = ALL) =>
+  fakeLinear((q) => {
+    if (has(q, "issueUpdate")) return { issueUpdate: { success: true } };
+    return { issue: { state: current, team: { states: { nodes } } } };
+  });
+const updates = (calls: { query: string }[]) => calls.filter((c) => has(c.query, "issueUpdate"));
+
+test("advanceIssue: todo は種類が unstarted の状態のうち position が最小のものへ移す", async () => {
+  const { fetch, calls } = advanceFake(S.backlog, [
+    ...ALL,
+    { id: "s-todo2", name: "Ready", type: "unstarted", position: 3 },
+  ]);
+  await t(fetch).advanceIssue(P, issue, "todo");
+  assert.deepEqual(calls[1].variables, { id: "uuid-2", input: { stateId: "s-todo" } });
+});
+
+test("advanceIssue: inProgress は種類が started の状態のうち position が最小のものへ移す", async () => {
+  const { fetch, calls } = advanceFake(S.todo);
+  await t(fetch).advanceIssue(P, issue, "inProgress");
+  assert.deepEqual(calls[1].variables, { id: "uuid-2", input: { stateId: "s-inprog" } });
+});
+
+test("advanceIssue: inReview は既定で名前が In Review の状態へ移す", async () => {
+  const { fetch, calls } = advanceFake(S.inprog);
+  await t(fetch).advanceIssue(P, issue, "inReview");
+  assert.deepEqual(calls[1].variables, { id: "uuid-2", input: { stateId: "s-review" } });
+});
+
+test("advanceIssue: project.yaml の名前があればその名前で引く", async () => {
+  const { fetch, calls } = advanceFake(S.inprog, [
+    ...ALL,
+    { id: "s-custom", name: "レビュー中", type: "started", position: 3 },
+  ]);
+  await linearTracker({
+    apiKey: KEY,
+    team: "ENG",
+    fetch,
+    states: { inReview: "レビュー中" },
+  }).advanceIssue(P, issue, "inReview");
+  assert.deepEqual(calls[1].variables, { id: "uuid-2", input: { stateId: "s-custom" } });
+});
+
+test("advanceIssue: 今の状態が同じなら issueUpdate を呼ばない", async () => {
+  const { fetch, calls } = advanceFake(S.inprog);
+  await t(fetch).advanceIssue(P, issue, "inProgress");
+  assert.equal(updates(calls).length, 0);
+});
+
+test("advanceIssue: 手で先へ進められていれば戻さない", async () => {
+  const { fetch, calls } = advanceFake(S.review);
+  await t(fetch).advanceIssue(P, issue, "inProgress");
+  assert.equal(updates(calls).length, 0);
+});
+
+test("advanceIssue: 完了・取りやめの Issue は触らない", async () => {
+  const a = advanceFake(S.done);
+  await t(a.fetch).advanceIssue(P, issue, "inReview");
+  assert.equal(updates(a.calls).length, 0);
+  const b = advanceFake(S.cancel);
+  await t(b.fetch).advanceIssue(P, issue, "todo");
+  assert.equal(updates(b.calls).length, 0);
+});
+
+test("advanceIssue: その名前の状態が無ければ投げる", async () => {
+  const { fetch, calls } = advanceFake(S.inprog, ALL.filter((s) => s.id !== "s-review"));
+  await assert.rejects(t(fetch).advanceIssue(P, issue, "inReview"), /In Review/);
+  assert.equal(updates(calls).length, 0);
+});
+
+test("advanceIssue: その種類の状態が無ければ投げる", async () => {
+  const { fetch } = advanceFake(S.backlog, ALL.filter((s) => s.type !== "unstarted"));
+  await assert.rejects(t(fetch).advanceIssue(P, issue, "todo"), /unstarted/);
+});
+
+test("advanceIssue: Issue が無ければ投げる", async () => {
+  const { fetch } = fakeLinear(() => ({ issue: null }));
+  await assert.rejects(t(fetch).advanceIssue(P, issue, "todo"), /見つかりません/);
+});
+
 test("GraphQL の errors は Error にする", async () => {
   const { fetch } = fakeLinear(() => errors(200, "boom"));
   await assert.rejects(t(fetch).updateIssue(P, issue, { title: "T", body: "B" }), /boom/);

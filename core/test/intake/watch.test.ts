@@ -3,6 +3,7 @@ import { test } from "@std/testing/bdd";
 import assert from "node:assert/strict";
 import type { PrFact } from "../../../shared/intake/processStatus.ts";
 import type { Pfd } from "../../../shared/intake/pfd.ts";
+import type { TrackerKind } from "../../../shared/intake/tracker.ts";
 import {
   getIntake,
   getPrObservation,
@@ -106,9 +107,9 @@ test("observePullRequests: pullRequests の失敗は投げる", async () => {
 
 const now = () => new Date().toISOString();
 
-async function setup(pfd: Pfd = example()) {
+async function setup(pfd: Pfd = example(), kind?: TrackerKind) {
   const seeded = await seedActive(pfd);
-  const ft = fakeTracker();
+  const ft = fakeTracker({ kind });
   const pw = fakePrWatcher();
   const base = fakeBaseSync();
   const updated: string[] = [];
@@ -487,4 +488,103 @@ test("偽の gh: ghTracker と ghPrWatcher を通して、承認直後の投入�
   await watcher.request(projectId);
   const tasks = await listTasks(db);
   assert.deepEqual(tasks.map((t) => t.intake_process_id).toSorted(), ["1", "2"]);
+});
+
+// Linear の状態（対応表の出来事ごとの呼び出し）
+const setupLinear = (pfd: Pfd = example()) => setup(pfd, "linear");
+const advancesOf = (ft: ReturnType<typeof fakeTracker>) =>
+  ft.calls.flatMap((c) => c.op === "advanceIssue" ? [{ url: c.url, phase: c.phase }] : []);
+async function subIssueUrl(db: Db, processId: string): Promise<string> {
+  return (await listProcesses(db, "i1")).find((r) => r.process_id === processId)!.sub_issue_url!;
+}
+async function branchOf(db: Db, processId: string): Promise<string> {
+  const row = (await listProcesses(db, "i1")).find((r) => r.process_id === processId)!;
+  return (await getTask(db, row.current_task_id!))!.branch;
+}
+
+test("Linear: 承認後の最初の周で、親を inProgress、投入した sub-issue を inProgress、残りを todo に 1 回ずつ進める", async () => {
+  const { db, projectId, ft, watcher } = await setupLinear();
+  await watcher.request(projectId);
+  assert.deepEqual(advancesOf(ft), [
+    { url: PARENT_URL, phase: "inProgress" },
+    { url: await subIssueUrl(db, "1"), phase: "inProgress" },
+    { url: await subIssueUrl(db, "2"), phase: "todo" },
+    { url: await subIssueUrl(db, "3"), phase: "todo" },
+    { url: await subIssueUrl(db, "4"), phase: "todo" },
+  ]);
+});
+
+test("Linear: 変化の無い周では状態を進めない", async () => {
+  const { projectId, ft, watcher } = await setupLinear();
+  await watcher.request(projectId);
+  const count = advancesOf(ft).length;
+  await watcher.request(projectId);
+  assert.equal(advancesOf(ft).length, count);
+});
+
+test("Linear: PR が開いた sub-issue を inReview に 1 回進める", async () => {
+  const { db, projectId, ft, pw, watcher } = await setupLinear();
+  await watcher.request(projectId);
+  const before = advancesOf(ft).length;
+  pw.prs.set(await branchOf(db, "1"), [pr(7, "OPEN")]);
+  await watcher.request(projectId);
+  assert.deepEqual(advancesOf(ft).slice(before), [
+    { url: await subIssueUrl(db, "1"), phase: "inReview" },
+  ]);
+  await watcher.request(projectId);
+  assert.equal(advancesOf(ft).length, before + 1);
+});
+
+test("Linear: 上流のマージで投入した下流の sub-issue を inProgress に進める", async () => {
+  const { db, projectId, ft, pw, watcher } = await setupLinear();
+  await watcher.request(projectId);
+  const before = advancesOf(ft).length;
+  await finishHuman3(db);
+  await mergeOf(pw, db, "1");
+  await watcher.request(projectId);
+  assert.deepEqual(advancesOf(ft).slice(before), [
+    { url: await subIssueUrl(db, "1"), phase: "inReview" },
+    { url: await subIssueUrl(db, "2"), phase: "inProgress" },
+  ]);
+});
+
+test("Linear: 状態を進められなくても投入は続き、失敗を健康状態に出し、次の周でやり直す", async () => {
+  const { db, projectId, ft, watcher } = await setupLinear();
+  ft.failWhen((c) => c.op === "advanceIssue");
+  await watcher.request(projectId);
+  assert.equal((await listTasks(db)).length, 1);
+  assert.equal((await getIntake(db, "i1"))!.state, "active");
+  assert.equal(watcher.health(projectId).consecutiveFailures, 1);
+  assert.match(watcher.health(projectId).lastError!, /Linear の状態/);
+
+  ft.heal();
+  const before = advancesOf(ft).length;
+  await watcher.request(projectId);
+  assert.equal(advancesOf(ft).length - before, 5);
+  assert.equal(watcher.health(projectId).consecutiveFailures, 0);
+
+  await watcher.request(projectId);
+  assert.equal(advancesOf(ft).length - before, 5);
+});
+
+test("Linear: 改訂中の Intake の状態は進めない", async () => {
+  const { db, projectId, ft, watcher } = await setupLinear();
+  await updateIntake(db, "i1", { state: "decomposing", revising: 1 });
+  await watcher.request(projectId);
+  assert.equal(advancesOf(ft).length, 0);
+});
+
+test("GitHub のプロジェクトでは状態を進める呼び出しが起きない", async () => {
+  const { db, projectId, ft, pw, watcher } = await setup();
+  await watcher.request(projectId);
+  assert.equal(advancesOf(ft).length, 0);
+  pw.prs.set(await branchOf(db, "1"), [pr(7, "OPEN")]);
+  await watcher.request(projectId);
+  assert.equal(advancesOf(ft).length, 0);
+  await finishHuman3(db);
+  await mergeOf(pw, db, "1");
+  await watcher.request(projectId);
+  assert.equal(advancesOf(ft).length, 0);
+  assert.equal((await getIntake(db, "i1"))!.issue_phase, null);
+  assert.ok((await listProcesses(db, "i1")).every((r) => r.sub_issue_phase === null));
 });
