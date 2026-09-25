@@ -423,6 +423,26 @@ export const GITHUB_ISSUES: TrackerIssue[] = [
   },
 ];
 
+/** Linear のプロジェクトの一覧。intake_id のあるものと無いもの */
+export const LINEAR_ISSUES: TrackerIssue[] = [
+  {
+    url: "https://linear.app/acme/issue/ENG-123/fix-login",
+    identifier: "ENG-123",
+    title: "ログインを直す",
+    assignees: ["Shun"],
+    updatedAt: at(30),
+    intake_id: null,
+  },
+  {
+    url: "https://linear.app/acme/issue/ENG-124/add-export",
+    identifier: "ENG-124",
+    title: "書き出しを足す",
+    assignees: [],
+    updatedAt: at(90),
+    intake_id: null,
+  },
+];
+
 /** ワークフローの定義の標本。.doctrine/workflows/default.yaml と同じ形の 10 ステップ。 */
 export const WORKFLOW_DEFAULT = {
   name: "default",

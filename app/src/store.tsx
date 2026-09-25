@@ -21,7 +21,7 @@ import {
 } from "./daemon/client";
 import { receiveGuide } from "./guide";
 import { buildDiff } from "./patch";
-import type { IssueDetail, TrackerStatus } from "../../shared/intake/tracker.ts";
+import type { IssueDetail, ProjectTrackerStatus } from "../../shared/intake/tracker.ts";
 import type { QuestionSetReply } from "../../shared/intake/validateQuestion.ts";
 import type {
   DaemonSlots,
@@ -442,7 +442,7 @@ export function useDecide() {
  */
 export function useIntakeRpc() {
   return {
-    trackerStatus: (projectPath: string): Promise<TrackerStatus> =>
+    trackerStatus: (projectPath: string): Promise<ProjectTrackerStatus> =>
       rpc("tracker.status", { project: projectPath }),
     issues: (
       projectPath: string,

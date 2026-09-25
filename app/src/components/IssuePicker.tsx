@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { IssueDetail, TrackerStatus } from "../../../shared/intake/tracker.ts";
+import type { IssueDetail, TrackerKind, TrackerStatus } from "../../../shared/intake/tracker.ts";
 import type { IntakeSummary, TrackerIssue } from "../../../shared/protocol.ts";
 import { type Cached, revalidate, trackerCache, trackerCacheKey } from "../trackerCache";
 import { issueIdentifier, issueTarget, parseIssueInput, trackerGuidance, type IssueTarget } from "../intake";
@@ -123,6 +123,91 @@ export function IssuePreview(
   );
 }
 
+export function IssueChooser(
+  {
+    kind,
+    target,
+    assignee,
+    onAssignee,
+    searchText,
+    onSearchText,
+    onSearch,
+    issues,
+    refreshing,
+    refreshError,
+    intakes,
+    selected,
+    onSelect,
+    direct,
+    onDirect,
+    onPickDirect,
+  }: {
+    kind: TrackerKind;
+    target: { id: string; name: string };
+    assignee: "me" | "any";
+    onAssignee: (assignee: "me" | "any") => void;
+    searchText: string;
+    onSearchText: (text: string) => void;
+    /** Enter を押したとき */
+    onSearch: () => void;
+    issues: Loaded<TrackerIssue[]>;
+    refreshing: boolean;
+    refreshError: string | null;
+    intakes: IntakeSummary[];
+    selected: string | null;
+    onSelect: (url: string) => void;
+    direct: string;
+    onDirect: (text: string) => void;
+    /** 直接入力欄の「選ぶ」 */
+    onPickDirect: () => void;
+  },
+) {
+  return (
+    <div style={{ display: "grid", gap: 10 }}>
+      {kind === "linear" && <p className="hint">{`Linear のチーム ${target.name} の Issue`}</p>}
+      <div className="actions">
+        <div className="seg">
+          <button aria-pressed={assignee === "me"} onClick={() => onAssignee("me")}>自分が担当</button>
+          <button aria-pressed={assignee === "any"} onClick={() => onAssignee("any")}>すべて</button>
+        </div>
+        <input
+          type="text"
+          aria-label="タイトルで探す"
+          placeholder="タイトルで探す（Enter で検索）"
+          style={{ flex: 1, minWidth: 160 }}
+          value={searchText}
+          onChange={(e) => onSearchText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") onSearch();
+          }}
+        />
+      </div>
+      {issues.kind === "error" && <div className="box danger"><p>{issues.message}</p></div>}
+      {issues.kind === "loading" && <p className="hint">読み込み中</p>}
+      {issues.kind === "ok" && <Refreshing refreshing={refreshing} error={refreshError} />}
+      {issues.kind === "ok" && (
+        <IssueList issues={issues.value} intakes={intakes} selected={selected} onSelect={onSelect} />
+      )}
+      {kind !== "linear" && (
+        <div style={{ display: "grid", gap: 4 }}>
+          <label className="hint" htmlFor="issue-direct">番号か URL を直接入れる</label>
+          <div className="actions">
+            <input
+              id="issue-direct"
+              type="text"
+              placeholder="#123 / 123 / https://github.com/…/issues/123"
+              style={{ flex: 1 }}
+              value={direct}
+              onChange={(e) => onDirect(e.target.value)}
+            />
+            <button className="btn sm" onClick={onPickDirect}>選ぶ</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 type Picked = { url: string; identifier: string | null; title: string };
 
 export function IssuePicker() {
@@ -212,59 +297,28 @@ export function IssuePicker() {
     <div className="pad">
       {head}
       <div className="picker">
-        <div style={{ display: "grid", gap: 10 }}>
-          <div className="actions">
-            <div className="seg">
-              <button aria-pressed={assignee === "me"} onClick={() => setAssignee("me")}>自分が担当</button>
-              <button aria-pressed={assignee === "any"} onClick={() => setAssignee("any")}>すべて</button>
-            </div>
-            <input
-              type="text"
-              aria-label="タイトルで探す"
-              placeholder="タイトルで探す（Enter で検索）"
-              style={{ flex: 1, minWidth: 160 }}
-              value={searchText}
-              onChange={(e) => setSearchText(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") setSearch(searchText.trim());
-              }}
-            />
-          </div>
-          {issues.kind === "error" && <div className="box danger"><p>{issues.message}</p></div>}
-          {issues.kind === "loading" && <p className="hint">読み込み中</p>}
-          {issues.kind === "ok" && (
-            <Refreshing
-              refreshing={statusCached.refreshing || issuesCached.refreshing}
-              error={statusCached.refreshError ?? issuesCached.refreshError}
-            />
-          )}
-          {issues.kind === "ok" && (
-            <IssueList issues={issues.value} intakes={s.intakes} selected={picked?.url ?? null} onSelect={choose} />
-          )}
-          <div style={{ display: "grid", gap: 4 }}>
-            <label className="hint" htmlFor="issue-direct">番号か URL を直接入れる</label>
-            <div className="actions">
-              <input
-                id="issue-direct"
-                type="text"
-                placeholder="#123 / 123 / https://github.com/…/issues/123"
-                style={{ flex: 1 }}
-                value={direct}
-                onChange={(e) => setDirect(e.target.value)}
-              />
-              <button
-                className="btn sm"
-                onClick={() => {
-                  const url = parseIssueInput(direct, target);
-                  if (url === null) dispatch({ type: "toast", message: "番号か URL を読めません" });
-                  else choose(url);
-                }}
-              >
-                選ぶ
-              </button>
-            </div>
-          </div>
-        </div>
+        <IssueChooser
+          kind={status.value.kind}
+          target={target}
+          assignee={assignee}
+          onAssignee={setAssignee}
+          searchText={searchText}
+          onSearchText={setSearchText}
+          onSearch={() => setSearch(searchText.trim())}
+          issues={issues}
+          refreshing={statusCached.refreshing || issuesCached.refreshing}
+          refreshError={statusCached.refreshError ?? issuesCached.refreshError}
+          intakes={s.intakes}
+          selected={picked?.url ?? null}
+          onSelect={choose}
+          direct={direct}
+          onDirect={setDirect}
+          onPickDirect={() => {
+            const url = parseIssueInput(direct, target);
+            if (url === null) dispatch({ type: "toast", message: "番号か URL を読めません" });
+            else choose(url);
+          }}
+        />
         {picked && (
           <IssuePreview
             issue={{ url: picked.url, identifier: picked.identifier, title }}

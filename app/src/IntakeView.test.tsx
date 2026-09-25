@@ -2,11 +2,35 @@ import { describe, expect, test } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { IntakeLogPanel } from "./components/IntakeLog";
 import { IntakeFacePlaceholder, IntakeHeading, RevisingBand } from "./components/IntakeView";
-import { IssueList, IssuePreview, TrackerUnavailable } from "./components/IssuePicker";
-import { GITHUB_ISSUES, INTAKES, PROJECTS } from "./fixtures";
+import { IssueChooser, IssueList, IssuePreview, TrackerUnavailable } from "./components/IssuePicker";
+import { GITHUB_ISSUES, INTAKES, LINEAR_ISSUES, PROJECTS } from "./fixtures";
 
 const noop = () => {};
 const URL = "https://github.com/o/r/issues/8";
+
+function chooser(o: Partial<Parameters<typeof IssueChooser>[0]>) {
+  return renderToStaticMarkup(
+    <IssueChooser
+      kind="github"
+      target={{ id: "o/r", name: "o/r" }}
+      assignee="me"
+      onAssignee={noop}
+      searchText=""
+      onSearchText={noop}
+      onSearch={noop}
+      issues={{ kind: "ok", value: GITHUB_ISSUES }}
+      refreshing={false}
+      refreshError={null}
+      intakes={INTAKES}
+      selected={null}
+      onSelect={noop}
+      direct=""
+      onDirect={noop}
+      onPickDirect={noop}
+      {...o}
+    />,
+  );
+}
 
 function preview(o: Partial<Parameters<typeof IssuePreview>[0]>) {
   return renderToStaticMarkup(
@@ -29,6 +53,13 @@ describe("IssuePreview", () => {
     expect(preview({})).toContain("#8 Issue 8 のタイトル");
     const noIdentifier = preview({ issue: { url: URL, identifier: null, title: "T" } });
     expect(noIdentifier).toContain("<h2>T</h2>");
+  });
+
+  test("Linear の Issue は見出しに ENG-123 を出す", () => {
+    const html = preview({
+      issue: { url: LINEAR_ISSUES[0].url, identifier: "ENG-123", title: "ログインを直す" },
+    });
+    expect(html).toContain("ENG-123 ログインを直す");
   });
 
   test("Intake のある Issue は開始の代わりに開くボタンを出す", () => {
@@ -99,7 +130,61 @@ describe("IssueList", () => {
   });
 });
 
+describe("IssueChooser", () => {
+  test("Linear のプロジェクトでは ENG-123 形式の識別子を出し、URL の直接入力欄を出さない", () => {
+    const html = chooser({
+      kind: "linear",
+      target: { id: "team-uuid", name: "Engineering" },
+      issues: { kind: "ok", value: LINEAR_ISSUES },
+    });
+    expect(html).toContain("ENG-123");
+    expect(html).toContain("ENG-124");
+    expect(html).toContain("Engineering");
+    expect(html).not.toContain("issue-direct");
+    expect(html).not.toContain("番号か URL を直接入れる");
+    expect(html).not.toContain("github.com");
+  });
+
+  test("GitHub のプロジェクトでは直接入力欄を出し、チームの行は出さない", () => {
+    const html = chooser({});
+    expect(html).toContain('id="issue-direct"');
+    expect(html).toContain("番号か URL を直接入れる");
+    expect(html).toContain("#5");
+    expect(html).not.toContain("Linear のチーム");
+  });
+
+  test("取り直しに失敗したら手元の一覧を出したまま理由を出す", () => {
+    const html = chooser({ refreshError: "ネットワーク" });
+    expect(html).toContain("取り直せませんでした（ネットワーク）");
+    expect(html).toContain("#5");
+  });
+});
+
 describe("TrackerUnavailable", () => {
+  test("Linear の API key が無いときは config.json への設定を促す", () => {
+    const html = renderToStaticMarkup(
+      <TrackerUnavailable
+        status={{ ok: false, reason: "no_api_key", message: "config.json に linearApiKey がありません" }}
+        onRetry={noop}
+      />,
+    );
+    expect(html).toContain("Linear の API key がありません");
+    expect(html).toContain("config.json");
+    expect(html).toContain("linearApiKey");
+    expect(html).toContain("もう一度確かめる");
+  });
+
+  test("Linear のチームが見つからないときは project.yaml の tracker.team を確かめるよう促す", () => {
+    const html = renderToStaticMarkup(
+      <TrackerUnavailable
+        status={{ ok: false, reason: "team_not_found", message: "チーム ENG が見つかりません" }}
+        onRetry={noop}
+      />,
+    );
+    expect(html).toContain("tracker.team");
+    expect(html).toContain("チーム ENG が見つかりません");
+  });
+
   test("gh が使えないときは理由と直し方と gh の出力を出す", () => {
     const html = renderToStaticMarkup(
       <TrackerUnavailable
