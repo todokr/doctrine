@@ -11,7 +11,7 @@ import { loadWorkflowFromDisk, taskWorkflow } from "../../src/workflow/load.ts";
 import { createMockAdapter } from "../../src/adapter/mock.ts";
 import type { ServerEvent } from "../../../shared/protocol.ts";
 import { makeRepo, tickWhenIdle, until } from "../helpers/repo.ts";
-import { fakeTracker } from "../helpers/tracker.ts";
+import { constTrackerOf, fakeTracker } from "../helpers/tracker.ts";
 import { noopWatcher } from "../helpers/watcher.ts";
 import type { ReviewFile } from "../../src/domain/reviewFiles.ts";
 import type { CommandResult, ReviewEntry } from "../../src/domain/taskContext.ts";
@@ -77,7 +77,7 @@ async function context() {
     loadWorkflow: loadWorkflowFromDisk,
     workflowOf: (t, p) => taskWorkflow(t, p, loadWorkflowFromDisk),
     running: new Set(),
-    tracker: fakeTracker(),
+    trackerOf: constTrackerOf(fakeTracker()),
     runningIntakeRuns: new Set(),
     intakeWatcher: noopWatcher(),
     warnings: createWarningLog({ broadcast: () => {}, write: () => {} }),

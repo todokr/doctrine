@@ -1,5 +1,15 @@
-import type { IssueDetail, IssueSummary, TrackerStatus } from "../../../shared/intake/tracker.ts";
-import type { Tracker } from "../../src/tracker/tracker.ts";
+import type {
+  IssueDetail,
+  IssueSummary,
+  TrackerKind,
+  TrackerStatus,
+} from "../../../shared/intake/tracker.ts";
+import type { Tracker, TrackerOf } from "../../src/tracker/tracker.ts";
+
+/** どのプロジェクトにも同じ Tracker を返す TrackerOf。 */
+export function constTrackerOf(tracker: Tracker): TrackerOf {
+  return () => Promise.resolve(tracker);
+}
 
 type ListOptions = Parameters<Tracker["listIssues"]>[1];
 
@@ -15,6 +25,7 @@ export function fakeTracker(
     issues?: IssueSummary[];
     failList?: boolean;
     failClose?: boolean;
+    kind?: TrackerKind;
   } = {},
 ): Tracker & {
   reads: string[];
@@ -28,6 +39,7 @@ export function fakeTracker(
     throw new Error("fakeTracker では未実装です");
   };
   return {
+    kind: o.kind ?? "github",
     reads,
     listCalls,
     closes,

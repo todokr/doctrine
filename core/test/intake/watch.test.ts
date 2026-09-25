@@ -25,6 +25,8 @@ import {
 import { toIntakeDetail } from "../../src/intake/view.ts";
 import { fakeGh, parseGraphqlArgs } from "../helpers/gh.ts";
 import { fakeTracker } from "../helpers/fakeTracker.ts";
+import { constTrackerOf } from "../helpers/tracker.ts";
+import type { TrackerOf } from "../../src/tracker/tracker.ts";
 import { fakePrWatcher } from "../helpers/prWatcher.ts";
 import { until } from "../helpers/repo.ts";
 import { example } from "./pfd/fixture.ts";
@@ -113,7 +115,7 @@ async function setup(pfd: Pfd = example()) {
   const transitions: IntakeTransition[] = [];
   const watcher = createIntakeWatcher({
     db: seeded.db,
-    tracker: ft.tracker,
+    trackerOf: constTrackerOf(ft.tracker),
     prWatcher: pw.prWatcher,
     baseSync: base.baseSync,
     loadWorkflow: fakeWorkflowLoader(),
@@ -198,6 +200,48 @@ test("sub-issue が作れなかったプロセスは投入せず、失敗を健�
   assert.equal((await listTasks(db)).length, 1);
   assert.equal(watcher.health(projectId).consecutiveFailures, 0);
   assert.notEqual(watcher.health(projectId).lastSucceededAt, null);
+});
+
+/** setup と同じ組み立てで、trackerOf だけ差し替える。 */
+async function setupWith(trackerOf: TrackerOf) {
+  const seeded = await seedActive(example());
+  const base = fakeBaseSync();
+  const watcher = createIntakeWatcher({
+    db: seeded.db,
+    trackerOf,
+    prWatcher: fakePrWatcher().prWatcher,
+    baseSync: base.baseSync,
+    loadWorkflow: fakeWorkflowLoader(),
+    onStateChanged: () => {},
+    onUpdated: () => {},
+  });
+  return { ...seeded, base, watcher };
+}
+
+test("見張りはプロジェクトのパスで Tracker を引く", async () => {
+  const ft = fakeTracker();
+  const paths: string[] = [];
+  const { projectId, watcher } = await setupWith((path) => {
+    paths.push(path);
+    return Promise.resolve(ft.tracker);
+  });
+  await watcher.request(projectId);
+  assert.deepEqual(paths, ["/repo"]);
+  assert.equal(ft.issues.length, 4);
+});
+
+test("Tracker を引けない周も baseBranch の取り込みは続け、失敗を健康状態に出す", async () => {
+  const { db, projectId, base, watcher } = await setupWith(() =>
+    Promise.reject(new Error("project.yaml がありません"))
+  );
+  await watcher.request(projectId);
+  assert.equal(base.fetches, 1);
+  assert.equal((await listTasks(db)).length, 0);
+  assert.match(
+    watcher.health(projectId).lastError!,
+    /sub-issue の同期: project\.yaml がありません/,
+  );
+  assert.equal(watcher.health(projectId).consecutiveFailures, 1);
 });
 
 test("PR の見張りが失敗しても Intake は止まらず、連続失敗の回数が増える", async () => {
@@ -425,7 +469,7 @@ test("偽の gh: ghTracker と ghPrWatcher を通して、承認直後の投入�
   });
   const watcher = createIntakeWatcher({
     db,
-    tracker: ghTracker(gh.run),
+    trackerOf: constTrackerOf(ghTracker(gh.run)),
     prWatcher: ghPrWatcher(gh.run),
     baseSync: fakeBaseSync().baseSync,
     loadWorkflow: fakeWorkflowLoader(),

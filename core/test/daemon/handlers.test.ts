@@ -38,7 +38,7 @@ import type {
 import { branchNameFor } from "../../src/domain/worktree.ts";
 import { randomUUID } from "node:crypto";
 import { makeRepo, tickWhenIdle, until } from "../helpers/repo.ts";
-import { fakeTracker } from "../helpers/tracker.ts";
+import { constTrackerOf, fakeTracker } from "../helpers/tracker.ts";
 import { noopWatcher } from "../helpers/watcher.ts";
 import { getIntake, insertIntake, listIntakeRuns, updateIntake } from "../../src/db/intakes.ts";
 import { enqueueIntakeRun } from "../../src/intake/runner.ts";
@@ -95,7 +95,7 @@ async function context(events: ServerEvent[] = []): Promise<DaemonContext> {
     loadWorkflow: loadWorkflowFromDisk,
     workflowOf: (t, p) => taskWorkflow(t, p, loadWorkflowFromDisk),
     running: new Set(),
-    tracker: fakeTracker(),
+    trackerOf: constTrackerOf(fakeTracker()),
     runningIntakeRuns: new Set(),
     intakeWatcher: noopWatcher(),
   };

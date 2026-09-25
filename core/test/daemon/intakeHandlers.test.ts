@@ -22,13 +22,14 @@ import type {
 } from "../../../shared/protocol.ts";
 import type { PrFact } from "../../../shared/intake/processStatus.ts";
 import type { IntakeState } from "../../../shared/intake/state.ts";
-import type { PrWatcher, Tracker } from "../../src/tracker/tracker.ts";
+import type { PrWatcher, Tracker, TrackerOf } from "../../src/tracker/tracker.ts";
+import { trackerFor } from "../../src/daemon/tracker.ts";
 import { createIntakeWatcher } from "../../src/intake/watch.ts";
 import { loadWorkflowFromDisk, taskWorkflow } from "../../src/workflow/load.ts";
 import { fakeTracker as statefulTracker } from "../helpers/fakeTracker.ts";
 import { fakePrWatcher } from "../helpers/prWatcher.ts";
 import { makeRepo, until } from "../helpers/repo.ts";
-import { fakeTracker } from "../helpers/tracker.ts";
+import { constTrackerOf, fakeTracker } from "../helpers/tracker.ts";
 import { pfdOut, question, questionsOut } from "../intake/runnerHelper.ts";
 import { example, revised } from "../intake/pfd/fixture.ts";
 
@@ -71,11 +72,16 @@ function standardAdapter(): AgentAdapter {
   });
 }
 
-type Options = { adapter?: AgentAdapter; tracker?: Tracker; prWatcher?: PrWatcher };
+type Options = {
+  adapter?: AgentAdapter;
+  tracker?: Tracker;
+  trackerOf?: TrackerOf;
+  prWatcher?: PrWatcher;
+};
 
 async function context(events: ServerEvent[] = [], o: Options = {}): Promise<DaemonContext> {
   const db = await openDb(":memory:");
-  const tracker = o.tracker ?? fakeTracker();
+  const trackerOf = o.trackerOf ?? constTrackerOf(o.tracker ?? fakeTracker());
   const ctx: DaemonContext = {
     db,
     adapter: o.adapter ?? standardAdapter(),
@@ -87,11 +93,11 @@ async function context(events: ServerEvent[] = [], o: Options = {}): Promise<Dae
     loadWorkflow: loadWorkflowFromDisk,
     workflowOf: (t, p) => taskWorkflow(t, p, loadWorkflowFromDisk),
     running: new Set(),
-    tracker,
+    trackerOf,
     runningIntakeRuns: new Set(),
     intakeWatcher: createIntakeWatcher({
       db,
-      tracker,
+      trackerOf,
       prWatcher: o.prWatcher ?? fakePrWatcher().prWatcher,
       baseSync: fakeBaseSync().baseSync,
       loadWorkflow: loadWorkflowFromDisk,
@@ -132,14 +138,24 @@ async function tickUntil(ctx: DaemonContext, id: string, state: IntakeState): Pr
 
 const answerQ1 = [{ questionId: "q1", optionIds: ["a"], other: null, note: null }];
 
-async function toAnswering(ctx: DaemonContext, call: Call): Promise<IntakeSummary> {
-  const started = await call<IntakeSummary>("intake.start", { project: repo, issue_url: ISSUE });
+async function toAnswering(
+  ctx: DaemonContext,
+  call: Call,
+  project = repo,
+  issueUrl = ISSUE,
+): Promise<IntakeSummary> {
+  const started = await call<IntakeSummary>("intake.start", { project, issue_url: issueUrl });
   await tickUntil(ctx, started.id, "answering");
   return started;
 }
 
-async function toReviewing(ctx: DaemonContext, call: Call): Promise<IntakeDetail> {
-  const started = await toAnswering(ctx, call);
+async function toReviewing(
+  ctx: DaemonContext,
+  call: Call,
+  project = repo,
+  issueUrl = ISSUE,
+): Promise<IntakeDetail> {
+  const started = await toAnswering(ctx, call, project, issueUrl);
   const detail = await call<IntakeDetail>("intake.get", { intake_id: started.id });
   await call("intake.answer", {
     intake_id: started.id,
@@ -823,6 +839,7 @@ test("tracker.status は tracker の結果を返す", async () => {
   assert.deepEqual(await call("tracker.status", { project: repo }), {
     ok: true,
     target: { id: "R1", name: "o/r" },
+    kind: "github",
   });
 });
 
@@ -1198,4 +1215,103 @@ test("実行中の出力は intake.logLine として、その Intake を追従�
     logs.lines.filter((l) => l !== ""),
     "ファイルと同じ文字列を流す",
   );
+});
+
+const LINEAR_ISSUE = "https://linear.app/acme/issue/ENG-1/x";
+
+/** repo（宣言なし = GitHub）と linearRepo（tracker: linear）の 2 プロジェクトを登録する。 */
+async function twoProjects(o: { github: Tracker; linear: Tracker }) {
+  const linearRepo = await makeRepo(join(root, "linear"), {
+    "README.md": "y\n",
+    ".doctrine/project.yaml":
+      "defaultWorkflow: feature\nmaxConcurrent: 1\nbaseBranch: main\ntracker:\n  kind: linear\n  team: ENG\n",
+    ".doctrine/workflows/feature.yaml":
+      "name: feature\nsteps:\n  - id: review\n    type: approval\n    title: 見て\n",
+  });
+  const s = await setup({
+    trackerOf: trackerFor({ linearApiKey: "lin_x", github: o.github, linear: () => o.linear }),
+  });
+  await s.call("project.add", { path: linearRepo });
+  return { ...s, linearRepo };
+}
+
+const linearStatus = { ok: true, target: { id: "T1", name: "Eng" } } as const;
+
+test("tracker.status はプロジェクトのトラッカーの結果と種類を返す", async () => {
+  const gh = fakeTracker();
+  const lin = fakeTracker({}, { kind: "linear", status: linearStatus });
+  const { call, linearRepo } = await twoProjects({ github: gh, linear: lin });
+  assert.deepEqual(await call("tracker.status", { project: repo }), {
+    ok: true,
+    target: { id: "R1", name: "o/r" },
+    kind: "github",
+  });
+  assert.deepEqual(await call("tracker.status", { project: linearRepo }), {
+    ok: true,
+    target: { id: "T1", name: "Eng" },
+    kind: "linear",
+  });
+});
+
+test("tracker.issue と tracker.issues はプロジェクトのトラッカーを読む", async () => {
+  const gh = fakeTracker();
+  const lin = fakeTracker({}, { kind: "linear", status: linearStatus });
+  const { call, linearRepo } = await twoProjects({ github: gh, linear: lin });
+
+  await call("tracker.issue", { project: linearRepo, url: LINEAR_ISSUE });
+  await call("tracker.issues", { project: linearRepo });
+  assert.deepEqual(lin.reads, [LINEAR_ISSUE]);
+  assert.deepEqual(lin.listCalls, [{ assignee: "me" }]);
+  assert.deepEqual(gh.reads, []);
+  assert.deepEqual(gh.listCalls, []);
+
+  await call("tracker.issue", { project: repo, url: ISSUE });
+  await call("tracker.issues", { project: repo });
+  assert.deepEqual(gh.reads, [ISSUE]);
+  assert.deepEqual(gh.listCalls, [{ assignee: "me" }]);
+  assert.deepEqual(lin.reads, [LINEAR_ISSUE]);
+  assert.deepEqual(lin.listCalls, [{ assignee: "me" }]);
+});
+
+test("Linear のプロジェクトの Intake は開始・調査・親 Issue を閉じるのに Linear を使う", async () => {
+  const gh = fakeTracker();
+  const lin = fakeTracker({}, { kind: "linear", status: linearStatus });
+  const { ctx, call, linearRepo } = await twoProjects({ github: gh, linear: lin });
+
+  const started = await call<IntakeSummary>("intake.start", {
+    project: linearRepo,
+    issue_url: LINEAR_ISSUE,
+  });
+  assert.deepEqual(lin.reads, [LINEAR_ISSUE]);
+
+  await tickUntil(ctx, started.id, "answering");
+  // 最初の調査は fresh なので、本文を読み直す
+  assert.deepEqual(lin.reads, [LINEAR_ISSUE, LINEAR_ISSUE]);
+  assert.deepEqual(gh.reads, []);
+
+  await updateIntake(ctx.db, started.id, { state: "completed" });
+  await call("intake.closeIssue", { intake_id: started.id });
+  assert.deepEqual(lin.closes, [{ url: LINEAR_ISSUE, reason: "completed" }]);
+  assert.deepEqual(gh.closes, []);
+});
+
+test("Linear のプロジェクトの見張りと中止は Linear に sub-issue を作り、閉じる", async () => {
+  const ghFt = statefulTracker();
+  const linFt = statefulTracker();
+  const lin: Tracker = { ...linFt.tracker, kind: "linear" };
+  const { ctx, call, linearRepo } = await twoProjects({ github: ghFt.tracker, linear: lin });
+
+  const reviewing = await toReviewing(ctx, call, linearRepo, LINEAR_ISSUE);
+  await call("intake.approve", {
+    intake_id: reviewing.id,
+    draft_id: reviewing.latest_draft!.id,
+    hash: reviewing.latest_draft!.hash,
+  });
+  await until(() => ctx.intakeWatcher.idle());
+  assert.equal(linFt.issues.length, 4);
+  assert.deepEqual(ghFt.calls, []);
+
+  await call("intake.cancel", { intake_id: reviewing.id, mode: "stop" });
+  assert.ok(linFt.calls.some((c) => c.op === "closeIssue"));
+  assert.deepEqual(ghFt.calls, []);
 });

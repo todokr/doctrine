@@ -10,7 +10,7 @@ import {
 import type { Db, ProjectRow } from "../db/schema.ts";
 import { getProject, listProjects } from "../db/tasks.ts";
 import { assertIntakeTransition } from "../domain/intakeStates.ts";
-import type { PrWatcher, Tracker } from "../tracker/tracker.ts";
+import type { PrWatcher, Tracker, TrackerOf } from "../tracker/tracker.ts";
 import { containsCommit, fetchBaseBranch, originRef } from "../domain/worktree.ts";
 import type { IntakeTransition } from "./commands.ts";
 import { dispatchIntake, loadApprovedPlan } from "./dispatch.ts";
@@ -159,7 +159,7 @@ export type ProjectWatchReport = {
 export async function watchProject(
   db: Db,
   deps: {
-    tracker: Tracker;
+    trackerOf: TrackerOf;
     prWatcher: PrWatcher;
     baseSync: BaseSync;
     loadWorkflow: WorkflowLoader;
@@ -183,11 +183,21 @@ export async function watchProject(
     report.watched = watched.map((i) => i.id);
     const intakes = watched.filter((i) => i.state === "active");
 
-    for (const intake of intakes) {
+    // 改訂中だけの周は tracker を使わないので、解決は active があるときだけ。失敗は同期だけを飛ばす
+    let tracker: Tracker | null = null;
+    if (intakes.length > 0) {
+      try {
+        tracker = await deps.trackerOf(project.path);
+      } catch (e) {
+        report.errors.push(`sub-issue の同期: ${describe(e)}`);
+      }
+    }
+
+    for (const intake of tracker ? intakes : []) {
       try {
         const plan = await loadApprovedPlan(db, intake.id);
         if (!plan) continue;
-        const synced = await syncSubIssues(db, deps.tracker, {
+        const synced = await syncSubIssues(db, tracker!, {
           projectPath: project.path,
           intake,
           pfd: plan.pfd,
@@ -284,7 +294,7 @@ export interface IntakeWatcher {
 
 export function createIntakeWatcher(deps: {
   db: Db;
-  tracker: Tracker;
+  trackerOf: TrackerOf;
   prWatcher: PrWatcher;
   baseSync: BaseSync;
   loadWorkflow: WorkflowLoader;

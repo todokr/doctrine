@@ -67,7 +67,7 @@ export const INTAKE_ALLOWED_TOOLS: readonly string[] = ["Read", "Grep", "Glob", 
 export type IntakeRunnerDeps = {
   db: Db;
   adapter: AgentAdapter;
-  tracker: Pick<Tracker, "readIssue">;
+  trackerOf(projectPath: string): Promise<Pick<Tracker, "readIssue">>;
   logRoot: string;
   onStateChanged?(intakeId: string, from: IntakeState, to: IntakeState, revising: boolean): void;
   onRateLimit?(s: RateLimitObservation): void | Promise<void>;
@@ -318,7 +318,7 @@ export async function runIntakeRun(db: Db, runId: number, deps: IntakeRunnerDeps
       comments: rows.comments,
     });
     const issue = continuation === null || fresh
-      ? await deps.tracker.readIssue(project.path, intake.issue_url)
+      ? await (await deps.trackerOf(project.path)).readIssue(project.path, intake.issue_url)
       : null;
     const firstPrompt = () => firstPromptOf(db, intake, run, issue!, rows);
 

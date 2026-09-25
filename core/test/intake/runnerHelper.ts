@@ -9,7 +9,7 @@ import { insertProject } from "../../src/db/tasks.ts";
 import { claimIntakeRun, type IntakeRunnerDeps, runIntakeRun } from "../../src/intake/runner.ts";
 import type { Pfd } from "../../../shared/intake/pfd.ts";
 import type { Answer, Assumption, Question } from "../../../shared/intake/question.ts";
-import { fakeTracker } from "../helpers/tracker.ts";
+import { constTrackerOf, fakeTracker } from "../helpers/tracker.ts";
 import { makeRepo } from "../helpers/repo.ts";
 
 export type Fixture = {
@@ -55,7 +55,7 @@ export function depsOf(f: Fixture, adapter: AgentAdapter): IntakeRunnerDeps {
   return {
     db: f.db,
     adapter,
-    tracker: fakeTracker({ title: "T", body: "Issue の本文" }),
+    trackerOf: constTrackerOf(fakeTracker({ title: "T", body: "Issue の本文" })),
     logRoot: f.logRoot,
   };
 }

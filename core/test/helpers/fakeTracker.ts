@@ -73,6 +73,7 @@ export function fakeTracker(): FakeTracker {
   const settle = <T>(f: () => T): Promise<T> => new Promise((resolve) => resolve(f()));
 
   const tracker: Tracker = {
+    kind: "github",
     // calls に積まない。積むと subIssueSync.test.ts の calls の検査が崩れる
     status: () => Promise.resolve({ ok: true, target: { id: "R_1", name: "o/r" } }),
     listIssues: unexpected("listIssues"),

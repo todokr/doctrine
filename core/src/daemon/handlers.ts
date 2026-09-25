@@ -65,7 +65,7 @@ import {
 import { previewTaskPrompt, redispatchProcess } from "../intake/dispatch.ts";
 import { intakeDraft, toIntakeDetail, toIntakeSummary } from "../intake/view.ts";
 import type { IntakeWatcher } from "../intake/watch.ts";
-import type { Tracker } from "../tracker/tracker.ts";
+import type { TrackerOf } from "../tracker/tracker.ts";
 import { applyApproval, runTask } from "../domain/engine.ts";
 import {
   branchNameFor,
@@ -117,8 +117,8 @@ export type DaemonContext = {
   /** タスクが従うワークフロー（setup を差し込んだ後）。tick・承認・読み取りの経路はすべてここを通る。 */
   workflowOf(task: TaskRow, project: ProjectRow): Promise<Workflow>;
   running: Set<string>;
-  /** Issue の読み込み。調査・分解の prompt に本文とコメントを載せるのに使う。 */
-  tracker: Tracker;
+  /** プロジェクトの Tracker。project.yaml の tracker で GitHub Issues か Linear を選ぶ。 */
+  trackerOf: TrackerOf;
   /** 走らせている Intake の実行（intake_runs.id）。tick の再入ガード。running とは別に持つ。 */
   runningIntakeRuns: Set<number>;
   /** 投入とマージの見張り（spec 11 章）。 */
@@ -738,18 +738,20 @@ export function createHandler(ctx: DaemonContext): Handler {
 
       case "tracker.status": {
         const project = await reqProject(ctx, params);
-        return await ctx.tracker.status(project.path);
+        const tracker = await ctx.trackerOf(project.path);
+        return { ...(await tracker.status(project.path)), kind: tracker.kind };
       }
       case "tracker.issues": {
         const project = await reqProject(ctx, params);
         const assignee = params.assignee === "any" ? "any" : "me";
         const search = typeof params.search === "string" ? params.search : undefined;
-        const issues = await ctx.tracker.listIssues(project.path, {
+        const tracker = await ctx.trackerOf(project.path);
+        const issues = await tracker.listIssues(project.path, {
           assignee,
           ...(search === undefined ? {} : { search }),
         }).catch(async (e) => {
           // 理由が分かる失敗は、トラッカーの生のエラーより先に返す。
-          const status = await ctx.tracker.status(project.path);
+          const status = await tracker.status(project.path);
           if (!status.ok) {
             throw new Error(`Issue トラッカーを使えません（${status.reason}）: ${status.message}`);
           }
@@ -763,12 +765,14 @@ export function createHandler(ctx: DaemonContext): Handler {
       }
       case "tracker.issue": {
         const project = await reqProject(ctx, params);
-        return await ctx.tracker.readIssue(project.path, req(params, "url"));
+        const tracker = await ctx.trackerOf(project.path);
+        return await tracker.readIssue(project.path, req(params, "url"));
       }
 
       case "intake.start": {
         const project = await reqProject(ctx, params);
-        const { intake, alreadyActive } = await startIntake(ctx.db, ctx.tracker, {
+        const tracker = await ctx.trackerOf(project.path);
+        const { intake, alreadyActive } = await startIntake(ctx.db, tracker, {
           projectId: project.id,
           projectPath: project.path,
           issueUrl: req(params, "issue_url"),
@@ -875,7 +879,7 @@ export function createHandler(ctx: DaemonContext): Handler {
         const project = (await getProject(ctx.db, intake.project_id))!;
         const outcome = await cancelIntake(
           ctx.db,
-          { probe: defaultProbe(), tracker: ctx.tracker },
+          { probe: defaultProbe(), trackerOf: ctx.trackerOf },
           { intakeId, mode: params.mode, projectPath: project.path },
         );
         for (const t of outcome.stoppedTasks) {
@@ -932,7 +936,7 @@ export function createHandler(ctx: DaemonContext): Handler {
         const intake = await getIntake(ctx.db, req(params, "intake_id"));
         if (!intake) throw new Error("Intake がありません");
         const project = (await getProject(ctx.db, intake.project_id))!;
-        const row = await closeParentIssue(ctx.db, ctx.tracker, {
+        const row = await closeParentIssue(ctx.db, await ctx.trackerOf(project.path), {
           intakeId: intake.id,
           projectPath: project.path,
         });
@@ -1291,7 +1295,7 @@ async function startIntakeRuns(ctx: DaemonContext): Promise<void> {
     void runIntakeRun(ctx.db, run.id, {
       db: ctx.db,
       adapter: ctx.adapter,
-      tracker: ctx.tracker,
+      trackerOf: ctx.trackerOf,
       logRoot: ctx.logRoot,
       onStateChanged: (intakeId, from, to, revising) =>
         ctx.broadcast({ event: "intake.stateChanged", intake_id: intakeId, from, to, revising }),

@@ -14,7 +14,7 @@ import { recoverOnStartup } from "../../src/domain/recovery.ts";
 import { commitStepBoundary } from "../../src/db/boundary.ts";
 import { buildWorkflowLookup } from "../../src/daemon/main.ts";
 import { makeRepo, tickWhenIdle, until } from "../helpers/repo.ts";
-import { fakeTracker } from "../helpers/tracker.ts";
+import { constTrackerOf, fakeTracker } from "../helpers/tracker.ts";
 import { noopWatcher } from "../helpers/watcher.ts";
 import type { TaskGuide } from "../../../shared/protocol.ts";
 
@@ -71,7 +71,7 @@ async function context(): Promise<DaemonContext> {
     loadWorkflow: loadWorkflowFromDisk,
     workflowOf: (t, p) => taskWorkflow(t, p, loadWorkflowFromDisk),
     running: new Set(),
-    tracker: fakeTracker(),
+    trackerOf: constTrackerOf(fakeTracker()),
     runningIntakeRuns: new Set(),
     intakeWatcher: noopWatcher(),
   };

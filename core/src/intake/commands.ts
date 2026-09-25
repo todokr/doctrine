@@ -322,7 +322,10 @@ export type CancelOutcome = IntakeTransition & {
  */
 export async function cancelIntake(
   db: Db,
-  deps: { probe: ProcessProbe; tracker: Pick<Tracker, "closeIssue"> },
+  deps: {
+    probe: ProcessProbe;
+    trackerOf: (projectPath: string) => Promise<Pick<Tracker, "closeIssue">>;
+  },
   o: { intakeId: string; mode: "leave" | "stop"; projectPath: string },
 ): Promise<CancelOutcome> {
   const intake = await requireIntake(db, o.intakeId);
@@ -365,7 +368,8 @@ export async function cancelIntake(
   }
   try {
     const project = (await getProject(db, intake.project_id))!;
-    const closed = await closeSubIssuesOnCancel(db, deps.tracker, {
+    const tracker = await deps.trackerOf(o.projectPath);
+    const closed = await closeSubIssuesOnCancel(db, tracker, {
       projectPath: o.projectPath,
       intakeId: intake.id,
       baseBranch: project.base_branch,

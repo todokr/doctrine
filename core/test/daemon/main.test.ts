@@ -10,7 +10,7 @@ import { createWarningLog } from "../../src/daemon/warnings.ts";
 import { openDbOn } from "../../src/db/migrate.ts";
 import { createMockAdapter } from "../../src/adapter/mock.ts";
 import type { DaemonContext } from "../../src/daemon/handlers.ts";
-import { fakeTracker } from "../helpers/tracker.ts";
+import { constTrackerOf, fakeTracker } from "../helpers/tracker.ts";
 import { noopWatcher } from "../helpers/watcher.ts";
 import { call } from "../../src/cli/dctl.ts";
 import type { DaemonSlots, Warning } from "../../../shared/protocol.ts";
@@ -167,7 +167,7 @@ test("スケジューリングの1周が失敗してもデーモンは落ちず�
     loadWorkflow: () => Promise.reject(new Error("使わない")),
     workflowOf: () => Promise.reject(new Error("使わない")),
     running: new Set(),
-    tracker: fakeTracker(),
+    trackerOf: constTrackerOf(fakeTracker()),
     runningIntakeRuns: new Set(),
     intakeWatcher: noopWatcher(),
     warnings: createWarningLog({ broadcast: () => {}, write: (l) => logged.push(l) }),
