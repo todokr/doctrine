@@ -442,13 +442,12 @@ kbd{font-family:var(--mono);font-size:10.5px;border:1px solid var(--line);border
 .cmt{border-top:1px dashed var(--line);padding-top:8px;font-size:12.5px}
 .cmt .who{font-size:11px;color:var(--ink-3)}
 
-/* 計画レビュー・経緯 */
+/* 計画レビュー・経緯。PFD は横に長いので、図に幅を全部渡し、要素の欄はその下に置く */
 .plan-title{margin:0;font-size:14px}
-.plan-body{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:14px;align-items:start;min-width:0}
+.plan-body{display:grid;grid-template-columns:minmax(0,1fr);gap:14px;min-width:0}
 .plan-body > *{min-width:0}
-@media (max-width:1150px){.plan-body{grid-template-columns:1fr}}
-.el-panel{border:1px solid var(--accent);border-radius:9px;background:var(--surface);padding:14px;display:grid;gap:12px;align-content:start;position:sticky;top:0;max-height:calc(100vh - 160px);overflow-y:auto}
-@media (max-width:1150px){.el-panel{position:static;max-height:none}}
+.el-panel{border:1px solid var(--accent);border-radius:9px;background:var(--surface);padding:14px;display:grid;gap:12px;align-content:start}
+.el-panel > *{max-width:880px}
 .el-head{display:grid;gap:2px}
 .el-sec{display:grid;gap:6px}
 .el-sec h3,.el-sec-title{margin:0;font-family:var(--mono);font-size:10px;font-weight:500;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3)}
