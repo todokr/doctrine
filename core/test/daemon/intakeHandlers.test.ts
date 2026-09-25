@@ -1297,9 +1297,11 @@ test("Linear のプロジェクトの Intake は開始・調査・親 Issue を�
 
 test("Linear のプロジェクトの見張りと中止は Linear に sub-issue を作り、閉じる", async () => {
   const ghFt = statefulTracker();
-  const linFt = statefulTracker();
-  const lin: Tracker = { ...linFt.tracker, kind: "linear" };
-  const { ctx, call, linearRepo } = await twoProjects({ github: ghFt.tracker, linear: lin });
+  const linFt = statefulTracker({ kind: "linear" });
+  const { ctx, call, linearRepo } = await twoProjects({
+    github: ghFt.tracker,
+    linear: linFt.tracker,
+  });
 
   const reviewing = await toReviewing(ctx, call, linearRepo, LINEAR_ISSUE);
   await call("intake.approve", {

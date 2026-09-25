@@ -40,6 +40,7 @@ export function fakeTracker(
   };
   return {
     kind: o.kind ?? "github",
+    closesViaPullRequest: (o.kind ?? "github") === "github",
     reads,
     listCalls,
     closes,

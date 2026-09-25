@@ -12,6 +12,8 @@ export type SubIssue = { ref: IssueRef; body: string; state: "OPEN" | "CLOSED" }
 /** Issue の参照は URL で持ち、番号を前提にしない（PRD 11 章）。 */
 export interface Tracker {
   readonly kind: TrackerKind;
+  /** PR 本文の Closes がマージ時に sub-issue を閉じるか。false なら Intake がマージを検知して閉じる。 */
+  readonly closesViaPullRequest: boolean;
   status(projectPath: string): Promise<TrackerStatus>;
   listIssues(
     projectPath: string,
