@@ -394,6 +394,27 @@ export function trackerGuidance(
         fix: "GitHub の remote を持つリポジトリで使う",
         command: null,
       };
+    case "no_api_key":
+      return {
+        title: "Linear の API key がありません",
+        fix:
+          "状態ディレクトリ（既定は ~/.local/state/doctrine。DOCTRINE_STATE_DIR で変わる）の config.json に、Linear の Personal API key を linearApiKey として書き、dctld を起動し直す",
+        command: '{ "linearApiKey": "lin_api_..." }',
+      };
+    case "invalid_api_key":
+      return {
+        title: "Linear の API key が使えません",
+        fix:
+          "Linear で Personal API key を作り直し、状態ディレクトリの config.json の linearApiKey を書き換えて dctld を起動し直す",
+        command: null,
+      };
+    case "team_not_found":
+      return {
+        title: "Linear のチームが見つかりません",
+        fix:
+          ".doctrine/project.yaml の tracker.team が Linear のチームのキー（ENG など）と合っているか確かめる",
+        command: null,
+      };
     default:
       return {
         title: "Issue トラッカーを使えません",

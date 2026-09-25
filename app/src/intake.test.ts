@@ -455,6 +455,29 @@ describe("trackerGuidance", () => {
     expect(g.command).toBeNull();
   });
 
+  test("Linear の API key が無い", () => {
+    const g = trackerGuidance({ ok: false, reason: "no_api_key", message: "" });
+    expect(g.title).toBe("Linear の API key がありません");
+    expect(g.fix).toContain("config.json");
+    expect(g.fix).toContain("linearApiKey");
+    expect(g.fix).toContain("起動し直す");
+    expect(g.command).toContain("linearApiKey");
+  });
+
+  test("Linear の API key が無効", () => {
+    const g = trackerGuidance({ ok: false, reason: "invalid_api_key", message: "" });
+    expect(g.title).toBe("Linear の API key が使えません");
+    expect(g.fix).toContain("linearApiKey");
+  });
+
+  test("Linear のチームが見つからない", () => {
+    const g = trackerGuidance({ ok: false, reason: "team_not_found", message: "" });
+    expect(g.title).toBe("Linear のチームが見つかりません");
+    expect(g.fix).toContain("project.yaml");
+    expect(g.fix).toContain("tracker.team");
+    expect(g.command).toBeNull();
+  });
+
   test("知らない理由は汎用の案内と null のコマンド", () => {
     const g = trackerGuidance({ ok: false, reason: "unknown", message: "" });
     expect(g.title).toBe("Issue トラッカーを使えません");
