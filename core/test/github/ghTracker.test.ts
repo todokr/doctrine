@@ -243,6 +243,12 @@ test("closeIssue: 理由を stateReason に写す", async () => {
   assert.ok(calls.every((c) => c.cwd === P));
 });
 
+test("advanceIssue: gh を呼ばずに何もしない", async () => {
+  const { run, calls } = fakeGh(() => "");
+  await ghTracker(run).advanceIssue(P, { url: URL1, nodeId: "I_2" }, "inReview");
+  assert.equal(calls.length, 0);
+});
+
 test("gh の失敗はそのまま投げる", async () => {
   const err = new Error("Command failed: gh api graphql\nboom");
   const { run } = fakeGh(() => err);

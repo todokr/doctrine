@@ -2,14 +2,14 @@ import { join } from "@std/path";
 import { ghTracker } from "../github/ghTracker.ts";
 import { linearTracker } from "../linear/linearTracker.ts";
 import type { Tracker, TrackerOf } from "../tracker/tracker.ts";
-import { parseProjectConfig } from "../workflow/project.ts";
+import { type LinearStateNames, parseProjectConfig } from "../workflow/project.ts";
 
 export function trackerFor(o: {
   linearApiKey: string | undefined;
   /** テストで差し替える。既定は ghTracker() を 1 つ作って使い回す */
   github?: Tracker;
   /** テストで差し替える。既定は linearTracker */
-  linear?: (o: { apiKey: string | undefined; team: string }) => Tracker;
+  linear?: (o: { apiKey: string | undefined; team: string; states?: LinearStateNames }) => Tracker;
 }): TrackerOf {
   const github = o.github ?? ghTracker();
   const linear = o.linear ?? linearTracker;
@@ -21,7 +21,11 @@ export function trackerFor(o: {
     });
     const { tracker } = parseProjectConfig(text);
     if (tracker.kind === "linear") {
-      return linear({ apiKey: o.linearApiKey, team: tracker.team });
+      return linear({
+        apiKey: o.linearApiKey,
+        team: tracker.team,
+        ...(tracker.states ? { states: tracker.states } : {}),
+      });
     }
     return github;
   };

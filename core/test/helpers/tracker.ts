@@ -1,5 +1,6 @@
 import type {
   IssueDetail,
+  IssuePhase,
   IssueSummary,
   TrackerKind,
   TrackerStatus,
@@ -25,13 +26,16 @@ export function fakeTracker(
     issues?: IssueSummary[];
     failList?: boolean;
     failClose?: boolean;
+    failAdvance?: boolean;
     kind?: TrackerKind;
   } = {},
 ): Tracker & {
   reads: string[];
   listCalls: ListOptions[];
   closes: { url: string; reason: "completed" | "not_planned" }[];
+  advances: { url: string; phase: IssuePhase }[];
 } {
+  const advances: { url: string; phase: IssuePhase }[] = [];
   const reads: string[] = [];
   const listCalls: ListOptions[] = [];
   const closes: { url: string; reason: "completed" | "not_planned" }[] = [];
@@ -43,6 +47,7 @@ export function fakeTracker(
     reads,
     listCalls,
     closes,
+    advances,
     readIssue: (_projectPath, url) => {
       reads.push(url);
       return Promise.resolve({
@@ -69,6 +74,13 @@ export function fakeTracker(
     closeIssue: (_projectPath, issue, reason) => {
       closes.push({ url: issue.url, reason });
       if (o.failClose) return Promise.reject(new Error("gh issue close に失敗しました"));
+      return Promise.resolve();
+    },
+    advanceIssue: (_projectPath, issue, phase) => {
+      advances.push({ url: issue.url, phase });
+      if (o.failAdvance) {
+        return Promise.reject(new Error("Linear の状態を変えられませんでした"));
+      }
       return Promise.resolve();
     },
   };
