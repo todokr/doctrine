@@ -1,7 +1,7 @@
 import type {
   IssueDetail,
-  IssueRef,
   IssuePhase,
+  IssueRef,
   IssueSummary,
   TrackerKind,
   TrackerStatus,

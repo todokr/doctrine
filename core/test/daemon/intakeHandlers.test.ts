@@ -1295,6 +1295,42 @@ test("Linear のプロジェクトの Intake は開始・調査・親 Issue を�
   assert.deepEqual(gh.closes, []);
 });
 
+test("Linear のプロジェクトで Intake を始めると、親 Issue を inProgress に進める", async () => {
+  const gh = fakeTracker();
+  const lin = fakeTracker({}, { kind: "linear", status: linearStatus });
+  const { call, linearRepo } = await twoProjects({ github: gh, linear: lin });
+  await call("intake.start", { project: linearRepo, issue_url: LINEAR_ISSUE });
+  assert.deepEqual(lin.advances, [{ url: LINEAR_ISSUE, phase: "inProgress" }]);
+  assert.deepEqual(gh.advances, []);
+  const again = await call<IntakeSummary & { alreadyActive: boolean }>("intake.start", {
+    project: linearRepo,
+    issue_url: LINEAR_ISSUE,
+  });
+  assert.equal(again.alreadyActive, true);
+  assert.equal(lin.advances.length, 1);
+});
+
+test("GitHub のプロジェクトで Intake を始めても状態を進めない", async () => {
+  const gh = fakeTracker();
+  const lin = fakeTracker({}, { kind: "linear", status: linearStatus });
+  const { call } = await twoProjects({ github: gh, linear: lin });
+  await call("intake.start", { project: repo, issue_url: ISSUE });
+  assert.deepEqual(gh.advances, []);
+  assert.deepEqual(lin.advances, []);
+});
+
+test("親 Issue の状態を進められなくても開始は成功し、警告に出す", async () => {
+  const gh = fakeTracker();
+  const lin = fakeTracker({}, { kind: "linear", status: linearStatus, failAdvance: true });
+  const { ctx, call, linearRepo } = await twoProjects({ github: gh, linear: lin });
+  const started = await call<IntakeSummary & { alreadyActive: boolean }>("intake.start", {
+    project: linearRepo,
+    issue_url: LINEAR_ISSUE,
+  });
+  assert.equal(started.alreadyActive, false);
+  assert.ok(ctx.warnings.recent().some((w) => /Linear の状態/.test(w.message)));
+});
+
 test("Linear のプロジェクトの見張りと中止は Linear に sub-issue を作り、閉じる", async () => {
   const ghFt = statefulTracker();
   const linFt = statefulTracker();

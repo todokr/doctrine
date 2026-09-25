@@ -772,12 +772,13 @@ export function createHandler(ctx: DaemonContext): Handler {
       case "intake.start": {
         const project = await reqProject(ctx, params);
         const tracker = await ctx.trackerOf(project.path);
-        const { intake, alreadyActive } = await startIntake(ctx.db, tracker, {
+        const { intake, alreadyActive, problems } = await startIntake(ctx.db, tracker, {
           projectId: project.id,
           projectPath: project.path,
           issueUrl: req(params, "issue_url"),
           logRoot: ctx.logRoot,
         });
+        for (const message of problems) ctx.warnings.push(message);
         const summary = await toIntakeSummary(
           ctx.db,
           intake,
