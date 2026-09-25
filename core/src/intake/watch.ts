@@ -15,7 +15,7 @@ import { containsCommit, fetchBaseBranch, originRef } from "../domain/worktree.t
 import type { IntakeTransition } from "./commands.ts";
 import { dispatchIntake, loadApprovedPlan } from "./dispatch.ts";
 import { computeProcessStatuses, goalReached } from "./pfd/status.ts";
-import { syncSubIssues } from "./subIssueSync.ts";
+import { closeMergedSubIssues, syncSubIssues } from "./subIssueSync.ts";
 import { processProgressOf } from "./view.ts";
 import type { WorkflowLoader } from "../workflow/load.ts";
 
@@ -222,6 +222,27 @@ export async function watchProject(
       observed.changedIntakeIds.forEach((id) => report.updated.add(id));
     } catch (e) {
       report.errors.push(`PR の観測: ${describe(e)}`);
+    }
+
+    // PR の Closes で閉じないトラッカーでは、観測したマージで sub-issue を閉じる
+    if (tracker && !tracker.closesViaPullRequest) {
+      for (const intake of intakes) {
+        try {
+          const closed = await closeMergedSubIssues(db, tracker, {
+            projectPath: project.path,
+            intakeId: intake.id,
+            baseBranch: project.base_branch,
+          });
+          for (const f of closed.failures) {
+            report.errors.push(
+              `${intake.issue_url} プロセス ${f.processId} の sub-issue（close）: ${f.message}`,
+            );
+          }
+          if (closed.closed.length > 0) report.updated.add(intake.id);
+        } catch (e) {
+          report.errors.push(`${intake.issue_url} の sub-issue の閉じ: ${describe(e)}`);
+        }
+      }
     }
 
     // 取り込めなかった周は投入しない。手元の古い baseBranch から切ると、下流が上流の成果物を持たずに始まる

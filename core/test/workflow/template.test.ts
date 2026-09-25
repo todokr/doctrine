@@ -30,6 +30,25 @@ test("Intake 由来でないタスクでは issue 系統が空文字になる", 
   );
 });
 
+test("Linear の Issue に対する issue.closes は閉じる語を含まない参照の行になる", () => {
+  const linear: TemplateContext = {
+    ...ctx,
+    issue: {
+      url: "https://linear.app/acme/issue/ENG-2/login",
+      parent_url: "https://linear.app/acme/issue/ENG-1/parent",
+    },
+  };
+  const out = expand("{{ issue.closes }}", linear);
+  assert.equal(out, "Linear: https://linear.app/acme/issue/ENG-2/login");
+  assert.doesNotMatch(out, /\b(close[sd]?|fix(e[sd])?|resolve[sd]?)\b/i);
+  assert.equal(expand("{{ issue.url }}", linear), "https://linear.app/acme/issue/ENG-2/login");
+});
+
+test("URL として読めない issue.url でも issue.closes は投げずに Closes を付ける", () => {
+  const odd: TemplateContext = { ...ctx, issue: { url: "not a url", parent_url: null } };
+  assert.equal(expand("{{ issue.closes }}", odd), "Closes not a url");
+});
+
 test("issue の未知のフィールドは落とす", () => {
   for (const expr of ["{{ issue.number }}", "{{ issue }}"]) {
     assert.throws(() => expand(expr, ctx), (e: unknown) => {
