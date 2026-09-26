@@ -334,7 +334,9 @@ export async function cancelIntake(
   db: Db,
   deps: {
     probe: ProcessProbe;
-    trackerOf: (projectPath: string) => Promise<Pick<Tracker, "closeIssue">>;
+    trackerOf: (
+      projectPath: string,
+    ) => Promise<Pick<Tracker, "closeIssue" | "closesViaPullRequest">>;
   },
   o: { intakeId: string; mode: "leave" | "stop"; projectPath: string },
 ): Promise<CancelOutcome> {

@@ -252,27 +252,65 @@ export async function syncSubIssues(
   return result;
 }
 
+export type SubIssueCloseResult = {
+  closed: string[]; // process_id
+  failures: { processId: string; message: string }[];
+};
+
 /**
- * 中止（stop）の後始末。sub_issue_closed = 0 の sub-issue を閉じる。完了を記録した人のプロセスは completed、
- * マージ済みのプロセスは PR の Closes で閉じるので触らない、それ以外は not_planned。
+ * baseBranch へのマージを観測したプロセスの sub-issue を completed で閉じ、sub_issue_closed = 1 を記録する。
+ * PR の Closes で sub-issue が閉じないトラッカーのときだけ呼ぶ（呼び出し側が closesViaPullRequest を見る）。
  */
-export async function closeSubIssuesOnCancel(
+export async function closeMergedSubIssues(
   db: Db,
   tracker: Pick<Tracker, "closeIssue">,
   o: { projectPath: string; intakeId: string; baseBranch: string },
-): Promise<{ closed: string[]; failures: { processId: string; message: string }[] }> {
-  const out: { closed: string[]; failures: { processId: string; message: string }[] } = {
-    closed: [],
-    failures: [],
-  };
+): Promise<SubIssueCloseResult> {
+  const out: SubIssueCloseResult = { closed: [], failures: [] };
+  const progress = await processProgressOf(db, o.intakeId);
+  for (const r of await listProcesses(db, o.intakeId)) {
+    if (r.retired_at !== null || r.sub_issue_url === null || r.sub_issue_closed !== 0) continue;
+    const pr = progress.get(r.process_id)?.pr;
+    if (pr?.state !== "MERGED" || pr.baseRef !== o.baseBranch) continue;
+    try {
+      await tracker.closeIssue(
+        o.projectPath,
+        { url: r.sub_issue_url, nodeId: r.sub_issue_node_id! },
+        "completed",
+      );
+      await updateProcess(db, o.intakeId, r.process_id, { sub_issue_closed: 1 });
+      out.closed.push(r.process_id);
+    } catch (e) {
+      out.failures.push({
+        processId: r.process_id,
+        message: e instanceof Error ? e.message : String(e),
+      });
+    }
+  }
+  return out;
+}
+
+/**
+ * 中止（stop）の後始末。sub_issue_closed = 0 の sub-issue を閉じる。完了を記録した人のプロセスは completed、
+ * マージ済みのプロセスは PR の Closes で閉じるトラッカーのときだけ触らず（閉じないトラッカーでは completed）、
+ * それ以外は not_planned。
+ */
+export async function closeSubIssuesOnCancel(
+  db: Db,
+  tracker: Pick<Tracker, "closeIssue" | "closesViaPullRequest">,
+  o: { projectPath: string; intakeId: string; baseBranch: string },
+): Promise<SubIssueCloseResult> {
+  const out: SubIssueCloseResult = { closed: [], failures: [] };
   const progress = await processProgressOf(db, o.intakeId);
   for (const r of await listProcesses(db, o.intakeId)) {
     if (r.retired_at !== null || r.sub_issue_url === null || r.sub_issue_closed !== 0) continue;
     const facts = progress.get(r.process_id);
     let reason: "completed" | "not_planned";
     if (facts?.humanDone) reason = "completed";
-    else if (facts?.pr?.state === "MERGED" && facts.pr.baseRef === o.baseBranch) continue;
-    else reason = "not_planned";
+    else if (facts?.pr?.state === "MERGED" && facts.pr.baseRef === o.baseBranch) {
+      if (tracker.closesViaPullRequest) continue;
+      reason = "completed";
+    } else reason = "not_planned";
     try {
       await tracker.closeIssue(
         o.projectPath,

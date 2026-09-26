@@ -278,7 +278,8 @@ doctrine は宣言されたファイルの中身を理解しない。読んで�
 
 - `{{ task.id }}` `{{ task.title }}` `{{ task.prompt }}` `{{ task.branch }}`
 - `{{ issue.url }}` `{{ issue.parent_url }}` `{{ issue.closes }}`
-  — Intake から投入されたタスクの sub-issue の URL、親 Issue の URL、`Closes <sub-issue の URL>`。
+  — Intake から投入されたタスクの sub-issue の URL、親 Issue の URL、`Closes <sub-issue の URL>`
+  （Linear の Issue では、PR で閉じないので `Linear: <URL>`）。
   Intake 由来でないタスクではどれも空文字。
 - `{{ worktree.path }}`
 - `{{ project.path }}`

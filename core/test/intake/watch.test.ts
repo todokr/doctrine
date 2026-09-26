@@ -23,6 +23,7 @@ import {
   INITIAL_WATCH_HEALTH,
   observePullRequests,
 } from "../../src/intake/watch.ts";
+import { closeSubIssuesOnCancel } from "../../src/intake/subIssueSync.ts";
 import { toIntakeDetail } from "../../src/intake/view.ts";
 import { fakeGh, parseGraphqlArgs } from "../helpers/gh.ts";
 import { fakeTracker } from "../helpers/fakeTracker.ts";
@@ -488,6 +489,120 @@ test("偽の gh: ghTracker と ghPrWatcher を通して、承認直後の投入�
   await watcher.request(projectId);
   const tasks = await listTasks(db);
   assert.deepEqual(tasks.map((t) => t.intake_process_id).toSorted(), ["1", "2"]);
+});
+
+/** プロセス 1 の sub-issue への closeIssue の呼び出し。 */
+async function closesOfProcess1(db: Db, ft: ReturnType<typeof fakeTracker>) {
+  const url = (await listProcesses(db, "i1")).find((r) => r.process_id === "1")!.sub_issue_url;
+  return ft.calls.filter((c) => c.op === "closeIssue" && c.url === url);
+}
+
+async function subIssueOf(db: Db, ft: ReturnType<typeof fakeTracker>, processId: string) {
+  const url = (await listProcesses(db, "i1")).find((r) => r.process_id === processId)!
+    .sub_issue_url;
+  return ft.issues.find((i) => i.ref.url === url)!;
+}
+
+/** 見張りの周を回さず、マージの観測だけを作る。 */
+async function observeMerge1(s: Awaited<ReturnType<typeof setup>>): Promise<void> {
+  await s.watcher.request(s.projectId);
+  await mergeOf(s.pw, s.db, "1");
+  await observePullRequests(s.db, s.pw.prWatcher, (await getProject(s.db, s.projectId))!);
+}
+
+const CANCEL = { projectPath: "/repo", intakeId: "i1", baseBranch: "main" };
+
+test("中止: PR の Closes で閉じないトラッカーでは、マージ済みのプロセスの sub-issue も completed で閉じる", async () => {
+  const s = await setup(example(), "linear");
+  await observeMerge1(s);
+  const out = await closeSubIssuesOnCancel(s.db, s.ft.tracker, CANCEL);
+  assert.ok(out.closed.includes("1"));
+  assert.deepEqual(out.failures, []);
+  assert.equal((await subIssueOf(s.db, s.ft, "1")).closeReason, "completed");
+  for (const id of ["2", "3", "4"]) {
+    assert.equal((await subIssueOf(s.db, s.ft, id)).closeReason, "not_planned");
+  }
+  for (const r of await listProcesses(s.db, "i1")) assert.equal(r.sub_issue_closed, 1);
+});
+
+test("中止: PR の Closes で閉じるトラッカーでは、マージ済みのプロセスの sub-issue に触らない", async () => {
+  const s = await setup();
+  await observeMerge1(s);
+  const out = await closeSubIssuesOnCancel(s.db, s.ft.tracker, CANCEL);
+  assert.ok(!out.closed.includes("1"));
+  assert.deepEqual(await closesOfProcess1(s.db, s.ft), []);
+  const p1 = (await listProcesses(s.db, "i1")).find((r) => r.process_id === "1")!;
+  assert.equal(p1.sub_issue_closed, 0);
+  for (const id of ["2", "3", "4"]) {
+    assert.equal((await subIssueOf(s.db, s.ft, id)).closeReason, "not_planned");
+  }
+});
+
+test("中止: 見張りがすでに閉じたマージ済みの sub-issue はもう閉じない", async () => {
+  const s = await setup(example(), "linear");
+  await s.watcher.request(s.projectId);
+  await mergeOf(s.pw, s.db, "1");
+  await s.watcher.request(s.projectId);
+  await closeSubIssuesOnCancel(s.db, s.ft.tracker, CANCEL);
+  assert.equal((await closesOfProcess1(s.db, s.ft)).length, 1);
+});
+
+test("Linear のプロジェクトでは、baseBranch へのマージを検知して sub-issue を completed で 1 回だけ閉じる", async () => {
+  const s = await setup(example(), "linear");
+  await s.watcher.request(s.projectId);
+  await mergeOf(s.pw, s.db, "1");
+  const before = s.updated.length;
+  await s.watcher.request(s.projectId);
+  await s.watcher.request(s.projectId);
+  const closes = await closesOfProcess1(s.db, s.ft);
+  assert.equal(closes.length, 1);
+  assert.equal(closes[0].op === "closeIssue" && closes[0].reason, "completed");
+  const p1 = (await listProcesses(s.db, "i1")).find((r) => r.process_id === "1")!;
+  assert.equal(p1.sub_issue_closed, 1);
+  assert.equal((await subIssueOf(s.db, s.ft, "1")).state, "CLOSED");
+  for (const id of ["2", "4"]) assert.equal((await subIssueOf(s.db, s.ft, id)).state, "OPEN");
+  assert.ok(s.updated.slice(before).includes("i1"));
+  assert.equal(s.watcher.health(s.projectId).consecutiveFailures, 0);
+});
+
+test("GitHub のプロジェクトでは、マージを検知しても sub-issue を閉じない", async () => {
+  const s = await setup();
+  await s.watcher.request(s.projectId);
+  await mergeOf(s.pw, s.db, "1");
+  await s.watcher.request(s.projectId);
+  assert.deepEqual(s.ft.calls.filter((c) => c.op === "closeIssue"), []);
+  const p1 = (await listProcesses(s.db, "i1")).find((r) => r.process_id === "1")!;
+  assert.equal(p1.sub_issue_closed, 0);
+});
+
+test("Linear のプロジェクトでも、baseBranch 以外へのマージでは sub-issue を閉じない", async () => {
+  const s = await setup(example(), "linear");
+  await s.watcher.request(s.projectId);
+  await mergeOf(s.pw, s.db, "1", "release");
+  await s.watcher.request(s.projectId);
+  assert.deepEqual(s.ft.calls.filter((c) => c.op === "closeIssue"), []);
+  const p1 = (await listProcesses(s.db, "i1")).find((r) => r.process_id === "1")!;
+  assert.equal(p1.sub_issue_closed, 0);
+});
+
+test("マージした sub-issue を閉じられなければ失敗を健康状態に出し、次の周で閉じる", async () => {
+  const s = await setup(example(), "linear");
+  await s.watcher.request(s.projectId);
+  await mergeOf(s.pw, s.db, "1");
+  s.ft.failWhen((c) => c.op === "closeIssue");
+  await s.watcher.request(s.projectId);
+  const p1 = async () => (await listProcesses(s.db, "i1")).find((r) => r.process_id === "1")!;
+  assert.equal((await p1()).sub_issue_closed, 0);
+  assert.equal(s.watcher.health(s.projectId).consecutiveFailures, 1);
+  assert.match(s.watcher.health(s.projectId).lastError!, /sub-issue（close）/);
+
+  s.ft.heal();
+  await s.watcher.request(s.projectId);
+  assert.equal((await p1()).sub_issue_closed, 1);
+  assert.equal(s.watcher.health(s.projectId).consecutiveFailures, 0);
+  const closes = await closesOfProcess1(s.db, s.ft);
+  assert.equal(closes.length, 2);
+  assert.equal(closes[1].op === "closeIssue" && closes[1].reason, "completed");
 });
 
 // Linear の状態（対応表の出来事ごとの呼び出し）

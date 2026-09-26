@@ -16,7 +16,7 @@ import type { IntakeTransition } from "./commands.ts";
 import { dispatchIntake, loadApprovedPlan } from "./dispatch.ts";
 import { computeProcessStatuses, goalReached } from "./pfd/status.ts";
 import { syncIssueStates } from "./issueStateSync.ts";
-import { syncSubIssues } from "./subIssueSync.ts";
+import { closeMergedSubIssues, syncSubIssues } from "./subIssueSync.ts";
 import { processProgressOf } from "./view.ts";
 import type { WorkflowLoader } from "../workflow/load.ts";
 
@@ -260,6 +260,28 @@ export async function watchProject(
         }
       } catch (e) {
         report.errors.push(`${intake.issue_url} の Linear の状態の同期: ${describe(e)}`);
+      }
+    }
+
+    // PR の Closes で閉じないトラッカーでは、観測したマージで sub-issue を閉じる。
+    // 状態の同期は閉じた sub-issue を飛ばすので、inReview へ進めた後に閉じる
+    if (tracker && !tracker.closesViaPullRequest) {
+      for (const intake of intakes) {
+        try {
+          const closed = await closeMergedSubIssues(db, tracker, {
+            projectPath: project.path,
+            intakeId: intake.id,
+            baseBranch: project.base_branch,
+          });
+          for (const f of closed.failures) {
+            report.errors.push(
+              `${intake.issue_url} プロセス ${f.processId} の sub-issue（close）: ${f.message}`,
+            );
+          }
+          if (closed.closed.length > 0) report.updated.add(intake.id);
+        } catch (e) {
+          report.errors.push(`${intake.issue_url} の sub-issue の閉じ: ${describe(e)}`);
+        }
       }
     }
 

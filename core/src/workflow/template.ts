@@ -76,6 +76,15 @@ function validatePlaceholders(template: string): void {
   }
 }
 
+/** Linear は PR の Closes で Issue を閉じないので参照だけを出す。閉じるのは Intake の見張りが行う。 */
+function isLinearUrl(url: string): boolean {
+  try {
+    return new URL(url).hostname === "linear.app";
+  } catch {
+    return false;
+  }
+}
+
 function resolve(expr: string, ctx: TemplateContext): string {
   const parts = expr.split(".");
   if (
@@ -93,7 +102,8 @@ function resolve(expr: string, ctx: TemplateContext): string {
     const { url, parent_url } = ctx.issue;
     if (parts[1] === "url") return url ?? "";
     if (parts[1] === "parent_url") return parent_url ?? "";
-    return url ? `Closes ${url}` : "";
+    if (!url) return "";
+    return isLinearUrl(url) ? `Linear: ${url}` : `Closes ${url}`;
   }
   if (expr === "worktree.path") return ctx.worktree.path;
   if (expr === "project.path") return ctx.project.path;
