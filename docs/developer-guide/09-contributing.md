@@ -84,7 +84,7 @@ mise run app:build && mise run app:test
 2. `core/src/domain/engine.ts:runTask` と `core/src/domain/stepRunner.ts`
 3. `workflow.get` / `workflow.save` が扱う形（`handlers.ts:toStepDetail`、`core/src/workflow/save.ts`）と、アプリの `app/src/workflowEdit.ts`
 4. 雛形（`core/src/workflow/scaffold.ts`）に入れるか
-5. README 2 章の説明
+5. サイトの「ワークフローを書く」（`site/src/content/docs/ja/guide/writing-workflows.mdx`）の説明
 
 ### Review Guide のスキーマを変える
 

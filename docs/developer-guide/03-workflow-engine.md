@@ -306,7 +306,7 @@ pause から resume すると `current_step_id` は進んでいないので、�
 3. 失敗したら `failed` にする
 
 再開の仕方は、再び枠を取った後の `runTask` が決める。agent / guide は会話があれば `--resume`、command / poll は頭から `sh -c` になる。
-このため **command ステップは 2 回実行されても安全でなければならない**（README 3 章）。
+このため **command ステップは 2 回実行されても安全でなければならない**（サイトの「[command ステップは再実行安全でなければならない](https://todokr.github.io/doctrine/ja/guide/idempotent-commands/)」）。
 どちらの場合も直前の行は `interrupted` なので回数は +1 され、feed で入っていたステップは feed を失って `step.prompt` で再開する。
 
 `rate_limited` / `waiting` / `suspended` / `paused` は期限や状態が DB にあるので、復帰処理の対象にならない。

@@ -157,7 +157,7 @@ test("ステップにフィールドがないと落とす", () => {
 
 test("改名前のフィールド名 stdout/stderr はもう使えない（リネームの安全網）", () => {
   // steps.test. の直後に旧フィールド名を続けてリテラルで書くと、リネームの書き残しを
-  // 洗い出す `grep -rn 'steps\.[a-z-]*\.\(stdout\|stderr\)'`（README参照）に、この
+  // 洗い出す `grep -rn 'steps\.[a-z-]*\.\(stdout\|stderr\)'`（docs/superpowers/plans/2026-09-19-task-context.md 参照）に、この
   // 意図的なテストコードまで拾われてしまう。組み立てて避ける。
   const oldField = (field: "stdout" | "stderr") => `{{ steps.test.${field} }}`;
   for (const field of ["stdout", "stderr"] as const) {
