@@ -1,0 +1,50 @@
+---
+title: command ステップは再実行安全でなければならない
+description: クラッシュ復帰や再開でステップが頭から再実行されること、書き手が守ること。
+sidebar:
+  order: 30
+---
+
+doctrine はステップ境界ごとに状態を1トランザクションで書く。これにより
+デーモンが落ちても失うのは進行中の1ステップ分だけで済むが、**代償として**
+クラッシュ復帰時・`dctl pause` からの `dctl resume` 時に、中断されていたステップはもう一度実行される。
+
+- `command` と `poll` は、コマンドを頭から実行し直す
+- `agent` と `guide` は、同じ role の会話を `--resume` して、ステップの prompt を送り直す
+  （会話の履歴は残るので、白紙からのやり直しではない）
+
+`poll` はそもそも `interval` ごとに何度も実行される。
+
+つまり **`command` と `poll` の `run` に書くコマンドは、二回実行されても安全でなければ
+ならない。**
+
+- 問題ない例: `pnpm install --frozen-lockfile`、`pnpm test`
+- **問題になり得る例: `gh pr create`、`gh pr comment`、`git push`、`npm publish`**
+  （復帰のたびに二重にPRが立つ・二重にコメントが付く・二重にpushされる・二重に公開される）
+
+ワークフローのパーサ（`parseWorkflow`）は `gh pr create` / `gh pr comment` / `gh release create` /
+`git push` / `npm publish` / `pnpm publish` のような既知の非冪等コマンドを、`command` と `poll` の
+`run` から検出するチェックを持っている。警告は次の3か所に出る。
+
+- `dctl add`（`task.create`）の応答の `warnings`
+- デーモンの警告ログ。標準エラー出力に `作成時の検証:` 付きで出て、つないでいるアプリにも通知される
+- アプリのワークフロー設定画面が使う、読み込み・保存の応答。警告ログには積まれない
+
+```bash
+$ dctl add --project /path/to/repo --title "PRを作る" --prompt "..." --workflow release
+{
+  "id": "...",
+  ...,
+  "warnings": [
+    "ステップ \"open-pr\" のコマンドは再実行で二重に効く可能性があります: gh pr create --fill\n  クラッシュ復帰時、command / poll ステップは頭から再実行されます。"
+  ]
+}
+```
+
+この警告は**正規表現による既知パターンの検出であり、完全には防げない。**
+また `task.create` の1回だけに出る。タスクは作成時のワークフロー定義を保存し、
+`task.approve` / `task.reject` / 進行（tick）はそれを読み直すだけでディスクを読まないため、
+同じ警告が読み直すたびに流れ続けることはない
+（[作成済みのタスクに定義の変更は効かない](/ja/guide/writing-workflows/)）。したがって、
+**`command` ステップが再実行安全かどうかの最終的な担保は、常にワークフローの
+書き手の責任である。**
