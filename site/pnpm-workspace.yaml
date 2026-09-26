@@ -1,0 +1,4 @@
+# esbuild の postinstall はバイナリの確認だけで、プラットフォーム別の optional 依存から
+# 本体が入るので走らせなくてよい。pnpm 11 は判断の無いビルドスクリプトを install の失敗にする。
+allowBuilds:
+  esbuild: false

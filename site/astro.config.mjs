@@ -19,10 +19,10 @@ export default defineConfig({
       ],
       // autogenerate にしておくと、ページを足す PR がこの設定を触らずに済む。
       sidebar: [
-        { label: 'Quick Start', autogenerate: { directory: 'quick-start' } },
-        { label: 'Guide', autogenerate: { directory: 'guide' } },
-        { label: 'Concepts', autogenerate: { directory: 'concepts' } },
-        { label: 'Examples', autogenerate: { directory: 'examples' } },
+        { label: 'Quick Start', items: [{ autogenerate: { directory: 'quick-start' } }] },
+        { label: 'Guide', items: [{ autogenerate: { directory: 'guide' } }] },
+        { label: 'Concepts', items: [{ autogenerate: { directory: 'concepts' } }] },
+        { label: 'Examples', items: [{ autogenerate: { directory: 'examples' } }] },
       ],
     }),
     react(),
