@@ -1,4 +1,5 @@
 import { Fragment, type ReactNode, useEffect, useState } from "react";
+import { canRetry, retryInit } from "../composer";
 import { rpc } from "../daemon/client";
 import { sendDecision } from "../decision";
 import {
@@ -15,6 +16,7 @@ import {
   RUN_WORD,
   stepRunHistory,
   stopReasons,
+  type ComposerInit,
 } from "../model";
 import { useDecide, useNotYet, useStore } from "../store";
 import { RUN_TONE, TASK_TONE } from "../tone";
@@ -120,6 +122,21 @@ export function TaskActions(props: {
   );
 }
 
+/** hook を使わない。押すと init を渡して onOpen を呼ぶ */
+export function RetryButton(props: { init: ComposerInit; onOpen: (init: ComposerInit) => void }) {
+  return <button className="btn sm" onClick={() => props.onOpen(props.init)}>同じ内容で投入し直す</button>;
+}
+
+/** Intake 由来のタスクのやり直し方の案内。Intake の画面を開くボタンを添える */
+export function IntakeRetryHint(props: { intakeId: string; onOpenIntake: (id: string) => void }) {
+  return (
+    <p className="hint">
+      Intake から投入したタスクです。やり直すには、Intake の画面の「操作が必要」から「再投入する」を押してください。
+      <button className="el-link" onClick={() => props.onOpenIntake(props.intakeId)}>Intake を開く</button>
+    </p>
+  );
+}
+
 export function TaskView({ t }: { t: Task }) {
   const { s, dispatch } = useStore();
   const decide = useDecide();
@@ -153,6 +170,9 @@ export function TaskView({ t }: { t: Task }) {
       setPending(null);
     }
   }
+
+  const openComposer = (init: ComposerInit) => dispatch({ type: "composer.open", init });
+  const openIntake = (id: string) => dispatch({ type: "intake.open", id });
 
   const detail = s.detail[t.id];
   const history = stepRunHistory(detail);
@@ -206,24 +226,13 @@ export function TaskView({ t }: { t: Task }) {
                     worktree は残っていないので、中を見ることはできません。記録だけが残っています。
                   </p>
                 )}
-              <div className="actions">
-                <button
-                  className="btn sm"
-                  onClick={() =>
-                    dispatch({
-                      type: "composer.open",
-                      init: {
-                        project: s.projects.find((p) => p.id === t.project)?.path,
-                        workflow: t.wf,
-                        title: t.title,
-                        prompt: t.prompt,
-                      },
-                    })}
-                >
-                  同じ内容で投入し直す
-                </button>
-                {t.worktree && <RemoveWorktreeButton path={removePath!} dirty={removeDirty} />}
-              </div>
+              {t.intake && <IntakeRetryHint intakeId={t.intake.id} onOpenIntake={openIntake} />}
+              {(canRetry(t) || t.worktree) && (
+                <div className="actions">
+                  {canRetry(t) && <RetryButton init={retryInit(t, s.projects)} onOpen={openComposer} />}
+                  {t.worktree && <RemoveWorktreeButton path={removePath!} dirty={removeDirty} />}
+                </div>
+              )}
             </section>
           );
         }
@@ -242,6 +251,18 @@ export function TaskView({ t }: { t: Task }) {
           </section>
         );
       })}
+      {t.state === "canceled" && (
+        <section className="box quiet">
+          <p>{t.worktree ? "中止しました。worktree は残しています。" : "中止しました。worktree は残っていません。"}</p>
+          {t.intake
+            ? <IntakeRetryHint intakeId={t.intake.id} onOpenIntake={openIntake} />
+            : (
+              <div className="actions">
+                <RetryButton init={retryInit(t, s.projects)} onOpen={openComposer} />
+              </div>
+            )}
+        </section>
+      )}
       {t.state === "rate_limited" && (
         <section className="box quiet">
           <p>
