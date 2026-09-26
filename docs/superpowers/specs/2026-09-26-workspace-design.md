@@ -98,7 +98,11 @@ workspace とプロジェクトを DB に登録する。
 
 - プロジェクトの名前が `[a-z0-9-]+` で、workspace の中で重なっていない
 - パスが git リポジトリのルートである
-- そのリポジトリがほかの workspace に登録されていない
+- そのリポジトリがほかの workspace に登録されていない。ただし、ほかの workspace がそのリポジトリ 1 つだけでできていて、
+  終わっていない Intake（`completed`・`canceled` 以外）を持たなければ、その workspace を吸収する。
+  プロジェクトと終わった Intake を新しい workspace に付け替え、空になった workspace の行を消す。
+  マイグレーション（4.2）が既存のプロジェクトを 1 つずつの workspace にするので、この例外が無いと
+  `~/work/tp` のように既存のリポジトリを束ね直せない
 
 ### 4.2 DB
 
