@@ -1,0 +1,38 @@
+---
+title: ステップ間で成果物を渡す
+description: agent ステップの間で計画やレビュー結果をファイルで受け渡す方法。
+sidebar:
+  order: 60
+---
+
+前段の `agent` ステップが後段へ計画やレビュー結果を渡したいときは、worktree 内の
+ファイルに書かせ、後段は `{{ worktree.path }}` でパスを組み立てて読ませる。
+
+```yaml
+  - id: plan
+    type: agent
+    session: planner
+    prompt: "計画を .doctrine-out/plan.md に書いてください"
+
+  - id: review
+    type: agent
+    session: reviewer
+    prompt: "{{ worktree.path }}/.doctrine-out/plan.md の内容をレビューしてください"
+```
+
+`.doctrine-out/` という名前は規約であり、doctrine が強制するものではない
+（プロンプトで指示する自由な文字列）。ただし doctrine は worktree 作成時に、
+この名前を `.git/info/exclude` へ自動で追記する。`.git/info/exclude` はリポジトリ共通のファイルで、
+プロジェクトの `.gitignore` は書き換えない。これにより:
+
+- `completed` の後始末（Guide の「worktree は失敗・中止時に残る」）が、この中間ファイルを「未コミットの変更」として
+  誤って削除拒否しない
+- レビュー画面の diff にも混ざらない。diff を取るときも `.doctrine-out/` を除いているので、
+  `.git/info/exclude` への追記とは別にも守られている
+
+対象を別の名前にしたい場合でも、この自動追記の対象は `.doctrine-out/` に固定されている
+点に注意する（変えたい場合は自分で `.git/info/exclude` に追記する）。
+
+短い結果なら、ファイルを介さず `{{ steps.<id>.last_stdout }}`（`agent` の最終応答）でも渡せる。
+書かせたファイルを人に見せたいときは、`approval` の `review.files` に並べる
+（[ワークフローを書く](/ja/guide/writing-workflows/)）。
