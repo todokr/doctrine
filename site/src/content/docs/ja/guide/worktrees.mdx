@@ -1,0 +1,81 @@
+---
+title: worktree は失敗・中止時に残る
+description: 失敗・中止したタスクの worktree を見つけて消す方法。
+sidebar:
+  order: 40
+---
+
+## 完了・失敗・中止のときの worktree
+
+- `completed` → worktree は削除される（ブランチは残る）。ただし完了時に
+  **未コミットの変更が残っていれば削除は拒否される**。
+- `failed` / `canceled` → worktree は**意図的に残される**。失敗した実行こそ
+  中を見たい瞬間であり、そこで証拠を消すのは最悪の設計であるため。
+
+`failed` / `canceled` の worktree を消す例外が 1 つある。Intake の「再投入する」で同じプロセスに新しいタスクを作ると、止まった前のタスクの worktree を消す。ただし未コミットの変更が無い場合だけである。
+
+### 削除を拒否した警告の届き方
+
+削除を拒否すると、警告は次の形でクライアントに届く。
+
+- デーモンの標準エラー出力に `[warn] …` と出る。
+- `daemon.warning` イベントとして、つないでいるクライアントに送られる。
+- `task.cleanedUp` イベント（`outcome` は `"refused"`）も送られる。
+- デーモンのメモリに直近 100 件が残り、`daemon.warnings` で読める。
+
+アプリでは、トーストが出て、サイドバーの「worktree と警告」画面の「警告」節にも並ぶ。タスク画面には「worktree の削除を拒否しました」の枠と「worktree を削除」ボタンが出る。`dctl` には警告を読むコマンドが無い。
+
+完了イベントと後始末の順序については、[既知の制約](/ja/guide/known-limitations/)を参照。
+
+## 残った worktree を見つけて消す
+
+残った worktree は溜まる。見つけて消すには次のコマンドを使う。
+
+```bash
+dctl ls --state failed              # 失敗したタスクを探す
+dctl get <task-id> | jq -r .task.worktree_path   # worktree のパスを確認する
+dctl gc <task-id>                   # そのタスクの worktree を削除する
+dctl gc <task-id> --force           # 削除が拒否される場合（未コミットの変更がある）
+dctl gc --path <path>               # 一覧に出た worktree をパスで指定して消す
+```
+
+`dctl get` の出力は `{ task, stepRuns, steps }` の形で、worktree のパスは `.task.worktree_path` にある。
+
+:::caution
+`--force` を付けると、worktree 内の未コミットの作業は失われる。確認してから使うこと。
+:::
+
+- `--force` が外すのは、未コミットの変更の確認だけである。
+- 終わっていないタスクの worktree は、`--force` を付けても消せない。終わっていない Intake の worktree も同じである。完了・中止した Intake の worktree は `gc --path` で消せる。
+- `gc --path` に渡すパスは、絶対パスで、状態ディレクトリの `worktrees/` の下にあり、`git worktree list` に出るものに限る。
+- 消すのは worktree だけで、ブランチは残る。
+
+worktree を消すと、そのタスクのレビュー参照（`refs/doctrine/reviews/<task-id>/`）も
+一緒に消える。この参照は「レビュー時点の worktree の中身」を `git gc` から守るために
+doctrine が張っているもので、worktree が無くなれば使う相手もいない。これはタスクの worktree のときだけである。
+
+## dctl worktrees で一覧する
+
+`dctl worktrees` は、すべての worktree を一覧する。孤立したものだけではない。各行は次の形である。
+
+```
+{project, path, branch, task_id, task_state, intake_id, dirty, age_basis}
+```
+
+- 孤立した worktree は、`task_id` と `intake_id` がどちらも `null` の行である。
+- `failed` のタスクの worktree も、`task_state: "failed"` として出る。
+
+## アプリから消す
+
+サイドバーのアイコン「worktree と警告」を開くと、「worktree」節が表になっている。
+
+- 列は「プロジェクト」「パス」「持ち主」「未コミットの変更」「経過」。
+- 「持ち主」には、タスク名か「Intake」か「孤児」が出る。
+- 未コミットの変更がある行には「未コミットの変更あり」、古い行には「古い」が付く。
+- 持ち主が動いていない行（孤児・終わったタスク・閉じた Intake）には「worktree を削除」ボタンが出る。
+
+ボタンを押すと、題が「worktree を削除しますか」の確認のモーダルが開く。ボタンは「削除する」と「戻る」で、未コミットの変更があれば「未コミットの変更があります。削除すると失われます。」と出る。タスク画面の「失敗」の枠と「削除を拒否」の枠にも、同じ「worktree を削除」ボタンがある。
+
+:::caution
+アプリの削除は、常に `force: true` で送られる。歯止めは確認のモーダルだけなので、未コミットの変更の有無を確かめてから「削除する」を押すこと。
+:::
