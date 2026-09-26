@@ -296,7 +296,7 @@ git commit -m "DB に workspaces を足し、プロジェクトを属させる"
 - Modify: `core/src/cli/dctl.ts:64-66,112-115`（`project-add` / `project-update` を消し、`workspace-add --path` / `workspace-update --path` / `workspaces` を足す）
 - Modify: `shared/protocol.ts`（`WorkspaceSummary`・`workspace.*` を `Methods` に足す）
 - Create: `.doctrine/workspace.yaml`（doctrine 自身: `projects: { doctrine: . }`）
-- Modify: `README.md`、`docs/overview.md`（`project-add` の説明を `workspace-add` に）
+- Modify: `site/src/content/docs/ja/guide/writing-workflows.mdx`、`site/src/content/docs/ja/guide/intake.mdx`、`docs/overview.md`（`project-add` の説明を `workspace-add` に）
 - Test: `core/test/daemon/workspaceRegistry.test.ts`、`core/test/daemon/cli.test.ts`、`core/test/workflow/scaffold.test.ts`
 
 **Interfaces:**
@@ -363,7 +363,7 @@ Expected: FAIL
 
 - [ ] **Step 3: 実装する**（上の振る舞いのとおり。`project.add` を使っていたテストは `workspace.add` に書き換える）
 
-- [ ] **Step 4: doctrine 自身の `.doctrine/workspace.yaml` を足し、README / overview を書き換える**
+- [ ] **Step 4: doctrine 自身の `.doctrine/workspace.yaml` を足し、サイトの Guide / overview を書き換える**
 
 ```yaml
 # doctrine の workspace 設定（dctl workspace-add が雛形として作成）
@@ -379,7 +379,7 @@ Expected: PASS
 - [ ] **Step 6: コミットする**
 
 ```bash
-git add core shared app .doctrine/workspace.yaml README.md docs/overview.md
+git add core shared app .doctrine/workspace.yaml site/src/content/docs/ja/guide/writing-workflows.mdx site/src/content/docs/ja/guide/intake.mdx docs/overview.md
 git commit -m "workspace を登録する dctl workspace-add / workspace-update を足す"
 ```
 

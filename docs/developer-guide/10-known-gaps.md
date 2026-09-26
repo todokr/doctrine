@@ -41,22 +41,9 @@
 | `.github/workflows/ci.yml` | `.doctrine/` の変更で core のテストが流れない（`defaultWorkflow.test.ts` がそのファイルを読むのに） |
 | `core/deno.json` | `zod` の範囲が `^3.24.0` だが、`shared/` が使う `zod/v4` は 3.25 以降にしか無い。lock で救われている |
 
-## 10.3 README との食い違い
+## 10.3 app/README.md との食い違い
 
-| 箇所 | 実際 |
-| --- | --- |
-| 「ステップは4種類だけ」 | 5 種類（`poll` がある） |
-| 3 章「`agent` ステップは `claude_session_id` で `--resume` されるので再実行されない」 | 会話は役割ごとに `task_sessions` に持つ。agent も再開時に同じ会話で `step.prompt` を送り直し、回数も進む |
-| 5 章のステップ実行の状態 | `waiting` が無い。`interrupted` は起動時の復帰だけでなく pause / cancel / poll の 2 でも付く |
-| 4 章・既知の制約「警告はクライアントに届かない」「完了イベントと後始末の競合」 | `daemon.warning` と `task.cleanedUp` で届く |
-| 4 章「`dctl worktrees` は孤立 worktree だけ」 | すべての worktree を区別付きで返す |
-| 3 章の非冪等コマンド | `gh pr comment` も対象。警告文は「command / poll ステップは」 |
-| 組み込みのシステムプロンプトは「すべての `agent` ステップに」 | guide ステップにも付く |
-| 1 章「レビュー画面（②）はまだ無い」 | アプリにレビュー画面がある |
-| 7 章の `pfd` CLI | Intake に置き換え済みで削除予定 |
-| 2 章の `tracker` | Linear の状態名を上書きする `tracker.states` の説明が無い |
-
-`app/README.md` も古い。`PfdDiagram` は「どの画面にもまだ置いていない」とあるが `PlanReview` と `IntakeProgress` が使っている。
+`app/README.md` は古い。`PfdDiagram` は「どの画面にもまだ置いていない」とあるが `PlanReview` と `IntakeProgress` が使っている。
 `settings.json`・`open_path`・Intake や設定の画面・Rust のテストの走らせ方に触れていない。
 
 ## 10.4 overview との食い違い

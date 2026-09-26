@@ -121,5 +121,5 @@ doctrine のエージェントは `allowedTools` の許可が先頭一致なの�
 - `pfd/` は Intake 以前に doctrine の外で作った試作 CLI で、`dctl add` を叩いて PFD のプロセスをタスクにしていた。
   その機能は Intake（[6 章](06-intake.md)）に移植済みで、core・shared・app のどこからも import されていない。
   [`overview.md`](../overview.md) 7 章のとおり削除する。削除するときは `mise.toml` の `pfd:*` と `setup` の依存、
-  CI の `pfd` ジョブ、`.doctrine/workflows/default.yaml` の `verify` / `verify-sync` と `allowedTools`、`README.md` 7 章も一緒に消す
+  CI の `pfd` ジョブ、`.doctrine/workflows/default.yaml` の `verify` / `verify-sync` と `allowedTools` も一緒に消す
 - `prototype/` はデーモンに繋がらない単一 HTML のモックで、spec の見た目を確かめるための資料である

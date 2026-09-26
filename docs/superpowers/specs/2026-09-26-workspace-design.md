@@ -245,4 +245,4 @@ const processSchema = z.strictObject({
 ## 12. 置き換える記述
 
 - [Intake のコア設計](2026-09-21-intake-core-design.md) の「Intake はプロジェクトに属する」「worktree は 1 つ」「トラッカーは project.yaml から引く」という記述は、4・5・8 章が置き換える。
-- `docs/overview.md` と `README.md` のプロジェクト登録（`project-add`）の説明は、`workspace-add` に書き換える。
+- `docs/overview.md` とドキュメントサイト（`site/src/content/docs/ja/guide/writing-workflows.mdx`、`site/src/content/docs/ja/guide/intake.mdx`）のプロジェクト登録（`project-add`）の説明は、`workspace-add` に書き換える。
