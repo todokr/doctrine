@@ -1,0 +1,14 @@
+/* アクセントカラーは app/src/styles.css の --accent 系から仮に当てた値。人が見て決め直す。 */
+:root {
+  --sl-font: "IBM Plex Sans JP","Hiragino Sans","Noto Sans JP",system-ui,sans-serif;
+  --sl-font-mono: "IBM Plex Mono",ui-monospace,"SFMono-Regular",Menlo,monospace;
+  --sl-color-accent-low: #3A2E15;
+  --sl-color-accent: #E0A857;
+  --sl-color-accent-high: #F1E3C9;
+}
+
+:root[data-theme='light'] {
+  --sl-color-accent-low: #F1E3C9;
+  --sl-color-accent: #AD7625;
+  --sl-color-accent-high: #20140A;
+}
