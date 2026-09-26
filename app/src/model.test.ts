@@ -102,10 +102,67 @@ const base = (overrides: Partial<State> = {}): State => ({
   warnings: [],
   removing: null,
   settings: { kind: "loading" },
+  composer: null,
   ...overrides,
 });
 
 const task = (s: State, id: string) => s.tasks.find((t) => t.id === id)!;
+
+describe("コンポーザ", () => {
+  const open = (s: State, init = {}) => reduce(s, { type: "composer.open", init });
+
+  test("composer.open は初期値を持って開き、editing を消す", () => {
+    const s = reduce(
+      base({ editing: { task: "t-2b91", path: "a", line: 1, quote: "q", text: "x" } }),
+      { type: "composer.open", init: { title: "T" } },
+    );
+    expect(s.composer).toEqual({ init: { title: "T" }, opened: 1 });
+    expect(s.editing).toBeNull();
+    expect(s.view).toBe("tasks");
+  });
+  test("開いたまま composer.open すると opened が増える", () => {
+    const s = open(open(base(), { title: "A" }), { title: "B" });
+    expect(s.composer).toEqual({ init: { title: "B" }, opened: 2 });
+  });
+  test("composer.close で閉じる", () => {
+    expect(reduce(open(base()), { type: "composer.close" }).composer).toBeNull();
+  });
+  test("composer.created は作ったタスクを選び、閉じてトーストを出す", () => {
+    const target = seedTasks()[0];
+    const s = reduce(open(base({ view: "tasks" })), {
+      type: "composer.created",
+      id: target.id,
+      toast: "タスクを作りました: X",
+    });
+    expect(s.sel).toBe(target.id);
+    expect(s.view).toBe(taskViewFor(target));
+    expect(s.composer).toBeNull();
+    expect(s.toast).toBe("タスクを作りました: X");
+  });
+  test("一覧に無い id でも sel をその id にし、view は変えない", () => {
+    const s = reduce(open(base({ view: "done" })), { type: "composer.created", id: "new-1", toast: "作った" });
+    expect(s.sel).toBe("new-1");
+    expect(s.view).toBe("done");
+    expect(s.composer).toBeNull();
+    expect(s.toast).toBe("作った");
+    const created = { ...seedTasks()[0], id: "new-1" };
+    const synced = reduce(s, { type: "sync", tasks: [created, ...seedTasks()], projects: PROJECTS, now: NOW });
+    expect(synced.sel).toBe("new-1");
+  });
+  test("select で閉じる", () => {
+    const s = reduce(open(base()), { type: "select", id: "t-7f3a" });
+    expect(s.composer).toBeNull();
+    expect(s.sel).toBe("t-7f3a");
+  });
+  test("view を移ると閉じる", () => {
+    expect(reduce(open(base()), { type: "view", view: "intake" }).composer).toBeNull();
+    expect(reduce(open(base()), { type: "view", view: "done" }).composer).toBeNull();
+  });
+  test("開いている間の move は何もしない", () => {
+    const s = open(base());
+    expect(reduce(s, { type: "move", delta: 1 })).toBe(s);
+  });
+});
 
 describe("groupOf", () => {
   const t = (patch: Partial<Task>) => ({ ...seedTasks()[0], ...patch });

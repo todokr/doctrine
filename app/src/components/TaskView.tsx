@@ -197,20 +197,33 @@ export function TaskView({ t }: { t: Task }) {
               </h2>
               {t.worktree
                 ? (
-                  <>
-                    <p>
-                      worktree は証拠として残しています。中を確認してから、<span className="mono">dctl add</span> で同じ内容を投入し直すか、
-                      削除してください（UIでの「同じ内容で投入し直す」は第2段階です）。
-                    </p>
-                    <RemoveWorktreeButton path={removePath!} dirty={removeDirty} />
-                  </>
+                  <p>
+                    worktree は証拠として残しています。中を確認してから、同じ内容で投入し直すか、削除してください。
+                  </p>
                 )
                 : (
                   <p>
                     worktree は残っていないので、中を見ることはできません。記録だけが残っています。
-                    やり直すなら <span className="mono">dctl add</span> で同じ内容を投入し直してください（UIでの「同じ内容で投入し直す」は第2段階です）。
                   </p>
                 )}
+              <div className="actions">
+                <button
+                  className="btn sm"
+                  onClick={() =>
+                    dispatch({
+                      type: "composer.open",
+                      init: {
+                        project: s.projects.find((p) => p.id === t.project)?.path,
+                        workflow: t.wf,
+                        title: t.title,
+                        prompt: t.prompt,
+                      },
+                    })}
+                >
+                  同じ内容で投入し直す
+                </button>
+                {t.worktree && <RemoveWorktreeButton path={removePath!} dirty={removeDirty} />}
+              </div>
             </section>
           );
         }

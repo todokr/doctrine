@@ -10,7 +10,7 @@ import {
   taskIntakeMark,
 } from "../intake";
 import { GROUPS, ago, countReview, groupOf, hm, sidebarOrder, staleDaysOf, timeLabel, visibleTasks } from "../model";
-import { useNotYet, useStore } from "../store";
+import { useStore } from "../store";
 import { groupTone, sectionTone, toneClass } from "../tone";
 import type { Task } from "../types";
 import { isStaleWorktree, worktreesNeedAttention } from "../worktrees";
@@ -184,7 +184,6 @@ function SettingsSidebar() {
 
 export function Sidebar() {
   const { s, dispatch } = useStore();
-  const notYet = useNotYet();
   if (s.view === "worktrees") return <WorktreeSidebar />;
   if (s.view === "intake") return <IntakeSidebar />;
   if (s.view === "settings") return <SettingsSidebar />;
@@ -201,7 +200,7 @@ export function Sidebar() {
         </select>
         <span className="count">{count}</span>
         <span className="grow" />
-        <button className="plus" title="新しいタスク" aria-label="新しいタスク" onClick={() => notYet("タスクの作成はCLI（dctl add）から行います。UIからの作成（コンポーザ）は第2段階です")}>＋</button>
+        <button className="plus" title="新しいタスク" aria-label="新しいタスク" aria-pressed={s.composer !== null} onClick={() => dispatch({ type: "composer.open", init: {} })}>＋</button>
       </div>
       <div className="side-scroll">
         {isDone ? (

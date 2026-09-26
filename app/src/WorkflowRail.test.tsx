@@ -108,6 +108,21 @@ describe("WorkflowRail", () => {
     expect(classesOf(html, "gone")).toContain("unknown");
   });
 
+  test("実行の無い列はすべて tone-idle で now が無い（TaskDetail 以外の形で渡せる）", () => {
+    const html = renderToStaticMarkup(
+      <WorkflowRail
+        detail={{ steps, stepRuns: [], task: { current_step_id: null } }}
+        legend={false}
+      />,
+    );
+    for (const id of ["implement", "verify", "review"]) {
+      const cls = classesOf(html, id)!;
+      expect(cls).toContain("tone-idle");
+      expect(cls).not.toContain("now");
+    }
+    expect(classesOf(html, "review")).toContain("gate");
+  });
+
   test("legend={true} は 5 語の凡例を出す", () => {
     const html = renderToStaticMarkup(
       <WorkflowRail detail={detail("implement", [])} legend={true} />,

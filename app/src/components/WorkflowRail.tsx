@@ -1,6 +1,8 @@
 import { type KeyboardEvent, useId } from "react";
 import type {
-  TaskDetail,
+  StepRun,
+  StepView,
+  TaskSummary,
   WorkflowStepDetail,
 } from "../../../shared/protocol.ts";
 import {
@@ -121,7 +123,10 @@ const LEGEND: { tone: Parameters<typeof toneClass>[0]; word: string }[] = [
 ];
 
 export function WorkflowRail(
-  { detail, legend }: { detail: TaskDetail; legend: boolean },
+  { detail, legend }: {
+    detail: { steps: StepView[] | null; stepRuns: StepRun[]; task: Pick<TaskSummary, "current_step_id"> };
+    legend: boolean;
+  },
 ) {
   const nodes = buildRail(detail.steps, detail.stepRuns, detail.task);
   if (!nodes) return null;
