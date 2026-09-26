@@ -1,0 +1,20 @@
+---
+title: 小さなワークフロー
+description: 4 種類のステップを 1 つずつ使う、短いワークフロー YAML の例。
+---
+
+import { Code } from '@astrojs/starlight/components';
+import { WorkflowStepExplorer } from '../../../../components/WorkflowStepExplorer';
+import minimalWorkflow from '../../../../workflows/minimal.yaml?raw';
+
+実装、テスト、人の確認、マージ待ちの順に進むワークフローの例です。ワークフローは `.doctrine/workflows/<name>.yaml` に置きます。
+
+<Code code={minimalWorkflow} lang="yaml" title=".doctrine/workflows/minimal.yaml" />
+
+## ステップを見る
+
+ボタンを押すと、そのステップの説明が出ます。
+
+<WorkflowStepExplorer client:load />
+
+ステップの型にはほかに `guide`（Review Guide を作る）がありますが、この例では使っていません。

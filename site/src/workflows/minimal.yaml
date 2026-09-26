@@ -1,0 +1,39 @@
+# 実装して、テストを通し、人が確かめてから、PR のマージを待つ小さなワークフロー。
+name: minimal
+steps:
+  - id: implement
+    type: agent
+    permissionMode: acceptEdits
+    prompt: |
+      {{ task.prompt }}
+
+      実装してコミットしてください。
+
+  - id: test
+    type: command
+    run: npm test
+    onFailure:
+      goto: implement
+      maxAttempts: 3
+      feed: |
+        テストが落ちました:
+        {{ steps.test.last_stdout }}
+
+  - id: review
+    type: approval
+    title: 変更を確認してください
+    onReject:
+      goto: implement
+      maxAttempts: 2
+      feed: "{{ steps.review.last_stdout }}"
+
+  - id: wait-merge
+    type: poll
+    interval: 5m
+    run: |
+      state=$(gh pr view --json state --jq .state) || exit 1
+      case "$state" in
+        MERGED) exit 0 ;;
+        CLOSED) exit 2 ;;
+        *) exit 75 ;;
+      esac
