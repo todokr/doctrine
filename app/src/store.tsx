@@ -28,10 +28,12 @@ import type {
   IntakeDetail,
   IntakeSummary,
   NewComment,
+  ParamsOf,
   PfdDraft,
   ProjectConfig,
   ProjectConfigInput,
   ProjectSummary,
+  ResultOf,
   TrackerIssue,
   Warning,
   WorkflowDetail,
@@ -99,6 +101,7 @@ function initialState(): State {
     warnings: [],
     removing: null,
     settings: { kind: "loading" },
+    composer: null,
   };
 }
 
@@ -513,6 +516,19 @@ export function useProjectConfigRpc(): ProjectConfigRpc {
     get: (project: string) => rpc("project.config.get", { project }),
     workflows: (project: string) => rpc("workflow.list", { project }),
     save: (project: string, config: ProjectConfigInput) => rpc("project.config.save", { project, config }),
+  };
+}
+
+/** コンポーザの RPC。project は Project.path。useIntakeRpc と同じくここでは catch しない */
+export type ComposerRpc = {
+  workflows: (project: string) => Promise<WorkflowListEntry[]>;
+  create: (params: ParamsOf<"task.create">) => Promise<ResultOf<"task.create">>;
+};
+
+export function useComposerRpc(): ComposerRpc {
+  return {
+    workflows: (project: string) => rpc("workflow.list", { project }),
+    create: (params: ParamsOf<"task.create">) => rpc("task.create", params),
   };
 }
 

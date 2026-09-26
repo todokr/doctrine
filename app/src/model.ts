@@ -513,6 +513,12 @@ export type Loaded<T> =
   | { kind: "ok"; value: T }
   | { kind: "error"; message: string };
 
+/** コンポーザに外から渡す初期値。project は Project.path（表示名ではない） */
+export type ComposerInit = { project?: string; workflow?: string; title?: string; prompt?: string };
+
+/** 開いているコンポーザ。opened は開き直すたびに増やし、部品の key にして入力を作り直す */
+export type Composer = { init: ComposerInit; opened: number };
+
 /** レビュー画面の diff の並べ方。flow はガイドの読む順、files はファイル順 */
 export type Layout = "flow" | "files";
 
@@ -569,6 +575,8 @@ export type State = {
   removing: { path: string; dirty: boolean | null } | null;
   /** 起動時に load_settings で読んだ設定。保存に成功したら置き換える */
   settings: Loaded<AppSettings>;
+  /** null でなければメイン領域にコンポーザを出す（tasks / done のビューのとき） */
+  composer: Composer | null;
 };
 
 /** 古い worktree のしきい値（日）。設定が読めていなければ null（強調も点も出さない） */
@@ -686,7 +694,11 @@ export type Action =
   | { type: "worktrees.sync"; worktrees: WorktreeEntry[]; warnings: Warning[] | null }
   | { type: "remove.ask"; path: string; dirty: boolean | null }
   | { type: "remove.close" }
-  | { type: "settings"; loaded: Loaded<AppSettings> };
+  | { type: "settings"; loaded: Loaded<AppSettings> }
+  | { type: "composer.open"; init: ComposerInit }
+  | { type: "composer.close" }
+  /** task.create と取り直しが済んだ後の後片付け。作ったタスクを選び、トーストを出す */
+  | { type: "composer.created"; id: string; toast: string };
 
 /**
  * 流れてきた1行を足す。step_run_id が持っているものと違えば、別のステップの
@@ -764,9 +776,11 @@ export function reduce(s: State, a: Action): State {
   const t = selectedTask(s);
   switch (a.type) {
     case "view": {
-      if (a.view === "intake" || a.view === "worktrees") return { ...s, view: a.view, editing: null };
-      if (a.view === "settings") return { ...s, view: "settings", editing: null };
-      const next = { ...s, view: a.view };
+      if (a.view === "intake" || a.view === "worktrees") {
+        return { ...s, view: a.view, editing: null, composer: null };
+      }
+      if (a.view === "settings") return { ...s, view: "settings", editing: null, composer: null };
+      const next = { ...s, view: a.view, composer: null };
       const leaving = a.view === "done" || (t !== null && groupOf(t) === "done");
       const first = sidebarOrder(s.tasks, a.view, s.project)[0];
       return leaving && first ? { ...next, sel: first.id, editing: null } : next;
@@ -776,11 +790,30 @@ export function reduce(s: State, a: Action): State {
     case "select": {
       if (s.view === "settings") {
         const target = s.tasks.find((x) => x.id === a.id);
-        return target ? { ...s, view: taskViewFor(target), sel: a.id, editing: null } : { ...s, sel: a.id };
+        return target
+          ? { ...s, view: taskViewFor(target), sel: a.id, editing: null, composer: null }
+          : { ...s, sel: a.id, composer: null };
       }
-      return { ...s, sel: a.id, editing: null };
+      return { ...s, sel: a.id, editing: null, composer: null };
+    }
+    case "composer.open":
+      return { ...s, composer: { init: a.init, opened: (s.composer?.opened ?? 0) + 1 }, editing: null };
+    case "composer.close":
+      return { ...s, composer: null };
+    case "composer.created": {
+      const target = s.tasks.find((x) => x.id === a.id);
+      // 一覧に無くても sel は先に決める。後から来る sync が ids.has(s.sel) で残す
+      return {
+        ...s,
+        ...(target ? { view: taskViewFor(target) } : {}),
+        sel: a.id,
+        editing: null,
+        composer: null,
+        toast: a.toast,
+      };
     }
     case "move": {
+      if (s.composer !== null) return s;
       if (s.view === "worktrees" || s.view === "settings") return s;
       if (s.view === "intake") {
         const rows = intakeOrder(s.intakes, s.projects, s.project, s.showClosedIntakes);
