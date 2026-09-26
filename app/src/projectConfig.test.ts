@@ -106,8 +106,8 @@ describe("assignSaveError", () => {
 describe("workflowOptions", () => {
   test("一覧の名前が選択肢になる", () => {
     const entries: Parameters<typeof workflowOptions>[0] = [
-      { name: "default", ok: true },
-      { name: "quick", ok: true },
+      { name: "default", default: true, ok: true, steps: [] },
+      { name: "quick", default: false, ok: true, steps: [] },
     ];
     expect(workflowOptions(entries, "default")).toEqual([
       { name: "default", label: "default" },
@@ -117,13 +117,15 @@ describe("workflowOptions", () => {
 
   test("読めないワークフローには（不正）を添える", () => {
     const entries: Parameters<typeof workflowOptions>[0] = [
-      { name: "broken", ok: false, issues: ["x"] },
+      { name: "broken", default: true, ok: false, issues: ["x"] },
     ];
     expect(workflowOptions(entries, "broken")[0].label).toBe("broken（不正）");
   });
 
   test("今の値が一覧に無ければ（見つかりません）を先頭に足す", () => {
-    const entries: Parameters<typeof workflowOptions>[0] = [{ name: "default", ok: true }];
+    const entries: Parameters<typeof workflowOptions>[0] = [
+      { name: "default", default: true, ok: true, steps: [] },
+    ];
     const r = workflowOptions(entries, "gone");
     expect(r[0]).toEqual({ name: "gone", label: "gone（見つかりません）" });
     expect(r[1]).toEqual({ name: "default", label: "default" });

@@ -30,7 +30,10 @@ const NO_ERRORS = { fields: {}, rest: null };
 describe("loadProjectConfig", () => {
   test("project.config.get と workflow.list をプロジェクトのパスで呼ぶ", async () => {
     const config: ProjectConfig = { defaultWorkflow: "default", maxConcurrent: 2, baseBranch: "main", setup: "pnpm install" };
-    const list: WorkflowListEntry[] = [{ name: "default", ok: true }, { name: "quick", ok: true }];
+    const list: WorkflowListEntry[] = [
+      { name: "default", default: true, ok: true, steps: [] },
+      { name: "quick", default: false, ok: true, steps: [] },
+    ];
     invoke.mockResolvedValueOnce(config).mockResolvedValueOnce(list);
 
     const r = await loadProjectConfig("/repo/app", api);
@@ -50,7 +53,10 @@ describe("loadProjectConfig", () => {
 
 describe("ProjectConfigFields", () => {
   const config: ProjectConfig = { defaultWorkflow: "default", maxConcurrent: 2, baseBranch: "main", setup: "pnpm install" };
-  const list: WorkflowListEntry[] = [{ name: "default", ok: true }, { name: "quick", ok: true }];
+  const list: WorkflowListEntry[] = [
+    { name: "default", default: true, ok: true, steps: [] },
+    { name: "quick", default: false, ok: true, steps: [] },
+  ];
 
   test("project.config.get の値が欄に出る", () => {
     const form = toProjectConfigForm(config);

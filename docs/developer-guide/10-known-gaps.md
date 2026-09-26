@@ -30,7 +30,7 @@
 | `cli/dctl.ts:main` | `DOCTRINE_SOCKET ?? socketPath()` なので、空文字の `DOCTRINE_SOCKET` を空のパスとして使う |
 | `daemon/handlers.ts` の `task.list` | 未登録のプロジェクトを渡すと絞り込みが外れて全件を返す（`intake.list` は空を返す） |
 | `daemon/handlers.ts` の `task.logs` | `step_run_id` がそのタスクのものかを確かめない（`intake.logs` は確かめる） |
-| `shared/protocol.ts:Methods` | `project.add` / `project.update` / `task.create` が載っていない。中継は素通しなのでアプリからも呼べる |
+| `shared/protocol.ts:Methods` | `project.add` / `project.update` が載っていない。中継は素通しなのでアプリからも呼べる |
 | `domain/guidePrompt.ts` | エージェントに実行させる diff が `git diff -M` で `-C` が無い。hunk 一覧は `-M -C` で作るので、コピーを含む変更では id が合わない |
 | `domain/guideInputs.ts` | diff が 2 MiB で打ち切られても、プロンプトにはそれが伝わらない |
 | `adapter/claude.ts:structuredOutputOf` | 構造化出力のキー `structured_output` は、コメント自身が「未実測」としている |

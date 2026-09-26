@@ -6,6 +6,7 @@ import {
   parseProjectConfig,
   type ProjectConfig,
   type ProjectConfigInput,
+  withSetupStep,
   writeProjectYaml,
 } from "../workflow/project.ts";
 import { applyWorkflowChanges, writeWorkflowYaml } from "../workflow/save.ts";
@@ -376,12 +377,16 @@ export function createHandler(ctx: DaemonContext): Handler {
         const project = await reqProject(ctx, params);
         const names = await workflowNames(project.path);
         return await Promise.all(names.map(async (name): Promise<WorkflowListEntry> => {
+          const isDefault = name === project.default_workflow;
           try {
-            await ctx.loadWorkflow(project.path, name);
-            return { name, ok: true };
+            const { workflow } = await ctx.loadWorkflow(project.path, name);
+            const steps = toStepViews(withSetupStep(workflow, project.setup ?? undefined));
+            return { name, default: isDefault, ok: true, steps };
           } catch (e) {
-            if (e instanceof WorkflowValidationError) return { name, ok: false, issues: e.issues };
-            return { name, ok: false, issues: [(e as Error).message] };
+            if (e instanceof WorkflowValidationError) {
+              return { name, default: isDefault, ok: false, issues: e.issues };
+            }
+            return { name, default: isDefault, ok: false, issues: [(e as Error).message] };
           }
         }));
       }
