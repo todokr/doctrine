@@ -508,6 +508,20 @@ export type TrackerIssue = IssueSummary & { intake_id: string | null };
  */
 export type Methods = {
   "task.list": { params: { project?: string; state?: TaskState }; result: TaskSummary[] };
+  /**
+   * タスクを作る。workflow を省くと project の既定を使い、priority の既定は 2。
+   * warnings は非冪等コマンドの警告で、作成時の 1 回だけ返る。
+   */
+  "task.create": {
+    params: {
+      project: string;
+      title: string;
+      prompt: string;
+      workflow?: string;
+      priority?: number;
+    };
+    result: TaskSummary & { warnings: string[] };
+  };
   "project.list": { params: Record<string, never>; result: ProjectSummary[] };
   /**
    * <project>/.doctrine/workflows/*.yaml を名前の昇順で。検証に落ちたものも issues とともに返す。
