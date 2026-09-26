@@ -1,0 +1,61 @@
+---
+title: 権限で拒否された操作を読む
+description: 権限で拒否された操作と、ステップ実行の状態を dctl とアプリで読む方法。
+sidebar:
+  order: 50
+---
+
+## 拒否された操作
+
+Claude Code は `--permission-prompts none` で headless 実行するため、
+権限で操作を拒否されても**プロセスとしては正常終了する**（終了コード0、
+`is_error: false`）。拒否があっても実行の成否は変わらないので、
+ステップ実行の状態は `success` のままで、ワークフローも止まらない。
+
+何が拒否されたかは、その行の `permission_denials` に入る。ツール名と入力
+（Bash ならコマンド）が読める。
+
+```bash
+dctl get <task-id> | jq '.stepRuns[] | select(.permission_denials) | .permission_denials.denials[] | {tool_name, input}'
+# => {"tool_name":"Bash","input":{"command":"git push origin main"}}
+```
+
+`permission_denials` の形は `{ total, denials: [{ tool_name, tool_use_id, input }] }` である。
+残すのは1回の実行につき先頭20件で、実際の件数は `permission_denials.total` に入る。
+入力のトップレベルの文字列は各2000字までで切る。拒否が無かった実行では `null`。
+
+## 失敗と差し戻しを見分ける
+
+同じ `dctl get` で、非0終了が**失敗**だったのか**差し戻し**だったのかも読める。
+`onFailure` / `onReject` の `goto` が発火した実行は `status` が `bounced` になり、
+戻り先が `goto_step_id` に入る（`status` が `failed` の行に戻り先は無い）。
+
+```bash
+dctl get <task-id> | jq '.stepRuns[] | {step_id, attempt, status, goto_step_id}'
+# => {"step_id":"plan-gate","attempt":1,"status":"bounced","goto_step_id":"plan"}
+#    plan-gate が通らず plan へ差し戻した。タスクは失敗していない
+```
+
+## アプリで読む
+
+タスク画面の「実行履歴」の表で、拒否があった実行は状態の点がボタンになる。ボタンのタイトルは「拒否された操作を見る」で、押すと、ツール名と中身の行が開く。保存しなかった分は「他 N 件は保存していません」と出る。
+
+## ステップ実行の状態
+
+`dctl get <task-id>` の `.stepRuns[].status` が取る値。括弧内はアプリでの表記。
+
+- `running` — 実行中（実行中）
+- `awaiting` — `approval` ステップが人の承認・却下を待っている（1行＝レビュー1回）（レビュー待ち）
+- `success` — 終わった。権限で拒否された操作があっても成功は成功で、
+  拒否の中身は同じ行の `permission_denials` に入る（成功）
+- `bounced` — 非0で終わった（または却下された）が、`onFailure` / `onReject` の `goto` で
+  前のステップへ戻った。タスクは失敗していない。戻り先は同じ行の `goto_step_id`、
+  差し戻しが何回目かは同じ行の `attempt`（差し戻し）
+- `failed` — 分岐先が無い、または `maxAttempts` を使い切って、そこでタスクが止まった（失敗）
+- `interrupted` — 途中で打ち切られて閉じられた（中断）。次の場合に書かれる。
+  - デーモンのクラッシュで中断され、復帰時に閉じられた
+  - 実行中のステップを pause / cancel が止めた
+  - `awaiting` の承認待ちが cancel / resume で閉じられた
+  - poll が PR の close を見つけ、タスクを中止した
+- `rate_limited` — Claude の利用上限で打ち切られた。枠が明けたら同じ会話で再開されるので失敗ではない（上限待ち）
+- `waiting` — poll ステップが「まだ」と答えた待ちの 1 周（マージ待ち）
