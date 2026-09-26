@@ -45,7 +45,7 @@
 実装は `handlers.ts:createHandler` の `switch` で、未知のメソッドは `未知のメソッドです` を投げる。
 デーモンは DB の行をそのまま返すので実際の応答には型より多い列が載るが、UI が頼ってよいのは型に書いた分だけである。
 
-`project.add` / `project.update` / `task.create` の 3 つは `Methods` に無い（dctl 専用）。ただし中継は何でも通すので、アプリからも呼べてしまう。
+`project.add` / `project.update` の 2 つは `Methods` に無い（dctl 専用）。ただし中継は何でも通すので、アプリからも呼べてしまう。
 
 ### プロジェクトとワークフローの設定
 
@@ -55,7 +55,7 @@
 | `project.update` | `project.yaml` を読み直して DB の行に写す |
 | `project.list` | 登録済みのプロジェクト |
 | `project.config.get` / `project.config.save` | `project.yaml` の読み書き。保存はコメントと `tracker` を残し、DB の行も同期する |
-| `workflow.list` / `workflow.get` / `workflow.save` | `.doctrine/workflows/*.yaml` の一覧・詳細・ステップ単位の編集（検証に落ちたら書かない。コミットはしない） |
+| `workflow.list` / `workflow.get` / `workflow.save` | `.doctrine/workflows/*.yaml` の一覧・詳細・ステップ単位の編集（検証に落ちたら書かない。コミットはしない）。`workflow.list` の各要素は `default`（`projects.default_workflow` と名前が一致するか）を持ち、検証を通ったものは `steps`（setup を差し込んだ後の `StepView` の列。`task.get` の `steps` と同じ形）も持つ |
 
 `project.yaml` を手で編集しただけでは DB の `projects` 行（`max_concurrent` など）は変わらない。`project.update` か画面からの保存で写る。
 
