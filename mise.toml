@@ -6,12 +6,12 @@ deno = "2.9.4"
 node = "26.8.1"
 # aqua の pnpm レジストリは 11 系の配布物（tarball 化された）に追随できておらず
 # `pnpm = "11.15.1"` だと install が 404 で落ちる。npm 経由なら版を指定できる。
-# app/package.json の packageManager と一致させること（食い違うと pnpm 自身が
+# app/package.json と site/package.json の packageManager と一致させること（食い違うと pnpm 自身が
 # packageManager 側の版に入れ替わり、ここの指定が効かなくなる）。
 "npm:pnpm" = "11.15.1"
 rust = "1.98.1"
 
-# タスクはすべて core/deno.json と app/package.json への一行の委譲。実体をここに
+# タスクはすべて core/deno.json と app/package.json と site/package.json への一行の委譲。実体をここに
 # 書き写さないのは、書き写した瞬間に二重管理になるため。
 [tasks."core:deps"]
 description = "コアの依存を取る"
@@ -83,13 +83,28 @@ description = "アプリをウィンドウで開く"
 dir = "app"
 run = "pnpm tauri dev"
 
+[tasks."site:deps"]
+description = "ドキュメントサイトの依存を取る"
+dir = "site"
+run = "pnpm install --frozen-lockfile"
+
+[tasks."site:dev"]
+description = "ドキュメントサイトをブラウザで開く"
+dir = "site"
+run = "pnpm dev"
+
+[tasks."site:build"]
+description = "ドキュメントサイトをビルドする"
+dir = "site"
+run = "pnpm build"
+
 # worktree 初期化で使う。`mise run setup` を worktree 内で実行する。
 # 注意: 新しい worktree のパスは mise にとって未信頼なので、このタスクを呼ぶ前に
 # `mise trust`（または MISE_TRUSTED_CONFIG_PATHS）が必要。信頼判定は設定の
 # パース時点で走るため、タスク自身が自分の信頼をブートストラップすることはできない
 #
 # deno と pnpm はそれぞれの lock ファイルの隣で走る必要があり、1 つの dir では
-# 書けないので、実体を 3 つに割って depends で束ねている。
+# 書けないので、実体を 4 つに割って depends で束ねている。
 [tasks.setup]
 description = "worktree を作業可能な状態にする（依存の取得）"
-depends = ["core:deps", "app:deps", "pfd:deps"]
+depends = ["core:deps", "app:deps", "pfd:deps", "site:deps"]
