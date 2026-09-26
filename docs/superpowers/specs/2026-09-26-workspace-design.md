@@ -133,12 +133,18 @@ stateDir()/worktrees/intake-<intakeId>/     ← エージェントの cwd（git 
   すべての worktree に対して行う。どれか 1 つでも書き換えられていれば、いまと同じく `wrote_repository` で `needs_attention` にする。
   `paths` は `<プロジェクト名>/<パス>` で持つ。
 - Intake が終わったときの worktree の片付けは、親ディレクトリごと、各 worktree を `git worktree remove` してから消す。
+- worktree の一覧（`worktreeEntries`）と削除の対象の引き当ては、いまと同じくプロジェクトごとの `git worktree list` から始める。
+  Intake との対応は「`intake.worktree_path` と一致する」から「親ディレクトリが `intake.worktree_path` と一致する」に変える。
+  Intake はプロジェクトではなく workspace から引く（`listIntakes({ workspaceId })`）。
 
 最初のプロンプトには、プロジェクトの一覧（名前・ディレクトリ・baseBranch・GitHub ならリポジトリの `owner/name`）を載せる。
 
-**実装の最初に確かめること:** cwd が git リポジトリでなくなるため、`READ_ONLY_TOOLS` の `Bash(git log:*)` のような許可が
-サブディレクトリの中の git に効くか（`cd tp && git log` が通るか）を実物で確かめる。効かなければ許可の書き方を直す。
-`Bash(git -C:*)` は書き込みの git も通してしまうので使わない。
+**git の許可はプロジェクトごとに作る。** cwd が git リポジトリでないと、`Bash(git log:*)` の許可では
+`git -C tp log`・`cd tp && git log` のどちらも拒否される（2026-09-26 に `claude -p --permission-prompts none` で実測。
+cwd を git リポジトリにすると同じ許可で通る）。一方 `Bash(git -C tp log:*)` と書けば `git -C tp log` は通る。
+そこで Intake の `allowedTools` は、`READ_ONLY_TOOLS` の git の許可（`git status`・`git diff`・`git log`・`git show`）を
+プロジェクトの名前ごとに `Bash(git -C <名前> log:*)` の形へ展開して作り、プロンプトでは git を `git -C <名前>` で呼ぶよう指示する。
+`Bash(git -C:*)` は書き込みの git も通してしまうので使わない。git 以外の読み取りの許可（`grep`・`cat` など）はそのまま使う。
 
 ## 6. PFD の `project`
 
@@ -187,12 +193,16 @@ const processSchema = z.strictObject({
 | 呼び出し | 渡すプロジェクト |
 | --- | --- |
 | `status` / `listIssues` | workspace のすべてのプロジェクト（GitHub は 1 つずつ呼んで合わせる。Linear は 1 回） |
-| `readIssue` / `findSubIssues` / `updateIssue` / `closeIssue` / `advanceIssue` | Issue の URL の `owner/name` に一致するプロジェクト。無ければ先頭のプロジェクト（URL と node id で引くので、どのリポジトリで実行しても結果は同じ） |
+| `readIssue` / `findSubIssues` / `updateIssue` / `closeIssue` / `advanceIssue` | GitHub は Issue の URL の `owner/name` に一致するプロジェクト。Linear はどれでもよい（team で引く） |
 | `createSubIssue` | プロセスの `project` のプロジェクト。`project` の無いプロセスは親 Issue のリポジトリのプロジェクト |
 
 ### 8.2 GitHub
 
 - Issue の一覧は、全プロジェクトのリポジトリの Issue を合わせて `updatedAt` の新しい順に並べる。
+  一部のリポジトリで `gh` が失敗しても、取れたリポジトリの分だけを返す。失敗したリポジトリは `tracker.status` の
+  `target` にそのリポジトリの失敗として出る。すべて失敗したときだけ一覧も失敗にする。
+- `intake.start` は、Issue の URL の `owner/name` が workspace のどのプロジェクトのリポジトリとも一致しなければ断る。
+  sub-issue もすべてプロジェクトのリポジトリに作るので、Intake が触る GitHub の Issue は必ずどれかのプロジェクトに対応する。
   `IssueSummary.identifier` は、プロジェクトが 2 つ以上なら `tp#112` のようにプロジェクトの名前を付ける。
 - sub-issue はプロセスのプロジェクトのリポジトリに作り、親 Issue に付ける。GitHub はリポジトリをまたいだ sub-issue を、
   同じ organization の中でだけ、両方のリポジトリに triage 以上の権限があるときに許す。
@@ -217,6 +227,7 @@ const processSchema = z.strictObject({
 - マイグレーション: 既存のプロジェクトと Intake が 1 プロジェクトの workspace に移ること（`migrate.test.ts` の列集合の突き合わせも含む）。
 - `validatePfd`: agent のプロセスの `project` の欠落と、workspace に無い名前を落とすこと。human のプロセスは `project` 無しで通ること。
 - Intake の実行: 複数の worktree が作られ、どれか 1 つの書き換えで `wrote_repository` になり、すべてが巻き戻ること。
+- Intake の `allowedTools`: プロジェクトごとに `Bash(git -C <名前> log:*)` などが並び、素の `Bash(git log:*)` を含まないこと。
 - 投入: プロセスごとに別のプロジェクトへタスクができること。外されたプロジェクトのプロセスが `errors` に入ること。
 - GitHub トラッカー: 複数リポジトリの一覧の合わせ方と、sub-issue がプロセスのプロジェクトのリポジトリに作られること（`test/helpers/gh.ts` の偽物で）。
 - 1 プロジェクトの workspace で、いまの Intake の結合テストがそのまま通ること。
