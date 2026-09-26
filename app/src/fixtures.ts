@@ -543,9 +543,26 @@ export const WORKFLOW_DEFAULT = {
 } satisfies WorkflowDetail;
 
 export const WORKFLOW_LIST: WorkflowListEntry[] = [
-  { name: "broken", ok: false, issues: ["steps[1].goto: 存在しないステップ nowhere を指しています"] },
-  { name: "default", ok: true },
-  { name: "light", ok: true },
+  {
+    name: "broken",
+    default: false,
+    ok: false,
+    issues: ["steps[1].goto: 存在しないステップ nowhere を指しています"],
+  },
+  {
+    name: "default",
+    default: true,
+    ok: true,
+    steps: WORKFLOW_DEFAULT.steps.map((s) =>
+      s.type === "approval" ? { id: s.id, type: s.type, title: s.title } : { id: s.id, type: s.type }
+    ),
+  },
+  {
+    name: "light",
+    default: false,
+    ok: true,
+    steps: [{ id: "review", type: "approval", title: "見て" }],
+  },
 ];
 
 const INTAKE_1 = INTAKES.find((i) => i.id === "i1")!;

@@ -190,10 +190,14 @@ export type WorkflowStepDetail =
     }
   );
 
-/** workflow.list の1件。name は .doctrine/workflows/<name>.yaml の <name>。 */
+/**
+ * workflow.list の1件。name は .doctrine/workflows/<name>.yaml の <name>。
+ * default は projects.default_workflow と name が一致するか。steps は project の setup を
+ * 差し込んだ後の、実際に走る列（TaskDetail.steps と同じ形）。
+ */
 export type WorkflowListEntry =
-  | { name: string; ok: true }
-  | { name: string; ok: false; issues: string[] };
+  | { name: string; default: boolean; ok: true; steps: StepView[] }
+  | { name: string; default: boolean; ok: false; issues: string[] };
 
 /**
  * workflow.get の応答。setup（project.yaml）は差し込まない、ファイルに書かれたステップの列。
@@ -505,7 +509,10 @@ export type TrackerIssue = IssueSummary & { intake_id: string | null };
 export type Methods = {
   "task.list": { params: { project?: string; state?: TaskState }; result: TaskSummary[] };
   "project.list": { params: Record<string, never>; result: ProjectSummary[] };
-  /** <project>/.doctrine/workflows/*.yaml を名前の昇順で。検証に落ちたものも issues とともに返す。 */
+  /**
+   * <project>/.doctrine/workflows/*.yaml を名前の昇順で。検証に落ちたものも issues とともに返す。
+   * 既定の印と、setup を差し込んだ後のステップの列を添える。
+   */
   "workflow.list": { params: { project: string }; result: WorkflowListEntry[] };
   /** 検証に落ちたときは例外ではなく ok: false で返す。ファイルが無ければ失敗する。 */
   "workflow.get": { params: { project: string; name: string }; result: WorkflowDetail };
