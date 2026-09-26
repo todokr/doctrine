@@ -9,6 +9,7 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
+.astro/
 
 .superpowers/
 # doctrine の agent ステップが成果物を受け渡す作業ファイル
