@@ -8,8 +8,9 @@ import "@fontsource/ibm-plex-mono/400.css";
 import "@fontsource/ibm-plex-mono/500.css";
 import "../styles.css";
 import { PfdDiagram } from "../components/PfdDiagram";
-import { PFD_LONG_LABELS, PFD_SAMPLE, PFD_STATUSES_A, PFD_STATUSES_B } from "../fixtures";
-import { buildPfdView } from "../pfd";
+import { PfdElementPanel } from "../components/PfdElementPanel";
+import { INTAKE_REVIEWING, PFD_LONG_LABELS, PFD_SAMPLE, PFD_STATUSES_A, PFD_STATUSES_B } from "../fixtures";
+import { buildPfdView, pfdElement } from "../pfd";
 
 const CASES = [
   { title: "承認前", view: buildPfdView(PFD_SAMPLE) },
@@ -36,6 +37,33 @@ function Case({ title, view }: (typeof CASES)[number]) {
   );
 }
 
+/** 画面と同じ .plan-body に図と要素の欄を並べる。幅を変えて列の組み替えを見る */
+function WithPanel() {
+  const [selected, setSelected] = useState<string | null>("p:design");
+  const [comments, setComments] = useState<{ index: number; comment: { target_kind: "process"; target_id: string; body: string } }[]>([]);
+  const view = buildPfdView(PFD_SAMPLE);
+  return (
+    <section style={{ display: "grid", gap: 8, marginBottom: 24 }}>
+      <h2 style={{ margin: 0, fontSize: 14 }}>要素の欄</h2>
+      <div className="plan-body">
+        <PfdDiagram view={view} selected={selected} onSelect={setSelected} />
+        <PfdElementPanel
+          pfd={PFD_SAMPLE}
+          info={selected === null ? null : pfdElement(PFD_SAMPLE, selected, INTAKE_REVIEWING.question_sets)}
+          onSelect={setSelected}
+          prompt={undefined}
+          onOpenPrompt={() => {}}
+          comments={comments}
+          previous={[{ comment: INTAKE_REVIEWING.comments[0], reply: "列を減らしました" }]}
+          onAddComment={(body) =>
+            setComments((c) => [...c, { index: c.length, comment: { target_kind: "process", target_id: "design", body } }])}
+          onDeleteComment={(index) => setComments((c) => c.filter((x) => x.index !== index))}
+        />
+      </div>
+    </section>
+  );
+}
+
 function Preview() {
   const [dark, setDark] = useState(false);
   const toggle = () => {
@@ -50,6 +78,7 @@ function Preview() {
         <h1 style={{ margin: 0, fontSize: 16 }}>PFD の図</h1>
         <button type="button" className="btn sm" onClick={toggle}>{dark ? "ライト" : "ダーク"}</button>
       </header>
+      <WithPanel />
       {CASES.map((c) => <Case key={c.title} {...c} />)}
     </main>
   );

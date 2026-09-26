@@ -108,9 +108,9 @@ test("observePullRequests: pullRequests の失敗は投げる", async () => {
 
 const now = () => new Date().toISOString();
 
-async function setup(pfd: Pfd = example(), o: { kind?: TrackerKind } = {}) {
+async function setup(pfd: Pfd = example(), kind?: TrackerKind) {
   const seeded = await seedActive(pfd);
-  const ft = fakeTracker({ kind: o.kind });
+  const ft = fakeTracker({ kind });
   const pw = fakePrWatcher();
   const base = fakeBaseSync();
   const updated: string[] = [];
@@ -513,7 +513,7 @@ async function observeMerge1(s: Awaited<ReturnType<typeof setup>>): Promise<void
 const CANCEL = { projectPath: "/repo", intakeId: "i1", baseBranch: "main" };
 
 test("中止: PR の Closes で閉じないトラッカーでは、マージ済みのプロセスの sub-issue も completed で閉じる", async () => {
-  const s = await setup(example(), { kind: "linear" });
+  const s = await setup(example(), "linear");
   await observeMerge1(s);
   const out = await closeSubIssuesOnCancel(s.db, s.ft.tracker, CANCEL);
   assert.ok(out.closed.includes("1"));
@@ -539,7 +539,7 @@ test("中止: PR の Closes で閉じるトラッカーでは、マージ済み�
 });
 
 test("中止: 見張りがすでに閉じたマージ済みの sub-issue はもう閉じない", async () => {
-  const s = await setup(example(), { kind: "linear" });
+  const s = await setup(example(), "linear");
   await s.watcher.request(s.projectId);
   await mergeOf(s.pw, s.db, "1");
   await s.watcher.request(s.projectId);
@@ -548,7 +548,7 @@ test("中止: 見張りがすでに閉じたマージ済みの sub-issue はも�
 });
 
 test("Linear のプロジェクトでは、baseBranch へのマージを検知して sub-issue を completed で 1 回だけ閉じる", async () => {
-  const s = await setup(example(), { kind: "linear" });
+  const s = await setup(example(), "linear");
   await s.watcher.request(s.projectId);
   await mergeOf(s.pw, s.db, "1");
   const before = s.updated.length;
@@ -576,7 +576,7 @@ test("GitHub のプロジェクトでは、マージを検知しても sub-issue
 });
 
 test("Linear のプロジェクトでも、baseBranch 以外へのマージでは sub-issue を閉じない", async () => {
-  const s = await setup(example(), { kind: "linear" });
+  const s = await setup(example(), "linear");
   await s.watcher.request(s.projectId);
   await mergeOf(s.pw, s.db, "1", "release");
   await s.watcher.request(s.projectId);
@@ -586,7 +586,7 @@ test("Linear のプロジェクトでも、baseBranch 以外へのマージで�
 });
 
 test("マージした sub-issue を閉じられなければ失敗を健康状態に出し、次の周で閉じる", async () => {
-  const s = await setup(example(), { kind: "linear" });
+  const s = await setup(example(), "linear");
   await s.watcher.request(s.projectId);
   await mergeOf(s.pw, s.db, "1");
   s.ft.failWhen((c) => c.op === "closeIssue");
@@ -603,4 +603,103 @@ test("マージした sub-issue を閉じられなければ失敗を健康状態
   const closes = await closesOfProcess1(s.db, s.ft);
   assert.equal(closes.length, 2);
   assert.equal(closes[1].op === "closeIssue" && closes[1].reason, "completed");
+});
+
+// Linear の状態（対応表の出来事ごとの呼び出し）
+const setupLinear = (pfd: Pfd = example()) => setup(pfd, "linear");
+const advancesOf = (ft: ReturnType<typeof fakeTracker>) =>
+  ft.calls.flatMap((c) => c.op === "advanceIssue" ? [{ url: c.url, phase: c.phase }] : []);
+async function subIssueUrl(db: Db, processId: string): Promise<string> {
+  return (await listProcesses(db, "i1")).find((r) => r.process_id === processId)!.sub_issue_url!;
+}
+async function branchOf(db: Db, processId: string): Promise<string> {
+  const row = (await listProcesses(db, "i1")).find((r) => r.process_id === processId)!;
+  return (await getTask(db, row.current_task_id!))!.branch;
+}
+
+test("Linear: 承認後の最初の周で、親を inProgress、投入した sub-issue を inProgress、残りを todo に 1 回ずつ進める", async () => {
+  const { db, projectId, ft, watcher } = await setupLinear();
+  await watcher.request(projectId);
+  assert.deepEqual(advancesOf(ft), [
+    { url: PARENT_URL, phase: "inProgress" },
+    { url: await subIssueUrl(db, "1"), phase: "inProgress" },
+    { url: await subIssueUrl(db, "2"), phase: "todo" },
+    { url: await subIssueUrl(db, "3"), phase: "todo" },
+    { url: await subIssueUrl(db, "4"), phase: "todo" },
+  ]);
+});
+
+test("Linear: 変化の無い周では状態を進めない", async () => {
+  const { projectId, ft, watcher } = await setupLinear();
+  await watcher.request(projectId);
+  const count = advancesOf(ft).length;
+  await watcher.request(projectId);
+  assert.equal(advancesOf(ft).length, count);
+});
+
+test("Linear: PR が開いた sub-issue を inReview に 1 回進める", async () => {
+  const { db, projectId, ft, pw, watcher } = await setupLinear();
+  await watcher.request(projectId);
+  const before = advancesOf(ft).length;
+  pw.prs.set(await branchOf(db, "1"), [pr(7, "OPEN")]);
+  await watcher.request(projectId);
+  assert.deepEqual(advancesOf(ft).slice(before), [
+    { url: await subIssueUrl(db, "1"), phase: "inReview" },
+  ]);
+  await watcher.request(projectId);
+  assert.equal(advancesOf(ft).length, before + 1);
+});
+
+test("Linear: 上流のマージで投入した下流の sub-issue を inProgress に進める", async () => {
+  const { db, projectId, ft, pw, watcher } = await setupLinear();
+  await watcher.request(projectId);
+  const before = advancesOf(ft).length;
+  await finishHuman3(db);
+  await mergeOf(pw, db, "1");
+  await watcher.request(projectId);
+  assert.deepEqual(advancesOf(ft).slice(before), [
+    { url: await subIssueUrl(db, "1"), phase: "inReview" },
+    { url: await subIssueUrl(db, "2"), phase: "inProgress" },
+  ]);
+});
+
+test("Linear: 状態を進められなくても投入は続き、失敗を健康状態に出し、次の周でやり直す", async () => {
+  const { db, projectId, ft, watcher } = await setupLinear();
+  ft.failWhen((c) => c.op === "advanceIssue");
+  await watcher.request(projectId);
+  assert.equal((await listTasks(db)).length, 1);
+  assert.equal((await getIntake(db, "i1"))!.state, "active");
+  assert.equal(watcher.health(projectId).consecutiveFailures, 1);
+  assert.match(watcher.health(projectId).lastError!, /Linear の状態/);
+
+  ft.heal();
+  const before = advancesOf(ft).length;
+  await watcher.request(projectId);
+  assert.equal(advancesOf(ft).length - before, 5);
+  assert.equal(watcher.health(projectId).consecutiveFailures, 0);
+
+  await watcher.request(projectId);
+  assert.equal(advancesOf(ft).length - before, 5);
+});
+
+test("Linear: 改訂中の Intake の状態は進めない", async () => {
+  const { db, projectId, ft, watcher } = await setupLinear();
+  await updateIntake(db, "i1", { state: "decomposing", revising: 1 });
+  await watcher.request(projectId);
+  assert.equal(advancesOf(ft).length, 0);
+});
+
+test("GitHub のプロジェクトでは状態を進める呼び出しが起きない", async () => {
+  const { db, projectId, ft, pw, watcher } = await setup();
+  await watcher.request(projectId);
+  assert.equal(advancesOf(ft).length, 0);
+  pw.prs.set(await branchOf(db, "1"), [pr(7, "OPEN")]);
+  await watcher.request(projectId);
+  assert.equal(advancesOf(ft).length, 0);
+  await finishHuman3(db);
+  await mergeOf(pw, db, "1");
+  await watcher.request(projectId);
+  assert.equal(advancesOf(ft).length, 0);
+  assert.equal((await getIntake(db, "i1"))!.issue_phase, null);
+  assert.ok((await listProcesses(db, "i1")).every((r) => r.sub_issue_phase === null));
 });

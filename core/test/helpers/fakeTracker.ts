@@ -1,4 +1,4 @@
-import type { IssueRef, TrackerKind } from "../../../shared/intake/tracker.ts";
+import type { IssuePhase, IssueRef, TrackerKind } from "../../../shared/intake/tracker.ts";
 import type { SubIssue, Tracker } from "../../src/tracker/tracker.ts";
 
 export type FakeIssue = {
@@ -14,7 +14,8 @@ export type TrackerCall =
   | { op: "createSubIssue"; parentUrl: string; title: string; body: string }
   | { op: "findSubIssues"; parentUrl: string }
   | { op: "updateIssue"; url: string; title: string; body: string }
-  | { op: "closeIssue"; url: string; reason: "completed" | "not_planned" };
+  | { op: "closeIssue"; url: string; reason: "completed" | "not_planned" }
+  | { op: "advanceIssue"; url: string; phase: IssuePhase };
 
 type CreateCall = Extract<TrackerCall, { op: "createSubIssue" }>;
 
@@ -113,6 +114,10 @@ export function fakeTracker(o: { kind?: TrackerKind } = {}): FakeTracker {
         const target = find(issue);
         target.state = "CLOSED";
         target.closeReason = reason;
+      }),
+    advanceIssue: (_projectPath, issue, phase) =>
+      settle(() => {
+        record({ op: "advanceIssue", url: issue.url, phase });
       }),
   };
 

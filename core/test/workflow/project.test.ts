@@ -181,6 +181,31 @@ test("tracker に Linear のチームを書ける", () => {
   assert.deepEqual(cfg.tracker, { kind: "linear", team: "ENG" });
 });
 
+const LINEAR_HEAD = "defaultWorkflow: f\ntracker:\n  kind: linear\n  team: ENG\n";
+
+test("tracker: linear は段階ごとの状態の名前を持てる", () => {
+  const cfg = parseProjectConfig(`${LINEAR_HEAD}  states:\n    inReview: レビュー中\n`);
+  assert.deepEqual(cfg.tracker, {
+    kind: "linear",
+    team: "ENG",
+    states: { inReview: "レビュー中" },
+  });
+});
+
+test("tracker.states に知らない段階があれば弾く", () => {
+  assert.throws(
+    () => parseProjectConfig(`${LINEAR_HEAD}  states:\n    done: X\n`),
+    WorkflowValidationError,
+  );
+});
+
+test("tracker.states の名前が空なら弾く", () => {
+  assert.throws(
+    () => parseProjectConfig(`${LINEAR_HEAD}  states:\n    todo: ""\n`),
+    WorkflowValidationError,
+  );
+});
+
 test("Linear の tracker に team が無ければ落とす", () => {
   try {
     parseProjectConfig("defaultWorkflow: f\ntracker:\n  kind: linear\n");

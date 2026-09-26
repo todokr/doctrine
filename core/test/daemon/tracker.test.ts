@@ -25,7 +25,11 @@ async function writeProjectYaml(text: string) {
 function setup(o: { linearApiKey: string | undefined } = { linearApiKey: "lin_x" }) {
   const { linearApiKey } = o;
   const github = fakeTracker();
-  const linearCalls: { apiKey: string | undefined; team: string }[] = [];
+  const linearCalls: {
+    apiKey: string | undefined;
+    team: string;
+    states?: Partial<Record<"todo" | "inProgress" | "inReview", string>>;
+  }[] = [];
   const trackerOf = trackerFor({
     linearApiKey,
     github,
@@ -58,6 +62,15 @@ test("tracker: linear のプロジェクトは Linear の Tracker を config の
   const { linearCalls, trackerOf } = setup({ linearApiKey: "lin_x" });
   assert.equal((await trackerOf(dir)).kind, "linear");
   assert.deepEqual(linearCalls, [{ apiKey: "lin_x", team: "ENG" }]);
+});
+
+test("tracker.states があれば Linear の Tracker に渡す", async () => {
+  await writeProjectYaml(`${LINEAR_YAML}  states:\n    inReview: レビュー中\n`);
+  const { linearCalls, trackerOf } = setup();
+  await trackerOf(dir);
+  assert.deepEqual(linearCalls, [
+    { apiKey: "lin_x", team: "ENG", states: { inReview: "レビュー中" } },
+  ]);
 });
 
 test("linearApiKey が無くても Linear の Tracker を返す", async () => {

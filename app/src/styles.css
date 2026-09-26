@@ -444,11 +444,26 @@ kbd{font-family:var(--mono);font-size:10.5px;border:1px solid var(--line);border
 
 /* 計画レビュー・経緯。PFD は横に長いので、図に幅を全部渡し、要素の欄はその下に置く */
 .plan-title{margin:0;font-size:14px}
-.plan-body{display:grid;grid-template-columns:minmax(0,1fr);gap:14px;min-width:0}
+.plan-body{display:grid;grid-template-columns:minmax(0,1fr);gap:14px;min-width:0;container-type:inline-size}
 .plan-body > *{min-width:0}
 .el-panel{border:1px solid var(--accent);border-radius:9px;background:var(--surface);padding:14px;display:grid;gap:12px;align-content:start}
-.el-panel > *{max-width:880px}
-.el-head{display:grid;gap:2px}
+/* 要素の欄は図の幅いっぱいに広がるので、広いときは本文・つながりと状態・コメントを列に分ける */
+.el-detail{gap:14px 24px}
+.el-head{display:grid;gap:2px;grid-column:1/-1}
+.el-main,.el-side,.el-talk{display:grid;gap:12px;align-content:start;min-width:0}
+.el-side{overflow-wrap:anywhere}
+.el-side .el-links{flex-direction:column;align-items:start}
+@container (min-width:900px){
+  .el-detail{grid-template-columns:minmax(0,760px) minmax(240px,1fr)}
+  .el-side,.el-talk{border-left:1px solid var(--line);padding-left:20px}
+  .el-detail.with-talk .el-main{grid-row:span 2}
+  .el-detail.with-talk .el-talk{grid-column:2}
+}
+@container (min-width:1300px){
+  .el-detail.with-talk{grid-template-columns:minmax(0,760px) minmax(240px,1fr) minmax(280px,1fr)}
+  .el-detail.with-talk .el-main{grid-row:auto}
+  .el-detail.with-talk .el-talk{grid-column:auto}
+}
 .el-sec{display:grid;gap:6px}
 .el-sec h3,.el-sec-title{margin:0;font-family:var(--mono);font-size:10px;font-weight:500;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3)}
 .el-links{display:flex;gap:6px;flex-wrap:wrap}

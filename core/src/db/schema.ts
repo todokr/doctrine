@@ -4,6 +4,7 @@ import type {
   IntakeRunStatus,
   IntakeState,
 } from "../../../shared/intake/state.ts";
+import type { IssuePhase } from "../../../shared/intake/tracker.ts";
 
 /**
  * テーブルの形の唯一の定義（TypeScript 側）。クエリはすべてこの型に対して
@@ -165,6 +166,8 @@ export interface IntakesTable {
   rate_limited_until: string | null;
   /** 今の改訂の最初の revise 実行。改訂中でなければ null。 */
   revision_run_id: number | null;
+  /** 親 Issue の Linear の状態を最後に進めた段階。進めていなければ null。 */
+  issue_phase: IssuePhase | null;
   created_at: string;
   updated_at: string;
   ended_at: string | null;
@@ -249,6 +252,8 @@ export interface IntakeProcessesTable {
   /** sub-issue の本文を最後に揃えた内容のハッシュ。 */
   sub_issue_hash: string | null;
   sub_issue_closed: Generated<number>;
+  /** sub-issue の Linear の状態を最後に進めた段階。進めていなければ null。 */
+  sub_issue_phase: IssuePhase | null;
   current_task_id: string | null;
   human_note: string | null;
   human_done_at: string | null;

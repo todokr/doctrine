@@ -14,6 +14,7 @@ import {
   retireProcesses,
   updateIntake,
 } from "../db/intakes.ts";
+import { advanceParentIssue } from "./issueStateSync.ts";
 import { loadQuestionSets } from "./questionSet.ts";
 import type { Db, IntakeRow, IntakeState } from "../db/schema.ts";
 import { getProject, type TaskState } from "../db/tasks.ts";
@@ -53,16 +54,16 @@ async function requireIntake(db: Db, intakeId: string): Promise<IntakeRow> {
  */
 export async function startIntake(
   db: Db,
-  tracker: Pick<Tracker, "readIssue">,
+  tracker: Pick<Tracker, "readIssue" | "kind" | "advanceIssue">,
   o: { projectId: number; projectPath: string; issueUrl: string; logRoot: string },
-): Promise<{ intake: IntakeRow; alreadyActive: boolean }> {
+): Promise<{ intake: IntakeRow; alreadyActive: boolean; problems: string[] }> {
   // gh が使えなくても、進行中の Intake は開けるように、gh を呼ぶ前にも引く。
   const opened = await findOpenIntakeByIssue(db, o.issueUrl);
-  if (opened) return { intake: opened, alreadyActive: true };
+  if (opened) return { intake: opened, alreadyActive: true, problems: [] };
 
   const issue = await tracker.readIssue(o.projectPath, o.issueUrl);
   const canonical = await findOpenIntakeByIssue(db, issue.url);
-  if (canonical) return { intake: canonical, alreadyActive: true };
+  if (canonical) return { intake: canonical, alreadyActive: true, problems: [] };
 
   const id = crypto.randomUUID();
   try {
@@ -77,13 +78,22 @@ export async function startIntake(
       await enqueueIntakeRun(trx, id, "investigate", { logRoot: o.logRoot, resume: false });
       return row;
     });
-    return { intake, alreadyActive: false };
+    // 失敗しても開始は成功させる。承認の後の見張りの周が issue_phase を見てやり直す
+    const problems: string[] = [];
+    try {
+      await advanceParentIssue(db, tracker, { projectPath: o.projectPath, intake });
+    } catch (e) {
+      problems.push(
+        `親 Issue の Linear の状態を進められませんでした: ${e instanceof Error ? e.message : e}`,
+      );
+    }
+    return { intake, alreadyActive: false, problems };
   } catch (e) {
     // 競合で同じ Issue の Intake が先に入った。部分 unique index が最後の砦になる。
     if (!(e as Error).message.includes("UNIQUE constraint failed")) throw e;
     const winner = await findOpenIntakeByIssue(db, issue.url);
     if (!winner) throw e;
-    return { intake: winner, alreadyActive: true };
+    return { intake: winner, alreadyActive: true, problems: [] };
   }
 }
 

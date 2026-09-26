@@ -805,6 +805,18 @@ const migrations: Record<string, Migration> = {
       }
     },
   },
+
+  /**
+   * Linear の状態を最後に進めた段階。GitHub のプロジェクトでは NULL のまま。
+   * intakes は親 Issue、intake_processes は sub-issue の分。
+   */
+  "0014_issue_phase": {
+    // deno-lint-ignore no-explicit-any
+    async up(db: Kysely<any>) {
+      await db.schema.alterTable("intakes").addColumn("issue_phase", "text").execute();
+      await db.schema.alterTable("intake_processes").addColumn("sub_issue_phase", "text").execute();
+    },
+  },
 };
 
 /** ファイルを動的 import しない（権限も要らず、deno check で型検査される）。 */

@@ -1,5 +1,6 @@
 import type {
   IssueDetail,
+  IssuePhase,
   IssueRef,
   IssueSummary,
   TrackerKind,
@@ -37,6 +38,8 @@ export interface Tracker {
     issue: IssueRef,
     reason: "completed" | "not_planned",
   ): Promise<void>;
+  /** Issue をその段階の状態へ進める。すでに同じか先の状態なら何もしない。GitHub は何もしない。 */
+  advanceIssue(projectPath: string, issue: IssueRef, phase: IssuePhase): Promise<void>;
 }
 
 /** プロジェクトのパスから、そのプロジェクトが使う Tracker を返す。project.yaml が読めなければ投げる。 */

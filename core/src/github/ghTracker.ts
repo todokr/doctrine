@@ -187,5 +187,9 @@ export function ghTracker(run: GhRun = defaultGhRun): Tracker {
         "gh api graphql closeIssue",
       );
     },
+
+    advanceIssue() {
+      return Promise.resolve();
+    },
   };
 }

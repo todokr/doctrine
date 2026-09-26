@@ -21,6 +21,11 @@ export type IssueSummary = {
   updatedAt: string;
 };
 
+/** Intake の進行を Linear の状態へ写すときの段階。この順に進み、戻らない。 */
+export type IssuePhase = "todo" | "inProgress" | "inReview";
+
+export const ISSUE_PHASES: readonly IssuePhase[] = ["todo", "inProgress", "inReview"];
+
 /** author が null なのは、削除されたユーザーのコメント。 */
 export type IssueComment = { author: string | null; body: string; createdAt: string };
 
