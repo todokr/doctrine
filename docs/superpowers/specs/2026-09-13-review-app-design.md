@@ -305,12 +305,16 @@ src/stock/reserve.ts:36
 | --- | --- |
 | `suspended`（レビュー待ち） | **OS 通知** ＋ 件数に数える |
 | `failed` | **OS 通知** ＋ 件数に数える |
-| degraded なステップ実行 | **OS 通知** ＋ 件数に数える |
 | 後始末が削除を拒否（`task.cleanedUp` の `refused`） | **OS 通知** ＋ 件数に数える |
-| `completed` / `canceled` | 知らせない（画面が変わるだけ） |
+| Intake の `answering`（回答待ち）・`reviewing`（レビュー待ち）・`needs_attention`（要確認）・`completed`（完了）。改訂中も同じ | **OS 通知** |
+| タスクの `completed` / `canceled` | 知らせない（画面が変わるだけ） |
+| タスクの `rate_limited` / `waiting` / `paused` | 知らせない |
+| Intake の `investigating` / `decomposing` / `active` / `canceled` | 知らせない |
 | 古い worktree | 知らせない（UI で強調するだけ） |
 
 `canceled` は自分の操作の結果である。古い worktree は急ぐものではなく、毎日鳴らせば通知そのものが無視されるようになる。
+通知は人の対応が要る状態への遷移だけに絞る。degraded なステップ実行は成功として扱われて先へ進むので、止まっているわけではなく、通知しない。
+起動時の復帰で `failed` になったタスクは通知しない。警告として見える。
 
 ### 通知はデーモンが出す
 
@@ -320,10 +324,15 @@ src/stock/reserve.ts:36
 - Linux: `notify-send -a doctrine <title> <body>`（KDE では Plasma の通知サービスが受け取る）
 - macOS: `osascript -e 'display notification ...'`（依存を増やさない。発信元が「スクリプトエディタ」と表示され、
   クリックしても doctrine は開かない）
-- 文面: `[<project>] <task title> — レビュー待ち: <approval title>` のような形
-- 状態遷移ごとに1件1通。**5秒以内に3件以上重なったら**「レビュー待ち 2件 / 失敗 3件」の1通にまとめる
+- 出す場所はデーモンの `broadcast` を包む1箇所。アプリがつながっていなくても出る
+- 通知のタイトルは `doctrine`。次の1行を本文に置く。`<project>` はプロジェクトのパスの basename
+  - タスク: `[<project>] <task title> — レビュー待ち: <approval title>` / `— 失敗` / `— worktree の削除を拒否`
+  - Intake: `[<project>] #<Issue 番号> <Issue タイトル> — 回答待ち / レビュー待ち / 要確認 / 完了`
+- approval 以外のステップで `suspended` に入った場合（`onExhausted: suspend` など）は `— レビュー待ち` までとする
+- 出来事1件につき1通、その場で送る。まとめない
 - クリック時の動作は付けない（OS ごとに別の仕組みが要り、見合わない）
-- 通知コマンドが見つからない・失敗した場合は `daemon.warning` を1回だけ出し、以後は黙る
+- 通知コマンドが見つからない・失敗した場合は、警告（stderr・`daemon.warning`・`daemon.warnings`）を1回だけ出し、
+  そのデーモンのプロセスの間は送出も試みない
 - 通知の送出は**アダプタと同じ形で境界を切る**（`Notifier` インターフェース）。テストはモックに対して主張する
 
 ### トレイ
@@ -478,7 +487,7 @@ CLI でも回る。レビューは doctrine の価値そのものである。
   - `worktree.remove` が state 配下にないパスと非終端状態のタスクを拒否すること
   - `task.diff` が未コミット・未追跡の変更を含むこと、`since` が直近の差し戻しを基準にすること
   - `step_outputs` の履歴が回ごとに残り、テンプレート変数が最新を指し続けること
-  - 通知の分類と、5秒以内の3件以上をまとめること（`Notifier` のモックに対して）
+  - 通知の分類・文面と、送出の失敗後に黙ること（`Notifier` のモックに対して）
 - **画面の E2E テストは書かない。** 1人用のツールであり、見た目の退行は使っていれば気づける
 
 ## 12. 範囲外と未決

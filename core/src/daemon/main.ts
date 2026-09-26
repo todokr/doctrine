@@ -16,6 +16,8 @@ import { createServer, socketPath } from "./server.ts";
 import { createHandler, type DaemonContext, tick } from "./handlers.ts";
 import { createWarningLog } from "./warnings.ts";
 import { stateRoot } from "../util/home.ts";
+import { notifierFor } from "../notify/notifier.ts";
+import { createEventNotifier } from "../notify/notifications.ts";
 
 export { stateRoot };
 
@@ -163,7 +165,17 @@ export async function startDaemon(o: {
   };
 
   const server = createServer(createHandler(ctx));
-  ctx.broadcast = (ev, opts) => server.broadcast(ev, opts);
+  const notifications = createEventNotifier({
+    db,
+    workflowOf: ctx.workflowOf,
+    notifier: notifierFor(),
+    warnings: ctx.warnings,
+  });
+  // アプリの接続の有無に関係なく、配るイベントをここで OS 通知にする。
+  ctx.broadcast = (ev, opts) => {
+    server.broadcast(ev, opts);
+    void notifications.handle(ev);
+  };
   await server.listen(resolvedSocketPath);
 
   if (configWarning) ctx.warnings.push(configWarning);
