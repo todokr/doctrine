@@ -1,6 +1,6 @@
 import type { ParamsOf, StepView, WorkflowListEntry } from "../../shared/protocol.ts";
 import type { ComposerInit } from "./model";
-import type { Project } from "./types";
+import type { Project, Task } from "./types";
 
 /** 入力中の値。project は Project.path、workflow は WorkflowListEntry.name（未選択は ""） */
 export type ComposerForm = { project: string; workflow: string; title: string; prompt: string };
@@ -45,6 +45,21 @@ export function canSubmitComposer(form: ComposerForm, entries: WorkflowListEntry
 /** priority は渡さない（デーモンが既定の 2 にする） */
 export function createParams(form: ComposerForm): ParamsOf<"task.create"> {
   return { project: form.project, workflow: form.workflow, title: form.title.trim(), prompt: form.prompt };
+}
+
+/** 「同じ内容で投入し直す」を出すタスク。Intake 由来は Intake の「再投入する」でやり直すので出さない */
+export function canRetry(t: Task): boolean {
+  return (t.state === "failed" || t.state === "canceled") && t.intake === null;
+}
+
+/** 元のタスクの中身をコンポーザの初期値にする。project は t.project（表示名）から引いたパス */
+export function retryInit(t: Task, projects: Project[]): ComposerInit {
+  return {
+    project: projects.find((p) => p.id === t.project)?.path,
+    workflow: t.wf,
+    title: t.title,
+    prompt: t.prompt,
+  };
 }
 
 export function createdToast(title: string, warnings: string[]): string {

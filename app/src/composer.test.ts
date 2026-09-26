@@ -1,6 +1,8 @@
 import { describe, expect, test } from "vitest";
 import type { WorkflowListEntry } from "../../shared/protocol.ts";
 import {
+  canRetry,
+  retryInit,
   canSubmitComposer,
   composerWorkflowOptions,
   createdToast,
@@ -10,7 +12,50 @@ import {
   selectedSteps,
   type ComposerForm,
 } from "./composer";
-import { PROJECTS, WORKFLOW_LIST } from "./fixtures";
+import { PROJECTS, seedTasks, WORKFLOW_LIST } from "./fixtures";
+
+const task = (id: string) => seedTasks().find((t) => t.id === id)!;
+const intake = { id: "i1", processId: "2", issueUrl: null, parentIssueUrl: null };
+
+describe("canRetry", () => {
+  test("failed と canceled で出す", () => {
+    for (const id of ["t-e812", "t-6ba3", "s-1105"]) expect(canRetry(task(id))).toBe(true);
+  });
+  test("終わっていない・完了したタスクでは出さない", () => {
+    for (const id of ["t-7f3a", "t-91e0", "t-0a77"]) expect(canRetry(task(id))).toBe(false);
+  });
+  test("Intake 由来のタスクでは出さない", () => {
+    expect(canRetry({ ...task("t-e812"), intake })).toBe(false);
+    expect(canRetry({ ...task("s-1105"), intake })).toBe(false);
+  });
+});
+
+describe("retryInit", () => {
+  test("元のタスクのタイトル・指示・ワークフローとプロジェクトのパスを入れる", () => {
+    expect(retryInit(task("t-e812"), PROJECTS)).toEqual({
+      project: "~/git/doctrine",
+      workflow: "doctrine/feature",
+      title: "daemon.warning イベントを追加する",
+      prompt: "daemon.warning イベントを追加する。詳細は issue を参照してください。",
+    });
+  });
+  test("中止したタスクでも同じ", () => {
+    expect(retryInit(task("s-1105"), PROJECTS).project).toBe("~/work/shop-api");
+  });
+  test("プロジェクトが見つからなければ project を入れない", () => {
+    const init = retryInit(task("t-e812"), []);
+    expect(init.project).toBeUndefined();
+    expect(init.title).toBe("daemon.warning イベントを追加する");
+  });
+  test("コンポーザの欄に元のタスクの中身が入る", () => {
+    expect(initialComposerForm(PROJECTS, retryInit(task("s-1105"), PROJECTS), "doctrine")).toEqual({
+      project: "~/work/shop-api",
+      workflow: "shop-api/feature",
+      title: "決済 Webhook の署名検証",
+      prompt: "決済 Webhook の署名検証。詳細は issue を参照してください。",
+    });
+  });
+});
 
 describe("initialComposerForm", () => {
   test("init のプロジェクトを使う", () => {
