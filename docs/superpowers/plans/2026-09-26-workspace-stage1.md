@@ -329,7 +329,7 @@ git commit -m "DB に workspaces を足し、プロジェクトを属させる"
   **その workspace がそのプロジェクト 1 つだけで、`completed`・`canceled` 以外の Intake を持たないときだけ**吸収する
   （プロジェクトの `workspace_id` と `name` を付け替え、その workspace の Intake を付け替え、空の workspace の行を消す）。
   それ以外は `このリポジトリは workspace <name>（<path>）に登録済みです: <project path>` で投げ、何も書かない。
-  Intake の付け替えは Task 4 で `intakes.workspace_id` ができてからの話なので、この Task では「その workspace に Intake が 1 件でもあれば投げる」にしておき、Task 4 で上の規則に広げる。
+  Intake の付け替えは Task 4 で `intakes.workspace_id` ができてからの話なので、この Task では「そのプロジェクトに Intake が 1 件でもあれば（`intakes.project_id` で引く）投げる」にしておき、Task 4 で上の規則に広げる。
 - `updateWorkspace`: 読み直して、足されたプロジェクトは登録（吸収の規則も同じ）、消されたプロジェクトは登録を外す。
   外すプロジェクトに `queued`・`running`・`suspended`・`paused`・`rate_limited`・`waiting` のタスクがあれば何も変えずに投げる。
   残るプロジェクトは `project.yaml` を読み直して行を合わせ（いまの `project.update` と同じ）、名前が変わっていれば `name` を更新する。
@@ -511,6 +511,12 @@ git commit -m "Intake を workspace に属させる"
   }
   export function workspaceTracker(ws: WorkspaceRef, tracker: Tracker): WorkspaceTracker;
 
+  // core/src/db/workspaces.ts（WorkspaceRef を DB の行から作る。runner・commands・watch・handlers はすべてこれを使う）
+  export function workspaceRefOf(db: Db, workspaceId: number): Promise<WorkspaceRef>;
+
+  // core/src/github/ghTracker.ts（いまの repoIds のキャッシュを { id, nameWithOwner } に広げて出す）
+  repoOf(projectPath: string): Promise<{ id: string; nameWithOwner: string }>;
+
   // core/src/tracker/tracker.ts
   /** workspace.yaml を読んで作る。無い・読めないときは WorkspaceConfigError を投げる。 */
   export type TrackerOf = (ws: WorkspaceRef) => Promise<WorkspaceTracker>;
@@ -528,7 +534,9 @@ git commit -m "Intake を workspace に属させる"
 - `parseProjectConfig` は `tracker` キーがあれば `tracker は .doctrine/workspace.yaml に移りました。project.yaml から消して workspace.yaml に書いてください` で落とす（zod の strict の「未知のキー」より先に見る）。
 - `trackerFor` は `join(ws.path, WORKSPACE_YAML)` を呼ぶたびに読む（いまと同じく再起動なしで効く）。無ければ `WorkspaceConfigError("workspace_config_missing")`、形が違えば `workspace_config_invalid`。
   `ws.projects` は DB の行から作る（名前と実パス）。
-- GitHub の `projectPathFor` は、各プロジェクトの `tracker.status(path)` の `target.name`（`owner/name`）を覚えておき、URL `https://github.com/<owner>/<name>/issues/<n>` と比べる。
+- GitHub の `projectPathFor` は、各プロジェクトの `repoOf(path).nameWithOwner` を URL `https://github.com/<owner>/<name>/issues/<n>` と比べる。
+  `WorkspaceTracker` は `trackerOf` のたびに作り直されるので、`status` を呼んで調べると見張りの 1 周ごとに `gh auth status` と `gh repo view` がプロジェクトの数だけ走る。
+  `repoOf` は `ghTracker` の中（デーモンの生きている間ずっと残る）でパスごとに覚える。
 - `intake.start` は `projectPathFor` が null なら `この Issue は workspace のどのリポジトリにもありません: <url>` で断る。プロジェクトが 2 つ以上の workspace を断るのは Task 4 のまま。
 - Intake のコード（runner・commands・watch）は `trackerOf(ws)` で `WorkspaceTracker` を得て、`tracker.readIssue(await wt.projectPathFor(url) ?? soleProject.path, url)` のように `projectPath` を渡す。sub-issue の作成は第 1 段ではただ 1 つのプロジェクトのパスのまま。
 - app: `IssuePicker` はいまのプロジェクト選択のまま、選んだプロジェクトの workspace の root パスを `{ workspace }` に渡す（`workspace.list` から引く）。
