@@ -256,6 +256,7 @@ const COLUMNS = {
     child_started_at: true,
     rate_limited_until: true,
     revision_run_id: true,
+    issue_phase: true,
     created_at: true,
     updated_at: true,
     ended_at: true,
@@ -315,6 +316,7 @@ const COLUMNS = {
     sub_issue_node_id: true,
     sub_issue_hash: true,
     sub_issue_closed: true,
+    sub_issue_phase: true,
     current_task_id: true,
     human_note: true,
     human_done_at: true,
@@ -508,6 +510,7 @@ test("開き直してもマイグレーションは二度流れず、データ�
     "0011_task_workflow_pin",
     "0012_intake_assumptions",
     "0013_waiting",
+    "0014_issue_phase",
   ]);
   await first.destroy();
 
@@ -527,6 +530,7 @@ test("開き直してもマイグレーションは二度流れず、データ�
       "0011_task_workflow_pin",
       "0012_intake_assumptions",
       "0013_waiting",
+      "0014_issue_phase",
     ]);
     assert.equal((await second.selectFrom("projects").selectAll().execute()).length, 1);
   } finally {
@@ -566,6 +570,7 @@ test("pending_feed を足す前に作られたDBファイルは、行を保っ�
       "0011_task_workflow_pin",
       "0012_intake_assumptions",
       "0013_waiting",
+      "0014_issue_phase",
     ]);
     const old = await getTask(d, "old");
     assert.equal(old?.state, "suspended", "既存の行は残る");

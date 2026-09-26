@@ -106,7 +106,7 @@ export function PfdElementPanel(p: {
   /** null ならコメント欄を出さない（経緯の読み返し） */
   onAddComment: ((body: string) => void) | null;
   onDeleteComment: ((index: number) => void) | null;
-  /** プロセスの定義の後、コメント欄の前に出す（進行中の面の状態・sub-issue・タスク・PR） */
+  /** 入力・出力（前段・後続）の下に出す（進行中の面の状態・sub-issue・タスク・PR） */
   extra?: ReactNode;
   /** 改訂で変えられない要素 */
   frozen?: boolean;
@@ -126,64 +126,79 @@ export function PfdElementPanel(p: {
   }
 
   const head = info.kind === "artifact" ? info.artifact : info.process;
+  const talk = p.previous.length > 0 || p.onAddComment !== null || p.comments.length > 0;
   return (
-    <aside className="el-panel">
+    <aside className={talk ? "el-panel el-detail with-talk" : "el-panel el-detail"}>
       <div className="el-head">
         <b>{head.name}</b>
-        <span className="mono hint">{`${info.kind === "artifact" ? "成果物" : "プロセス"} ${head.id}`}</span>
+        <span className="mono hint">
+          {info.kind === "artifact"
+            ? `成果物 ${head.id}`
+            : `プロセス ${head.id} · ${ACTOR[info.process.actor]}（段 ${info.stage}）`}
+        </span>
         {p.frozen && <span className="tag">🔒 固定</span>}
       </div>
       {info.kind === "artifact"
         ? (
           <>
-            <Sec title="種類">
-              <span>
-                {[info.artifact.given ? "最初から揃っている" : "プロセスが作る", info.goal && "末端の成果物（ゴール）"]
-                  .filter(Boolean)
-                  .join(" / ")}
-              </span>
-            </Sec>
-            {info.decision && (
-              <Sec title="決定">
-                <span>{info.decision.prompt ?? `質問か仮定 ${info.decision.id}`}</span>
-                <span>{info.decision.answer ?? "回答が見つかりません"}</span>
+            <div className="el-main">
+              <Sec title="種類">
+                <span>
+                  {[info.artifact.given ? "最初から揃っている" : "プロセスが作る", info.goal && "末端の成果物（ゴール）"]
+                    .filter(Boolean)
+                    .join(" / ")}
+                </span>
               </Sec>
-            )}
-            <Text title="説明" src={info.artifact.description} />
-            <Text title="確かめ方" src={info.artifact.verify} />
-            <Links title="前段" kind="process" items={info.producers} onSelect={p.onSelect} />
-            <Links title="後続" kind="process" items={info.consumers} onSelect={p.onSelect} />
+              {info.decision && (
+                <Sec title="決定">
+                  <span>{info.decision.prompt ?? `質問か仮定 ${info.decision.id}`}</span>
+                  <span>{info.decision.answer ?? "回答が見つかりません"}</span>
+                </Sec>
+              )}
+              <Text title="説明" src={info.artifact.description} />
+              <Text title="確かめ方" src={info.artifact.verify} />
+            </div>
+            <div className="el-side">
+              <Links title="前段" kind="process" items={info.producers} onSelect={p.onSelect} />
+              <Links title="後続" kind="process" items={info.consumers} onSelect={p.onSelect} />
+              {p.extra}
+            </div>
           </>
         )
         : (
           <>
-            <Sec title="担い手">
-              <span>{`${ACTOR[info.process.actor]}（段 ${info.stage}）`}</span>
-            </Sec>
-            <Text title="目的" src={info.process.purpose} />
-            <Text title="手順" src={info.process.steps} />
-            <Text title="完了の条件" src={info.process.done_when} />
-            <Links title="入力" kind="artifact" items={info.inputs} onSelect={p.onSelect} />
-            <Links title="出力" kind="artifact" items={info.outputs} onSelect={p.onSelect} />
-            {info.process.actor === "agent" && p.onOpenPrompt && (
-              // 別のプロセスを選んだら閉じ直す（開いたままだと onToggle が来ず、prompt を取りに行かない）
-              <PromptSec key={info.key} prompt={p.prompt} onOpen={p.onOpenPrompt} />
-            )}
+            <div className="el-main">
+              <Text title="目的" src={info.process.purpose} />
+              <Text title="手順" src={info.process.steps} />
+              <Text title="完了の条件" src={info.process.done_when} />
+              {info.process.actor === "agent" && p.onOpenPrompt && (
+                // 別のプロセスを選んだら閉じ直す（開いたままだと onToggle が来ず、prompt を取りに行かない）
+                <PromptSec key={info.key} prompt={p.prompt} onOpen={p.onOpenPrompt} />
+              )}
+            </div>
+            <div className="el-side">
+              <Links title="入力" kind="artifact" items={info.inputs} onSelect={p.onSelect} />
+              <Links title="出力" kind="artifact" items={info.outputs} onSelect={p.onSelect} />
+              {p.extra}
+            </div>
           </>
         )}
-      {p.extra}
-      {p.previous.length > 0 && (
-        <Sec title="前の案へのコメント">
-          {p.previous.map(({ comment, reply }) => (
-            <div key={comment.id} className="el-comment">
-              <span>{comment.body}</span>
-              <span className="hint">{reply ?? "返答なし"}</span>
-            </div>
-          ))}
-        </Sec>
-      )}
-      {(p.onAddComment !== null || p.comments.length > 0) && (
-        <CommentBox key={info.key} comments={p.comments} onAdd={p.onAddComment} onDelete={p.onDeleteComment} />
+      {talk && (
+        <div className="el-talk">
+          {p.previous.length > 0 && (
+            <Sec title="前の案へのコメント">
+              {p.previous.map(({ comment, reply }) => (
+                <div key={comment.id} className="el-comment">
+                  <span>{comment.body}</span>
+                  <span className="hint">{reply ?? "返答なし"}</span>
+                </div>
+              ))}
+            </Sec>
+          )}
+          {(p.onAddComment !== null || p.comments.length > 0) && (
+            <CommentBox key={info.key} comments={p.comments} onAdd={p.onAddComment} onDelete={p.onDeleteComment} />
+          )}
+        </div>
       )}
     </aside>
   );

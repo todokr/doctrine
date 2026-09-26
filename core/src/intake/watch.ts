@@ -15,6 +15,7 @@ import { containsCommit, fetchBaseBranch, originRef } from "../domain/worktree.t
 import type { IntakeTransition } from "./commands.ts";
 import { dispatchIntake, loadApprovedPlan } from "./dispatch.ts";
 import { computeProcessStatuses, goalReached } from "./pfd/status.ts";
+import { syncIssueStates } from "./issueStateSync.ts";
 import { syncSubIssues } from "./subIssueSync.ts";
 import { processProgressOf } from "./view.ts";
 import type { WorkflowLoader } from "../workflow/load.ts";
@@ -244,6 +245,21 @@ export async function watchProject(
         }
       } catch (e) {
         report.errors.push(`${intake.issue_url} の投入: ${describe(e)}`);
+      }
+    }
+
+    // 投入と PR の観測を済ませた後に揃える。同じ周で作ったタスク・観測した PR が段階に入る
+    for (const intake of tracker ? intakes : []) {
+      try {
+        const synced = await syncIssueStates(db, tracker!, {
+          projectPath: project.path,
+          intake,
+        });
+        for (const f of synced.failures) {
+          report.errors.push(`${intake.issue_url} の Linear の状態（${f.url}）: ${f.message}`);
+        }
+      } catch (e) {
+        report.errors.push(`${intake.issue_url} の Linear の状態の同期: ${describe(e)}`);
       }
     }
 

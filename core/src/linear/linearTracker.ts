@@ -1,6 +1,7 @@
 import { z } from "zod";
-import type { IssueRef, TrackerStatus } from "../../../shared/intake/tracker.ts";
+import type { IssuePhase, IssueRef, TrackerStatus } from "../../../shared/intake/tracker.ts";
 import type { SubIssue, Tracker } from "../tracker/tracker.ts";
+import type { LinearStateNames } from "../workflow/project.ts";
 import { linearGraphql } from "./linear.ts";
 
 const viewerSchema = z.object({ viewer: z.object({ id: z.string() }) });
@@ -73,7 +74,27 @@ const teamStatesSchema = z.object({
   }).nullable(),
 });
 
+const issueStateSchema = z.object({
+  issue: z.object({
+    state: z.object({ id: z.string(), type: z.string(), position: z.number() }),
+    team: z.object({
+      states: z.object({
+        nodes: z.array(
+          z.object({
+            id: z.string(),
+            name: z.string(),
+            type: z.string(),
+            position: z.number(),
+          }),
+        ),
+      }),
+    }),
+  }).nullable(),
+});
+
 const VIEWER = `query { viewer { id } }`;
+const STATE_OF_ISSUE =
+  `query($id: String!) { issue(id: $id) { state { id type position } team { states { nodes { id name type position } } } } }`;
 const TEAM = `query($key: String!) { teams(filter: { key: { eq: $key } }) { nodes { id name } } }`;
 const LIST_ISSUES =
   `query($filter: IssueFilter!) { issues(first: 100, filter: $filter, orderBy: updatedAt) { nodes { url identifier title updatedAt assignee { displayName } } } }`;
@@ -93,6 +114,22 @@ const TEAM_STATES_OF_ISSUE =
 const CLOSED_TYPES = ["completed", "canceled"];
 const STATE_TYPE = { completed: "completed", not_planned: "canceled" } as const;
 
+type StateLookup = { type: string } | { name: string };
+const PHASE_LOOKUP: Record<IssuePhase, StateLookup> = {
+  todo: { type: "unstarted" },
+  inProgress: { type: "started" },
+  inReview: { name: "In Review" },
+};
+/** 左ほど前。載っていない種類は最も前として扱う。 */
+const TYPE_ORDER = ["triage", "backlog", "unstarted", "started", "completed", "canceled"];
+
+type StatePosition = { type: string; position: number };
+
+/** 状態の前後を「種類の順 → position」で比べる。負なら a が前。 */
+function compareState(a: StatePosition, b: StatePosition): number {
+  return TYPE_ORDER.indexOf(a.type) - TYPE_ORDER.indexOf(b.type) || a.position - b.position;
+}
+
 const NO_API_KEY = "config.json に linearApiKey がありません";
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -107,6 +144,7 @@ export function identifierOf(url: string): string {
 export function linearTracker(o: {
   apiKey: string | undefined;
   team: string; // チームのキー（ENG など）
+  states?: LinearStateNames; // 段階ごとの状態の名前。無い段階は PHASE_LOOKUP で引く
   fetch?: typeof fetch;
 }): Tracker {
   const doFetch: typeof fetch = o.fetch ?? ((input, init) => fetch(input, init));
@@ -240,6 +278,36 @@ export function linearTracker(o: {
         .filter((s) => s.type === type)
         .sort((a, b) => a.position - b.position)[0];
       if (!target) throw new Error(`チームに種類が ${type} の状態がありません`);
+      await update(issue.nodeId, { stateId: target.id });
+    },
+
+    async advanceIssue(_projectPath, issue, phase) {
+      const { issue: found } = await request(
+        STATE_OF_ISSUE,
+        { id: issue.nodeId },
+        issueStateSchema,
+        "issue",
+      );
+      if (!found) throw new Error(`${issue.url} の Issue が見つかりません`);
+      const nodes = found.team.states.nodes;
+      const named = o.states?.[phase];
+      const lookup = named === undefined ? PHASE_LOOKUP[phase] : { name: named };
+      let target;
+      if ("type" in lookup) {
+        target = nodes.filter((s) => s.type === lookup.type)
+          .sort((a, b) => a.position - b.position)[0];
+        if (!target) throw new Error(`チームに種類が ${lookup.type} の状態がありません`);
+      } else {
+        target = nodes.find((s) => s.name === lookup.name);
+        if (!target) {
+          throw new Error(
+            `チームに名前が ${lookup.name} の状態がありません（project.yaml の tracker.states.${phase} で名前を変えられます）`,
+          );
+        }
+      }
+      // In Progress の position が In Review より小さい（同じ started の中で左にある）前提。
+      // 逆に並べたチームでは inReview への前進が戻りと判定され、呼ばれない。
+      if (compareState(found.state, target) >= 0) return;
       await update(issue.nodeId, { stateId: target.id });
     },
   };
