@@ -24,7 +24,7 @@ baseBranch: main
 
 test("maxConcurrent と baseBranch には既定値がある", () => {
   const cfg = parseProjectConfig("defaultWorkflow: feature\n");
-  assert.equal(cfg.maxConcurrent, 1);
+  assert.equal(cfg.maxConcurrent, 5);
   assert.equal(cfg.baseBranch, "main");
   assert.equal(cfg.setup, undefined);
 });

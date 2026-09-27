@@ -106,7 +106,7 @@ workspace 共通の方針を固定の 7 問で聞く。既定値は doctrine 自
 
 base branch への追従は、PR を開く方針のときだけ聞く。
 
-プロジェクトごとに違う事実（検証コマンド、許可するコマンド、baseBranch）はここでは聞かない。setup のタスクがリポジトリから決め、人が承認の画面で確かめる（5.1）。
+プロジェクトごとに違う事実（検証コマンド、baseBranch）はここでは聞かない。setup のタスクがリポジトリから決め、人が承認の画面で確かめる（5.1）。
 
 ```ts
 type SetupPolicy = {
@@ -197,7 +197,7 @@ draft → validate → review → apply
 
 - 出発点は `{{ task.prompt }}` に入っている雛形。方針に合わせて、雛形のステップを削る・足す。
   PR を開く方針なら、雛形のコメントにある open-pr の例と、doctrine 自身の `wait-merge` / `sync` の形を足す。
-- 検証コマンド（verify の `run`）、implement の `allowedTools`、baseBranch は、リポジトリ（package.json・mise.toml・Makefile・CI の設定など）から決める。
+- 検証コマンド（verify の `run`）と baseBranch は、リポジトリ（package.json・mise.toml・Makefile・CI の設定など）から決める。
 - 方針とリポジトリが食い違えば（例: remote が無いのに PR を開く方針）、`.doctrine-out/setup-notes.md` に書き、方針よりリポジトリで動く形を選ぶ。
   決めたこと（検証コマンドを何にしたか、その根拠）も同じファイルに書く。承認の画面で人が読む。
 - 差し戻されたら、feed（検証のエラーか、人の却下コメント）を読んで直す。

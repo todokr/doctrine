@@ -164,7 +164,7 @@ function projectYamlFor(baseBranch: string | undefined): string {
     "#",
     "# setup: 新しい worktree で最初に走らせるコマンド。例: pnpm install --frozen-lockfile",
     `defaultWorkflow: ${DEFAULT_WORKFLOW_NAME}`,
-    "maxConcurrent: 1",
+    "maxConcurrent: 5",
   ];
   if (baseBranch) lines.push(`baseBranch: ${baseBranch}`);
   return lines.join("\n") + "\n";
@@ -193,8 +193,10 @@ function toolLines(tools: string[]): string {
 
 /**
  * spec 4章の手順（計画 → 計画レビュー → 実装 → 検証 → コードレビュー → ガイド → 人のレビュー）。
- * どのプロジェクトでも検証を通る一般形にしてあり、プロジェクトごとに違う verify の run と
- * allowedTools はコメントで「ここを書き換える」と示す。open-pr は入れない。
+ * どのプロジェクトでも検証を通る一般形にしてあり、プロジェクトごとに違う verify の run は
+ * コメントで「ここを書き換える」と示す。open-pr は入れない。
+ * implement だけは auto で動かし、テストやビルドのコマンドを列挙させない。計画・審査・ガイドの役は
+ * 読み取り系の許可だけにして、コードを書き換えられないようにしておく。
  *
  * テンプレート変数に baseBranch が無いので、agent-review が読む diff の範囲だけは
  * 雛形を作った時点の値を文字列で埋め込む。
@@ -202,7 +204,6 @@ function toolLines(tools: string[]): string {
 export function defaultWorkflowYamlFor(baseBranch: string | undefined): string {
   const base = baseBranch ?? "main";
   const readOnly = toolLines(READ_ONLY_TOOLS);
-  const implementTools = toolLines([...READ_ONLY_TOOLS, "Bash(git add:*)", "Bash(git commit:*)"]);
   return `# doctrine の既定ワークフロー（dctl workspace-add が雛形として作成したもの）
 # plan → plan-review → plan-gate → implement → verify → agent-review → review-gate → guide → review
 #
@@ -289,11 +290,8 @@ ${readOnly}
   - id: implement
     type: agent
     session: implementer
-    permissionMode: acceptEdits
-    # 自分のプロジェクトのテスト・lint のコマンドをここへ足す（例: "Bash(pnpm test:*)"）。
-    # 許可は「&&」や「cd」でつないだ各コマンドに個別に照合されるので、つないだ形は通らない。
-    allowedTools:
-${implementTools}
+    # auto はコマンドを列挙せずに実行させ、危ない操作だけを Claude Code が判定して止める。
+    permissionMode: auto
     prompt: |
       {{ worktree.path }}/.doctrine-out/plan.md を読んでから実装してください。
 

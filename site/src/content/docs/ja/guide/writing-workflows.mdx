@@ -14,11 +14,11 @@ sidebar:
 # .doctrine/project.yaml
 setup: pnpm install --frozen-lockfile   # 全ワークフローの先頭に自動で差し込まれる
 defaultWorkflow: default
-maxConcurrent: 1
+maxConcurrent: 5
 baseBranch: main
 ```
 
-必須なのは `defaultWorkflow` だけです。`setup` は省略できます。省略したときの値は、`maxConcurrent` が 1、`baseBranch` が `main` になります。
+必須なのは `defaultWorkflow` だけです。`setup` は省略できます。省略したときの値は、`maxConcurrent` が 5、`baseBranch` が `main` になります。
 
 Issue を Linear から取り込むときは、workspace の root の `.doctrine/workspace.yaml` に `tracker` を書きます。1 つの workspace で GitHub Issues と Linear は混ぜられません。`project.yaml` に `tracker` を書くと読み込みで失敗します。
 
@@ -82,10 +82,9 @@ steps:
 
 骨格では 1 行に縮めましたが、雛形の `verify` の `feed` は `last_stdout` と `last_stderr` の両方を渡します。雛形の各 `feed` には、「計画がレビューで却下された:」のような前置きも付いています。
 
-雛形のままでも検証は通ります。ただし、プロジェクトに合わせて書き換えるべき場所が 2 つあります。
+雛形のままでも検証は通ります。ただし、`verify` の `run` はプロジェクトに合わせて書き換えてください。雛形の `"true"` は何も検証しません。型検査やテストのコマンドにします。
 
-- **`verify` の `run`** — 雛形の `"true"` は何も検証しません。型検査やテストのコマンドに書き換えてください
-- **`implement` の `allowedTools`** — `acceptEdits` のままでは Bash がすべて拒否されます。実装中に実行させたいコマンド（テストや lint）をここに足してください
+`implement` は `permissionMode: auto` で動きます。テストやビルドのコマンドを `allowedTools` に列挙しなくても実行でき、危ない操作だけを Claude Code が判定して止めます。計画・審査・ガイドの役は `acceptEdits` と読み取り系の `allowedTools` のままにしてあり、コードを書き換えられません。
 
 エージェントのレビューで差し戻す仕組みは、専用の分岐ではなく、`command` ステップの `grep` で表します。審査役が書いたファイルの 1 行目の `verdict:` をゲートが見ます。通らなければゲートはファイルの中身を標準出力に出して非 0 で終わり、`onFailure` が前の工程へ戻します。そのとき `feed` にはファイルの中身が渡ります。`verdict: escalate` は実装者には直せない指摘を表し、`review-gate` を通して人のレビューへ進めます。
 

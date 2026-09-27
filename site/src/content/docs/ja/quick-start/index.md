@@ -79,7 +79,7 @@ setup のタスクを作るのは、今回ワークフローの雛形を置い�
 
 承認の画面では 2 つのファイルを読みます。
 
-- `.doctrine-out/default.yaml` — 書き上がったワークフロー。検証コマンド、実装ステップに許すコマンド、baseBranch は、エージェントがリポジトリ（package.json・mise.toml・Makefile・CI の設定など）から決めています。
+- `.doctrine-out/default.yaml` — 書き上がったワークフロー。検証コマンドと baseBranch は、エージェントがリポジトリ（package.json・mise.toml・Makefile・CI の設定など）から決めています。
 - `.doctrine-out/setup-notes.md` — 何をどう決めたか、その根拠。方針とリポジトリが食い違ったとき（remote が無いのに PR を開く方針にした、など）は、どちらを取ったかもここにあります。
 
 直してほしいところがあれば、コメントを付けて差し戻します。エージェントがコメントを読んで直し、もう一度検証してから承認の画面に戻ります。
