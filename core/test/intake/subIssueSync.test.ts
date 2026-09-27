@@ -66,7 +66,9 @@ test("偽の gh: ghTracker を通して初回の sub-issue を作る", async () 
   const { d, input } = await fixture();
   let n = 100;
   const gh = fakeGh((a) => {
-    if (a[0] === "repo" && a[1] === "view") return JSON.stringify({ id: "R_1" });
+    if (a[0] === "repo" && a[1] === "view") {
+      return JSON.stringify({ id: "R_1", nameWithOwner: "o/r" });
+    }
     if (a[0] === "api" && a[1] === "graphql") {
       const { query } = parseGraphqlArgs(a);
       if (/subIssues/.test(query)) {

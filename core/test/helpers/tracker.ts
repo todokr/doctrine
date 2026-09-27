@@ -6,10 +6,11 @@ import type {
   TrackerStatus,
 } from "../../../shared/intake/tracker.ts";
 import type { Tracker, TrackerOf } from "../../src/tracker/tracker.ts";
+import { workspaceTracker } from "../../src/tracker/workspaceTracker.ts";
 
-/** どのプロジェクトにも同じ Tracker を返す TrackerOf。 */
+/** どの workspace にも同じ Tracker を包んで返す TrackerOf。 */
 export function constTrackerOf(tracker: Tracker): TrackerOf {
-  return () => Promise.resolve(tracker);
+  return async (ws) => workspaceTracker(ws, tracker);
 }
 
 type ListOptions = Parameters<Tracker["listIssues"]>[1];
@@ -28,6 +29,7 @@ export function fakeTracker(
     failClose?: boolean;
     failAdvance?: boolean;
     kind?: TrackerKind;
+    repo?: string;
   } = {},
 ): Tracker & {
   reads: string[];
@@ -45,6 +47,7 @@ export function fakeTracker(
   return {
     kind: o.kind ?? "github",
     closesViaPullRequest: (o.kind ?? "github") === "github",
+    repoOf: () => Promise.resolve({ id: "R1", nameWithOwner: o.repo ?? "o/r" }),
     reads,
     listCalls,
     closes,

@@ -21,7 +21,7 @@ import {
 } from "./daemon/client";
 import { receiveGuide } from "./guide";
 import { buildDiff } from "./patch";
-import type { IssueDetail, ProjectTrackerStatus } from "../../shared/intake/tracker.ts";
+import type { IssueDetail, WorkspaceTrackerStatus } from "../../shared/intake/tracker.ts";
 import type { QuestionSetReply } from "../../shared/intake/validateQuestion.ts";
 import type {
   DaemonSlots,
@@ -40,6 +40,7 @@ import type {
   WorkflowListEntry,
   WorkflowSaveResult,
   WorkflowStepChange,
+  WorkspaceSummary,
   WorktreeEntry,
 } from "../../shared/protocol.ts";
 import {
@@ -449,28 +450,29 @@ export function useDecide() {
 
 /**
  * Issue の選択で使う RPC。useDecide と同じく、ここでは catch しない。
- * projectPath は Project.path（表示名ではない）
+ * workspacePath は workspace の root のパス（WorkspaceSummary.path）
  */
 export function useIntakeRpc() {
   return {
-    trackerStatus: (projectPath: string): Promise<ProjectTrackerStatus> =>
-      rpc("tracker.status", { project: projectPath }),
+    workspaces: (): Promise<WorkspaceSummary[]> => rpc("workspace.list", {}),
+    trackerStatus: (workspacePath: string): Promise<WorkspaceTrackerStatus> =>
+      rpc("tracker.status", { workspace: workspacePath }),
     issues: (
-      projectPath: string,
+      workspacePath: string,
       o: { assignee: "me" | "any"; search?: string },
     ): Promise<TrackerIssue[]> =>
       rpc("tracker.issues", {
-        project: projectPath,
+        workspace: workspacePath,
         assignee: o.assignee,
         ...(o.search ? { search: o.search } : {}),
       }),
-    issue: (projectPath: string, url: string): Promise<IssueDetail> =>
-      rpc("tracker.issue", { project: projectPath, url }),
+    issue: (workspacePath: string, url: string): Promise<IssueDetail> =>
+      rpc("tracker.issue", { workspace: workspacePath, url }),
     start: (
-      projectPath: string,
+      workspacePath: string,
       issueUrl: string,
     ): Promise<IntakeSummary & { alreadyActive: boolean }> =>
-      rpc("intake.start", { project: projectPath, issue_url: issueUrl }),
+      rpc("intake.start", { workspace: workspacePath, issue_url: issueUrl }),
     answer: (intakeId: string, questionSetId: number, reply: QuestionSetReply): Promise<IntakeSummary> =>
       rpc("intake.answer", {
         intake_id: intakeId,

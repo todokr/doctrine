@@ -1,8 +1,14 @@
-import { join } from "@std/path";
+import { basename, join } from "@std/path";
 import { ghTracker } from "../github/ghTracker.ts";
 import { linearTracker } from "../linear/linearTracker.ts";
-import type { Tracker, TrackerOf } from "../tracker/tracker.ts";
-import { type LinearStateNames, parseProjectConfig } from "../workflow/project.ts";
+import { type Tracker, type TrackerOf, WorkspaceConfigError } from "../tracker/tracker.ts";
+import { workspaceTracker } from "../tracker/workspaceTracker.ts";
+import {
+  type LinearStateNames,
+  parseWorkspaceConfig,
+  WORKSPACE_YAML,
+} from "../workflow/workspace.ts";
+import { WorkflowValidationError } from "../workflow/schema.ts";
 
 export function trackerFor(o: {
   linearApiKey: string | undefined;
@@ -13,20 +19,40 @@ export function trackerFor(o: {
 }): TrackerOf {
   const github = o.github ?? ghTracker();
   const linear = o.linear ?? linearTracker;
-  // project.yaml を書き換えたらデーモンの再起動なしで効くよう、呼ぶたびに読む
-  return async (projectPath) => {
-    const path = join(projectPath, ".doctrine", "project.yaml");
-    const text = await Deno.readTextFile(path).catch(() => {
-      throw new Error(`project.yaml がありません: ${path}`);
-    });
-    const { tracker } = parseProjectConfig(text);
-    if (tracker.kind === "linear") {
-      return linear({
-        apiKey: o.linearApiKey,
-        team: tracker.team,
-        ...(tracker.states ? { states: tracker.states } : {}),
-      });
+  // workspace.yaml を書き換えたらデーモンの再起動なしで効くよう、呼ぶたびに読む
+  return async (ws) => {
+    const path = join(ws.path, WORKSPACE_YAML);
+    let text: string;
+    try {
+      text = await Deno.readTextFile(path);
+    } catch (e) {
+      if (e instanceof Deno.errors.NotFound) {
+        throw new WorkspaceConfigError(
+          "workspace_config_missing",
+          `workspace.yaml がありません: ${path}`,
+        );
+      }
+      throw e;
     }
-    return github;
+    let config;
+    try {
+      config = parseWorkspaceConfig(text, basename(ws.path));
+    } catch (e) {
+      if (e instanceof WorkflowValidationError) {
+        throw new WorkspaceConfigError(
+          "workspace_config_invalid",
+          `workspace.yaml を読めません: ${path}\n${e.message}`,
+        );
+      }
+      throw e;
+    }
+    const tracker = config.tracker.kind === "linear"
+      ? linear({
+        apiKey: o.linearApiKey,
+        team: config.tracker.team,
+        ...(config.tracker.states ? { states: config.tracker.states } : {}),
+      })
+      : github;
+    return workspaceTracker(ws, tracker);
   };
 }

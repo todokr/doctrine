@@ -1,8 +1,8 @@
 import { basename, dirname, join } from "@std/path";
 import { runCommand } from "../util/exec.ts";
 import { projectNameFrom } from "../db/workspaces.ts";
-import { parseProjectConfig, type TrackerConfig } from "./project.ts";
-import { WORKSPACE_YAML, workspaceYamlFor } from "./workspace.ts";
+import { parseProjectConfig } from "./project.ts";
+import { type TrackerConfig, WORKSPACE_YAML, workspaceYamlFor } from "./workspace.ts";
 
 /** workspace-add が雛形を作るときのワークフロー名 */
 export const DEFAULT_WORKFLOW_NAME = "default";

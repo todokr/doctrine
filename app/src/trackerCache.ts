@@ -34,8 +34,13 @@ export function indexedDbStore(): CacheStore {
   const open = () => {
     db ??= new Promise((resolve, reject) => {
       if (typeof indexedDB === "undefined") return reject(new Error("indexedDB が無い"));
-      const r = indexedDB.open(DB_NAME, 1);
-      r.onupgradeneeded = () => r.result.createObjectStore(STORE);
+      // 版 2: tracker.status の値が WorkspaceTrackerStatus の形に変わり、1 リポジトリの
+      // workspace ではキーも同じになるので、版 1 の値を捨てる
+      const r = indexedDB.open(DB_NAME, 2);
+      r.onupgradeneeded = () => {
+        if (r.result.objectStoreNames.contains(STORE)) r.result.deleteObjectStore(STORE);
+        r.result.createObjectStore(STORE);
+      };
       r.onsuccess = () => resolve(r.result);
       r.onerror = () => reject(r.error);
     });
@@ -72,10 +77,10 @@ export function createTrackerCache(store: CacheStore) {
 }
 
 export const trackerCacheKey = {
-  status: (project: string) => JSON.stringify(["status", project]),
-  issues: (project: string, assignee: "me" | "any", search: string) =>
-    JSON.stringify(["issues", project, assignee, search]),
-  issue: (project: string, url: string) => JSON.stringify(["issue", project, url]),
+  status: (workspace: string) => JSON.stringify(["status", workspace]),
+  issues: (workspace: string, assignee: "me" | "any", search: string) =>
+    JSON.stringify(["issues", workspace, assignee, search]),
+  issue: (workspace: string, url: string) => JSON.stringify(["issue", workspace, url]),
 };
 
 /** refreshing はトラッカーから取り直している最中。refreshError は、手元の値を出したまま取り直しに失敗したときの理由 */

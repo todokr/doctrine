@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { IssuePhase, IssueRef, TrackerStatus } from "../../../shared/intake/tracker.ts";
 import type { SubIssue, Tracker } from "../tracker/tracker.ts";
-import type { LinearStateNames } from "../workflow/project.ts";
+import type { LinearStateNames } from "../workflow/workspace.ts";
 import { linearGraphql } from "./linear.ts";
 
 const viewerSchema = z.object({ viewer: z.object({ id: z.string() }) });
@@ -302,7 +302,7 @@ export function linearTracker(o: {
         target = nodes.find((s) => s.name === lookup.name);
         if (!target) {
           throw new Error(
-            `チームに名前が ${lookup.name} の状態がありません（project.yaml の tracker.states.${phase} で名前を変えられます）`,
+            `チームに名前が ${lookup.name} の状態がありません（workspace.yaml の tracker.states.${phase} で名前を変えられます）`,
           );
         }
       }

@@ -7,7 +7,7 @@ import {
   insertWorkspace,
   listProjectsOf,
 } from "../db/workspaces.ts";
-import { parseProjectConfig, type ProjectConfig, type TrackerConfig } from "../workflow/project.ts";
+import { parseProjectConfig, type ProjectConfig } from "../workflow/project.ts";
 import {
   ensureProjectScaffold,
   ensureWorkspaceScaffold,
@@ -15,6 +15,7 @@ import {
 } from "../workflow/scaffold.ts";
 import {
   parseWorkspaceConfig,
+  type TrackerConfig,
   WORKSPACE_YAML,
   type WorkspaceConfig,
 } from "../workflow/workspace.ts";

@@ -12,7 +12,7 @@ function chooser(o: Partial<Parameters<typeof IssueChooser>[0]>) {
   return renderToStaticMarkup(
     <IssueChooser
       kind="github"
-      target={{ id: "o/r", name: "o/r" }}
+      targets={[{ id: "o/r", name: "o/r" }]}
       assignee="me"
       onAssignee={noop}
       searchText=""
@@ -134,7 +134,7 @@ describe("IssueChooser", () => {
   test("Linear のプロジェクトでは ENG-123 形式の識別子を出し、URL の直接入力欄を出さない", () => {
     const html = chooser({
       kind: "linear",
-      target: { id: "team-uuid", name: "Engineering" },
+      targets: [{ id: "team-uuid", name: "Engineering" }],
       issues: { kind: "ok", value: LINEAR_ISSUES },
     });
     expect(html).toContain("ENG-123");
@@ -164,7 +164,8 @@ describe("TrackerUnavailable", () => {
   test("Linear の API key が無いときは config.json への設定を促す", () => {
     const html = renderToStaticMarkup(
       <TrackerUnavailable
-        status={{ ok: false, reason: "no_api_key", message: "config.json に linearApiKey がありません" }}
+        status={{ reason: "no_api_key", message: "config.json に linearApiKey がありません" }}
+        root="/ws"
         onRetry={noop}
       />,
     );
@@ -174,10 +175,11 @@ describe("TrackerUnavailable", () => {
     expect(html).toContain("もう一度確かめる");
   });
 
-  test("Linear のチームが見つからないときは project.yaml の tracker.team を確かめるよう促す", () => {
+  test("Linear のチームが見つからないときは workspace.yaml の tracker.team を確かめるよう促す", () => {
     const html = renderToStaticMarkup(
       <TrackerUnavailable
-        status={{ ok: false, reason: "team_not_found", message: "チーム ENG が見つかりません" }}
+        status={{ reason: "team_not_found", message: "チーム ENG が見つかりません" }}
+        root="/ws"
         onRetry={noop}
       />,
     );
@@ -188,7 +190,8 @@ describe("TrackerUnavailable", () => {
   test("gh が使えないときは理由と直し方と gh の出力を出す", () => {
     const html = renderToStaticMarkup(
       <TrackerUnavailable
-        status={{ ok: false, reason: "not_logged_in", message: "You are not logged into any GitHub hosts." }}
+        status={{ reason: "not_logged_in", message: "You are not logged into any GitHub hosts." }}
+        root="/ws"
         onRetry={noop}
       />,
     );
@@ -196,6 +199,18 @@ describe("TrackerUnavailable", () => {
     expect(html).toContain("gh auth login");
     expect(html).toContain("You are not logged into any GitHub hosts.");
     expect(html).toContain("もう一度確かめる");
+  });
+
+  test("project を渡すと見出しに前置する", () => {
+    const html = renderToStaticMarkup(
+      <TrackerUnavailable
+        status={{ reason: "no_github_remote", message: "" }}
+        root="/ws"
+        project="tp"
+        onRetry={noop}
+      />,
+    );
+    expect(html).toContain("tp: このリポジトリに GitHub の remote がありません");
   });
 });
 

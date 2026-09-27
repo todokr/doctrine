@@ -5,11 +5,11 @@ import {
   applyProjectConfig,
   parseProjectConfig,
   type ProjectConfigInput,
-  type TrackerConfig,
   withSetupStep,
   writeProjectYaml,
 } from "../workflow/project.ts";
 import { applyWorkflowChanges, writeWorkflowYaml } from "../workflow/save.ts";
+import type { TrackerConfig } from "../workflow/workspace.ts";
 import { pinOf, type WorkflowLoader, type WorkflowPin } from "../workflow/load.ts";
 import { SETUP_WORKFLOW_NAME, setupPrompt, setupWorkflowYaml } from "../workflow/setupWorkflow.ts";
 import {
@@ -23,7 +23,13 @@ import {
   type TaskRow,
   type TaskState,
 } from "../db/tasks.ts";
-import { getWorkspaceByPath, listProjectsOf, listWorkspaces, soleProjectOf } from "../db/workspaces.ts";
+import {
+  getWorkspaceByPath,
+  listProjectsOf,
+  listWorkspaces,
+  soleProjectOf,
+  workspaceRefOf,
+} from "../db/workspaces.ts";
 import {
   addWorkspace,
   syncProjectRow,
@@ -73,7 +79,7 @@ import {
 import { previewTaskPrompt, redispatchProcess } from "../intake/dispatch.ts";
 import { intakeDraft, toIntakeDetail, toIntakeSummary } from "../intake/view.ts";
 import type { IntakeWatcher } from "../intake/watch.ts";
-import type { TrackerOf } from "../tracker/tracker.ts";
+import { type TrackerOf, WorkspaceConfigError } from "../tracker/tracker.ts";
 import { applyApproval, runTask } from "../domain/engine.ts";
 import {
   branchNameFor,
@@ -126,7 +132,7 @@ export type DaemonContext = {
   /** タスクが従うワークフロー（setup を差し込んだ後）。tick・承認・読み取りの経路はすべてここを通る。 */
   workflowOf(task: TaskRow, project: ProjectRow): Promise<Workflow>;
   running: Set<string>;
-  /** プロジェクトの Tracker。project.yaml の tracker で GitHub Issues か Linear を選ぶ。 */
+  /** workspace の Tracker。workspace.yaml の tracker で GitHub Issues か Linear を選ぶ。 */
   trackerOf: TrackerOf;
   /** 走らせている Intake の実行（intake_runs.id）。tick の再入ガード。running とは別に持つ。 */
   runningIntakeRuns: Set<number>;
@@ -229,6 +235,13 @@ async function reqProject(ctx: DaemonContext, params: Record<string, unknown>) {
   const project = await getProjectByPath(ctx.db, path);
   if (!project) throw new Error(`未登録のプロジェクトです: ${path}`);
   return project;
+}
+
+async function reqWorkspace(ctx: DaemonContext, params: Record<string, unknown>) {
+  const path = req(params, "workspace");
+  const workspace = await getWorkspaceByPath(ctx.db, path);
+  if (!workspace) throw new Error(`未登録の workspace です: ${path}`);
+  return workspace;
 }
 
 /** ワークフロー名。`/` `\` を含むものはパスとして不正なので拒む。 */
@@ -776,47 +789,57 @@ export function createHandler(ctx: DaemonContext): Handler {
       }
 
       case "tracker.status": {
-        const project = await reqProject(ctx, params);
-        const tracker = await ctx.trackerOf(project.path);
-        return { ...(await tracker.status(project.path)), kind: tracker.kind };
+        const ws = await reqWorkspace(ctx, params);
+        try {
+          const wt = await ctx.trackerOf(await workspaceRefOf(ctx.db, ws.id));
+          return { ok: true, kind: wt.kind, targets: await wt.status() };
+        } catch (e) {
+          if (e instanceof WorkspaceConfigError) {
+            return { ok: false, reason: e.reason, message: e.message };
+          }
+          throw e;
+        }
       }
       case "tracker.issues": {
-        const project = await reqProject(ctx, params);
+        const ws = await reqWorkspace(ctx, params);
         const assignee = params.assignee === "any" ? "any" : "me";
         const search = typeof params.search === "string" ? params.search : undefined;
-        const tracker = await ctx.trackerOf(project.path);
-        const issues = await tracker.listIssues(project.path, {
+        const wt = await ctx.trackerOf(await workspaceRefOf(ctx.db, ws.id));
+        const issues = await wt.listIssues({
           assignee,
           ...(search === undefined ? {} : { search }),
         }).catch(async (e) => {
           // 理由が分かる失敗は、トラッカーの生のエラーより先に返す。
-          const status = await tracker.status(project.path);
-          if (!status.ok) {
-            throw new Error(`Issue トラッカーを使えません（${status.reason}）: ${status.message}`);
+          const failed = (await wt.status()).find((s) => !s.ok);
+          if (failed && !failed.ok) {
+            throw new Error(`Issue トラッカーを使えません（${failed.reason}）: ${failed.message}`);
           }
           throw e;
         });
         const open = new Map(
-          (await listIntakes(ctx.db, { workspaceId: project.workspace_id }))
-            .map((i) => [i.issue_url, i.id]),
+          (await listIntakes(ctx.db, { workspaceId: ws.id })).map((i) => [i.issue_url, i.id]),
         );
         return issues.map((i) => ({ ...i, intake_id: open.get(i.url) ?? null }));
       }
       case "tracker.issue": {
-        const project = await reqProject(ctx, params);
-        const tracker = await ctx.trackerOf(project.path);
-        return await tracker.readIssue(project.path, req(params, "url"));
+        const ws = await reqWorkspace(ctx, params);
+        const wt = await ctx.trackerOf(await workspaceRefOf(ctx.db, ws.id));
+        const url = req(params, "url");
+        const projectPath = await wt.projectPathFor(url);
+        if (projectPath === null) {
+          throw new Error(`この Issue は workspace のどのリポジトリにもありません: ${url}`);
+        }
+        return await wt.tracker.readIssue(projectPath, url);
       }
 
       case "intake.start": {
-        const project = await reqProject(ctx, params);
+        const ws = await reqWorkspace(ctx, params);
         // プロジェクトが複数ある workspace はここで断る（soleProjectOf がまだプロジェクトを
         // 1 つに絞れない）。何も書き込まずに reject する。
-        await soleProjectOf(ctx.db, project.workspace_id);
-        const tracker = await ctx.trackerOf(project.path);
-        const { intake, alreadyActive, problems } = await startIntake(ctx.db, tracker, {
-          workspaceId: project.workspace_id,
-          projectPath: project.path,
+        await soleProjectOf(ctx.db, ws.id);
+        const wt = await ctx.trackerOf(await workspaceRefOf(ctx.db, ws.id));
+        const { intake, alreadyActive, problems } = await startIntake(ctx.db, wt, {
+          workspaceId: ws.id,
           issueUrl: req(params, "issue_url"),
           logRoot: ctx.logRoot,
         });
@@ -923,7 +946,12 @@ export function createHandler(ctx: DaemonContext): Handler {
         const outcome = await cancelIntake(
           ctx.db,
           { probe: defaultProbe(), trackerOf: ctx.trackerOf },
-          { intakeId, mode: params.mode, projectPath: project.path },
+          {
+            intakeId,
+            mode: params.mode,
+            workspace: await workspaceRefOf(ctx.db, intake.workspace_id),
+            projectPath: project.path,
+          },
         );
         for (const t of outcome.stoppedTasks) {
           ctx.broadcast({
@@ -979,9 +1007,12 @@ export function createHandler(ctx: DaemonContext): Handler {
         const intake = await getIntake(ctx.db, req(params, "intake_id"));
         if (!intake) throw new Error("Intake がありません");
         const project = await soleProjectOf(ctx.db, intake.workspace_id);
-        const row = await closeParentIssue(ctx.db, await ctx.trackerOf(project.path), {
+        const ref = await workspaceRefOf(ctx.db, intake.workspace_id);
+        const wt = await ctx.trackerOf(ref);
+        const projectPath = (await wt.projectPathFor(intake.issue_url)) ?? project.path;
+        const row = await closeParentIssue(ctx.db, wt.tracker, {
           intakeId: intake.id,
-          projectPath: project.path,
+          projectPath,
         });
         return await toIntakeSummary(ctx.db, row, ctx.intakeWatcher.health(row.workspace_id));
       }

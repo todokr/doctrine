@@ -1,4 +1,5 @@
 import type { Db, ProjectRow, WorkspaceRow } from "./schema.ts";
+import type { WorkspaceRef } from "../tracker/workspaceTracker.ts";
 
 export type { WorkspaceRow } from "./schema.ts";
 
@@ -39,6 +40,14 @@ export async function soleProjectOf(db: Db, workspaceId: number): Promise<Projec
     throw new Error(`workspace ${workspaceId} にプロジェクトがありません`);
   }
   return projects[0];
+}
+
+/** WorkspaceRef を DB の行から作る。projects は id 順で、名前と実パス。 */
+export async function workspaceRefOf(db: Db, workspaceId: number): Promise<WorkspaceRef> {
+  const workspace = await getWorkspace(db, workspaceId);
+  if (!workspace) throw new Error(`workspace がありません: ${workspaceId}`);
+  const projects = await listProjectsOf(db, workspaceId);
+  return { path: workspace.path, projects: projects.map((p) => ({ name: p.name, path: p.path })) };
 }
 
 /** 名前を [a-z0-9-]+ に丸める。空になれば "project"。 */

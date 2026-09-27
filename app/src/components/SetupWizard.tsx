@@ -134,7 +134,7 @@ function Tracker({ s, onChange }: { s: WizardState; onChange: (s: WizardState) =
     else states[phase] = value;
     setTracker({ kind: "linear", team: t.team, ...(Object.keys(states).length ? { states } : {}) });
   };
-  const g = trackerGuidance({ ok: false, reason: "no_api_key", message: "" });
+  const g = trackerGuidance({ reason: "no_api_key", message: "" }, s.path ?? "");
   return (
     <>
       <p>Issue をどこから取り込むかを選んでください。setup のタスクはトラッカーを使わないので、後から設定しても構いません。</p>

@@ -18,12 +18,12 @@ maxConcurrent: 1
 baseBranch: main
 ```
 
-必須なのは `defaultWorkflow` だけです。`setup` は省略できます。省略したときの値は、`maxConcurrent` が 1、`baseBranch` が `main`、`tracker` が GitHub Issues になります。
+必須なのは `defaultWorkflow` だけです。`setup` は省略できます。省略したときの値は、`maxConcurrent` が 1、`baseBranch` が `main` になります。
 
-Issue を Linear から取り込むときは、`project.yaml` に `tracker` を書きます。`team` には Linear のチームのキー（例: `ENG`）を書きます。1 つのプロジェクトで GitHub Issues と Linear は混ぜられません。
+Issue を Linear から取り込むときは、workspace の root の `.doctrine/workspace.yaml` に `tracker` を書きます。1 つの workspace で GitHub Issues と Linear は混ぜられません。`project.yaml` に `tracker` を書くと読み込みで失敗します。
 
 ```yaml
-# .doctrine/project.yaml
+# .doctrine/workspace.yaml
 tracker:
   kind: linear
   team: ENG

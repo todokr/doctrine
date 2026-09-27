@@ -78,6 +78,7 @@ export function fakeTracker(o: { kind?: TrackerKind } = {}): FakeTracker {
     kind,
     closesViaPullRequest: kind === "github",
     // calls に積まない。積むと subIssueSync.test.ts の calls の検査が崩れる
+    repoOf: () => Promise.resolve({ id: "R_1", nameWithOwner: "o/r" }),
     status: () => Promise.resolve({ ok: true, target: { id: "R_1", name: "o/r" } }),
     listIssues: unexpected("listIssues"),
     readIssue: (_projectPath, url) =>

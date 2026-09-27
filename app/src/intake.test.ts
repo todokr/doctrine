@@ -60,6 +60,7 @@ import {
   setWholeComment,
   toggleOption,
   trackerGuidance,
+  workspacePathOf,
   updateAnswer,
   updateResponse,
   wholeComment,
@@ -439,40 +440,49 @@ describe("parseIssueInput", () => {
   test.each(["#12", "12", " 12 ", url, "https://github.com/O/R/issues/12#issuecomment-1"])(
     "%s は URL にする",
     (input) => {
-      expect(parseIssueInput(input, TARGET)).toBe(url);
+      expect(parseIssueInput(input, [TARGET])).toBe(url);
     },
   );
 
   test.each(["https://github.com/x/y/issues/12", "", "abc", "#", "https://github.com/o/r/pull/12"])(
     "%s は null",
     (input) => {
-      expect(parseIssueInput(input, TARGET)).toBeNull();
+      expect(parseIssueInput(input, [TARGET])).toBeNull();
     },
   );
+
+  test("番号だけの入力は target が 2 つ以上なら null", () => {
+    expect(parseIssueInput("#12", [{ name: "o/r" }, { name: "o/s" }])).toBeNull();
+  });
+
+  test("URL は targets のどれかに一致すればその名前で組み直す", () => {
+    expect(parseIssueInput("https://github.com/O/S/issues/3", [{ name: "o/r" }, { name: "o/s" }]))
+      .toBe("https://github.com/o/s/issues/3");
+  });
 });
 
 describe("trackerGuidance", () => {
   test("gh が無い", () => {
-    const g = trackerGuidance({ ok: false, reason: "not_installed", message: "" });
+    const g = trackerGuidance({ reason: "not_installed", message: "" }, "/ws");
     expect(g.title).toBe("gh が見つかりません");
     expect(g.fix).toContain("https://cli.github.com");
     expect(g.command).toBeNull();
   });
 
   test("ログインしていない", () => {
-    const g = trackerGuidance({ ok: false, reason: "not_logged_in", message: "" });
+    const g = trackerGuidance({ reason: "not_logged_in", message: "" }, "/ws");
     expect(g.title).toBe("gh にログインしていません");
     expect(g.command).toBe("gh auth login");
   });
 
   test("GitHub の remote が無い", () => {
-    const g = trackerGuidance({ ok: false, reason: "no_github_remote", message: "" });
+    const g = trackerGuidance({ reason: "no_github_remote", message: "" }, "/ws");
     expect(g.title).toBe("このリポジトリに GitHub の remote がありません");
     expect(g.command).toBeNull();
   });
 
   test("Linear の API key が無い", () => {
-    const g = trackerGuidance({ ok: false, reason: "no_api_key", message: "" });
+    const g = trackerGuidance({ reason: "no_api_key", message: "" }, "/ws");
     expect(g.title).toBe("Linear の API key がありません");
     expect(g.fix).toContain("config.json");
     expect(g.fix).toContain("~/.config/doctrine");
@@ -482,23 +492,49 @@ describe("trackerGuidance", () => {
   });
 
   test("Linear の API key が無効", () => {
-    const g = trackerGuidance({ ok: false, reason: "invalid_api_key", message: "" });
+    const g = trackerGuidance({ reason: "invalid_api_key", message: "" }, "/ws");
     expect(g.title).toBe("Linear の API key が使えません");
     expect(g.fix).toContain("linearApiKey");
   });
 
   test("Linear のチームが見つからない", () => {
-    const g = trackerGuidance({ ok: false, reason: "team_not_found", message: "" });
+    const g = trackerGuidance({ reason: "team_not_found", message: "" }, "/ws");
     expect(g.title).toBe("Linear のチームが見つかりません");
-    expect(g.fix).toContain("project.yaml");
+    expect(g.fix).toContain("workspace.yaml");
     expect(g.fix).toContain("tracker.team");
     expect(g.command).toBeNull();
   });
 
   test("知らない理由は汎用の案内と null のコマンド", () => {
-    const g = trackerGuidance({ ok: false, reason: "unknown", message: "" });
+    const g = trackerGuidance({ reason: "unknown", message: "" }, "/ws");
     expect(g.title).toBe("Issue トラッカーを使えません");
     expect(g.command).toBeNull();
+  });
+
+  test("workspace.yaml が無い", () => {
+    const g = trackerGuidance({ reason: "workspace_config_missing", message: "" }, "/ws");
+    expect(g.title).toBe("workspace.yaml がありません");
+    expect(g.fix).toContain("/ws/.doctrine/workspace.yaml");
+    expect(g.command).toBeNull();
+  });
+
+  test("workspace.yaml が読めない", () => {
+    const g = trackerGuidance({ reason: "workspace_config_invalid", message: "" }, "/ws");
+    expect(g.title).toBe("workspace.yaml を読めません");
+    expect(g.fix).toContain("/ws/.doctrine/workspace.yaml");
+  });
+});
+
+describe("workspacePathOf", () => {
+  test("プロジェクトの workspace の root を返す", () => {
+    const workspaces = [{ id: 2, path: "/w2", name: "w2", projects: [] }];
+    expect(workspacePathOf(PROJECTS[1], workspaces)).toBe("/w2");
+  });
+
+  test("workspace が無い・プロジェクトが無ければ undefined", () => {
+    expect(workspacePathOf(PROJECTS[1], [])).toBeUndefined();
+    expect(workspacePathOf(undefined, [{ id: 2, path: "/w2", name: "w2", projects: [] }]))
+      .toBeUndefined();
   });
 });
 
