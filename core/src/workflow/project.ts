@@ -26,7 +26,7 @@ export type ProjectConfig = {
   tracker: TrackerConfig;
 };
 
-const trackerSchema = z.discriminatedUnion("kind", [
+export const trackerSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("github") }).strict(),
   z.object({
     kind: z.literal("linear"),
