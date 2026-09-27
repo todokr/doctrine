@@ -29,12 +29,12 @@ import { loadWorkflowFromDisk, taskWorkflow } from "../../src/workflow/load.ts";
 import type {
   DaemonSlots,
   ProjectSummary,
-  WorkspaceSummary,
   ServerEvent,
   TaskGuide,
   TaskSummary,
   WorkflowDetail,
   WorkflowListEntry,
+  WorkspaceSummary,
   WorktreeEntry,
 } from "../../../shared/protocol.ts";
 import { branchNameFor } from "../../src/domain/worktree.ts";

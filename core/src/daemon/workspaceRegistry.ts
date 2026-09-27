@@ -9,7 +9,11 @@ import {
 } from "../db/workspaces.ts";
 import { parseProjectConfig, type ProjectConfig } from "../workflow/project.ts";
 import { ensureProjectScaffold, ensureWorkspaceScaffold } from "../workflow/scaffold.ts";
-import { parseWorkspaceConfig, WORKSPACE_YAML, type WorkspaceConfig } from "../workflow/workspace.ts";
+import {
+  parseWorkspaceConfig,
+  WORKSPACE_YAML,
+  type WorkspaceConfig,
+} from "../workflow/workspace.ts";
 import type { WorkspaceSummary } from "../../../shared/protocol.ts";
 
 type ResolvedProject = { name: string; path: string };
@@ -136,7 +140,9 @@ async function readConfig(root: string): Promise<WorkspaceConfig> {
   try {
     text = await Deno.readTextFile(yamlPath);
   } catch (e) {
-    if (e instanceof Deno.errors.NotFound) throw new Error(`workspace.yaml がありません: ${yamlPath}`);
+    if (e instanceof Deno.errors.NotFound) {
+      throw new Error(`workspace.yaml がありません: ${yamlPath}`);
+    }
     throw e;
   }
   return parseWorkspaceConfig(text, basename(root));
@@ -159,7 +165,9 @@ async function resolveProjects(root: string, cfg: WorkspaceConfig): Promise<Reso
     // parseWorkspaceConfig は文字列で比べるので、シンボリックリンク経由の重複はここで拾う
     const other = seen.get(real);
     if (other !== undefined) {
-      throw new Error(`projects の ${other} と ${entry.name} が同じリポジトリ ${real} を指しています`);
+      throw new Error(
+        `projects の ${other} と ${entry.name} が同じリポジトリ ${real} を指しています`,
+      );
     }
     seen.set(real, entry.name);
     resolved.push({ name: entry.name, path: real });

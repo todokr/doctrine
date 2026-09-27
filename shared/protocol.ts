@@ -305,7 +305,12 @@ export type ProjectSummary = {
   setup: string | null;
 };
 
-export type WorkspaceSummary = { id: number; path: string; name: string; projects: ProjectSummary[] };
+export type WorkspaceSummary = {
+  id: number;
+  path: string;
+  name: string;
+  projects: ProjectSummary[];
+};
 
 /**
  * project.yaml の設定（project.config.get が返す。core/src/workflow/project.ts の ProjectConfig と同じ形）。

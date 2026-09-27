@@ -47,7 +47,8 @@ async function writeTp(yaml: string, dir = "tp"): Promise<string> {
   return tp;
 }
 
-const THREE = "name: tp\nprojects:\n  terraform: ../a/repo\n  tp: ../b/repo\n  kubernetes: ../c/repo\n";
+const THREE =
+  "name: tp\nprojects:\n  terraform: ../a/repo\n  tp: ../b/repo\n  kubernetes: ../c/repo\n";
 
 test("git 管理外の root に 3 つのリポジトリを束ねて登録する", async () => {
   const [a, b, c] = [await repoAt("a"), await repoAt("b"), await repoAt("c")];
