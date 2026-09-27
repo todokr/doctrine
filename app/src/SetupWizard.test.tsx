@@ -1,9 +1,10 @@
 import { renderToStaticMarkup } from "react-dom/server";
+import { isValidElement, type ReactElement, type ReactNode } from "react";
 import { describe, expect, test, vi } from "vitest";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 
-import { WizardScreen } from "./components/SetupWizard";
+import { SetupFailedScreen, WizardScreen } from "./components/SetupWizard";
 import { DETECT_EXISTING, DETECT_PARENT, DETECT_REPO_ROOT } from "./fixtures";
 import { DEFAULT_POLICY, initialWizard, withDetection, type WizardState } from "./wizard";
 
@@ -97,5 +98,38 @@ describe("WizardScreen", () => {
   test("初回は閉じられず、サイドバーから開いたときは閉じられる", () => {
     expect(html(at("welcome"))).not.toContain("閉じる");
     expect(html(at("welcome"), { closable: true })).toContain("閉じる");
+  });
+});
+
+/** 要素の木から、ラベルが label のボタンを探す（関数コンポーネントは展開しない） */
+function findButton(node: ReactNode, label: string): ReactElement<{ onClick: () => void }> | null {
+  if (Array.isArray(node)) {
+    for (const n of node) {
+      const hit = findButton(n, label);
+      if (hit) return hit;
+    }
+    return null;
+  }
+  if (!isValidElement<{ children?: ReactNode; onClick?: () => void }>(node)) return null;
+  if (node.type === "button" && node.props.children === label) return node as ReactElement<{ onClick: () => void }>;
+  return findButton(node.props.children, label);
+}
+
+describe("SetupFailedScreen", () => {
+  test("登録済みであること・理由・手で直す案内を出し、戻る道は出さない", () => {
+    const h = renderToStaticMarkup(<SetupFailedScreen message="policy は必須です" onDone={noop} />);
+    expect(h).toContain("workspace は登録しました");
+    expect(h).toContain("policy は必須です");
+    expect(h).toContain("タスク画面から手でワークフローを直してください");
+    expect(h).not.toContain("戻る");
+    expect(h).not.toContain("登録する");
+  });
+
+  test("閉じるボタンで onDone を呼ぶ", () => {
+    const onDone = vi.fn();
+    const button = findButton(SetupFailedScreen({ message: "x", onDone }), "タスク一覧へ");
+    expect(button).not.toBeNull();
+    button!.props.onClick();
+    expect(onDone).toHaveBeenCalledTimes(1);
   });
 });

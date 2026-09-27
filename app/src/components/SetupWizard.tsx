@@ -277,6 +277,29 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
+/**
+ * workspace.add は通り、workspace.setup が落ちた後の画面。workspace は登録済みなので、
+ * 戻って登録し直す道は出さない。閉じるまで理由を出し続ける
+ */
+export function SetupFailedScreen({ message, onDone }: { message: string; onDone: () => void }) {
+  return (
+    <div className="wizard">
+      <div className="wz-panel">
+        <h1>setup のタスクを作れませんでした</h1>
+        <p>workspace は登録しました。ワークフローを作るタスクだけが作れませんでした。</p>
+        <div className="box danger"><p>{message}</p></div>
+        <p>
+          各プロジェクトには雛形の <span className="mono">.doctrine/workflows/default.yaml</span> が置かれています。
+          タスク画面から手でワークフローを直してください。
+        </p>
+        <div className="actions">
+          <button className="btn primary" onClick={onDone}>タスク一覧へ</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /** props だけで描く。テストはこちらを描く */
 export function WizardScreen(props: {
   s: WizardState;
@@ -325,6 +348,8 @@ export function SetupWizard({ closable }: { closable: boolean }) {
   const { dispatch, refresh } = useStore();
   const [s, setS] = useState(initialWizard);
   const [pending, setPending] = useState(false);
+  // workspace.setup が落ちた理由。null でなければ SetupFailedScreen を出す
+  const [setupFailed, setSetupFailed] = useState<string | null>(null);
 
   async function pick() {
     let path: string | null;
@@ -361,12 +386,7 @@ export function SetupWizard({ closable }: { closable: boolean }) {
     } catch (e) {
       if (e instanceof WorkspaceSetupError) {
         await refresh();
-        dispatch({
-          type: "wizard.done",
-          id: null,
-          toast: `workspace は登録しましたが、setup のタスクを作れませんでした（${e.message}）。` +
-            "タスク画面から手でワークフローを直してください",
-        });
+        setSetupFailed(e.message);
         return;
       }
       setS((x) => ({ ...x, error: `登録できませんでした: ${errorMessage(e)}` }));
@@ -377,6 +397,10 @@ export function SetupWizard({ closable }: { closable: boolean }) {
 
   // 確認画面の失敗は、そこを離れたら消す
   const go = (step: WizardStep) => setS((x) => ({ ...x, step, error: x.step === "confirm" ? null : x.error }));
+
+  if (setupFailed !== null) {
+    return <SetupFailedScreen message={setupFailed} onDone={() => dispatch({ type: "wizard.done", id: null, toast: null })} />;
+  }
 
   return (
     <WizardScreen
