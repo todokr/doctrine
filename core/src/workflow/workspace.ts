@@ -2,7 +2,28 @@ import { join, normalize } from "@std/path";
 import { parse as parseYaml, stringify } from "yaml";
 import { z } from "zod";
 import { formatZodIssues, WorkflowValidationError } from "./schema.ts";
-import { type TrackerConfig, trackerSchema } from "./project.ts";
+import type { IssuePhase } from "../../../shared/intake/tracker.ts";
+
+/** 段階ごとの Linear の状態の名前。書いた段階は名前で引く。 */
+export type LinearStateNames = Partial<Record<IssuePhase, string>>;
+
+/** Issue をどこから取るか。1 つの workspace は 1 つのトラッカーだけを使う。 */
+export type TrackerConfig =
+  | { kind: "github" }
+  | { kind: "linear"; team: string; states?: LinearStateNames };
+
+export const trackerSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("github") }).strict(),
+  z.object({
+    kind: z.literal("linear"),
+    team: z.string().min(1),
+    states: z.object({
+      todo: z.string().min(1),
+      inProgress: z.string().min(1),
+      inReview: z.string().min(1),
+    }).partial().strict().optional(),
+  }).strict(),
+]);
 
 export type WorkspaceProjectEntry = { name: string; path: string };
 

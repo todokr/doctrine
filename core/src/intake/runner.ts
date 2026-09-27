@@ -26,7 +26,7 @@ import type {
   IntakeRunRow,
   IntakeState,
 } from "../db/schema.ts";
-import { soleProjectOf } from "../db/workspaces.ts";
+import { soleProjectOf, workspaceRefOf } from "../db/workspaces.ts";
 import { assertIntakeTransition } from "../domain/intakeStates.ts";
 import {
   classifyRateLimit,
@@ -42,7 +42,7 @@ import {
   intakeWorktreePathFor,
   restoreWorktree,
 } from "../domain/worktree.ts";
-import type { Tracker } from "../tracker/tracker.ts";
+import type { TrackerOf } from "../tracker/tracker.ts";
 import { READ_ONLY_TOOLS } from "../workflow/scaffold.ts";
 import {
   type AttentionReason,
@@ -67,7 +67,7 @@ export const INTAKE_ALLOWED_TOOLS: readonly string[] = ["Read", "Grep", "Glob", 
 export type IntakeRunnerDeps = {
   db: Db;
   adapter: AgentAdapter;
-  trackerOf(projectPath: string): Promise<Pick<Tracker, "readIssue">>;
+  trackerOf: TrackerOf;
   logRoot: string;
   onStateChanged?(intakeId: string, from: IntakeState, to: IntakeState, revising: boolean): void;
   onRateLimit?(s: RateLimitObservation): void | Promise<void>;
@@ -317,7 +317,11 @@ export async function runIntakeRun(db: Db, runId: number, deps: IntakeRunnerDeps
       comments: rows.comments,
     });
     const issue = continuation === null || fresh
-      ? await (await deps.trackerOf(project.path)).readIssue(project.path, intake.issue_url)
+      ? await (async () => {
+        const wt = await deps.trackerOf(await workspaceRefOf(db, intake.workspace_id));
+        const projectPath = (await wt.projectPathFor(intake.issue_url)) ?? project.path;
+        return wt.tracker.readIssue(projectPath, intake.issue_url);
+      })()
       : null;
     const firstPrompt = () => firstPromptOf(db, intake, run, issue!, rows);
 

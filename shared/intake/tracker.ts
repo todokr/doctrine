@@ -6,13 +6,15 @@ export type TrackerStatus =
   | { ok: true; target: { id: string; name: string } }
   | { ok: false; reason: string; message: string };
 
-/** トラッカーの種類。project.yaml の tracker.kind と同じ値 */
+/** トラッカーの種類。workspace.yaml の tracker.kind と同じ値 */
 export type TrackerKind = "github" | "linear";
 
-/** tracker.status の応答。画面が種類で表示を分ける */
-export type ProjectTrackerStatus = TrackerStatus & { kind: TrackerKind };
+/** tracker.status の応答。targets の project はプロジェクトの名前。Linear は先頭のプロジェクト 1 つ */
+export type WorkspaceTrackerStatus =
+  | { ok: false; reason: "workspace_config_missing" | "workspace_config_invalid"; message: string }
+  | { ok: true; kind: TrackerKind; targets: (TrackerStatus & { project: string })[] };
 
-/** Issue の一覧の 1 行（S-1）。identifier は表示のためだけに持つ（GitHub は "#112"） */
+/** Issue の一覧の 1 行（S-1）。identifier は表示のためだけに持つ（GitHub は "#112"。プロジェクトが 2 つ以上の workspace では "tp#112"） */
 export type IssueSummary = {
   url: string;
   identifier: string;

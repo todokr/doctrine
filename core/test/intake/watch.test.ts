@@ -29,6 +29,7 @@ import { fakeGh, parseGraphqlArgs } from "../helpers/gh.ts";
 import { fakeTracker } from "../helpers/fakeTracker.ts";
 import { constTrackerOf } from "../helpers/tracker.ts";
 import type { TrackerOf } from "../../src/tracker/tracker.ts";
+import { workspaceTracker } from "../../src/tracker/workspaceTracker.ts";
 import { fakePrWatcher } from "../helpers/prWatcher.ts";
 import { until } from "../helpers/repo.ts";
 import { example } from "./pfd/fixture.ts";
@@ -220,28 +221,28 @@ async function setupWith(trackerOf: TrackerOf) {
   return { ...seeded, base, watcher };
 }
 
-test("見張りはプロジェクトのパスで Tracker を引く", async () => {
+test("見張りは workspace で Tracker を引く", async () => {
   const ft = fakeTracker();
-  const paths: string[] = [];
-  const { workspaceId, watcher } = await setupWith((path) => {
-    paths.push(path);
-    return Promise.resolve(ft.tracker);
+  const refs: { path: string; projects: { name: string; path: string }[] }[] = [];
+  const { workspaceId, watcher } = await setupWith((ws) => {
+    refs.push(ws);
+    return Promise.resolve(workspaceTracker(ws, ft.tracker));
   });
   await watcher.request(workspaceId);
-  assert.deepEqual(paths, ["/repo"]);
+  assert.deepEqual(refs, [{ path: "/repo", projects: [{ name: "repo", path: "/repo" }] }]);
   assert.equal(ft.issues.length, 4);
 });
 
 test("Tracker を引けない周も baseBranch の取り込みは続け、失敗を健康状態に出す", async () => {
   const { db, workspaceId, base, watcher } = await setupWith(() =>
-    Promise.reject(new Error("project.yaml がありません"))
+    Promise.reject(new Error("workspace.yaml がありません"))
   );
   await watcher.request(workspaceId);
   assert.equal(base.fetches, 1);
   assert.equal((await listTasks(db)).length, 0);
   assert.match(
     watcher.health(workspaceId).lastError!,
-    /sub-issue の同期: project\.yaml がありません/,
+    /sub-issue の同期: workspace\.yaml がありません/,
   );
   assert.equal(watcher.health(workspaceId).consecutiveFailures, 1);
 });
@@ -437,7 +438,9 @@ test("偽の gh: ghTracker と ghPrWatcher を通して、承認直後の投入�
   let n = 100;
   let mergedBranch = false;
   const gh = fakeGh((a) => {
-    if (a[0] === "repo" && a[1] === "view") return JSON.stringify({ id: "R_1" });
+    if (a[0] === "repo" && a[1] === "view") {
+      return JSON.stringify({ id: "R_1", nameWithOwner: "o/r" });
+    }
     if (a[0] !== "api" || a[1] !== "graphql") return undefined;
     const g = parseGraphqlArgs(a);
     if (/pullRequests/.test(g.query)) {

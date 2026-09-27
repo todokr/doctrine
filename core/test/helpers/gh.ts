@@ -7,12 +7,12 @@ export type GhCall = { args: string[]; cwd: string };
  * どれにも当たらなければ「想定外の gh 呼び出し」で投げる。
  */
 export function fakeGh(
-  respond: (args: string[]) => string | Error | undefined,
+  respond: (args: string[], cwd: string) => string | Error | undefined,
 ): { run: GhRun; calls: GhCall[] } {
   const calls: GhCall[] = [];
   const run: GhRun = (args, cwd) => {
     calls.push({ args, cwd });
-    const res = respond(args);
+    const res = respond(args, cwd);
     if (res === undefined) {
       return Promise.reject(new Error(`想定外の gh 呼び出し: ${args.join(" ")}`));
     }

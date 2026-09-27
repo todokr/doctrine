@@ -8,7 +8,7 @@ import {
   upsertPrObservation,
 } from "../db/intakes.ts";
 import type { Db, ProjectRow } from "../db/schema.ts";
-import { listWorkspaces, soleProjectOf } from "../db/workspaces.ts";
+import { listWorkspaces, soleProjectOf, workspaceRefOf } from "../db/workspaces.ts";
 import { assertIntakeTransition } from "../domain/intakeStates.ts";
 import type { PrWatcher, Tracker, TrackerOf } from "../tracker/tracker.ts";
 import { containsCommit, fetchBaseBranch, originRef } from "../domain/worktree.ts";
@@ -186,10 +186,11 @@ export async function watchWorkspace(
     const intakes = watched.filter((i) => i.state === "active");
 
     // 改訂中だけの周は tracker を使わないので、解決は active があるときだけ。失敗は同期だけを飛ばす
+    // sub-issue の作成を含む同期は第 1 段ではただ 1 つのプロジェクト（sole project）のパスのまま。
     let tracker: Tracker | null = null;
     if (intakes.length > 0) {
       try {
-        tracker = await deps.trackerOf(project.path);
+        tracker = (await deps.trackerOf(await workspaceRefOf(db, workspaceId))).tracker;
       } catch (e) {
         report.errors.push(`sub-issue の同期: ${describe(e)}`);
       }

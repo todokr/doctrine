@@ -1,6 +1,5 @@
 import type { CommentReply } from "../../shared/intake/decomposer.ts";
 import { buildFeedback } from "../../shared/intake/feedback.ts";
-import type { TrackerStatus } from "../../shared/intake/tracker.ts";
 import type { Pfd, Process } from "../../shared/intake/pfd.ts";
 import type { PrFact, ProcessStatus } from "../../shared/intake/processStatus.ts";
 import type { Answer, AssumptionResponse, Question } from "../../shared/intake/question.ts";
@@ -19,6 +18,7 @@ import type {
   IntakeSummary,
   NewComment,
   WatchHealth,
+  WorkspaceSummary,
 } from "../../shared/protocol.ts";
 import { LOOK, parsePfdKey, pfdKey } from "./pfd";
 import type { Project, Task } from "./types";
@@ -369,22 +369,49 @@ export function intakeHistory(detail: IntakeDetail): IntakeHistoryEntry[] {
   return entries.sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
 }
 
-/** `#123`・`123`・Issue の URL を、そのリポジトリの Issue の URL にする。読めなければ null */
-export function parseIssueInput(input: string, target: { name: string }): string | null {
+/** `#123`・`123`・Issue の URL を、targets のどれかのリポジトリの Issue の URL にする。読めなければ null。
+ *  番号だけの入力は targets がちょうど 1 つのときだけ読む */
+export function parseIssueInput(input: string, targets: { name: string }[]): string | null {
   const text = input.trim();
   const short = /^#?(\d+)$/.exec(text);
-  if (short) return `https://github.com/${target.name}/issues/${short[1]}`;
+  if (short) {
+    return targets.length === 1 ? `https://github.com/${targets[0].name}/issues/${short[1]}` : null;
+  }
   const url = /^https:\/\/github\.com\/([^/]+\/[^/]+)\/issues\/(\d+)(?:[/#?].*)?$/.exec(text);
-  if (url && url[1].toLowerCase() === target.name.toLowerCase()) {
-    return `https://github.com/${target.name}/issues/${url[2]}`;
+  if (url) {
+    const target = targets.find((t) => t.name.toLowerCase() === url[1].toLowerCase());
+    if (target) return `https://github.com/${target.name}/issues/${url[2]}`;
   }
   return null;
 }
 
+/** プロジェクトの workspace の root のパス。見つからなければ undefined。 */
+export function workspacePathOf(
+  project: Project | undefined,
+  workspaces: WorkspaceSummary[],
+): string | undefined {
+  if (!project) return undefined;
+  return workspaces.find((w) => w.id === project.workspaceId)?.path;
+}
+
 export function trackerGuidance(
-  status: Extract<TrackerStatus, { ok: false }>,
+  status: { reason: string; message: string },
+  root: string,
 ): { title: string; fix: string; command: string | null } {
   switch (status.reason) {
+    case "workspace_config_missing":
+      return {
+        title: "workspace.yaml がありません",
+        fix:
+          `${root}/.doctrine/workspace.yaml を書く（projects にこの workspace のリポジトリを、Linear を使うなら tracker を書く）`,
+        command: null,
+      };
+    case "workspace_config_invalid":
+      return {
+        title: "workspace.yaml を読めません",
+        fix: `${root}/.doctrine/workspace.yaml を下の出力に従って直す`,
+        command: null,
+      };
     case "not_installed":
       return {
         title: "gh が見つかりません",
@@ -421,7 +448,7 @@ export function trackerGuidance(
       return {
         title: "Linear のチームが見つかりません",
         fix:
-          ".doctrine/project.yaml の tracker.team が Linear のチームのキー（ENG など）と合っているか確かめる",
+          ".doctrine/workspace.yaml の tracker.team が Linear のチームのキー（ENG など）と合っているか確かめる",
         command: null,
       };
     default:

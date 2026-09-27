@@ -176,7 +176,25 @@ test("createSubIssue: repo id を知らなければ gh repo view で引いて覚
   await t.createSubIssue(P, parent, { title: "B", body: "" });
   const views = calls.filter((c) => isRepoView(c.args));
   assert.equal(views.length, 1);
-  assert.deepEqual(views[0].args, ["repo", "view", "--json", "id"]);
+  assert.deepEqual(views[0].args, ["repo", "view", "--json", "id,nameWithOwner"]);
+});
+
+test("repoOf: パスごとに 1 回だけ gh repo view を呼び、status で引いた値も使う", async () => {
+  const { run, calls } = fakeGh((a, cwd) => {
+    if (a[0] === "--version" || a[0] === "auth") return "";
+    if (isRepoView(a)) {
+      return JSON.stringify(
+        cwd === "/other" ? { id: "R_2", nameWithOwner: "o/other" } : { id: "R_1", nameWithOwner: "o/r" },
+      );
+    }
+  });
+  const t = ghTracker(run);
+  await t.status(P);
+  assert.deepEqual(await t.repoOf!(P), { id: "R_1", nameWithOwner: "o/r" });
+  assert.equal(calls.filter((c) => isRepoView(c.args)).length, 1);
+  assert.deepEqual(await t.repoOf!("/other"), { id: "R_2", nameWithOwner: "o/other" });
+  assert.equal(calls.filter((c) => isRepoView(c.args)).length, 2);
+  assert.equal(calls[calls.length - 1].cwd, "/other");
 });
 
 test("createSubIssue: @ で始まる本文も文字列のまま渡す", async () => {

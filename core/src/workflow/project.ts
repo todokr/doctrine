@@ -7,44 +7,20 @@ import {
   type Workflow,
   WorkflowValidationError,
 } from "./schema.ts";
-import type { IssuePhase } from "../../../shared/intake/tracker.ts";
 import { writeTextFileAtomic } from "../util/atomicWrite.ts";
-
-/** 段階ごとの Linear の状態の名前。書いた段階は名前で引く。 */
-export type LinearStateNames = Partial<Record<IssuePhase, string>>;
-
-/** Issue をどこから取るか。1 つのプロジェクトは 1 つのトラッカーだけを使う。 */
-export type TrackerConfig =
-  | { kind: "github" }
-  | { kind: "linear"; team: string; states?: LinearStateNames };
 
 export type ProjectConfig = {
   setup?: string;
   defaultWorkflow: string;
   maxConcurrent: number;
   baseBranch: string;
-  tracker: TrackerConfig;
 };
-
-export const trackerSchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("github") }).strict(),
-  z.object({
-    kind: z.literal("linear"),
-    team: z.string().min(1),
-    states: z.object({
-      todo: z.string().min(1),
-      inProgress: z.string().min(1),
-      inReview: z.string().min(1),
-    }).partial().strict().optional(),
-  }).strict(),
-]);
 
 const schema = z.object({
   setup: z.string().min(1).optional(),
   defaultWorkflow: z.string().min(1),
   maxConcurrent: z.number().int().min(1).default(1),
   baseBranch: z.string().min(1).default("main"),
-  tracker: trackerSchema.default({ kind: "github" }),
 }).strict();
 
 export function parseProjectConfig(yamlText: string): ProjectConfig {
@@ -53,6 +29,11 @@ export function parseProjectConfig(yamlText: string): ProjectConfig {
     raw = parseYaml(yamlText);
   } catch (e) {
     throw new WorkflowValidationError([`YAMLとして読めません: ${(e as Error).message}`]);
+  }
+  if (typeof raw === "object" && raw !== null && "tracker" in raw) {
+    throw new WorkflowValidationError([
+      "tracker は .doctrine/workspace.yaml に移りました。project.yaml から消して workspace.yaml に書いてください",
+    ]);
   }
   const parsed = schema.safeParse(raw);
   if (!parsed.success) {
