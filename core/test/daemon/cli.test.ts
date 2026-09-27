@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, test } from "@std/testing/bdd";
 import assert from "node:assert/strict";
 import { createServer, type Server, type Socket } from "node:net";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { call, followLogs, parseArgv } from "../../src/cli/dctl.ts";
+import { call, followLogs, parseArgv, workflowCheck } from "../../src/cli/dctl.ts";
 
 let root: string;
 let sock: string;
@@ -371,6 +371,78 @@ test("followLogs: 失敗の応答はそのまま投げる", async () => {
     /ステップ実行がありません/,
   );
   assert.deepEqual(got, []);
+});
+
+// --- workflowCheck() はデーモンを介さず、ファイルを parseWorkflow に通す。
+
+function fakeOut(): { error: (s: string) => void; lines: string[] } {
+  const lines: string[] = [];
+  return { error: (s: string) => lines.push(s), lines };
+}
+
+test("workflow-check は正しい定義で 0 を返す", async () => {
+  const file = join(root, "workflow.yaml");
+  await writeFile(
+    file,
+    `
+name: feature
+steps:
+  - id: implement
+    type: agent
+    prompt: "やって"
+`,
+  );
+  const out = fakeOut();
+  const code = await workflowCheck(file, out);
+  assert.equal(code, 0);
+  assert.deepEqual(out.lines, []);
+});
+
+test("workflow-check は不正な定義で 1 を返し、理由を出す", async () => {
+  const file = join(root, "workflow.yaml");
+  await writeFile(
+    file,
+    `
+name: feature
+steps:
+  - id: implement
+    type: agent
+    prompt: "やって"
+    onFailure:
+      goto: no-such-step
+      maxAttempts: 3
+`,
+  );
+  const out = fakeOut();
+  const code = await workflowCheck(file, out);
+  assert.equal(code, 1);
+  assert.ok(out.lines.some((l) => l.includes("no-such-step")));
+});
+
+test("workflow-check はファイルが無ければ 1 を返す", async () => {
+  const file = join(root, "no-such.yaml");
+  const out = fakeOut();
+  const code = await workflowCheck(file, out);
+  assert.equal(code, 1);
+  assert.ok(out.lines.some((l) => l.includes(`ファイルがありません: ${file}`)));
+});
+
+test("workflow-check は警告を出しても 0 を返す", async () => {
+  const file = join(root, "workflow.yaml");
+  await writeFile(
+    file,
+    `
+name: feature
+steps:
+  - id: release
+    type: command
+    run: git push
+`,
+  );
+  const out = fakeOut();
+  const code = await workflowCheck(file, out);
+  assert.equal(code, 0);
+  assert.ok(out.lines.some((l) => l.includes("git push")));
 });
 
 test("followLogs: intake.logs では、その Intake の intake.logLine だけを出す", async () => {
