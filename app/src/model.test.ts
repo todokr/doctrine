@@ -103,6 +103,8 @@ const base = (overrides: Partial<State> = {}): State => ({
   removing: null,
   settings: { kind: "loading" },
   composer: null,
+  wizard: null,
+  workspacesChecked: true,
   ...overrides,
 });
 
@@ -161,6 +163,59 @@ describe("コンポーザ", () => {
   test("開いている間の move は何もしない", () => {
     const s = open(base());
     expect(reduce(s, { type: "move", delta: 1 })).toBe(s);
+  });
+});
+
+describe("初回ウィザード", () => {
+  const unchecked = () => base({ workspacesChecked: false });
+
+  test("workspace が 0 件なら閉じられないウィザードを出す", () => {
+    const s = reduce(unchecked(), { type: "workspaces.checked", count: 0 });
+    expect(s.wizard).toEqual({ closable: false });
+    expect(s.workspacesChecked).toBe(true);
+  });
+  test("workspace が 1 件以上なら出さない", () => {
+    const s = reduce(unchecked(), { type: "workspaces.checked", count: 1 });
+    expect(s.wizard).toBeNull();
+    expect(s.workspacesChecked).toBe(true);
+  });
+  test("2 回目以降の workspaces.checked では開き直さない", () => {
+    const done = reduce(reduce(unchecked(), { type: "workspaces.checked", count: 0 }), {
+      type: "wizard.done",
+      id: null,
+      toast: null,
+    });
+    expect(reduce(done, { type: "workspaces.checked", count: 0 }).wizard).toBeNull();
+  });
+  test("初回のウィザードは wizard.close では閉じない", () => {
+    const s = reduce(unchecked(), { type: "workspaces.checked", count: 0 });
+    expect(reduce(s, { type: "wizard.close" }).wizard).toEqual({ closable: false });
+  });
+  test("サイドバーから開いたウィザードは閉じられる", () => {
+    const s = reduce(base(), { type: "wizard.open" });
+    expect(s.wizard).toEqual({ closable: true });
+    expect(reduce(s, { type: "wizard.close" }).wizard).toBeNull();
+  });
+  test("wizard.done は閉じてタスク一覧に移り、作った setup のタスクを選ぶ", () => {
+    const s = reduce(base({ view: "settings", wizard: { closable: false } }), {
+      type: "wizard.done",
+      id: "t-5e70",
+      toast: null,
+    });
+    expect(s.wizard).toBeNull();
+    expect(s.view).toBe("tasks");
+    expect(s.sel).toBe("t-5e70");
+    expect(s.composer).toBeNull();
+  });
+  test("setup のタスクが無ければ選ぶものは変えず、トーストを出す", () => {
+    const s = reduce(base({ wizard: { closable: true } }), {
+      type: "wizard.done",
+      id: null,
+      toast: "ワークフローは既存のものを使います",
+    });
+    expect(s.wizard).toBeNull();
+    expect(s.sel).toBe("t-2b91");
+    expect(s.toast).toBe("ワークフローは既存のものを使います");
   });
 });
 

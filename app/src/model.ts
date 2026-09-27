@@ -577,6 +577,10 @@ export type State = {
   settings: Loaded<AppSettings>;
   /** null でなければメイン領域にコンポーザを出す（tasks / done のビューのとき） */
   composer: Composer | null;
+  /** null でなければ初回ウィザードを全画面で出す。workspace が 0 件で開いたものは閉じられない */
+  wizard: { closable: boolean } | null;
+  /** 起動後に workspace.list を読めたか。読めるまで取り直しのたびに読む */
+  workspacesChecked: boolean;
 };
 
 /** 古い worktree のしきい値（日）。設定が読めていなければ null（強調も点も出さない） */
@@ -698,7 +702,12 @@ export type Action =
   | { type: "composer.open"; init: ComposerInit }
   | { type: "composer.close" }
   /** task.create と取り直しが済んだ後の後片付け。作ったタスクを選び、トーストを出す */
-  | { type: "composer.created"; id: string; toast: string };
+  | { type: "composer.created"; id: string; toast: string }
+  | { type: "workspaces.checked"; count: number }
+  | { type: "wizard.open" }
+  | { type: "wizard.close" }
+  /** 登録を終えた後の後片付け。id は最初の setup のタスク（無ければ null） */
+  | { type: "wizard.done"; id: string | null; toast: string | null };
 
 /**
  * 流れてきた1行を足す。step_run_id が持っているものと違えば、別のステップの
@@ -812,6 +821,25 @@ export function reduce(s: State, a: Action): State {
         toast: a.toast,
       };
     }
+    case "workspaces.checked":
+      // 取り直しは同時に何本も走る。2 本目の応答でウィザードを開き直さない
+      if (s.workspacesChecked) return s;
+      return { ...s, workspacesChecked: true, wizard: a.count === 0 ? { closable: false } : s.wizard };
+    case "wizard.open":
+      return s.wizard ? s : { ...s, wizard: { closable: true } };
+    case "wizard.close":
+      return s.wizard?.closable ? { ...s, wizard: null } : s;
+    case "wizard.done":
+      // composer.created と同じく、一覧に無くても sel は先に決める。後から来る sync が残す
+      return {
+        ...s,
+        wizard: null,
+        view: "tasks",
+        composer: null,
+        editing: null,
+        ...(a.id !== null ? { sel: a.id } : {}),
+        toast: a.toast,
+      };
     case "move": {
       if (s.composer !== null) return s;
       if (s.view === "worktrees" || s.view === "settings") return s;

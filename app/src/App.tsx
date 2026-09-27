@@ -6,6 +6,7 @@ import { IntakeView } from "./components/IntakeView";
 import { ReviewView } from "./components/ReviewView";
 import { Rail, Sidebar } from "./components/Sidebar";
 import { SettingsView } from "./components/SettingsView";
+import { SetupWizard } from "./components/SetupWizard";
 import { TaskView } from "./components/TaskView";
 import { RemoveWorktreeModal, WorktreeView } from "./components/WorktreeView";
 import { sendDecision } from "./decision";
@@ -91,6 +92,10 @@ function useKeys() {
     const onKey = (e: KeyboardEvent) => {
       const s = latest.current;
       if ((e.target as Element).closest("input,textarea,select,[contenteditable]") || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (s.wizard) {
+        if (e.key === "Escape") dispatch({ type: "wizard.close" });
+        return;
+      }
       if (e.key === "Escape" && s.modal) return dispatch({ type: "modal.close" });
       if (e.key === "Escape" && s.removing) return dispatch({ type: "remove.close" });
       if (e.key === "j" || e.key === "k") return dispatch({ type: "move", delta: e.key === "j" ? 1 : -1 });
@@ -131,6 +136,18 @@ export default function App() {
     mainRef.current?.scrollTo({ top: 0 });
   }, [s.sel, s.intakeSel, s.composer?.opened]);
 
+  const toast = s.toast && <div className="toast" role="status">{s.toast}</div>;
+
+  if (s.wizard) {
+    return (
+      <>
+        <ConnectionBanner />
+        <SetupWizard closable={s.wizard.closable} />
+        {toast}
+      </>
+    );
+  }
+
   return (
     <>
       <ConnectionBanner />
@@ -157,7 +174,7 @@ export default function App() {
       </div>
       <RejectModal />
       <RemoveWorktreeModal />
-      {s.toast && <div className="toast" role="status">{s.toast}</div>}
+      {toast}
     </>
   );
 }

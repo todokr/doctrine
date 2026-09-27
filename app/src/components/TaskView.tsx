@@ -137,6 +137,19 @@ export function IntakeRetryHint(props: { intakeId: string; onOpenIntake: (id: st
   );
 }
 
+/** 同梱の setup ワークフローで default.yaml を書き終えた後の案内 */
+export function SetupDoneNotice({ t }: { t: Task }) {
+  if (t.wf !== "setup" || t.state !== "completed") return null;
+  return (
+    <section className="box attn">
+      <p>
+        <span className="mono">.doctrine/workflows/default.yaml</span> を書き換えました（未コミット）。
+        コミットしてから、Issue を取り込むかタスクを作ってください。
+      </p>
+    </section>
+  );
+}
+
 export function TaskView({ t }: { t: Task }) {
   const { s, dispatch } = useStore();
   const decide = useDecide();
@@ -205,6 +218,7 @@ export function TaskView({ t }: { t: Task }) {
         </span>
       </div>
 
+      <SetupDoneNotice t={t} />
       {stopReasons(s.tasks, t, detail).map((r) => {
         if (r.kind === "failed") {
           return (

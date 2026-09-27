@@ -490,6 +490,23 @@ tr.wt-stale{background:var(--accent-soft)}
 .settings-field{display:grid;gap:4px}
 .hint.error{color:var(--danger)}
 
+/* 初回ウィザード */
+.wizard{height:100vh;overflow-y:auto;background:var(--ground);padding:48px 16px}
+.wz-panel{max-width:680px;margin:0 auto;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:22px 24px;display:grid;gap:14px}
+.wz-panel p{margin:0}
+.wz-steps{list-style:none;margin:0;padding:0;display:flex;gap:4px 14px;flex-wrap:wrap;font-size:11.5px;color:var(--ink-3)}
+.wz-steps li[aria-current="step"]{color:var(--accent-text);font-weight:500}
+.wz-list{margin:0;padding-left:18px;display:grid;gap:4px}
+.wz-repos{display:grid;gap:8px}
+.wz-repo{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px;align-items:center}
+.wz-repo label{display:flex;gap:8px;align-items:center;min-width:0;overflow-wrap:anywhere}
+.wz-choices{display:flex;gap:6px 18px;flex-wrap:wrap}
+.wz-choices label{display:flex;gap:6px;align-items:center}
+.wz-q{border:1px solid var(--line);border-radius:9px;padding:8px 12px 10px;margin:0;display:grid;gap:6px}
+.wz-q legend{padding:0 4px;font-weight:500}
+.wz-models{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.wz-models label{display:grid;gap:3px}
+
 /* ワークフローのステップ編集欄 */
 .wf-edit{display:grid;gap:10px}
 .wf-edit .vars{font-size:11.5px;color:var(--ink-3)}

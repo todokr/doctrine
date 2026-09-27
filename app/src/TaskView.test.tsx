@@ -1,8 +1,8 @@
 import { describe, expect, test, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
-import { IntakeRetryHint, RetryButton, TaskActions } from "./components/TaskView";
+import { IntakeRetryHint, RetryButton, SetupDoneNotice, TaskActions } from "./components/TaskView";
 import { retryInit } from "./composer";
-import { PROJECTS, seedTasks } from "./fixtures";
+import { PROJECTS, seedTasks, setupTask } from "./fixtures";
 import type { Task } from "./types";
 
 const task = (id: string) => seedTasks().find((t) => t.id === id)!;
@@ -94,5 +94,27 @@ describe("IntakeRetryHint", () => {
     expect(h).toContain("Intake を開く");
     expect(h).not.toContain("同じ内容で投入し直す");
     expect(h).not.toContain("pfd.yaml");
+  });
+});
+
+describe("SetupDoneNotice", () => {
+  const COMMIT = "コミットしてから、Issue を取り込むかタスクを作ってください";
+
+  test("setup のタスクが completed ならコミットの案内を出す", () => {
+    const h = renderToStaticMarkup(<SetupDoneNotice t={setupTask("completed")} />);
+    expect(h).toContain(".doctrine/workflows/default.yaml");
+    expect(h).toContain("（未コミット）");
+    expect(h).toContain(COMMIT);
+  });
+
+  test("setup のタスクでも completed でなければ出さない", () => {
+    for (const state of ["running", "suspended", "failed"] as const) {
+      expect(renderToStaticMarkup(<SetupDoneNotice t={setupTask(state)} />)).toBe("");
+    }
+  });
+
+  test("ほかのワークフローのタスクには出さない", () => {
+    expect(renderToStaticMarkup(<SetupDoneNotice t={task("t-0a77")} />)).toBe("");
+    expect(renderToStaticMarkup(<SetupDoneNotice t={{ ...setupTask("completed"), wf: "default" }} />)).toBe("");
   });
 });

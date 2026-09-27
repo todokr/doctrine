@@ -1,6 +1,7 @@
 // デーモンとやりとりする唯一の場所。Tauri の invoke / listen をここだけに閉じる。
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { open } from "@tauri-apps/plugin-dialog";
 import type {
   Method,
   ParamsOf,
@@ -80,4 +81,9 @@ export function saveSettings(settings: AppSettings): Promise<void> {
  */
 export function openPath(command: string, path: string): Promise<void> {
   return invoke("open_path", { command, path });
+}
+
+/** ディレクトリを 1 つ選ばせる。取り消したら null */
+export function pickDirectory(): Promise<string | null> {
+  return open({ directory: true, multiple: false });
 }
