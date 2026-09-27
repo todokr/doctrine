@@ -3,7 +3,11 @@ import { ghTracker } from "../github/ghTracker.ts";
 import { linearTracker } from "../linear/linearTracker.ts";
 import { type Tracker, type TrackerOf, WorkspaceConfigError } from "../tracker/tracker.ts";
 import { workspaceTracker } from "../tracker/workspaceTracker.ts";
-import { type LinearStateNames, parseWorkspaceConfig, WORKSPACE_YAML } from "../workflow/workspace.ts";
+import {
+  type LinearStateNames,
+  parseWorkspaceConfig,
+  WORKSPACE_YAML,
+} from "../workflow/workspace.ts";
 import { WorkflowValidationError } from "../workflow/schema.ts";
 
 export function trackerFor(o: {

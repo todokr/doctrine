@@ -184,7 +184,9 @@ test("repoOf: パスごとに 1 回だけ gh repo view を呼び、status で引
     if (a[0] === "--version" || a[0] === "auth") return "";
     if (isRepoView(a)) {
       return JSON.stringify(
-        cwd === "/other" ? { id: "R_2", nameWithOwner: "o/other" } : { id: "R_1", nameWithOwner: "o/r" },
+        cwd === "/other"
+          ? { id: "R_2", nameWithOwner: "o/other" }
+          : { id: "R_1", nameWithOwner: "o/r" },
       );
     }
   });

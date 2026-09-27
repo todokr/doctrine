@@ -116,7 +116,10 @@ test("projectPathFor は URL の owner/name でプロジェクトを選び、無
 test("repoOf が失敗したプロジェクトしか残らなければ projectPathFor は投げる", async () => {
   const { tracker } = fakeGhTracker();
   const wt = workspaceTracker(withProjects(["c"]), tracker);
-  await assert.rejects(wt.projectPathFor("https://github.com/o/c/issues/1"), /no git remotes found/);
+  await assert.rejects(
+    wt.projectPathFor("https://github.com/o/c/issues/1"),
+    /no git remotes found/,
+  );
 });
 
 test("プロジェクト 1 つの workspace では識別子がいまと同じ #<n>", async () => {
@@ -141,7 +144,11 @@ test("Linear は先頭のプロジェクトで 1 回だけ引き、status の pr
     ],
   });
   const wt = workspaceTracker(withProjects(["a", "b"]), ft);
-  assert.deepEqual(await wt.status(), [{ ok: true, target: { id: "T1", name: "Eng" }, project: "a" }]);
+  assert.deepEqual(await wt.status(), [{
+    ok: true,
+    target: { id: "T1", name: "Eng" },
+    project: "a",
+  }]);
   await wt.listIssues({ assignee: "any" });
   assert.equal(ft.listCalls.length, 1);
   assert.equal(await wt.projectPathFor("https://linear.app/acme/issue/ENG-1/x"), "/ws/a");
