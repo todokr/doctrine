@@ -280,7 +280,7 @@ Intake の調査・分解のエージェントも同じ規則で待つ。
 
 ### 5.6 Issue トラッカー
 
-Intake が Issue を取り込み、sub-issue を作る先は、プロジェクトごとに GitHub Issues か Linear のどちらかを選ぶ。
+Intake が Issue を取り込み、sub-issue を作る先は、workspace ごとに GitHub Issues か Linear のどちらかを選ぶ。
 どちらを使っても、PR は GitHub にあり、マージの検知は GitHub の PR を見て行う。
 
 ## 6. 想定する使われ方
@@ -366,5 +366,5 @@ sub-issue の作成、入力が揃ったプロセスのタスク化までを進�
 - **プロセス** — PFD の要素のひとつ。成果物を入力に取り、別の成果物を出力する作業。エージェントが行うプロセスは
 1つのタスク・1つのPR・1つの sub-issue になり、人が行うプロセスはタスクにならない（sub-issue にはなる）
 - **sub-issue** — PFD の承認時に、プロセスごとに親 Issue の下へ作る Issue。進行の正本は Intake にあり、sub-issue は外への表示である
-- **Issue トラッカー** — Intake が Issue を読み、sub-issue を作る先。GitHub Issues か Linear をプロジェクトごとに選ぶ
+- **Issue トラッカー** — Intake が Issue を読み、sub-issue を作る先。GitHub Issues か Linear を workspace ごとに選ぶ
 
