@@ -2,13 +2,13 @@ import { dirname, join } from "@std/path";
 import { z } from "zod";
 import { formatZodIssues } from "../workflow/schema.ts";
 import { DEFAULT_GLOBAL_LIMIT } from "../domain/scheduler.ts";
-import { stateRoot } from "../util/home.ts";
+import { configRoot } from "../util/home.ts";
 
 export const CONFIG_FILE_NAME = "config.json";
 
-/** 状態ディレクトリの設定ファイル。 */
+/** 設定ディレクトリの設定ファイル。 */
 export function defaultConfigPath(): string {
-  return join(stateRoot(), CONFIG_FILE_NAME);
+  return join(configRoot(), CONFIG_FILE_NAME);
 }
 
 export type DaemonConfig = { globalLimit: number; linearApiKey?: string };

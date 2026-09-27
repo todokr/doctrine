@@ -4,6 +4,7 @@ import { mkdtemp, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  defaultConfigPath,
   readDaemonConfig,
   saveGlobalLimit,
   validateGlobalLimit,
@@ -146,4 +147,19 @@ test("saveGlobalLimit はファイルが無ければ globalLimit だけを書く
   await saveGlobalLimit(path, 5);
   const text = await readFile(path, "utf8");
   assert.deepEqual(JSON.parse(text), { globalLimit: 5 });
+});
+
+test("defaultConfigPath は状態ディレクトリではなく設定ディレクトリの config.json", () => {
+  const prevState = Deno.env.get("DOCTRINE_STATE_DIR");
+  const prevConfig = Deno.env.get("DOCTRINE_CONFIG_DIR");
+  Deno.env.set("DOCTRINE_STATE_DIR", join(root, "state"));
+  Deno.env.set("DOCTRINE_CONFIG_DIR", join(root, "config"));
+  try {
+    assert.equal(defaultConfigPath(), join(root, "config", "config.json"));
+  } finally {
+    if (prevState === undefined) Deno.env.delete("DOCTRINE_STATE_DIR");
+    else Deno.env.set("DOCTRINE_STATE_DIR", prevState);
+    if (prevConfig === undefined) Deno.env.delete("DOCTRINE_CONFIG_DIR");
+    else Deno.env.set("DOCTRINE_CONFIG_DIR", prevConfig);
+  }
 });
