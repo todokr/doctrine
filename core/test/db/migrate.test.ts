@@ -1418,8 +1418,9 @@ test("0016: Intake をプロジェクトの workspace に付け替え、終わ�
   `);
   await migrateToLatest(d);
 
-  const rows = (await d.selectFrom("intakes").select(["id", "workspace_id"]).orderBy("id").execute())
-    .map((r) => ({ ...r }));
+  const rows =
+    (await d.selectFrom("intakes").select(["id", "workspace_id"]).orderBy("id").execute())
+      .map((r) => ({ ...r }));
   assert.deepEqual(rows, [{ id: "i1", workspace_id: 2 }, { id: "i2", workspace_id: 2 }]);
 
   const cols = (await columnsOf(d, "intakes")).map((c) => c.name);
@@ -1440,8 +1441,7 @@ test("0016: Intake をプロジェクトの workspace に付け替え、終わ�
   assert.equal((await getTask(d, "t1"))?.intake_id, "i1");
 
   await assert.rejects(
-    () =>
-      insertIntakeRow(d, 2, "i3", "https://github.com/o/r/issues/2"),
+    () => insertIntakeRow(d, 2, "i3", "https://github.com/o/r/issues/2"),
     /UNIQUE/,
   );
   await insertIntakeRow(d, 2, "i4", "https://github.com/o/r/issues/1");

@@ -37,7 +37,9 @@ import type { Db } from "../../src/db/schema.ts";
 
 const ISSUE = "https://github.com/o/r/issues/1";
 
-async function fixture(): Promise<{ d: Db; projectId: number; workspaceId: number; runId: number }> {
+async function fixture(): Promise<
+  { d: Db; projectId: number; workspaceId: number; runId: number }
+> {
   const d = await openDb(":memory:");
   const p = await seedProject(d, { path: "/repo" });
   const projectId = p.id;
