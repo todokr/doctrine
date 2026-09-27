@@ -87,7 +87,7 @@ Tauri のディレクトリ選択ダイアログで選ばせ、`workspace.detect
 
 ### 4.4 トラッカー
 
-github か linear を選ばせる。linear なら team と states を入力させ、API キーが未設定なら既存の設定画面と同じ経路で入力させる。
+github か linear を選ばせる。linear なら team と states を入力させる。API キーはウィザードでは扱わない（アプリに入力の画面は無く、config.json に書いて dctld を起動し直す）。linear を選んだときは、その手順（`trackerGuidance` と同じ文言）を画面に出す。setup のタスクはトラッカーを使わないので、キーが無くても Quick Start は最後まで進む。
 `existing` があるときはこの画面を飛ばす。
 
 ### 4.5 ワークフローの方針
@@ -189,7 +189,7 @@ draft → validate → review → apply
 | ステップ | 種類 | 中身 |
 | --- | --- | --- |
 | `draft` | agent | リポジトリを調べ、`{{ task.prompt }}` の方針に沿って `.doctrine-out/default.yaml` を書く |
-| `validate` | command | `dctl workflow-check .doctrine-out/default.yaml`。落ちたら draft へ（最大 3 回、feed は `{{ steps.validate.last_stderr }}`） |
+| `validate` | command | `dctl workflow-check .doctrine-out/default.yaml` と、`git status --porcelain` が空であること（draft が `.doctrine-out/` の外を書き換えていない）。落ちたら draft へ（最大 3 回、feed は `{{ steps.validate.last_stderr }}`） |
 | `review` | approval | `review.files: [.doctrine-out/default.yaml, .doctrine-out/setup-notes.md]`。却下で draft へ（最大 5 回） |
 | `apply` | command | `mkdir -p '{{ project.path }}/.doctrine/workflows' && cp .doctrine-out/default.yaml '{{ project.path }}/.doctrine/workflows/default.yaml'` |
 
