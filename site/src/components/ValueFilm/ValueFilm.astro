@@ -1,0 +1,8 @@
+---
+import { ValueFilm as Player } from './ValueFilm';
+import { loadFilmImages } from './filmImages';
+
+const images = await loadFilmImages();
+---
+
+<Player client:visible images={images} />

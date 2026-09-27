@@ -23,3 +23,8 @@
 .hero h1 span {
   display: inline-block;
 }
+
+/* 動画の締めと同じく、製品名だけアクセントカラーにする。 */
+.hero .tagline strong {
+  color: var(--sl-color-accent);
+}

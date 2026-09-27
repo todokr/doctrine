@@ -1,0 +1,30 @@
+---
+// scripts/render-film.mjs がコマ撮りするための、動画だけを原寸で出すページ。
+import '@fontsource/ibm-plex-sans-jp/400.css';
+import '@fontsource/ibm-plex-sans-jp/500.css';
+import '@fontsource/ibm-plex-sans-jp/700.css';
+import '@fontsource/ibm-plex-mono/400.css';
+import '../styles/theme.css';
+import { FilmStage } from '../components/ValueFilm/FilmStage';
+import { loadFilmImages } from '../components/ValueFilm/filmImages';
+
+const images = await loadFilmImages();
+---
+
+<html lang="ja" data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="robots" content="noindex" />
+    <title>doctrine film</title>
+    <style is:global>
+      html,
+      body {
+        margin: 0;
+        background: #17181c;
+      }
+    </style>
+  </head>
+  <body>
+    <FilmStage client:load images={images} />
+  </body>
+</html>

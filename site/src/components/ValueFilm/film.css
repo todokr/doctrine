@@ -1,0 +1,331 @@
+/* 代替値はダークテーマの値。Starlight の外（書き出し用の /film/）でも同じ見た目になる。 */
+.vf {
+  --vf-bg: var(--sl-color-black, #17181c);
+  --vf-fg: var(--sl-color-white, #ffffff);
+  --vf-muted: var(--sl-color-gray-3, #888b96);
+  --vf-line: var(--sl-color-gray-5, #353841);
+  --vf-panel: var(--sl-color-gray-6, #24272f);
+  --vf-accent: var(--sl-color-accent, #d79b42);
+  --vf-accent-low: var(--sl-color-accent-low, #473315);
+  --vf-green: #3fb27f;
+  --vf-red: #e5534b;
+  --vf-blue: #5b9cf5;
+  font-family: var(--sl-font, 'IBM Plex Sans JP', system-ui, sans-serif);
+}
+
+.vf-canvas {
+  position: relative;
+  overflow: hidden;
+  background:
+    radial-gradient(ellipse 60% 50% at 50% 55%, color-mix(in srgb, var(--vf-accent) 10%, transparent), transparent),
+    var(--vf-bg);
+  color: var(--vf-fg);
+}
+
+.vf-layer {
+  position: absolute;
+  inset: 0;
+}
+
+.vf-caption {
+  position: absolute;
+  left: 50%;
+  white-space: nowrap;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+
+.vf-em {
+  color: var(--vf-accent);
+}
+
+/* 場面 1 */
+.vf-pr {
+  position: absolute;
+  width: 640px;
+  height: 118px;
+  box-sizing: border-box;
+  padding: 18px 26px;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-rows: auto auto;
+  column-gap: 18px;
+  row-gap: 8px;
+  background: var(--vf-panel);
+  border: 1px solid var(--vf-line);
+  border-radius: 14px;
+  box-shadow: 0 10px 30px rgb(0 0 0 / 0.25);
+}
+.vf-pr-num {
+  grid-row: span 2;
+  align-self: center;
+  font-family: var(--sl-font-mono, 'IBM Plex Mono', monospace);
+  font-size: 30px;
+  color: var(--vf-muted);
+}
+.vf-pr-title {
+  font-size: 30px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.vf-pr-diff {
+  font-family: var(--sl-font-mono, 'IBM Plex Mono', monospace);
+  font-size: 24px;
+}
+.vf-add {
+  color: var(--vf-green);
+}
+.vf-del {
+  color: var(--vf-red);
+}
+.vf-counter {
+  position: absolute;
+  right: 120px;
+  bottom: 80px;
+  font-size: 36px;
+  color: var(--vf-muted);
+}
+.vf-counter strong {
+  font-size: 64px;
+  color: var(--vf-red);
+  margin: 0 8px;
+}
+
+/* 場面 2・4 のアプリ画面 */
+.vf-window {
+  position: absolute;
+  border-radius: 16px;
+  overflow: hidden;
+  border: 1px solid var(--vf-line);
+  box-shadow: 0 30px 80px rgb(0 0 0 / 0.4);
+  background: #ffffff;
+}
+.vf-window-bar {
+  height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 18px;
+  background: var(--vf-panel);
+  border-bottom: 1px solid var(--vf-line);
+  font-size: 20px;
+  color: var(--vf-muted);
+}
+.vf-window-bar i {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--vf-line);
+}
+.vf-window-bar span {
+  margin-left: 12px;
+}
+.vf-window-body {
+  position: relative;
+  overflow: hidden;
+}
+.vf-window-body img {
+  position: absolute;
+  max-width: none;
+  user-select: none;
+}
+.vf-ring {
+  position: absolute;
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+  border: 6px solid var(--vf-accent);
+}
+.vf-cursor {
+  position: absolute;
+  transform-origin: 6px 4px;
+}
+.vf-cursor path {
+  fill: #111111;
+  stroke: #ffffff;
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+}
+
+/* 場面 3 */
+.vf-graph {
+  position: absolute;
+  inset: 0;
+}
+.vf-edge {
+  fill: none;
+  stroke: var(--vf-line);
+  stroke-width: 4;
+}
+.vf-edge-live {
+  fill: none;
+  stroke: var(--vf-accent);
+  stroke-width: 4;
+}
+.vf-node {
+  position: absolute;
+  width: 300px;
+  height: 104px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 24px;
+  border-radius: 14px;
+  border: 2px solid var(--vf-line);
+  background: var(--vf-panel);
+}
+.vf-node-label {
+  font-size: 30px;
+  font-weight: 500;
+}
+.vf-node-badge {
+  font-size: 22px;
+  color: var(--vf-muted);
+}
+.vf-node-running {
+  border-color: var(--vf-blue);
+}
+.vf-node-running .vf-node-badge {
+  color: var(--vf-blue);
+}
+.vf-node-conflict {
+  border-color: var(--vf-red);
+  box-shadow: 0 0 0 6px color-mix(in srgb, var(--vf-red) 25%, transparent);
+}
+.vf-node-conflict .vf-node-badge {
+  color: var(--vf-red);
+}
+.vf-node-waiting {
+  border-color: var(--vf-accent);
+  border-style: dashed;
+}
+.vf-node-waiting .vf-node-badge {
+  color: var(--vf-accent);
+}
+.vf-node-merged {
+  border-color: var(--vf-green);
+  background: color-mix(in srgb, var(--vf-green) 12%, var(--vf-panel));
+}
+.vf-node-merged .vf-node-badge {
+  color: var(--vf-green);
+}
+.vf-footnote {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 70px;
+  text-align: center;
+  font-size: 32px;
+  color: var(--vf-muted);
+}
+
+/* 場面 5 */
+.vf-glow {
+  position: absolute;
+  left: 250px;
+  top: 190px;
+  width: 700px;
+  height: 700px;
+  border-radius: 50%;
+  background: radial-gradient(circle, color-mix(in srgb, var(--vf-accent) 35%, transparent), transparent 65%);
+}
+.vf-general {
+  position: absolute;
+  left: 300px;
+  top: 240px;
+  width: 600px;
+  height: 600px;
+}
+.vf-end {
+  position: absolute;
+  left: 960px;
+  top: 360px;
+}
+.vf-end-title {
+  font-size: 104px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+.vf-end-sub {
+  margin-top: 36px;
+  font-size: 38px;
+  color: var(--vf-muted);
+}
+.vf-end-sub strong {
+  color: var(--vf-accent);
+}
+
+/* プレイヤー */
+.vf-player {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border-radius: 0.75rem;
+  border: 1px solid var(--vf-line);
+  background: var(--vf-bg);
+}
+.vf-stage {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+}
+.vf-controls {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  background: linear-gradient(transparent, rgb(0 0 0 / 0.45));
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+.vf-player:hover .vf-controls,
+.vf-player:focus-within .vf-controls,
+.vf-player[data-paused] .vf-controls {
+  opacity: 1;
+}
+.vf-play {
+  flex: none;
+  width: 2rem;
+  height: 2rem;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: rgb(255 255 255 / 0.9);
+  color: #111111;
+  cursor: pointer;
+}
+.vf-seek {
+  flex: 1;
+  accent-color: var(--vf-accent);
+  cursor: pointer;
+}
+
+/* 転換 */
+.vf-glow-center {
+  left: 610px;
+  top: 40px;
+}
+.vf-general-center {
+  left: 50%;
+  top: 110px;
+  width: 560px;
+  height: 560px;
+}
+.vf-bridge {
+  position: absolute;
+  left: 50%;
+  top: 760px;
+  white-space: nowrap;
+  font-size: 84px;
+  font-weight: 700;
+}

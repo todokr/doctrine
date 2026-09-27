@@ -7,7 +7,8 @@
     "dev": "astro dev",
     "build": "astro check && astro build",
     "preview": "astro preview",
-    "astro": "astro"
+    "astro": "astro",
+    "render:film": "node scripts/render-film.mjs"
   },
   "dependencies": {
     "@astrojs/react": "^7.0.0",
@@ -23,6 +24,7 @@
     "@astrojs/check": "^0.9.10",
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
+    "playwright-core": "^1.63.0",
     "typescript": "~6.0.3"
   },
   "packageManager": "pnpm@11.15.1"
