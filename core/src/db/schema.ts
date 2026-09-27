@@ -46,8 +46,18 @@ export type IntakeCommentTarget = "artifact" | "process" | "whole";
 
 export type PrState = "OPEN" | "MERGED" | "CLOSED";
 
+export interface WorkspacesTable {
+  id: Generated<number>;
+  /** workspace の root。0015 が移した行と project.add が作る行では、プロジェクトの path と同じ値。 */
+  path: string;
+  name: string;
+}
+
 export interface ProjectsTable {
   id: Generated<number>;
+  workspace_id: number;
+  /** workspace の中で重ならない [a-z0-9-]+ の名前。 */
+  name: string;
   path: string;
   default_workflow: string;
   max_concurrent: Generated<number>;
@@ -273,6 +283,7 @@ export interface PrObservationsTable {
 }
 
 export interface Database {
+  workspaces: WorkspacesTable;
   projects: ProjectsTable;
   tasks: TasksTable;
   step_runs: StepRunsTable;
@@ -291,6 +302,7 @@ export interface Database {
 
 export type Db = Kysely<Database>;
 
+export type WorkspaceRow = Selectable<WorkspacesTable>;
 export type ProjectRow = Selectable<ProjectsTable>;
 export type TaskRow = Selectable<TasksTable>;
 export type StepRunRow = Selectable<StepRunsTable>;

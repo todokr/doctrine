@@ -1,7 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
 import { Kysely } from "kysely";
 import { NodeSqliteDialect } from "./dialect.ts";
-import { migrateToLatest } from "./migrations.ts";
+import { migrateTo, migrateToLatest } from "./migrations.ts";
 import type { Database, Db } from "./schema.ts";
 
 export function openDb(path: string): Promise<Db> {
@@ -17,12 +17,13 @@ export function openDb(path: string): Promise<Db> {
  *
  * journal_mode（WAL）は呼び出し側が設定する。ここで設定するのは foreign_keys だけ。
  */
-export async function openDbOn(sqlite: DatabaseSync): Promise<Db> {
+export async function openDbOn(sqlite: DatabaseSync, upTo?: string): Promise<Db> {
   // トランザクションの中では切り替えられないので、最初のクエリより前に設定する。
   sqlite.exec("PRAGMA foreign_keys = ON");
   const db = new Kysely<Database>({ dialect: new NodeSqliteDialect(sqlite) });
   try {
-    await migrateToLatest(db);
+    if (upTo) await migrateTo(db, upTo);
+    else await migrateToLatest(db);
   } catch (e) {
     await db.destroy();
     throw e;

@@ -203,6 +203,8 @@ describe("submitProjectConfig", () => {
     const form = { defaultWorkflow: "quick", maxConcurrent: "3", baseBranch: "develop", setup: "" };
     const saved: ProjectSummary = {
       id: 1,
+      workspace_id: 1,
+      name: "app",
       path: "/repo/app",
       default_workflow: "quick",
       max_concurrent: 3,

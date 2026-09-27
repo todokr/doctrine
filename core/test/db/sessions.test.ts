@@ -1,20 +1,15 @@
 import { test } from "@std/testing/bdd";
 import assert from "node:assert/strict";
 import { openDb } from "../../src/db/migrate.ts";
-import { insertProject, insertTask } from "../../src/db/tasks.ts";
+import { insertTask } from "../../src/db/tasks.ts";
+import { seedProject } from "../helpers/project.ts";
 import { commitStepBoundary } from "../../src/db/boundary.ts";
 import { getSessionId } from "../../src/db/sessions.ts";
 import type { Db } from "../../src/db/schema.ts";
 
 async function fixture(): Promise<Db> {
   const d = await openDb(":memory:");
-  const pid = await insertProject(d, {
-    path: "/repo",
-    default_workflow: "f",
-    max_concurrent: 1,
-    base_branch: "main",
-    setup: null,
-  });
+  const pid = (await seedProject(d, { path: "/repo" })).id;
   await insertTask(d, {
     id: "t1",
     project_id: pid,

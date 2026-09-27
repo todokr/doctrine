@@ -4,8 +4,10 @@ import { join } from "@std/path";
 import { DatabaseSync } from "node:sqlite";
 import { sql } from "kysely";
 import { openDb, openDbOn } from "../../src/db/migrate.ts";
-import { getTask, insertProject, insertTask, listTasks } from "../../src/db/tasks.ts";
+import { getTask, insertTask, listTasks } from "../../src/db/tasks.ts";
+import { migrateToLatest } from "../../src/db/migrations.ts";
 import type { Database, Db } from "../../src/db/schema.ts";
+import { seedProject } from "../helpers/project.ts";
 
 const dirs: string[] = [];
 afterEach(async () => {
@@ -22,14 +24,8 @@ function db() {
   return openDb(":memory:");
 }
 
-function seed(d: Db) {
-  return insertProject(d, {
-    path: "/repo",
-    default_workflow: "feature",
-    max_concurrent: 1,
-    base_branch: "main",
-    setup: null,
-  });
+async function seed(d: Db) {
+  return (await seedProject(d, { path: "/repo", default_workflow: "feature" })).id;
 }
 
 /**
@@ -178,8 +174,11 @@ CREATE TABLE IF NOT EXISTS rate_limit_samples (
  * これで「DDL（マイグレーション）と型」の食い違いが実行時まで隠れない。
  */
 const COLUMNS = {
+  workspaces: { id: true, path: true, name: true },
   projects: {
     id: true,
+    workspace_id: true,
+    name: true,
     path: true,
     default_workflow: true,
     max_concurrent: true,
@@ -363,7 +362,7 @@ async function appliedMigrations(d: Db): Promise<string[]> {
   return rows.map((r) => r.name);
 }
 
-test("マイグレーションで14のテーブルができる", async () => {
+test("マイグレーションで15のテーブルができる", async () => {
   const d = await db();
   const { rows } = await sql<
     { name: string }
@@ -386,6 +385,7 @@ test("マイグレーションで14のテーブルができる", async () => {
       "step_runs",
       "task_sessions",
       "tasks",
+      "workspaces",
     ]
   ) {
     assert.ok(names.includes(t), `${t} が無い: ${names.join(",")}`);
@@ -511,6 +511,7 @@ test("開き直してもマイグレーションは二度流れず、データ�
     "0012_intake_assumptions",
     "0013_waiting",
     "0014_issue_phase",
+    "0015_workspace",
   ]);
   await first.destroy();
 
@@ -531,6 +532,7 @@ test("開き直してもマイグレーションは二度流れず、データ�
       "0012_intake_assumptions",
       "0013_waiting",
       "0014_issue_phase",
+      "0015_workspace",
     ]);
     assert.equal((await second.selectFrom("projects").selectAll().execute()).length, 1);
   } finally {
@@ -571,8 +573,9 @@ test("pending_feed を足す前に作られたDBファイルは、行を保っ�
       "0012_intake_assumptions",
       "0013_waiting",
       "0014_issue_phase",
+      "0015_workspace",
     ]);
-    const old = await getTask(d, "old");
+    const old =await getTask(d, "old");
     assert.equal(old?.state, "suspended", "既存の行は残る");
     assert.equal(old?.pending_feed, null, "列が足されていて、読める");
     await d.updateTable("tasks").set({ pending_feed: "feed" }).where("id", "=", "old").execute();
@@ -1290,13 +1293,7 @@ test("0011: insertTask は作成時の定義を書き戻せる", async () => {
 
 test("0013: tasks.state と step_runs.status が waiting を受け付け、waiting_until が足される", async () => {
   const d = await openDb(":memory:");
-  const pid = await insertProject(d, {
-    path: "/repo",
-    default_workflow: "f",
-    max_concurrent: 1,
-    base_branch: "main",
-    setup: null,
-  });
+  const pid = (await seedProject(d, { path: "/repo" })).id;
   await insertTask(d, {
     id: "t1",
     project_id: pid,
@@ -1335,6 +1332,59 @@ test("0013: 作り直しても既存の行・索引・外部キーが残る", as
   `.execute(d);
   assert.ok(rows.some((r) => r.name === "idx_tasks_state"));
   assert.ok(rows.some((r) => r.name === "idx_step_runs_task"));
+  const { rows: violations } = await sql`PRAGMA foreign_key_check`.execute(d);
+  assert.deepEqual(violations, []);
+});
+
+test("0015: 既存のプロジェクトを 1 つずつの workspace に移し、外部キーが壊れない", async () => {
+  const sqlite = new DatabaseSync(":memory:");
+  const d = await openDbOn(sqlite, "0014_issue_phase");
+  sqlite.exec(`
+    INSERT INTO projects (path, default_workflow) VALUES ('/w/assured-tp', 'f'), ('/w/My_Repo', 'f');
+    INSERT INTO tasks (id, project_id, title, prompt, workflow_name, state, branch,
+                       created_at, updated_at)
+      VALUES ('t1', 1, 'T', 'P', 'f', 'running', 'b', '2026-09-26', '2026-09-26');
+    INSERT INTO intakes (id, project_id, issue_url, issue_node_id, issue_title, state,
+                         created_at, updated_at)
+      VALUES ('i1', 2, 'https://github.com/o/r/issues/1', 'I_1', 'T', 'completed',
+              '2026-09-26', '2026-09-26');
+  `);
+  await migrateToLatest(d);
+
+  const workspaces = (await d.selectFrom("workspaces").selectAll().orderBy("id").execute())
+    .map((r) => ({ ...r }));
+  assert.deepEqual(workspaces, [
+    { id: 1, path: "/w/assured-tp", name: "assured-tp" },
+    { id: 2, path: "/w/My_Repo", name: "My_Repo" },
+  ]);
+  const projects = (await d.selectFrom("projects").selectAll().orderBy("id").execute())
+    .map((r) => ({ ...r }));
+  assert.deepEqual(projects, [
+    {
+      id: 1,
+      workspace_id: 1,
+      name: "assured-tp",
+      path: "/w/assured-tp",
+      default_workflow: "f",
+      max_concurrent: 1,
+      base_branch: "main",
+      setup: null,
+    },
+    {
+      id: 2,
+      workspace_id: 2,
+      name: "my-repo",
+      path: "/w/My_Repo",
+      default_workflow: "f",
+      max_concurrent: 1,
+      base_branch: "main",
+      setup: null,
+    },
+  ]);
+  assert.equal((await getTask(d, "t1"))?.project_id, 1);
+  const intake = await d.selectFrom("intakes").select("project_id").where("id", "=", "i1")
+    .executeTakeFirstOrThrow();
+  assert.equal(intake.project_id, 2);
   const { rows: violations } = await sql`PRAGMA foreign_key_check`.execute(d);
   assert.deepEqual(violations, []);
 });

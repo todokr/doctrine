@@ -1,7 +1,8 @@
 import { test } from "@std/testing/bdd";
 import assert from "node:assert/strict";
 import { openDb } from "../../src/db/migrate.ts";
-import { insertProject, insertTask } from "../../src/db/tasks.ts";
+import { insertTask } from "../../src/db/tasks.ts";
+import { seedProject } from "../helpers/project.ts";
 import {
   answerQuestionSet,
   findOpenIntakeByIssue,
@@ -38,13 +39,7 @@ const ISSUE = "https://github.com/o/r/issues/1";
 
 async function fixture(): Promise<{ d: Db; projectId: number; runId: number }> {
   const d = await openDb(":memory:");
-  const projectId = await insertProject(d, {
-    path: "/repo",
-    default_workflow: "f",
-    max_concurrent: 1,
-    base_branch: "main",
-    setup: null,
-  });
+  const projectId = (await seedProject(d, { path: "/repo" })).id;
   await insertIntake(d, {
     id: "i1",
     project_id: projectId,
@@ -127,13 +122,7 @@ test("同じ Issue の終わっていない Intake は 2 つ作れない", async
 
 test("listIntakes は既定で終わった Intake を除き、includeClosed で含める", async () => {
   const { d, projectId } = await fixture();
-  const other = await insertProject(d, {
-    path: "/other",
-    default_workflow: "f",
-    max_concurrent: 1,
-    base_branch: "main",
-    setup: null,
-  });
+  const other = (await seedProject(d, { path: "/other" })).id;
   await insertIntake(d, {
     id: "i2",
     project_id: projectId,

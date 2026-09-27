@@ -501,6 +501,8 @@ const row = (o: Partial<TaskSummary> = {}): TaskSummary => ({
 
 const summary = (o: Partial<ProjectSummary> = {}): ProjectSummary => ({
   id: 1,
+  workspace_id: 1,
+  name: "doctrine",
   path: "/home/u/git/doctrine",
   default_workflow: "feature",
   max_concurrent: 2,

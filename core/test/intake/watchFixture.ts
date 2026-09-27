@@ -9,7 +9,7 @@ import {
 } from "../../src/db/intakes.ts";
 import { openDb } from "../../src/db/migrate.ts";
 import type { Db } from "../../src/db/schema.ts";
-import { insertProject } from "../../src/db/tasks.ts";
+import { seedProject } from "../helpers/project.ts";
 import { pfdHash } from "../../src/intake/pfd/hash.ts";
 import { example } from "./pfd/fixture.ts";
 
@@ -20,13 +20,7 @@ export async function seedActive(
   pfd: Pfd = example(),
 ): Promise<{ db: Db; projectId: number; runId: number }> {
   const db = await openDb(":memory:");
-  const projectId = await insertProject(db, {
-    path: "/repo",
-    default_workflow: "feature",
-    max_concurrent: 1,
-    base_branch: "main",
-    setup: null,
-  });
+  const projectId = (await seedProject(db, { path: "/repo", default_workflow: "feature" })).id;
   await insertIntake(db, {
     id: "i1",
     project_id: projectId,

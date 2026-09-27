@@ -2,7 +2,8 @@ import { test } from "@std/testing/bdd";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import { openDb, openDbOn } from "../../src/db/migrate.ts";
-import { insertProject, insertTask } from "../../src/db/tasks.ts";
+import { insertTask } from "../../src/db/tasks.ts";
+import { seedProject } from "../helpers/project.ts";
 import { insertIntake } from "../../src/db/intakes.ts";
 import type { Db } from "../../src/db/schema.ts";
 import type { ServerEvent } from "../../../shared/protocol.ts";
@@ -20,13 +21,7 @@ const workflow: Workflow = {
 } as Workflow;
 
 async function seed(db: Db) {
-  const project_id = await insertProject(db, {
-    path: "/work/myproj",
-    default_workflow: "f",
-    max_concurrent: 1,
-    base_branch: "main",
-    setup: null,
-  });
+  const project_id = (await seedProject(db, { path: "/work/myproj" })).id;
   await insertTask(db, {
     id: "t1",
     title: "ログインを直す",
