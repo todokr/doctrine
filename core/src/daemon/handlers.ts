@@ -5,6 +5,7 @@ import {
   applyProjectConfig,
   parseProjectConfig,
   type ProjectConfigInput,
+  type TrackerConfig,
   withSetupStep,
   writeProjectYaml,
 } from "../workflow/project.ts";
@@ -29,6 +30,7 @@ import {
   toWorkspaceSummary,
   updateWorkspace,
 } from "./workspaceRegistry.ts";
+import { detectWorkspace } from "./workspaceDetect.ts";
 import { getStepRun, lastRejectedReview, lastStepRun, listStepRuns } from "../db/stepRuns.ts";
 import { commitStepBoundary, StateConflictError } from "../db/boundary.ts";
 import type { Db } from "../db/schema.ts";
@@ -266,6 +268,27 @@ function readProjectConfigInput(params: Record<string, unknown>): ProjectConfigI
   };
 }
 
+/** params.projects / params.tracker を workspace.add の init に変換する。両方省略なら undefined。 */
+function readWorkspaceInit(
+  params: Record<string, unknown>,
+): { projects: Record<string, string>; tracker?: TrackerConfig } | undefined {
+  if (params.projects === undefined) {
+    if (params.tracker !== undefined) throw new Error("tracker には projects も必要です");
+    return undefined;
+  }
+  const projects = params.projects;
+  if (
+    typeof projects !== "object" || projects === null || Array.isArray(projects) ||
+    Object.values(projects).some((v) => typeof v !== "string")
+  ) {
+    throw new Error("projects は文字列のオブジェクトで渡してください");
+  }
+  return {
+    projects: projects as Record<string, string>,
+    tracker: params.tracker as TrackerConfig | undefined,
+  };
+}
+
 function broadcastIntakeTransition(ctx: DaemonContext, t: IntakeTransition): void {
   ctx.broadcast({
     event: "intake.stateChanged",
@@ -307,13 +330,16 @@ export function createHandler(ctx: DaemonContext): Handler {
   return async (method, params, conn) => {
     switch (method) {
       case "workspace.add": {
-        const r = await addWorkspace(ctx.db, req(params, "path"));
+        const init = readWorkspaceInit(params);
+        const r = await addWorkspace(ctx.db, req(params, "path"), init);
         return {
           ...(await toWorkspaceSummary(ctx.db, r.workspaceId)),
           created: r.created,
           alreadyRegistered: r.alreadyRegistered,
         };
       }
+      case "workspace.detect":
+        return await detectWorkspace(ctx.db, req(params, "path"));
       case "workspace.update": {
         const r = await updateWorkspace(ctx.db, req(params, "path"));
         return await toWorkspaceSummary(ctx.db, r.workspaceId);

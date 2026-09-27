@@ -56,9 +56,16 @@ export function parseWorkspaceConfig(yamlText: string, rootDirName: string): Wor
   };
 }
 
-/** 雛形。projects の順に書き、tracker は書かない（既定の github）。 */
-export function workspaceYamlFor(projects: WorkspaceProjectEntry[]): string {
-  const body = stringify({ projects: Object.fromEntries(projects.map((p) => [p.name, p.path])) });
+/** 雛形。projects の順に書く。tracker を渡さなければ書かない（既定の github）。 */
+export function workspaceYamlFor(
+  projects: WorkspaceProjectEntry[],
+  tracker?: TrackerConfig,
+): string {
+  const obj: Record<string, unknown> = {
+    projects: Object.fromEntries(projects.map((p) => [p.name, p.path])),
+  };
+  if (tracker) obj.tracker = tracker;
+  const body = stringify(obj);
   return `# doctrine の workspace 設定（dctl workspace-add が雛形として作成）\n${body}`;
 }
 

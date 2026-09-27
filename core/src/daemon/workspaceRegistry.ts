@@ -7,7 +7,7 @@ import {
   insertWorkspace,
   listProjectsOf,
 } from "../db/workspaces.ts";
-import { parseProjectConfig, type ProjectConfig } from "../workflow/project.ts";
+import { parseProjectConfig, type ProjectConfig, type TrackerConfig } from "../workflow/project.ts";
 import { ensureProjectScaffold, ensureWorkspaceScaffold } from "../workflow/scaffold.ts";
 import {
   parseWorkspaceConfig,
@@ -24,13 +24,24 @@ const ACTIVE_TASK_STATES = ["queued", "running", "suspended", "paused", "rate_li
 export async function addWorkspace(
   db: Db,
   rootPath: string,
+  init?: { projects: Record<string, string>; tracker?: TrackerConfig },
 ): Promise<{ workspaceId: number; created: string[]; alreadyRegistered: boolean }> {
   const root = await resolveRoot(rootPath);
   const existing = await getWorkspaceByPath(db, root);
   if (existing) return { workspaceId: existing.id, created: [], alreadyRegistered: true };
 
-  const created = (await ensureWorkspaceScaffold(root)).created;
-  const cfg = await readConfig(root);
+  const scaffold = await ensureWorkspaceScaffold(root, init);
+  const created = scaffold.created;
+  const yamlPath = join(root, WORKSPACE_YAML);
+  let cfg: WorkspaceConfig;
+  try {
+    cfg = await readConfig(root);
+  } catch (e) {
+    // init から書いた workspace.yaml が不正（名前の形が違う等）なら、書いたファイルを残さない。
+    // 既にあった workspace.yaml はここで消さない（scaffold.created に入らない）。
+    if (scaffold.created.includes(yamlPath)) await Deno.remove(yamlPath);
+    throw e;
+  }
   const projects = await resolveProjects(root, cfg);
 
   // ファイルを書く前に DB の衝突で断り、断ったリポジトリに project.yaml を書き残さない
@@ -123,7 +134,7 @@ export async function syncProjectRow(
 }
 
 /** 相対パス・末尾の /・シンボリックリンク・/var と /private/var の違いは、ここで実パスに揃う。 */
-async function resolveRoot(rootPath: string): Promise<string> {
+export async function resolveRoot(rootPath: string): Promise<string> {
   // デーモンの cwd で解決されて黙って別の場所を指すのを防ぐ
   if (!isAbsolute(rootPath)) throw new Error(`絶対パスを指定してください: ${rootPath}`);
   try {

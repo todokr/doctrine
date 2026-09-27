@@ -1,7 +1,7 @@
 import { basename, dirname, join } from "@std/path";
 import { runCommand } from "../util/exec.ts";
 import { projectNameFrom } from "../db/workspaces.ts";
-import { parseProjectConfig } from "./project.ts";
+import { parseProjectConfig, type TrackerConfig } from "./project.ts";
 import { WORKSPACE_YAML, workspaceYamlFor } from "./workspace.ts";
 
 /** workspace-add が雛形を作るときのワークフロー名 */
@@ -51,13 +51,28 @@ export async function ensureProjectScaffold(path: string): Promise<{ created: st
 }
 
 /**
- * <root>/.doctrine/workspace.yaml が無ければ、root が git リポジトリのルートなら
- * projects: { <丸めた名前>: . } で書く。root が git リポジトリでなく workspace.yaml も無ければ投げる
+ * <root>/.doctrine/workspace.yaml が無ければ書く。
+ *
+ * init を渡せば、root が git リポジトリでなくても init.projects / init.tracker で書く
+ * （ウィザードが非 git の root を束ねるときの経路）。init が無ければ、root が git
+ * リポジトリのルートのときだけ projects: { <丸めた名前>: . } で書き、それ以外は投げる
  * （何を束ねるかは人が書く）。既にある workspace.yaml の中身は検証しない。
  */
-export async function ensureWorkspaceScaffold(root: string): Promise<{ created: string[] }> {
+export async function ensureWorkspaceScaffold(
+  root: string,
+  init?: { projects: Record<string, string>; tracker?: TrackerConfig },
+): Promise<{ created: string[] }> {
   const yamlPath = join(root, WORKSPACE_YAML);
   if (await exists(yamlPath)) return { created: [] };
+
+  if (init) {
+    const projects = Object.entries(init.projects).map(([name, path]) => ({ name, path }));
+    await Deno.mkdir(dirname(yamlPath), { recursive: true });
+    await Deno.writeTextFile(yamlPath, workspaceYamlFor(projects, init.tracker), {
+      createNew: true,
+    });
+    return { created: [yamlPath] };
+  }
 
   const top = await gitTopLevel(root);
   if (top === null) {
@@ -79,7 +94,7 @@ export async function ensureWorkspaceScaffold(root: string): Promise<{ created: 
 }
 
 /** git のトップレベル（実パス）。git リポジトリの中でなければ null。 */
-async function gitTopLevel(path: string): Promise<string | null> {
+export async function gitTopLevel(path: string): Promise<string | null> {
   try {
     return (await runCommand("git", ["-C", path, "rev-parse", "--show-toplevel"])).stdout.trim();
   } catch {

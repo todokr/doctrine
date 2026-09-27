@@ -1,7 +1,7 @@
 import type { Guide } from "./guide/schema.ts";
 import type { AttentionReason, CommentReply } from "./intake/decomposer.ts";
 import type { FeedbackComment } from "./intake/feedback.ts";
-import type { IssueDetail, IssueSummary, ProjectTrackerStatus } from "./intake/tracker.ts";
+import type { IssueDetail, IssuePhase, IssueSummary, ProjectTrackerStatus } from "./intake/tracker.ts";
 import type { Pfd } from "./intake/pfd.ts";
 import type { ProcessStatus } from "./intake/processStatus.ts";
 import type { Answer, AssumptionResponse } from "./intake/question.ts";
@@ -324,6 +324,26 @@ export type WorkspaceSummary = {
   projects: ProjectSummary[];
 };
 
+/** project.yaml の tracker（core/src/workflow/project.ts の TrackerConfig と同じ形）。 */
+export type TrackerConfig =
+  | { kind: "github" }
+  | { kind: "linear"; team: string; states?: Partial<Record<IssuePhase, string>> };
+
+/**
+ * workspace.detect の応答。ファイルは書かない。
+ *
+ * isRepoRoot が true なら root 自身を束ねるので repositories は空。false なら root 直下の
+ * git リポジトリのルートを名前順に返す（`.` で始まるディレクトリは見ない）。
+ * existing は root/.doctrine/workspace.yaml があれば読んだ中身。alreadyRegistered は
+ * root が既に workspace として登録済みか。
+ */
+export type WorkspaceDetection = {
+  isRepoRoot: boolean;
+  repositories: { dir: string; suggestedName: string }[];
+  existing: { name?: string; projects: Record<string, string>; tracker: TrackerConfig } | null;
+  alreadyRegistered: boolean;
+};
+
 /**
  * project.yaml の設定（project.config.get が返す。core/src/workflow/project.ts の ProjectConfig と同じ形）。
  * setup は書かれていなければ無い。
@@ -545,13 +565,19 @@ export type Methods = {
   };
   "project.list": { params: Record<string, never>; result: ProjectSummary[] };
   "workspace.list": { params: Record<string, never>; result: WorkspaceSummary[] };
-  /** <path>/.doctrine/workspace.yaml と各プロジェクトの .doctrine/ の雛形を作り（既存は上書きしない）、登録する。2 回目は alreadyRegistered: true。 */
+  /**
+   * <path>/.doctrine/workspace.yaml と各プロジェクトの .doctrine/ の雛形を作り（既存は上書きしない）、登録する。2 回目は alreadyRegistered: true。
+   * workspace.yaml が無く projects を渡せば、root が git リポジトリでなくてもそれで書く
+   * （workspace.yaml が既にあれば projects / tracker は使わない）。
+   */
   "workspace.add": {
-    params: { path: string };
+    params: { path: string; projects?: Record<string, string>; tracker?: TrackerConfig };
     result: WorkspaceSummary & { created: string[]; alreadyRegistered: boolean };
   };
   /** workspace.yaml と各 project.yaml を読み直して DB を合わせる。 */
   "workspace.update": { params: { path: string }; result: WorkspaceSummary };
+  /** ウィザードの「このディレクトリを選ぶ」ボタンが呼ぶ。ファイルは書かない。 */
+  "workspace.detect": { params: { path: string }; result: WorkspaceDetection };
   /**
    * 対象プロジェクトごとに、方針に沿って .doctrine/workflows/default.yaml を作るタスクを 1 つ作る。
    * タスクは同梱の setup ワークフローを pin し、project.yaml の setup は差し込まない。
