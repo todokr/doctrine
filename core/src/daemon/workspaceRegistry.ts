@@ -206,7 +206,8 @@ async function resolveProjects(root: string, cfg: WorkspaceConfig): Promise<Reso
 
 /**
  * 足すプロジェクトが既に別の workspace にあるとき、吸収してよければその行を返す。
- * 吸収してよいのは、その workspace がそのプロジェクト 1 つだけで、Intake が 1 件も無いとき。
+ * 吸収してよいのは、その workspace がそのプロジェクト 1 つだけで、終わっていない
+ * （completed・canceled 以外の）Intake を持たないとき。
  */
 async function checkClaim(
   db: Db,
@@ -217,9 +218,11 @@ async function checkClaim(
   if (!row || row.workspace_id === workspaceId) return null;
 
   const siblings = await listProjectsOf(db, row.workspace_id);
-  const intake = await db.selectFrom("intakes").select("id").where("project_id", "=", row.id)
+  const openIntake = await db.selectFrom("intakes").select("id")
+    .where("workspace_id", "=", row.workspace_id)
+    .where("state", "not in", ["completed", "canceled"])
     .limit(1).executeTakeFirst();
-  if (siblings.length === 1 && !intake) return row;
+  if (siblings.length === 1 && !openIntake) return row;
 
   const other = await getWorkspace(db, row.workspace_id);
   throw new Error(
@@ -227,7 +230,7 @@ async function checkClaim(
   );
 }
 
-/** projects.retired_at を足すまでは、タスクと Intake の記録があるプロジェクトを消せない（外部キー）。 */
+/** projects.retired_at を足すまでは、タスクの記録があるプロジェクトを消せない（外部キー）。 */
 async function checkRemovable(db: Db, project: ProjectRow): Promise<void> {
   const active = await db.selectFrom("tasks").select("id")
     .where("project_id", "=", project.id)
@@ -238,13 +241,9 @@ async function checkRemovable(db: Db, project: ProjectRow): Promise<void> {
   const task = await db.selectFrom("tasks").select("id").where("project_id", "=", project.id)
     .limit(1).executeTakeFirst();
   if (task) throw new Error(`${project.name} にはタスクの記録があるので外せません`);
-
-  const intake = await db.selectFrom("intakes").select("id").where("project_id", "=", project.id)
-    .limit(1).executeTakeFirst();
-  if (intake) throw new Error(`${project.name} には Intake の記録があるので外せません`);
 }
 
-/** 吸収する行があれば付け替えて元の workspace を消し、無ければ INSERT する。 */
+/** 吸収する行があれば、プロジェクトと Intake を付け替えて元の workspace を消し、無ければ INSERT する。 */
 async function placeProject(
   trx: Db,
   workspaceId: number,
@@ -256,6 +255,8 @@ async function placeProject(
     await trx.updateTable("projects").set({ workspace_id: workspaceId, name: p.name })
       .where("id", "=", claimed.id).execute();
     await syncProjectRow(trx, claimed.id, cfg);
+    await trx.updateTable("intakes").set({ workspace_id: workspaceId })
+      .where("workspace_id", "=", claimed.workspace_id).execute();
     await trx.deleteFrom("workspaces").where("id", "=", claimed.workspace_id).execute();
     return;
   }

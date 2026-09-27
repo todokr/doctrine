@@ -29,6 +29,18 @@ export function listProjectsOf(db: Db, workspaceId: number): Promise<ProjectRow[
     .where("workspace_id", "=", workspaceId).orderBy("id").execute();
 }
 
+/** 第 1 段の Intake が使うプロジェクト。workspace のプロジェクトがちょうど 1 つでなければ投げる（第 2 段で消す）。 */
+export async function soleProjectOf(db: Db, workspaceId: number): Promise<ProjectRow> {
+  const projects = await listProjectsOf(db, workspaceId);
+  if (projects.length > 1) {
+    throw new Error("プロジェクトが複数ある workspace の Intake はまだ扱えません");
+  }
+  if (projects.length === 0) {
+    throw new Error(`workspace ${workspaceId} にプロジェクトがありません`);
+  }
+  return projects[0];
+}
+
 /** 名前を [a-z0-9-]+ に丸める。空になれば "project"。 */
 export function projectNameFrom(dirName: string): string {
   return dirName.toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "") || "project";

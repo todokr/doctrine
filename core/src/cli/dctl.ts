@@ -68,7 +68,7 @@ workspace
   projects                        登録済みのプロジェクト
 
 Intake
-  intake ls [--project <path>] [--include_closed]
+  intake ls [--workspace <root>] [--include_closed]
   intake get <intake-id>
   intake logs <intake-id> [--tail <n>] [--run_id <n>] [--follow]
   開始・回答・差し戻し・承認・中止はアプリから行う

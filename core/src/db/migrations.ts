@@ -883,6 +883,72 @@ const migrations: Record<string, Migration> = {
       }
     },
   },
+
+  /**
+   * Intake をプロジェクトから workspace に移す。各 Intake は元のプロジェクトの workspace に付く（終わった Intake も）。
+   * intakes を DROP すると intake_* と tasks.intake_id が参照を失うので、外部キーの止め方と確かめ方は 0015 と同じ。
+   */
+  "0016_intake_workspace": {
+    // deno-lint-ignore no-explicit-any
+    async up(db: Kysely<any>) {
+      await sql`PRAGMA foreign_keys = OFF`.execute(db);
+      await sql`PRAGMA defer_foreign_keys = ON`.execute(db);
+
+      await db.schema.createTable("intakes_new")
+        .addColumn("id", "text", (c) => c.primaryKey())
+        .addColumn("workspace_id", "integer", (c) => c.notNull().references("workspaces.id"))
+        .addColumn("issue_url", "text", (c) => c.notNull())
+        .addColumn("issue_node_id", "text", (c) => c.notNull())
+        .addColumn("issue_title", "text", (c) => c.notNull())
+        .addColumn("state", "text", (c) =>
+          c.notNull().check(
+            sql`state IN ('investigating','answering','decomposing','reviewing','active','needs_attention','completed','canceled')`,
+          ))
+        .addColumn("revising", "integer", (c) => c.notNull().defaultTo(0))
+        .addColumn("attention_reason", "text")
+        .addColumn("dispatch_paused", "integer", (c) => c.notNull().defaultTo(0))
+        .addColumn("worktree_path", "text")
+        .addColumn("claude_session_id", "text")
+        .addColumn("child_pid", "integer")
+        .addColumn("child_started_at", "text")
+        .addColumn("rate_limited_until", "text")
+        .addColumn("revision_run_id", "integer", (c) => c.references("intake_runs.id"))
+        .addColumn("issue_phase", "text")
+        .addColumn("created_at", "text", (c) => c.notNull())
+        .addColumn("updated_at", "text", (c) => c.notNull())
+        .addColumn("ended_at", "text")
+        .execute();
+
+      await sql`
+        INSERT INTO intakes_new
+          (id, workspace_id, issue_url, issue_node_id, issue_title, state, revising,
+           attention_reason, dispatch_paused, worktree_path, claude_session_id, child_pid,
+           child_started_at, rate_limited_until, revision_run_id, issue_phase,
+           created_at, updated_at, ended_at)
+        SELECT id, (SELECT workspace_id FROM projects WHERE projects.id = intakes.project_id),
+          issue_url, issue_node_id, issue_title, state, revising,
+          attention_reason, dispatch_paused, worktree_path, claude_session_id, child_pid,
+          child_started_at, rate_limited_until, revision_run_id, issue_phase,
+          created_at, updated_at, ended_at
+        FROM intakes
+      `.execute(db);
+      await db.schema.dropTable("intakes").execute();
+      await db.schema.alterTable("intakes_new").renameTo("intakes").execute();
+
+      await sql`
+        CREATE UNIQUE INDEX uq_intakes_open_issue ON intakes(issue_url)
+        WHERE state NOT IN ('completed','canceled')
+      `.execute(db);
+
+      const violations = await sql<{ table: string }>`PRAGMA foreign_key_check`.execute(db);
+      await sql`PRAGMA foreign_keys = ON`.execute(db);
+      if (violations.rows.length > 0) {
+        throw new Error(
+          `外部キーが壊れています: ${violations.rows.map((r) => r.table).join(", ")}`,
+        );
+      }
+    },
+  },
 };
 
 /** 名前を [a-z0-9-]+ に丸める。空になれば "project"。 */

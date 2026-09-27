@@ -40,7 +40,7 @@ export type {
 
 export type NewIntake = {
   id: string;
-  project_id: number;
+  workspace_id: number;
   issue_url: string;
   issue_node_id: string;
   issue_title: string;
@@ -73,10 +73,13 @@ export function findOpenIntakeByIssue(
 /** includeClosed が false（既定）なら completed / canceled を除く。 */
 export function listIntakes(
   db: Db,
-  filter: { projectId?: number; includeClosed?: boolean } = {},
+  filter: { workspaceId?: number; includeClosed?: boolean } = {},
 ): Promise<IntakeRow[]> {
   return db.selectFrom("intakes").selectAll()
-    .$if(filter.projectId !== undefined, (q) => q.where("project_id", "=", filter.projectId!))
+    .$if(
+      filter.workspaceId !== undefined,
+      (q) => q.where("workspace_id", "=", filter.workspaceId!),
+    )
     .$if(!filter.includeClosed, (q) => q.where("state", "not in", ["completed", "canceled"]))
     .orderBy("created_at").orderBy("id")
     .execute();

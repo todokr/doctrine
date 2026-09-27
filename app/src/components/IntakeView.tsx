@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { IntakeSummary } from "../../../shared/protocol.ts";
 import { sendDecision } from "../decision";
-import { INTAKE_WORD, intakeFace, isClosedIntake, issueNumber } from "../intake";
+import { INTAKE_WORD, intakeFace, isClosedIntake, issueNumber, projectOfIntake } from "../intake";
 import { intakeDetailOf, selectedIntake } from "../model";
 import { useIntakeRpc, useStore } from "../store";
 import { INTAKE_TONE } from "../tone";
@@ -77,7 +77,7 @@ export function IntakeView() {
       </div>
     );
   }
-  const project = s.projects.find((p) => p.daemonId === intake.project_id);
+  const project = projectOfIntake(intake, s.projects);
   const detail = intakeDetailOf(s, intake.id);
   const abandon = async () => {
     setAbandoning(true);

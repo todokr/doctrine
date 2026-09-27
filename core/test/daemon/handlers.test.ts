@@ -193,7 +193,7 @@ test("task.list は紐づけ付きのタスクの intake_id・intake_process_id�
   const [project] = await h("project.list", {}, NOOP_CONN) as ProjectSummary[];
   await insertIntake(ctx.db, {
     id: "i1",
-    project_id: project.id,
+    workspace_id: project.workspace_id,
     issue_url: "https://github.com/o/r/issues/1",
     issue_node_id: "I_1",
     issue_title: "親",
@@ -419,7 +419,7 @@ test("worktree.list はタスク・Intake・孤児の worktree を全部返す",
   const row = (await getTask(ctx.db, t.id))!;
   assert.equal(row.state, "suspended");
 
-  await addIntake(ctx, project.id);
+  await addIntake(ctx, project.workspace_id);
   const intakeWorktree = await createDetachedWorktree({
     repoPath: repo,
     worktreePath: intakeWorktreePathFor(repo, "i1"),
@@ -1829,7 +1829,7 @@ async function intakeWithWorktree(
 ): Promise<string> {
   const project = (await h("workspace.add", { path: repo }, NOOP_CONN) as WorkspaceSummary)
     .projects[0];
-  await addIntake(ctx, project.id);
+  await addIntake(ctx, project.workspace_id);
   const worktree = await createDetachedWorktree({
     repoPath: repo,
     worktreePath: intakeWorktreePathFor(repo, "i1"),
@@ -2718,10 +2718,10 @@ test("task.guide は無いタスクを名指しで断る", async () => {
   );
 });
 
-async function addIntake(ctx: DaemonContext, projectId: number): Promise<void> {
+async function addIntake(ctx: DaemonContext, workspaceId: number): Promise<void> {
   await insertIntake(ctx.db, {
     id: "i1",
-    project_id: projectId,
+    workspace_id: workspaceId,
     issue_url: "https://github.com/o/r/issues/1",
     issue_node_id: "N1",
     issue_title: "T",
@@ -2735,7 +2735,7 @@ test("tick は Intake の実行をタスクより先に受け付ける", async (
   const h = createHandler(ctx);
   const project = (await h("workspace.add", { path: repo }, NOOP_CONN) as WorkspaceSummary)
     .projects[0];
-  await addIntake(ctx, project.id);
+  await addIntake(ctx, project.workspace_id);
   await enqueueIntakeRun(ctx.db, "i1", "investigate", { logRoot: ctx.logRoot, resume: false });
   const t = await h("task.create", { project: repo, title: "T", prompt: "p" }, NOOP_CONN) as {
     id: string;
@@ -2754,7 +2754,7 @@ test("Intake の実行が例外で落ちたら、行を failed・Intake を要�
   const h = createHandler(ctx);
   const project = (await h("workspace.add", { path: repo }, NOOP_CONN) as WorkspaceSummary)
     .projects[0];
-  await addIntake(ctx, project.id);
+  await addIntake(ctx, project.workspace_id);
   // worktree が消えていて、書き換えの検出（changedPaths）が try の外で例外を投げる
   await updateIntake(ctx.db, "i1", {
     state: "decomposing",
@@ -2778,7 +2778,7 @@ test("worktree.list は Intake の worktree を孤児にしない", async () => 
   const h = createHandler(ctx);
   const project = (await h("workspace.add", { path: repo }, NOOP_CONN) as WorkspaceSummary)
     .projects[0];
-  await addIntake(ctx, project.id);
+  await addIntake(ctx, project.workspace_id);
   const worktree = await createDetachedWorktree({
     repoPath: repo,
     worktreePath: intakeWorktreePathFor(repo, "i1"),
@@ -3158,7 +3158,7 @@ test("daemon.slots は全体の実行枠・使っている数・枠待ちを返�
     { project: repo, title: "B", prompt: "p" },
     NOOP_CONN,
   ) as { id: string };
-  await addIntake(ctx, project.id);
+  await addIntake(ctx, project.workspace_id);
   await enqueueIntakeRun(ctx.db, "i1", "investigate", { logRoot: ctx.logRoot, resume: false });
   await ctx.db.updateTable("tasks").set({ state: "running" }).where("id", "=", a.id).execute();
 
@@ -3197,7 +3197,7 @@ test("終わった Intake の queued の実行は枠待ちに出さない", asyn
   const h = createHandler(ctx);
   const project = (await h("workspace.add", { path: repo }, NOOP_CONN) as WorkspaceSummary)
     .projects[0];
-  await addIntake(ctx, project.id);
+  await addIntake(ctx, project.workspace_id);
   await enqueueIntakeRun(ctx.db, "i1", "investigate", { logRoot: ctx.logRoot, resume: false });
   await updateIntake(ctx.db, "i1", { state: "canceled" });
 

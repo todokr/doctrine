@@ -8,7 +8,7 @@ import {
   upsertPrObservation,
 } from "../db/intakes.ts";
 import type { Db, ProjectRow } from "../db/schema.ts";
-import { getProject, listProjects } from "../db/tasks.ts";
+import { listWorkspaces, soleProjectOf } from "../db/workspaces.ts";
 import { assertIntakeTransition } from "../domain/intakeStates.ts";
 import type { PrWatcher, Tracker, TrackerOf } from "../tracker/tracker.ts";
 import { containsCommit, fetchBaseBranch, originRef } from "../domain/worktree.ts";
@@ -92,7 +92,7 @@ export async function observePullRequests(
         eb.and([eb("i.revising", "=", 1), eb("i.state", "not in", ["completed", "canceled"])]),
       ])
     )
-    .where("i.project_id", "=", project.id)
+    .where("i.workspace_id", "=", project.workspace_id)
     .where("p.retired_at", "is", null)
     .where((eb) =>
       eb.or([
@@ -146,7 +146,7 @@ export async function completeIntake(db: Db, intakeId: string): Promise<IntakeTr
   return { intakeId, from: "active", to: "completed", revising: false };
 }
 
-export type ProjectWatchReport = {
+export type WorkspaceWatchReport = {
   /** この周で見た active な Intake と改訂中の Intake の id。空なら、gh を呼ばずに終えた。 */
   watched: string[];
   /** gh の失敗・承認の食い違い・prompt を組めなかったことなど。空なら成功の周。 */
@@ -156,31 +156,32 @@ export type ProjectWatchReport = {
   transitions: IntakeTransition[];
 };
 
-/** 1 プロジェクトの 1 周。投げない（想定外の例外も errors に入れる）。 */
-export async function watchProject(
+export type WatchDeps = {
+  trackerOf: TrackerOf;
+  prWatcher: PrWatcher;
+  baseSync: BaseSync;
+  loadWorkflow: WorkflowLoader;
+};
+
+/** 1 workspace の 1 周。投げない（想定外の例外も errors に入れる）。 */
+export async function watchWorkspace(
   db: Db,
-  deps: {
-    trackerOf: TrackerOf;
-    prWatcher: PrWatcher;
-    baseSync: BaseSync;
-    loadWorkflow: WorkflowLoader;
-  },
-  projectId: number,
-): Promise<ProjectWatchReport> {
-  const report: ProjectWatchReport = {
+  deps: WatchDeps,
+  workspaceId: number,
+): Promise<WorkspaceWatchReport> {
+  const report: WorkspaceWatchReport = {
     watched: [],
     errors: [],
     updated: new Set(),
     transitions: [],
   };
   try {
-    const project = await getProject(db, projectId);
-    if (!project) return report;
     // 改訂中の Intake は PR の観測だけ続ける。計画が変わりうるので、sub-issue の同期・投入・完了の判定は
     // active のものだけが行う（投入は dispatchIntake の revising の検査でも止まる）
-    const watched = (await listIntakes(db, { projectId }))
+    const watched = (await listIntakes(db, { workspaceId }))
       .filter((i) => i.state === "active" || i.revising === 1);
     if (watched.length === 0) return report;
+    const project = await soleProjectOf(db, workspaceId);
     report.watched = watched.map((i) => i.id);
     const intakes = watched.filter((i) => i.state === "active");
 
@@ -316,16 +317,16 @@ export const INITIAL_WATCH_HEALTH: WatchHealth = {
 };
 
 export interface IntakeWatcher {
-  /** 登録済みの全プロジェクトを 1 周する。決して reject しない。 */
+  /** 登録済みの全 workspace を 1 周する。決して reject しない。 */
   cycle(): Promise<void>;
   /**
-   * 1 プロジェクトを今すぐ 1 周する。そのプロジェクトの周がすでに走っていれば、
+   * 1 workspace を今すぐ 1 周する。その workspace の周がすでに走っていれば、
    * それが終わった後にもう 1 周回す（走っている周が承認の前に行を読んでいた場合に取りこぼさないため）。
    * 決して reject しない。
    */
-  request(projectId: number): Promise<void>;
-  /** プロジェクトの見張りの健康状態。まだ回っていなければ INITIAL_WATCH_HEALTH。 */
-  health(projectId: number): WatchHealth;
+  request(workspaceId: number): Promise<void>;
+  /** workspace の見張りの健康状態。まだ回っていなければ INITIAL_WATCH_HEALTH。 */
+  health(workspaceId: number): WatchHealth;
   /** 走っている周が無いか。テストの後始末が待つ。 */
   idle(): boolean;
 }
@@ -345,7 +346,7 @@ export function createIntakeWatcher(deps: {
   const pending = new Set<number>();
   const health = new Map<number, WatchHealth>();
 
-  const healthOf = (projectId: number) => health.get(projectId) ?? INITIAL_WATCH_HEALTH;
+  const healthOf = (workspaceId: number) => health.get(workspaceId) ?? INITIAL_WATCH_HEALTH;
 
   // コールバックの例外で周を止めない。失敗は errors に足して健康状態に出す
   function safely(errors: string[], call: () => void): void {
@@ -359,8 +360,8 @@ export function createIntakeWatcher(deps: {
 
   // 健康状態を更新し、失敗に入った・続いた・治ったときだけ true を返す。
   // lastSucceededAt だけの変化では配らない（成功の周のたびに全 Intake へ飛ぶため）
-  function record(projectId: number, errors: string[]): boolean {
-    const before = healthOf(projectId);
+  function record(workspaceId: number, errors: string[]): boolean {
+    const before = healthOf(workspaceId);
     const next: WatchHealth = errors.length === 0
       ? { lastSucceededAt: now().toISOString(), consecutiveFailures: 0, lastError: null }
       : {
@@ -368,18 +369,18 @@ export function createIntakeWatcher(deps: {
         consecutiveFailures: before.consecutiveFailures + 1,
         lastError: errors.join("\n"),
       };
-    health.set(projectId, next);
+    health.set(workspaceId, next);
     return next.consecutiveFailures !== before.consecutiveFailures ||
       next.lastError !== before.lastError;
   }
 
-  async function pass(projectId: number): Promise<void> {
-    let report: ProjectWatchReport;
+  async function pass(workspaceId: number): Promise<void> {
+    let report: WorkspaceWatchReport;
     try {
-      report = await watchProject(deps.db, deps, projectId);
+      report = await watchWorkspace(deps.db, deps, workspaceId);
     } catch (e) {
       console.error("intake watch failed:", e);
-      record(projectId, [describe(e)]);
+      record(workspaceId, [describe(e)]);
       return;
     }
     if (report.watched.length === 0) {
@@ -392,7 +393,7 @@ export function createIntakeWatcher(deps: {
     const errors = [...report.errors];
     for (const t of report.transitions) safely(errors, () => deps.onStateChanged(t));
     for (const id of report.updated) safely(errors, () => deps.onUpdated(id));
-    if (record(projectId, errors)) {
+    if (record(workspaceId, errors)) {
       for (const id of report.watched) {
         if (!report.updated.has(id)) safely([], () => deps.onUpdated(id));
       }
@@ -400,39 +401,39 @@ export function createIntakeWatcher(deps: {
   }
 
   // pending の確認と inFlight からの削除は同じ同期区間で行う。分けると、その間に来た要求を取りこぼす
-  async function loop(projectId: number): Promise<void> {
+  async function loop(workspaceId: number): Promise<void> {
     try {
       while (true) {
-        pending.delete(projectId);
-        await pass(projectId);
-        if (!pending.has(projectId)) break;
+        pending.delete(workspaceId);
+        await pass(workspaceId);
+        if (!pending.has(workspaceId)) break;
       }
     } finally {
-      inFlight.delete(projectId);
+      inFlight.delete(workspaceId);
     }
   }
 
-  function request(projectId: number): Promise<void> {
-    const running = inFlight.get(projectId);
+  function request(workspaceId: number): Promise<void> {
+    const running = inFlight.get(workspaceId);
     if (running) {
-      pending.add(projectId);
+      pending.add(workspaceId);
       return running;
     }
     // 最初の await より前に登録する。ハンドラは void で起動して応答を返すので、
     // 遅れると idle() が周の始まる前に true になる
-    const started = loop(projectId);
-    inFlight.set(projectId, started);
+    const started = loop(workspaceId);
+    inFlight.set(workspaceId, started);
     return started;
   }
 
-  // listProjects を待つ間は inFlight が空なので、cycle 自身も idle の判定に数える
+  // listWorkspaces を待つ間は inFlight が空なので、cycle 自身も idle の判定に数える
   let cycling = 0;
 
   return {
     async cycle() {
       cycling++;
       try {
-        for (const p of await listProjects(deps.db)) await request(p.id);
+        for (const w of await listWorkspaces(deps.db)) await request(w.id);
       } catch (e) {
         console.error("intake watch cycle failed:", e);
       } finally {

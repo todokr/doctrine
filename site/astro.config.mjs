@@ -3,8 +3,12 @@ import starlight from '@astrojs/starlight';
 import react from '@astrojs/react';
 
 export default defineConfig({
+  // GitHub Pages のプロジェクトサイト（https://todokr.github.io/doctrine/）として公開する。
+  site: 'https://todokr.github.io',
+  base: '/doctrine',
   // ルートロケールがないので `/` にページができない。`/ja/` へ送る。
-  redirects: { '/': '/ja/' },
+  // リダイレクト先には base が付かないので、自分で付ける。
+  redirects: { '/': '/doctrine/ja/' },
   integrations: [
     starlight({
       title: 'doctrine',
@@ -20,9 +24,8 @@ export default defineConfig({
       // autogenerate にしておくと、ページを足す PR がこの設定を触らずに済む。
       sidebar: [
         { label: 'Quick Start', items: [{ autogenerate: { directory: 'quick-start' } }] },
-        { label: 'Guide', items: [{ autogenerate: { directory: 'guide' } }] },
-        { label: 'Concepts', items: [{ autogenerate: { directory: 'concepts' } }] },
         { label: 'Examples', items: [{ autogenerate: { directory: 'examples' } }] },
+        { label: 'Guide', items: [{ autogenerate: { directory: 'guide' } }] },
       ],
     }),
     react(),

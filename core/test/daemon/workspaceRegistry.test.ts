@@ -3,10 +3,11 @@ import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { sql } from "kysely";
 import { openDb } from "../../src/db/migrate.ts";
 import type { Db } from "../../src/db/schema.ts";
 import { getProject, insertTask, listProjects } from "../../src/db/tasks.ts";
-import { insertIntake } from "../../src/db/intakes.ts";
+import { getIntake, insertIntake, updateIntake } from "../../src/db/intakes.ts";
 import {
   getWorkspace,
   getWorkspaceByPath,
@@ -154,11 +155,11 @@ test("1 つずつの workspace になっていたリポジトリを吸収する"
   }
 });
 
-test("Intake を持つ workspace のリポジトリは吸収せず、何も書かずに投げる", async () => {
+test("終わっていない Intake を持つ workspace は吸収しない", async () => {
   const seeded = await seedThree();
   await insertIntake(db, {
     id: "i1",
-    project_id: seeded[1].id,
+    workspace_id: seeded[1].workspace_id,
     issue_url: "https://github.com/o/r/issues/1",
     issue_node_id: "I_1",
     issue_title: "親",
@@ -173,6 +174,39 @@ test("Intake を持つ workspace のリポジトリは吸収せず、何も書�
   for (const s of seeded) {
     assert.equal((await getProject(db, s.id))!.workspace_id, s.workspace_id);
   }
+  assert.equal((await getIntake(db, "i1"))!.workspace_id, seeded[1].workspace_id);
+});
+
+test("終わった Intake だけを持つ 1 つずつの workspace は吸収し、Intake を付け替える", async () => {
+  const seeded = await seedThree();
+  await insertIntake(db, {
+    id: "i1",
+    workspace_id: seeded[1].workspace_id,
+    issue_url: "https://github.com/o/r/issues/1",
+    issue_node_id: "I_1",
+    issue_title: "親",
+  });
+  await updateIntake(db, "i1", { state: "completed" });
+  await insertIntake(db, {
+    id: "i2",
+    workspace_id: seeded[1].workspace_id,
+    issue_url: "https://github.com/o/r/issues/2",
+    issue_node_id: "I_2",
+    issue_title: "親2",
+  });
+  await updateIntake(db, "i2", { state: "canceled" });
+
+  const tp = await writeTp(THREE);
+  const r = await addWorkspace(db, tp);
+  const workspaces = await listWorkspaces(db);
+  assert.deepEqual(workspaces.map((w) => w.id), [r.workspaceId]);
+  assert.equal((await getIntake(db, "i1"))!.workspace_id, r.workspaceId);
+  assert.equal((await getIntake(db, "i2"))!.workspace_id, r.workspaceId);
+  const p = (await getProject(db, seeded[1].id))!;
+  assert.equal(p.workspace_id, r.workspaceId);
+  assert.equal(p.name, "tp");
+  const { rows: violations } = await sql`PRAGMA foreign_key_check`.execute(db);
+  assert.deepEqual(violations, []);
 });
 
 test("2 つ以上のプロジェクトを持つ workspace のリポジトリは吸収しない", async () => {
@@ -256,20 +290,6 @@ test("終わったタスクだけがあるプロジェクトも外さずに投�
   await db.updateTable("tasks").set({ state: "completed" }).execute();
   await writeTp("projects:\n  a: ../a/repo\n");
   await assert.rejects(updateWorkspace(db, tp), /タスクの記録/);
-  assert.equal((await listProjectsOf(db, workspaceId)).length, 2);
-});
-
-test("Intake の記録があるプロジェクトは外さずに投げる", async () => {
-  const { tp, workspaceId, bId } = await addTwoWithTaskOnB();
-  await insertIntake(db, {
-    id: "i1",
-    project_id: bId,
-    issue_url: "https://github.com/o/r/issues/1",
-    issue_node_id: "I_1",
-    issue_title: "親",
-  });
-  await writeTp("projects:\n  a: ../a/repo\n");
-  await assert.rejects(updateWorkspace(db, tp), /Intake の記録/);
   assert.equal((await listProjectsOf(db, workspaceId)).length, 2);
 });
 

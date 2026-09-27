@@ -28,3 +28,16 @@
 .hero .tagline strong {
   color: var(--sl-color-accent);
 }
+
+/* Starlight の既定（上下 clamp(2.5rem, 1rem + 10vmin, 10rem)）は、下に動画を置くと間延びする。
+   Starlight の .hero は後から読み込まれるので、main を足して詳細度で勝つ。 */
+@media (min-width: 50rem) {
+  main .hero {
+    padding-block: 0
+  }
+}
+
+.page header.header {
+    background: transparent;
+    border-bottom: none;
+}

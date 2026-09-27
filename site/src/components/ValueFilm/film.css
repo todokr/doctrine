@@ -264,8 +264,7 @@
   aspect-ratio: 16 / 9;
   overflow: hidden;
   border-radius: 0.75rem;
-  border: 1px solid var(--vf-line);
-  background: var(--vf-bg);
+  background: transparent;
 }
 .vf-stage {
   position: absolute;

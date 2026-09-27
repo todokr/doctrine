@@ -37,12 +37,16 @@ import type { Db } from "../../src/db/schema.ts";
 
 const ISSUE = "https://github.com/o/r/issues/1";
 
-async function fixture(): Promise<{ d: Db; projectId: number; runId: number }> {
+async function fixture(): Promise<
+  { d: Db; projectId: number; workspaceId: number; runId: number }
+> {
   const d = await openDb(":memory:");
-  const projectId = (await seedProject(d, { path: "/repo" })).id;
+  const p = await seedProject(d, { path: "/repo" });
+  const projectId = p.id;
+  const workspaceId = p.workspace_id;
   await insertIntake(d, {
     id: "i1",
-    project_id: projectId,
+    workspace_id: workspaceId,
     issue_url: ISSUE,
     issue_node_id: "I_1",
     issue_title: "T",
@@ -55,7 +59,7 @@ async function fixture(): Promise<{ d: Db; projectId: number; runId: number }> {
     started_at: null,
     log_path: "",
   });
-  return { d, projectId, runId };
+  return { d, projectId, workspaceId, runId };
 }
 
 function newDraft(runId: number, intakeId = "i1") {
@@ -89,7 +93,7 @@ test("Intake は investigating・revising 0・dispatch_paused 0 で作られる"
 });
 
 test("findOpenIntakeByIssue は終わった Intake を返さない", async () => {
-  const { d, projectId } = await fixture();
+  const { d, workspaceId } = await fixture();
   assert.equal((await findOpenIntakeByIssue(d, ISSUE))?.id, "i1");
 
   await updateIntake(d, "i1", { state: "canceled" });
@@ -97,7 +101,7 @@ test("findOpenIntakeByIssue は終わった Intake を返さない", async () =>
 
   await insertIntake(d, {
     id: "i2",
-    project_id: projectId,
+    workspace_id: workspaceId,
     issue_url: ISSUE,
     issue_node_id: "I_1",
     issue_title: "T",
@@ -106,12 +110,12 @@ test("findOpenIntakeByIssue は終わった Intake を返さない", async () =>
 });
 
 test("同じ Issue の終わっていない Intake は 2 つ作れない", async () => {
-  const { d, projectId } = await fixture();
+  const { d, workspaceId } = await fixture();
   await assert.rejects(
     () =>
       insertIntake(d, {
         id: "i2",
-        project_id: projectId,
+        workspace_id: workspaceId,
         issue_url: ISSUE,
         issue_node_id: "I_1",
         issue_title: "T",
@@ -121,18 +125,18 @@ test("同じ Issue の終わっていない Intake は 2 つ作れない", async
 });
 
 test("listIntakes は既定で終わった Intake を除き、includeClosed で含める", async () => {
-  const { d, projectId } = await fixture();
-  const other = (await seedProject(d, { path: "/other" })).id;
+  const { d, workspaceId } = await fixture();
+  const other = await seedProject(d, { path: "/other" });
   await insertIntake(d, {
     id: "i2",
-    project_id: projectId,
+    workspace_id: workspaceId,
     issue_url: "https://github.com/o/r/issues/2",
     issue_node_id: "I_2",
     issue_title: "T",
   });
   await insertIntake(d, {
     id: "i3",
-    project_id: other,
+    workspace_id: other.workspace_id,
     issue_url: "https://github.com/o/other/issues/1",
     issue_node_id: "I_3",
     issue_title: "T",
@@ -145,9 +149,12 @@ test("listIntakes は既定で終わった Intake を除き、includeClosed で�
     "i2",
     "i3",
   ]);
-  assert.deepEqual((await listIntakes(d, { projectId: other })).map((i) => i.id), ["i3"]);
   assert.deepEqual(
-    (await listIntakes(d, { projectId, includeClosed: true })).map((i) => i.id),
+    (await listIntakes(d, { workspaceId: other.workspace_id })).map((i) => i.id),
+    ["i3"],
+  );
+  assert.deepEqual(
+    (await listIntakes(d, { workspaceId, includeClosed: true })).map((i) => i.id),
     ["i1", "i2"],
   );
 });
@@ -259,10 +266,10 @@ test("回答は一度だけ書ける", async () => {
 });
 
 test("案の seq は Intake ごとに 1 から振られ、latestDraft は最後の案を返す", async () => {
-  const { d, projectId, runId } = await fixture();
+  const { d, workspaceId, runId } = await fixture();
   await insertIntake(d, {
     id: "i2",
-    project_id: projectId,
+    workspace_id: workspaceId,
     issue_url: "https://github.com/o/r/issues/2",
     issue_node_id: "I_2",
     issue_title: "T",

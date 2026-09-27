@@ -18,9 +18,9 @@ import examplePatch from "../../shared/guide/examples/step-artifacts.patch?raw";
 export const NOW = Date.parse("2026-09-15T15:00:00+09:00");
 export const MIN = 60000;
 export const PROJECTS: Project[] = [
-  { id: "doctrine", daemonId: 1, color: "#2E6CA4", path: "~/git/doctrine", def: "feature" },
-  { id: "shop-api", daemonId: 2, color: "#AA3A2C", path: "~/work/shop-api", def: "feature" },
-  { id: "blog", daemonId: 3, color: "#296B49", path: "~/git/blog", def: "feature" },
+  { id: "doctrine", daemonId: 1, workspaceId: 1, color: "#2E6CA4", path: "~/git/doctrine", def: "feature" },
+  { id: "shop-api", daemonId: 2, workspaceId: 2, color: "#AA3A2C", path: "~/work/shop-api", def: "feature" },
+  { id: "blog", daemonId: 3, workspaceId: 3, color: "#296B49", path: "~/git/blog", def: "feature" },
 ];
 
 // 状態は doctrine の7状態。refused はフラグ。
@@ -377,7 +377,7 @@ const at = (minutesAgo: number) => new Date(NOW - minutesAgo * MIN).toISOString(
 function intake(n: number, o: Partial<IntakeSummary>): IntakeSummary {
   return {
     id: `i${n}`,
-    project_id: 1,
+    workspace_id: 1,
     issue_url: `https://github.com/o/r/issues/${n}`,
     issue_title: `Issue ${n} のタイトル`,
     state: "investigating",
@@ -396,9 +396,9 @@ function intake(n: number, o: Partial<IntakeSummary>): IntakeSummary {
 
 /** 並びを確かめられるよう、区分や更新の順とは違う並びで持つ */
 export const INTAKES: IntakeSummary[] = [
-  intake(4, { state: "decomposing", project_id: 2, rate_limited_until: at(-40), updated_at: at(20) }),
-  intake(6, { state: "canceled", project_id: 2, updated_at: at(100) }),
-  intake(2, { state: "active", needs_human: true, project_id: 2, progress: { done: 1, total: 4 }, updated_at: at(10) }),
+  intake(4, { state: "decomposing", workspace_id: 2, rate_limited_until: at(-40), updated_at: at(20) }),
+  intake(6, { state: "canceled", workspace_id: 2, updated_at: at(100) }),
+  intake(2, { state: "active", needs_human: true, workspace_id: 2, progress: { done: 1, total: 4 }, updated_at: at(10) }),
   intake(5, { state: "active", revising: true, progress: { done: 2, total: 5 }, updated_at: at(30) }),
   intake(1, { state: "reviewing", needs_human: true, updated_at: at(60) }),
   intake(7, { state: "completed", updated_at: at(200) }),

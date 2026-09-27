@@ -9,7 +9,8 @@ import {
 } from "../db/intakes.ts";
 import { loadQuestionSets } from "./questionSet.ts";
 import type { Db, IntakeProcessRow, IntakeRow, ProjectRow } from "../db/schema.ts";
-import { getProject, insertTask, type NewTask } from "../db/tasks.ts";
+import { insertTask, type NewTask } from "../db/tasks.ts";
+import { soleProjectOf } from "../db/workspaces.ts";
 import { branchNameFor } from "../domain/worktree.ts";
 import { pinOf, type WorkflowLoader, type WorkflowPin } from "../workflow/load.ts";
 import { sha256Hex } from "./pfd/hash.ts";
@@ -77,7 +78,7 @@ type DispatchSource = {
 
 /** タスクの prompt に載せる材料を DB から組む。dispatchIntake と redispatchProcess が使う。 */
 async function loadDispatchSource(db: Db, intake: IntakeRow, pfd: Pfd): Promise<DispatchSource> {
-  const project = (await getProject(db, intake.project_id))!;
+  const project = await soleProjectOf(db, intake.workspace_id);
   const rows = new Map(
     (await listProcesses(db, intake.id)).filter((r) => r.retired_at === null)
       .map((r) => [r.process_id, r]),
@@ -153,7 +154,7 @@ async function dispatchProcess(
     expectedTaskId: row.current_task_id,
     task: {
       id: taskId,
-      project_id: intake.project_id,
+      project_id: project.id,
       title: process.name,
       prompt,
       workflow_name: project.default_workflow,
