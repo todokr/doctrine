@@ -460,7 +460,7 @@ function EndCard({ t, images }: { t: number; images: FilmImages }) {
         <div className="vf-end-title">
           作業は渡す、
           <br />
-          理解は渡さない
+          理解は譲らない
         </div>
         <div className="vf-end-sub">
           <strong>doctrine</strong> — 手元のマシンで動く software factory
