@@ -26,7 +26,7 @@
 | `domain/` | エンジン（`engine.ts`）、1 ステップの実行（`stepRunner.ts`）、状態遷移（`states.ts` / `intakeStates.ts`）、スケジューラ、worktree、上限待ち、復帰、diff、レビュー記録、ガイド | 3・5 |
 | `github/` / `linear/` / `tracker/` | Issue トラッカーの抽象と 2 つの実装、PR の見張り | 6 |
 | `intake/` | Intake のコマンド、runner、会話、出力検証、改訂、投入、sub-issue 同期、見張り。`intake/pfd/` は PFD の検証・ハッシュ・状態計算・タスク prompt | 6 |
-| `util/` | 原子的書き込み、子プロセス実行、状態ディレクトリの解決（`home.ts:stateRoot`） | — |
+| `util/` | 原子的書き込み、子プロセス実行、状態ディレクトリと設定ディレクトリの解決（`home.ts:stateRoot` / `home.ts:configRoot`） | — |
 | `workflow/` | ワークフロー YAML のスキーマ・読み込み・保存・テンプレート展開、`project.yaml`、`dctl project-add` が作る雛形 | 3 |
 
 **名前の衝突に注意する。** `core/src/intake/pfd/`、`shared/intake/pfd.ts`、`app/src/pfd.ts`、`app/src/components/PfdDiagram.tsx`

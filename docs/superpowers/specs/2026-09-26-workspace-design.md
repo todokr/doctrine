@@ -46,7 +46,7 @@ assured-terraform でインフラを作り、assured-tp でコードを変え、
 | `<repo>/.doctrine/project.yaml` | リポジトリ（コミットする） | setup・defaultWorkflow・maxConcurrent・baseBranch |
 | `<repo>/.doctrine/workflows/*.yaml` | リポジトリ（コミットする） | いまと同じ |
 | `<root>/.doctrine/workspace.yaml` | workspace | name・projects・tracker |
-| `<stateRoot>/config.json` | マシン | globalLimit・linearApiKey（いまと同じ） |
+| `<configRoot>/config.json` | マシン | globalLimit・linearApiKey（いまと同じ） |
 
 プロジェクトの設定はリポジトリの中身に縛られる（setup のコマンドもワークフローもそのリポジトリでしか意味を持たない）ので、
 リポジトリにコミットしたまま残す。どのリポジトリを束ねるか・Issue をどこから取るかは、どの 1 つのリポジトリにも属さないので
