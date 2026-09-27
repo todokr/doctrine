@@ -8,9 +8,14 @@ import {
   listProjectsOf,
 } from "../db/workspaces.ts";
 import { parseProjectConfig, type ProjectConfig } from "../workflow/project.ts";
-import { ensureProjectScaffold, ensureWorkspaceScaffold } from "../workflow/scaffold.ts";
+import {
+  ensureProjectScaffold,
+  ensureWorkspaceScaffold,
+  requireNotSubdirectory,
+} from "../workflow/scaffold.ts";
 import {
   parseWorkspaceConfig,
+  type TrackerConfig,
   WORKSPACE_YAML,
   type WorkspaceConfig,
 } from "../workflow/workspace.ts";
@@ -24,20 +29,35 @@ const ACTIVE_TASK_STATES = ["queued", "running", "suspended", "paused", "rate_li
 export async function addWorkspace(
   db: Db,
   rootPath: string,
+  init?: { projects: Record<string, string>; tracker?: TrackerConfig },
 ): Promise<{ workspaceId: number; created: string[]; alreadyRegistered: boolean }> {
   const root = await resolveRoot(rootPath);
   const existing = await getWorkspaceByPath(db, root);
   if (existing) return { workspaceId: existing.id, created: [], alreadyRegistered: true };
 
-  const created = (await ensureWorkspaceScaffold(root)).created;
-  const cfg = await readConfig(root);
-  const projects = await resolveProjects(root, cfg);
+  const scaffold = await ensureWorkspaceScaffold(root, init);
+  const created = scaffold.created;
+  const yamlPath = join(root, WORKSPACE_YAML);
 
-  // ファイルを書く前に DB の衝突で断り、断ったリポジトリに project.yaml を書き残さない
-  const claims = new Map<string, ProjectRow>();
-  for (const p of projects) {
-    const claimed = await checkClaim(db, null, p);
-    if (claimed) claims.set(p.path, claimed);
+  let cfg: WorkspaceConfig;
+  let projects: ResolvedProject[];
+  let claims: Map<string, ProjectRow>;
+  try {
+    // init から書いた workspace.yaml の名前・パスが不正（名前の形が違う、指す先が無い、
+    // git リポジトリでないなど）なら、書いたファイルを残さない。既にあった workspace.yaml は
+    // ここで消さない（scaffold.created に入らない）。DB の衝突（checkClaim）もファイルを
+    // 書く前の検証なので、ここに含める。resolveProjects が全 projects を検証してから
+    // 下の ensureProjectScaffold のループに入るので、1件でも不正なら1件もスキャフォルドしない。
+    cfg = await readConfig(root);
+    projects = await resolveProjects(root, cfg);
+    claims = new Map<string, ProjectRow>();
+    for (const p of projects) {
+      const claimed = await checkClaim(db, null, p);
+      if (claimed) claims.set(p.path, claimed);
+    }
+  } catch (e) {
+    if (scaffold.created.includes(yamlPath)) await Deno.remove(yamlPath);
+    throw e;
   }
 
   const configs = new Map<string, ProjectConfig>();
@@ -123,7 +143,7 @@ export async function syncProjectRow(
 }
 
 /** 相対パス・末尾の /・シンボリックリンク・/var と /private/var の違いは、ここで実パスに揃う。 */
-async function resolveRoot(rootPath: string): Promise<string> {
+export async function resolveRoot(rootPath: string): Promise<string> {
   // デーモンの cwd で解決されて黙って別の場所を指すのを防ぐ
   if (!isAbsolute(rootPath)) throw new Error(`絶対パスを指定してください: ${rootPath}`);
   try {
@@ -148,6 +168,11 @@ async function readConfig(root: string): Promise<WorkspaceConfig> {
   return parseWorkspaceConfig(text, basename(root));
 }
 
+/**
+ * projects の各エントリを実パスに解決し、git リポジトリのルートであることまで確かめる。
+ * ここで全件を検証してから呼び出し側が ensureProjectScaffold に進むので、1件でも
+ * 不正なら（存在しない・リポジトリでない・重複）1件もスキャフォルドしない。
+ */
 async function resolveProjects(root: string, cfg: WorkspaceConfig): Promise<ResolvedProject[]> {
   const resolved: ResolvedProject[] = [];
   const seen = new Map<string, string>();
@@ -167,6 +192,13 @@ async function resolveProjects(root: string, cfg: WorkspaceConfig): Promise<Reso
     if (other !== undefined) {
       throw new Error(
         `projects の ${other} と ${entry.name} が同じリポジトリ ${real} を指しています`,
+      );
+    }
+    // ensureProjectScaffold（assertRepoRoot）が同じことを確かめるが、それは1件ずつ
+    // スキャフォルドしながら呼ぶので手遅れ。ここで先に全件を確かめる。
+    if (await requireNotSubdirectory(real) === null) {
+      throw new Error(
+        `projects の ${entry.name} が指すパスは git リポジトリではありません: ${real}`,
       );
     }
     seen.set(real, entry.name);

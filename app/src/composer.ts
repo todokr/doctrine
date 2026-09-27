@@ -47,9 +47,12 @@ export function createParams(form: ComposerForm): ParamsOf<"task.create"> {
   return { project: form.project, workflow: form.workflow, title: form.title.trim(), prompt: form.prompt };
 }
 
-/** 「同じ内容で投入し直す」を出すタスク。Intake 由来は Intake の「再投入する」でやり直すので出さない */
+/**
+ * 「同じ内容で投入し直す」を出すタスク。Intake 由来は Intake の「再投入する」でやり直すので出さない。
+ * setup は setup.yaml がプロジェクトに無く、コンポーザが既定のワークフローに落ちるので出さない
+ */
 export function canRetry(t: Task): boolean {
-  return (t.state === "failed" || t.state === "canceled") && t.intake === null;
+  return (t.state === "failed" || t.state === "canceled") && t.intake === null && t.wf !== "setup";
 }
 
 /** 元のタスクの中身をコンポーザの初期値にする。project は t.project（表示名）から引いたパス */

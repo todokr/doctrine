@@ -1,6 +1,7 @@
 #!/usr/bin/env -S deno run --allow-all
 import { socketPath } from "../daemon/server.ts";
 import type { IntakeLogs, Response, ServerEvent, TaskLogs } from "../../../shared/protocol.ts";
+import { parseWorkflow } from "../workflow/schema.ts";
 
 const NUMERIC = new Set(["priority", "limit", "tail", "step_run_id", "run_id"]);
 const BOOLEAN = new Set(["force", "follow", "include_closed"]);
@@ -78,6 +79,7 @@ worktree
   gc --path <path> [--force]      dctl worktrees が出すパスを消す
 
 その他
+  workflow-check <file>          ワークフローの定義を検証する（デーモン不要）
   ratelimit [--limit <n>]
   slots                           全体の実行枠・使っている数・枠待ちを見る
   slots set --limit <n>           全体の実行枠を変える（1 以上の整数。すぐ効き、再起動しても残る）
@@ -363,7 +365,40 @@ export async function followLogs(
   }
 }
 
+/** デーモンを介さずにファイルを parseWorkflow に通す。戻り値は終了コード。 */
+export async function workflowCheck(
+  file: string,
+  out: { error: (s: string) => void },
+): Promise<number> {
+  if (file === undefined) {
+    out.error(USAGE);
+    return 1;
+  }
+  let yamlText: string;
+  try {
+    yamlText = await Deno.readTextFile(file);
+  } catch (e) {
+    if (e instanceof Deno.errors.NotFound) {
+      out.error(`ファイルがありません: ${file}`);
+      return 1;
+    }
+    out.error((e as Error).message);
+    return 1;
+  }
+  try {
+    const { warnings } = parseWorkflow(yamlText);
+    for (const w of warnings) out.error(w);
+    return 0;
+  } catch (e) {
+    out.error((e as Error).message);
+    return 1;
+  }
+}
+
 export async function main(argv: string[]): Promise<number> {
+  if (argv[0] === "workflow-check") {
+    return await workflowCheck(argv[1], { error: console.error });
+  }
   try {
     const { method, params } = parseArgv(argv);
     const path = Deno.env.get("DOCTRINE_SOCKET") ?? socketPath();

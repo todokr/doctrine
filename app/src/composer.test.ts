@@ -12,7 +12,7 @@ import {
   selectedSteps,
   type ComposerForm,
 } from "./composer";
-import { PROJECTS, seedTasks, WORKFLOW_LIST } from "./fixtures";
+import { PROJECTS, seedTasks, setupTask, WORKFLOW_LIST } from "./fixtures";
 
 const task = (id: string) => seedTasks().find((t) => t.id === id)!;
 const intake = { id: "i1", processId: "2", issueUrl: null, parentIssueUrl: null };
@@ -23,6 +23,10 @@ describe("canRetry", () => {
   });
   test("終わっていない・完了したタスクでは出さない", () => {
     for (const id of ["t-7f3a", "t-91e0", "t-0a77"]) expect(canRetry(task(id))).toBe(false);
+  });
+  test("setup のタスクでは出さない（setup.yaml はディスクに無く、投入し直すと default で走る）", () => {
+    expect(canRetry(setupTask("failed"))).toBe(false);
+    expect(canRetry(setupTask("canceled"))).toBe(false);
   });
   test("Intake 由来のタスクでは出さない", () => {
     expect(canRetry({ ...task("t-e812"), intake })).toBe(false);

@@ -61,6 +61,19 @@ test("雛形は読み直すと同じ projects になる", () => {
   );
 });
 
+test("tracker を渡すと雛形に書かれ、読み直すと同じ tracker になる", () => {
+  const projects = [{ name: "doctrine", path: "." }];
+  const tracker = { kind: "linear" as const, team: "ENG" };
+  const cfg = parseWorkspaceConfig(workspaceYamlFor(projects, tracker), "doctrine");
+  assert.deepEqual(cfg.tracker, tracker);
+});
+
+test("tracker を渡さなければ雛形は github のまま", () => {
+  const projects = [{ name: "doctrine", path: "." }];
+  const cfg = parseWorkspaceConfig(workspaceYamlFor(projects), "doctrine");
+  assert.deepEqual(cfg.tracker, { kind: "github" });
+});
+
 const LINEAR_HEAD = "projects:\n  a: .\ntracker:\n  kind: linear\n  team: ENG\n";
 
 test("tracker に github を書ける", () => {

@@ -103,6 +103,8 @@ function initialState(): State {
     removing: null,
     settings: { kind: "loading" },
     composer: null,
+    wizard: null,
+    workspacesChecked: false,
   };
 }
 
@@ -159,6 +161,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           now: Date.now(),
         });
         if (intakes) dispatch({ type: "intakes.sync", intakes });
+
+        // 0 件ならウィザードを出す。読めなかった回は出さず、次の取り直しでまた読む
+        if (!latest.current.workspacesChecked) {
+          const workspaces = await rpc("workspace.list", {}).catch(() => null);
+          if (alive && workspaces) dispatch({ type: "workspaces.checked", count: workspaces.length });
+        }
 
         // worktree.list は worktree ごとに git status を回す（重い）ので、タスク一覧の
         // 反映をそれに待たせないよう別の Promise.all で取る。

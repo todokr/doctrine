@@ -137,6 +137,38 @@ export function IntakeRetryHint(props: { intakeId: string; onOpenIntake: (id: st
   );
 }
 
+/** 同梱の setup ワークフローで default.yaml を書き終えた後の案内 */
+export function SetupDoneNotice({ t }: { t: Task }) {
+  if (t.wf !== "setup" || t.state !== "completed") return null;
+  return (
+    <section className="box attn">
+      <p>
+        <span className="mono">.doctrine/workflows/default.yaml</span> を書き換えました（未コミット）。
+        コミットしてから、Issue を取り込むかタスクを作ってください。
+      </p>
+    </section>
+  );
+}
+
+/** 失敗・中止した setup のタスクの立て直し方。setup は投入し直せないので、default.yaml を手で置く */
+export function SetupRetryHint({ t }: { t: Task }) {
+  if (t.wf !== "setup") return null;
+  return (
+    <p className="hint">
+      ワークフローを作るタスクは投入し直せません。
+      {t.worktree && (
+        <>
+          worktree の <span className="mono">.doctrine-out/default.yaml</span> が書けていれば、それを
+          <span className="mono">{t.project}</span> の <span className="mono">.doctrine/workflows/default.yaml</span>{" "}
+          に写してください。
+        </>
+      )}
+      {t.worktree ? "あるいは、" : ""}
+      ウィザードが置いた雛形の <span className="mono">.doctrine/workflows/default.yaml</span> を直接直してください。
+    </p>
+  );
+}
+
 export function TaskView({ t }: { t: Task }) {
   const { s, dispatch } = useStore();
   const decide = useDecide();
@@ -205,6 +237,7 @@ export function TaskView({ t }: { t: Task }) {
         </span>
       </div>
 
+      <SetupDoneNotice t={t} />
       {stopReasons(s.tasks, t, detail).map((r) => {
         if (r.kind === "failed") {
           return (
@@ -218,7 +251,9 @@ export function TaskView({ t }: { t: Task }) {
               {t.worktree
                 ? (
                   <p>
-                    worktree は証拠として残しています。中を確認してから、同じ内容で投入し直すか、削除してください。
+                    {canRetry(t)
+                      ? "worktree は証拠として残しています。中を確認してから、同じ内容で投入し直すか、削除してください。"
+                      : "worktree は証拠として残しています。中を確認してから削除してください。"}
                   </p>
                 )
                 : (
@@ -227,6 +262,7 @@ export function TaskView({ t }: { t: Task }) {
                   </p>
                 )}
               {t.intake && <IntakeRetryHint intakeId={t.intake.id} onOpenIntake={openIntake} />}
+              <SetupRetryHint t={t} />
               {(canRetry(t) || t.worktree) && (
                 <div className="actions">
                   {canRetry(t) && <RetryButton init={retryInit(t, s.projects)} onOpen={openComposer} />}
@@ -254,13 +290,13 @@ export function TaskView({ t }: { t: Task }) {
       {t.state === "canceled" && (
         <section className="box quiet">
           <p>{t.worktree ? "中止しました。worktree は残しています。" : "中止しました。worktree は残っていません。"}</p>
-          {t.intake
-            ? <IntakeRetryHint intakeId={t.intake.id} onOpenIntake={openIntake} />
-            : (
-              <div className="actions">
-                <RetryButton init={retryInit(t, s.projects)} onOpen={openComposer} />
-              </div>
-            )}
+          {t.intake && <IntakeRetryHint intakeId={t.intake.id} onOpenIntake={openIntake} />}
+          <SetupRetryHint t={t} />
+          {canRetry(t) && (
+            <div className="actions">
+              <RetryButton init={retryInit(t, s.projects)} onOpen={openComposer} />
+            </div>
+          )}
         </section>
       )}
       {t.state === "rate_limited" && (

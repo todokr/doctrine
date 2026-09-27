@@ -106,6 +106,7 @@ fn open_path(command: String, path: String) -> Result<(), String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let handle = app.handle().clone();
             let emit: relay::Emit = Arc::new(move |name: &str, payload: Value| {

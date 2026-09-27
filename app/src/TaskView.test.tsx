@@ -1,8 +1,8 @@
 import { describe, expect, test, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
-import { IntakeRetryHint, RetryButton, TaskActions } from "./components/TaskView";
+import { IntakeRetryHint, RetryButton, SetupDoneNotice, SetupRetryHint, TaskActions } from "./components/TaskView";
 import { retryInit } from "./composer";
-import { PROJECTS, seedTasks } from "./fixtures";
+import { PROJECTS, seedTasks, setupTask } from "./fixtures";
 import type { Task } from "./types";
 
 const task = (id: string) => seedTasks().find((t) => t.id === id)!;
@@ -94,5 +94,50 @@ describe("IntakeRetryHint", () => {
     expect(h).toContain("Intake を開く");
     expect(h).not.toContain("同じ内容で投入し直す");
     expect(h).not.toContain("pfd.yaml");
+  });
+});
+
+describe("SetupDoneNotice", () => {
+  const COMMIT = "コミットしてから、Issue を取り込むかタスクを作ってください";
+
+  test("setup のタスクが completed ならコミットの案内を出す", () => {
+    const h = renderToStaticMarkup(<SetupDoneNotice t={setupTask("completed")} />);
+    expect(h).toContain(".doctrine/workflows/default.yaml");
+    expect(h).toContain("（未コミット）");
+    expect(h).toContain(COMMIT);
+  });
+
+  test("setup のタスクでも completed でなければ出さない", () => {
+    for (const state of ["running", "suspended", "failed"] as const) {
+      expect(renderToStaticMarkup(<SetupDoneNotice t={setupTask(state)} />)).toBe("");
+    }
+  });
+
+  test("ほかのワークフローのタスクには出さない", () => {
+    expect(renderToStaticMarkup(<SetupDoneNotice t={task("t-0a77")} />)).toBe("");
+    expect(renderToStaticMarkup(<SetupDoneNotice t={{ ...setupTask("completed"), wf: "default" }} />)).toBe("");
+  });
+});
+
+describe("SetupRetryHint", () => {
+  test("worktree が残っていれば .doctrine-out/default.yaml を写す案内と、雛形を直す案内を出す", () => {
+    const h = renderToStaticMarkup(
+      <SetupRetryHint t={{ ...setupTask("failed"), worktree: "/Users/me/.doctrine/worktrees/t-5e70" }} />,
+    );
+    expect(h).toContain(".doctrine-out/default.yaml");
+    expect(h).toContain("shop-api");
+    expect(h).toContain(".doctrine/workflows/default.yaml");
+    expect(h).toContain("雛形");
+    expect(h).not.toContain("同じ内容で投入し直す");
+  });
+
+  test("worktree が無ければ雛形を直す案内だけを出す", () => {
+    const h = renderToStaticMarkup(<SetupRetryHint t={setupTask("canceled")} />);
+    expect(h).not.toContain(".doctrine-out/default.yaml");
+    expect(h).toContain("雛形");
+  });
+
+  test("ほかのワークフローのタスクには出さない", () => {
+    expect(renderToStaticMarkup(<SetupRetryHint t={task("t-e812")} />)).toBe("");
   });
 });

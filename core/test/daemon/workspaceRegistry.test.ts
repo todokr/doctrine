@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, test } from "@std/testing/bdd";
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { sql } from "kysely";
@@ -14,9 +14,23 @@ import {
   listProjectsOf,
   listWorkspaces,
 } from "../../src/db/workspaces.ts";
-import { addWorkspace, updateWorkspace } from "../../src/daemon/workspaceRegistry.ts";
+import {
+  addWorkspace,
+  toWorkspaceSummary,
+  updateWorkspace,
+} from "../../src/daemon/workspaceRegistry.ts";
+import { WorkflowValidationError } from "../../src/workflow/schema.ts";
 import { makeRepo } from "../helpers/repo.ts";
 import { seedProject } from "../helpers/project.ts";
+
+async function pathExists(p: string): Promise<boolean> {
+  try {
+    await stat(p);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 let rawRoot: string;
 let root: string;
@@ -287,4 +301,104 @@ test("未登録の root の updateWorkspace は投げる", async () => {
 
 test("相対パスは投げる", async () => {
   await assert.rejects(addWorkspace(db, "tp"), /絶対パス/);
+});
+
+test("git 管理外の root に workspace.yaml が無くても、projects を渡せば書いて登録する", async () => {
+  const a = await repoAt("a");
+  const tp = join(root, "tp-init");
+  await mkdir(tp, { recursive: true });
+  const r = await addWorkspace(db, tp, { projects: { a: "../a/repo" } });
+  assert.equal(r.alreadyRegistered, false);
+  assert.deepEqual(r.created, [join(tp, ".doctrine", "workspace.yaml")]);
+  const rows = await listProjectsOf(db, r.workspaceId);
+  assert.deepEqual(rows.map((p) => p.name), ["a"]);
+  assert.deepEqual(rows.map((p) => p.path), [a]);
+});
+
+test("tracker を渡すと workspace.yaml に書く", async () => {
+  await repoAt("a");
+  const tp = join(root, "tp-tracker");
+  await mkdir(tp, { recursive: true });
+  await addWorkspace(db, tp, {
+    projects: { a: "../a/repo" },
+    tracker: { kind: "linear", team: "ENG" },
+  });
+  const written = await readFile(join(tp, ".doctrine", "workspace.yaml"), "utf8");
+  assert.match(written, /kind: linear/);
+  assert.match(written, /team: ENG/);
+});
+
+test("workspace.yaml があれば projects と tracker を使わない", async () => {
+  const a = await repoAt("a");
+  const tp = await writeTp("projects:\n  a: ../a/repo\n");
+  const r = await addWorkspace(db, tp, { projects: { other: "../does/not/exist" } });
+  assert.deepEqual(r.created, []);
+  const rows = await listProjectsOf(db, r.workspaceId);
+  assert.deepEqual(rows.map((p) => p.name), ["a"]);
+  assert.deepEqual(rows.map((p) => p.path), [a]);
+});
+
+test("既に .doctrine/ があるプロジェクトの default.yaml は created に入らない", async () => {
+  await repoAt("a");
+  const tp = join(root, "tp-existing");
+  await mkdir(tp, { recursive: true });
+  const r = await addWorkspace(db, tp, { projects: { a: "../a/repo" } });
+  assert.ok(!r.created.some((p) => p.endsWith("workflows/default.yaml")));
+});
+
+test("不正な projects（名前の形が違う）なら workspace.yaml を残さずに投げる", async () => {
+  await repoAt("a");
+  const tp = join(root, "tp-invalid");
+  await mkdir(tp, { recursive: true });
+  await assert.rejects(
+    addWorkspace(db, tp, { projects: { "Assured_TP": "../a/repo" } }),
+    WorkflowValidationError,
+  );
+  assert.equal(await pathExists(join(tp, ".doctrine", "workspace.yaml")), false);
+  assert.deepEqual(await listWorkspaces(db), []);
+});
+
+test("init の projects が指すパスが無ければ workspace.yaml を残さずに投げる", async () => {
+  const tp = join(root, "tp-nopath");
+  await mkdir(tp, { recursive: true });
+  await assert.rejects(
+    addWorkspace(db, tp, { projects: { a: "../nope" } }),
+    /指すパスがありません/,
+  );
+  assert.equal(await pathExists(join(tp, ".doctrine", "workspace.yaml")), false);
+  assert.deepEqual(await listWorkspaces(db), []);
+});
+
+test("init の projects が既存の git 管理外ディレクトリを指すなら、他のプロジェクトも含めて何もスキャフォルドせずに投げる", async () => {
+  // .doctrine を持たない、まだ雛形を書いていないリポジトリ（repoAt は最初から
+  // project.yaml を持つので使えない — スキャフォルドが走ったかどうかを見分けられない）
+  const plain = await makeRepo(join(root, "plain"), { "README.md": "x\n" });
+  const notGit = join(root, "not-a-repo");
+  await mkdir(notGit, { recursive: true });
+  const tp = join(root, "tp-notgit");
+  await mkdir(tp, { recursive: true });
+  await assert.rejects(
+    addWorkspace(db, tp, { projects: { plain: "../plain/repo", b: "../not-a-repo" } }),
+    /git リポジトリではありません/,
+  );
+  assert.equal(await pathExists(join(tp, ".doctrine", "workspace.yaml")), false);
+  // plain は正当なリポジトリだが、b の検証が先に全件終わるまでスキャフォルドは走らない
+  assert.equal(await pathExists(join(plain, ".doctrine")), false);
+  assert.equal(await pathExists(join(notGit, ".doctrine")), false);
+  assert.deepEqual(await listWorkspaces(db), []);
+  assert.deepEqual(await listWorkspaces(db), []);
+});
+
+test("created の default.yaml は summary.projects の path から作った絶対パスと一致する（symlink 経由の root でも）", async () => {
+  const plain = await makeRepo(join(root, "plain"), { "README.md": "x\n" });
+  await symlink(plain, join(root, "plain-link"));
+  const tp = join(rawRoot, "tp-symlink");
+  await mkdir(tp, { recursive: true });
+  const r = await addWorkspace(db, tp, { projects: { plain: "../plain-link" } });
+  const summary = await toWorkspaceSummary(db, r.workspaceId);
+  const project = summary.projects.find((p) => p.name === "plain")!;
+  assert.equal(project.path, plain);
+  assert.ok(r.created.includes(join(project.path, ".doctrine", "workflows", "default.yaml")));
+  assert.ok(r.created.includes(join(project.path, ".doctrine", "project.yaml")));
+  assert.ok(r.created.includes(join(summary.path, ".doctrine", "workspace.yaml")));
 });

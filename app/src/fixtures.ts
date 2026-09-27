@@ -7,6 +7,8 @@ import type {
   TrackerIssue,
   WorkflowDetail,
   WorkflowListEntry,
+  WorkspaceDetection,
+  WorkspaceSummary,
 } from "../../shared/protocol.ts";
 import type { Pfd } from "../../shared/intake/pfd.ts";
 import type { PrFact, ProcessStatus } from "../../shared/intake/processStatus.ts";
@@ -651,3 +653,67 @@ export const INTAKE_ANSWERING: IntakeDetail = {
   processes: [],
   runs: [],
 };
+
+/** workspace.detect の標本。git 管理外の root の直下に 2 つのリポジトリ */
+export const DETECT_PARENT: WorkspaceDetection = {
+  isRepoRoot: false,
+  repositories: [
+    { dir: "Shop_API", suggestedName: "shop-api" },
+    { dir: "web", suggestedName: "web" },
+  ],
+  existing: null,
+  alreadyRegistered: false,
+};
+
+/** root 自身が git リポジトリのルート */
+export const DETECT_REPO_ROOT: WorkspaceDetection = {
+  isRepoRoot: true,
+  repositories: [],
+  existing: null,
+  alreadyRegistered: false,
+};
+
+/** root/.doctrine/workspace.yaml が既にある */
+export const DETECT_EXISTING: WorkspaceDetection = {
+  isRepoRoot: false,
+  repositories: [{ dir: "api", suggestedName: "api" }],
+  existing: { name: "shop", projects: { api: "api" }, tracker: { kind: "linear", team: "ENG" } },
+  alreadyRegistered: false,
+};
+
+/** workspace.add の応答の標本。shop-api だけに default.yaml の雛形を作った */
+export const ADDED_WORKSPACE: WorkspaceSummary & { created: string[]; alreadyRegistered: boolean } = {
+  id: 7,
+  path: "/Users/me/work",
+  name: "work",
+  projects: [
+    { id: 11, workspace_id: 7, name: "shop-api", path: "/Users/me/work/Shop_API", default_workflow: "default", max_concurrent: 1, base_branch: "main", setup: null },
+    { id: 12, workspace_id: 7, name: "web", path: "/Users/me/work/web", default_workflow: "default", max_concurrent: 1, base_branch: "main", setup: null },
+  ],
+  created: [
+    "/Users/me/work/.doctrine/workspace.yaml",
+    "/Users/me/work/Shop_API/.doctrine/workflows/default.yaml",
+    "/Users/me/work/Shop_API/.doctrine/project.yaml",
+    "/Users/me/work/web/.doctrine/project.yaml",
+  ],
+  alreadyRegistered: false,
+};
+
+/** 同梱の setup ワークフローで走るタスク（workflow_name は setup） */
+export function setupTask(state: Task["state"]): Task {
+  return {
+    id: "t-5e70",
+    wf: "setup",
+    project: "shop-api",
+    title: "shop-api のワークフローを作る",
+    prompt: "",
+    branch: "doctrine/t-5e70",
+    worktree: null,
+    state,
+    step: "apply",
+    attempt: 1,
+    prio: 2,
+    since: NOW - 5 * MIN,
+    intake: null,
+  };
+}
