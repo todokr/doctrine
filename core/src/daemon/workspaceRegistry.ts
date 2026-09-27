@@ -197,7 +197,9 @@ async function resolveProjects(root: string, cfg: WorkspaceConfig): Promise<Reso
     // ensureProjectScaffold（assertRepoRoot）が同じことを確かめるが、それは1件ずつ
     // スキャフォルドしながら呼ぶので手遅れ。ここで先に全件を確かめる。
     if (await requireNotSubdirectory(real) === null) {
-      throw new Error(`projects の ${entry.name} が指すパスは git リポジトリではありません: ${real}`);
+      throw new Error(
+        `projects の ${entry.name} が指すパスは git リポジトリではありません: ${real}`,
+      );
     }
     seen.set(real, entry.name);
     resolved.push({ name: entry.name, path: real });
