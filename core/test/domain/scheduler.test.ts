@@ -1,7 +1,8 @@
 import { test } from "@std/testing/bdd";
 import assert from "node:assert/strict";
 import { openDb } from "../../src/db/migrate.ts";
-import { getTask, insertProject, insertTask, type TaskState } from "../../src/db/tasks.ts";
+import { getTask, insertTask, type TaskState } from "../../src/db/tasks.ts";
+import { seedProject } from "../helpers/project.ts";
 import {
   currentUsage,
   hasActiveRateLimit,
@@ -24,13 +25,7 @@ import type { Db } from "../../src/db/schema.ts";
 
 async function fixture(maxConcurrent = 1) {
   const d = await openDb(":memory:");
-  const p = await insertProject(d, {
-    path: "/repo",
-    default_workflow: "f",
-    max_concurrent: maxConcurrent,
-    base_branch: "main",
-    setup: null,
-  });
+  const p = (await seedProject(d, { path: "/repo", max_concurrent: maxConcurrent })).id;
   return { d, p };
 }
 
@@ -91,13 +86,7 @@ test("paused もプロジェクト枠を握り続ける", async () => {
 
 test("suspended は全体枠を握らない", async () => {
   const { d, p } = await fixture(1);
-  const p2 = await insertProject(d, {
-    path: "/other",
-    default_workflow: "f",
-    max_concurrent: 1,
-    base_branch: "main",
-    setup: null,
-  });
+  const p2 = (await seedProject(d, { path: "/other" })).id;
   for (const id of ["a", "b", "c", "d"]) await add(d, p, id, { state: "suspended" });
   await add(d, p2, "other");
   assert.deepEqual(
@@ -112,13 +101,7 @@ test("全体枠の上限を超えて返さない", async () => {
   const projects: number[] = [];
   for (const n of [1, 2, 3, 4, 5]) {
     projects.push(
-      await insertProject(d, {
-        path: `/p${n}`,
-        default_workflow: "f",
-        max_concurrent: 1,
-        base_branch: "main",
-        setup: null,
-      }),
+      (await seedProject(d, { path: `/p${n}` })).id,
     );
   }
   for (const [i, p] of projects.entries()) await add(d, p, `t${i}`);
@@ -127,20 +110,8 @@ test("全体枠の上限を超えて返さない", async () => {
 
 test("再開したタスクが行列の先頭に入る", async () => {
   const d = await openDb(":memory:");
-  const p1 = await insertProject(d, {
-    path: "/a",
-    default_workflow: "f",
-    max_concurrent: 1,
-    base_branch: "main",
-    setup: null,
-  });
-  const p2 = await insertProject(d, {
-    path: "/b",
-    default_workflow: "f",
-    max_concurrent: 1,
-    base_branch: "main",
-    setup: null,
-  });
+  const p1 = (await seedProject(d, { path: "/a" })).id;
+  const p2 = (await seedProject(d, { path: "/b" })).id;
   await add(d, p1, "newer", { createdAt: "2026-01-01T00:00:00Z" });
   await add(d, p2, "resumed-later", { createdAt: "2026-06-01T00:00:00Z", resumed: 1 });
   assert.deepEqual(
@@ -155,13 +126,7 @@ test("優先度 → 作成時刻のFIFO", async () => {
   const ps: number[] = [];
   for (const n of ["a", "b", "c"]) {
     ps.push(
-      await insertProject(d, {
-        path: `/${n}`,
-        default_workflow: "f",
-        max_concurrent: 1,
-        base_branch: "main",
-        setup: null,
-      }),
+      (await seedProject(d, { path: `/${n}` })).id,
     );
   }
   await add(d, ps[0], "p2-old", { priority: 2, createdAt: "2026-01-01T00:00:00Z" });

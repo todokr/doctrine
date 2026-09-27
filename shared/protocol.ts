@@ -296,6 +296,8 @@ export type RateLimitSample = {
 
 export type ProjectSummary = {
   id: number;
+  workspace_id: number;
+  name: string;
   path: string;
   default_workflow: string;
   max_concurrent: number;

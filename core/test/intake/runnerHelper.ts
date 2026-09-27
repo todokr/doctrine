@@ -5,7 +5,7 @@ import type { AgentAdapter } from "../../src/adapter/types.ts";
 import { insertIntake } from "../../src/db/intakes.ts";
 import { openDb } from "../../src/db/migrate.ts";
 import type { Db } from "../../src/db/schema.ts";
-import { insertProject } from "../../src/db/tasks.ts";
+import { seedProject } from "../helpers/project.ts";
 import { claimIntakeRun, type IntakeRunnerDeps, runIntakeRun } from "../../src/intake/runner.ts";
 import type { Pfd } from "../../../shared/intake/pfd.ts";
 import type { Answer, Assumption, Question } from "../../../shared/intake/question.ts";
@@ -28,13 +28,7 @@ export async function createFixture(): Promise<Fixture> {
   Deno.env.set("DOCTRINE_STATE_DIR", join(root, "state"));
   const repo = await makeRepo(root, { "README.md": "x\n" });
   const db = await openDb(":memory:");
-  const projectId = await insertProject(db, {
-    path: repo,
-    default_workflow: "f",
-    max_concurrent: 1,
-    base_branch: "main",
-    setup: null,
-  });
+  const projectId = (await seedProject(db, { path: repo })).id;
   await insertIntake(db, {
     id: "i1",
     project_id: projectId,

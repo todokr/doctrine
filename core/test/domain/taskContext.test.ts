@@ -2,7 +2,8 @@ import { afterEach, test } from "@std/testing/bdd";
 import assert from "node:assert/strict";
 import { join } from "@std/path";
 import { openDb } from "../../src/db/migrate.ts";
-import { getTask, insertProject, insertTask } from "../../src/db/tasks.ts";
+import { getTask, insertTask } from "../../src/db/tasks.ts";
+import { seedProject } from "../helpers/project.ts";
 import { commitStepBoundary } from "../../src/db/boundary.ts";
 import { parseWorkflow } from "../../src/workflow/schema.ts";
 import { buildTaskContext } from "../../src/domain/taskContext.ts";
@@ -33,13 +34,7 @@ steps:
 
 async function fixture(worktree: string | null = null): Promise<Db> {
   const db = await openDb(":memory:");
-  const pid = await insertProject(db, {
-    path: "/repo",
-    default_workflow: "f",
-    max_concurrent: 1,
-    base_branch: "main",
-    setup: null,
-  });
+  const pid = (await seedProject(db, { path: "/repo" })).id;
   await insertTask(db, {
     id: "t1",
     project_id: pid,

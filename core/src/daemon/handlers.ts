@@ -1,4 +1,4 @@
-import { isAbsolute, join } from "@std/path";
+import { basename, isAbsolute, join } from "@std/path";
 import { computeDiff, mergeBase, type TaskDiff } from "../domain/diff.ts";
 import { branchOf, type Step, type Workflow, WorkflowValidationError } from "../workflow/schema.ts";
 import {
@@ -24,6 +24,7 @@ import {
   type TaskRow,
   type TaskState,
 } from "../db/tasks.ts";
+import { insertWorkspace, projectNameFrom } from "../db/workspaces.ts";
 import { getStepRun, lastRejectedReview, lastStepRun, listStepRuns } from "../db/stepRuns.ts";
 import { commitStepBoundary, StateConflictError } from "../db/boundary.ts";
 import type { Db } from "../db/schema.ts";
@@ -318,6 +319,7 @@ export function createHandler(ctx: DaemonContext): Handler {
   return async (method, params, conn) => {
     switch (method) {
       case "project.add": {
+        // Task 3 で workspace.add に置き換えるまでのつなぎ: プロジェクト 1 つの workspace を作る
         const path = req(params, "path");
         // 最初に叩く init 的なコマンドなので、2回目はエラーにせず登録済みと伝えるだけにする
         const existing = await getProjectByPath(ctx.db, path);
@@ -327,12 +329,18 @@ export function createHandler(ctx: DaemonContext): Handler {
         const cfg = parseProjectConfig(
           await Deno.readTextFile(join(path, ".doctrine", "project.yaml")),
         );
-        const id = await insertProject(ctx.db, {
-          path,
-          default_workflow: cfg.defaultWorkflow,
-          max_concurrent: cfg.maxConcurrent,
-          base_branch: cfg.baseBranch,
-          setup: cfg.setup ?? null,
+        const dir = basename(path);
+        const id = await ctx.db.transaction().execute(async (trx) => {
+          const workspace_id = await insertWorkspace(trx, { path, name: dir });
+          return await insertProject(trx, {
+            workspace_id,
+            name: projectNameFrom(dir),
+            path,
+            default_workflow: cfg.defaultWorkflow,
+            max_concurrent: cfg.maxConcurrent,
+            base_branch: cfg.baseBranch,
+            setup: cfg.setup ?? null,
+          });
         });
         return { ...(await getProject(ctx.db, id)), created, alreadyRegistered: false };
       }

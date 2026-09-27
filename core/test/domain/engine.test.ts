@@ -10,7 +10,8 @@ import type { AgentEvent, AgentResult } from "../../src/adapter/types.ts";
 import { parseWorkflow } from "../../src/workflow/schema.ts";
 import { DatabaseSync } from "node:sqlite";
 import { openDb, openDbOn } from "../../src/db/migrate.ts";
-import { getTask, insertProject, insertTask } from "../../src/db/tasks.ts";
+import { getTask, insertTask } from "../../src/db/tasks.ts";
+import { seedProject } from "../helpers/project.ts";
 import { getStepOutputs, getStepRun, listStepRuns } from "../../src/db/stepRuns.ts";
 import { createMockAdapter } from "../../src/adapter/mock.ts";
 import type { Db } from "../../src/db/schema.ts";
@@ -113,13 +114,7 @@ async function taskFixture(workflowYaml: string) {
   const root = await mkdtemp(join(tmpdir(), "doctrine-engine-"));
   roots.push(root);
   const db = await openDb(":memory:");
-  const pid = await insertProject(db, {
-    path: root,
-    default_workflow: "f",
-    max_concurrent: 1,
-    base_branch: "main",
-    setup: null,
-  });
+  const pid = (await seedProject(db, { path: root })).id;
   await insertTask(db, {
     id: "t1",
     project_id: pid,
@@ -1351,13 +1346,7 @@ test("状態を読んだ直後に cancel が届いても、runTask はステッ�
   roots.push(root);
   const sqlite = new DatabaseSync(":memory:");
   const db = await openDbOn(sqlite);
-  const pid = await insertProject(db, {
-    path: root,
-    default_workflow: "f",
-    max_concurrent: 1,
-    base_branch: "main",
-    setup: null,
-  });
+  const pid = (await seedProject(db, { path: root })).id;
   await insertTask(db, {
     id: "t1",
     project_id: pid,
@@ -1418,13 +1407,7 @@ test("captureTree が走っている間に cancel が届いても、awaiting の
   const repo = await makeRepo(root, { "a.txt": "1\n" }); // captureTree が本物の git を叩けるようにする
   const sqlite = new DatabaseSync(":memory:");
   const db = await openDbOn(sqlite);
-  const pid = await insertProject(db, {
-    path: repo,
-    default_workflow: "f",
-    max_concurrent: 1,
-    base_branch: "main",
-    setup: null,
-  });
+  const pid = (await seedProject(db, { path: repo })).id;
   await insertTask(db, {
     id: "t1",
     project_id: pid,

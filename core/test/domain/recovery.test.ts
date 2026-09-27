@@ -1,7 +1,8 @@
 import { test } from "@std/testing/bdd";
 import assert from "node:assert/strict";
 import { openDb } from "../../src/db/migrate.ts";
-import { getTask, insertProject, insertTask } from "../../src/db/tasks.ts";
+import { getTask, insertTask } from "../../src/db/tasks.ts";
+import { seedProject } from "../helpers/project.ts";
 import { commitStepBoundary } from "../../src/db/boundary.ts";
 import { listStepRuns } from "../../src/db/stepRuns.ts";
 import type { Workflow } from "../../src/workflow/schema.ts";
@@ -16,13 +17,7 @@ import {
 
 async function fixture(taskIds: string[] = ["t1"]) {
   const db = await openDb(":memory:");
-  const p = await insertProject(db, {
-    path: "/repo",
-    default_workflow: "f",
-    max_concurrent: 1,
-    base_branch: "main",
-    setup: null,
-  });
+  const p = (await seedProject(db, { path: "/repo" })).id;
   for (const id of taskIds) {
     await insertTask(db, {
       id,

@@ -10,7 +10,7 @@ import {
 } from "../../src/db/intakes.ts";
 import { openDb } from "../../src/db/migrate.ts";
 import type { Db } from "../../src/db/schema.ts";
-import { insertProject } from "../../src/db/tasks.ts";
+import { seedProject } from "../helpers/project.ts";
 import { ghTracker } from "../../src/github/ghTracker.ts";
 import { type SubIssueSyncInput, syncSubIssues } from "../../src/intake/subIssueSync.ts";
 import { fakeGh, parseGraphqlArgs } from "../helpers/gh.ts";
@@ -22,13 +22,7 @@ const PARENT = { url: PARENT_URL, nodeId: "I_1" };
 
 async function fixture(processIds = ["1", "2", "3", "4"]) {
   const d: Db = await openDb(":memory:");
-  const projectId = await insertProject(d, {
-    path: "/repo",
-    default_workflow: "f",
-    max_concurrent: 1,
-    base_branch: "main",
-    setup: null,
-  });
+  const projectId = (await seedProject(d, { path: "/repo" })).id;
   await insertIntake(d, {
     id: "i1",
     project_id: projectId,

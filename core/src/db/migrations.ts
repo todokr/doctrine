@@ -817,7 +817,78 @@ const migrations: Record<string, Migration> = {
       await db.schema.alterTable("intake_processes").addColumn("sub_issue_phase", "text").execute();
     },
   },
+
+  /**
+   * プロジェクトをちょうど 1 つの workspace に属させる。既存のプロジェクトは 1 つずつ
+   * 「そのリポジトリを root とする、プロジェクト 1 つの workspace」に移す。
+   * name の丸めは nameFrom に書き写した規則で固定してある。
+   *
+   * projects を DROP すると tasks・intakes が参照を失うので、外部キーの止め方と
+   * 確かめ方は 0005 と同じ。
+   */
+  "0015_workspace": {
+    // deno-lint-ignore no-explicit-any
+    async up(db: Kysely<any>) {
+      await db.schema.createTable("workspaces")
+        .addColumn("id", "integer", (c) => c.primaryKey().autoIncrement())
+        .addColumn("path", "text", (c) => c.notNull().unique())
+        .addColumn("name", "text", (c) => c.notNull())
+        .execute();
+      await db.schema.alterTable("projects").addColumn("workspace_id", "integer").execute();
+      await db.schema.alterTable("projects").addColumn("name", "text").execute();
+
+      const existing = await sql<{ id: number; path: string }>`
+        SELECT id, path FROM projects ORDER BY id
+      `.execute(db);
+      for (const p of existing.rows) {
+        const dir = p.path.replace(/\/+$/, "").split("/").at(-1) || "project";
+        const w = await sql<{ id: number }>`
+          INSERT INTO workspaces (path, name) VALUES (${p.path}, ${dir}) RETURNING id
+        `.execute(db);
+        await sql`
+          UPDATE projects SET workspace_id = ${w.rows[0].id}, name = ${nameFrom(dir)}
+          WHERE id = ${p.id}
+        `.execute(db);
+      }
+
+      await sql`PRAGMA foreign_keys = OFF`.execute(db);
+      await sql`PRAGMA defer_foreign_keys = ON`.execute(db);
+
+      await db.schema.createTable("projects_new")
+        .addColumn("id", "integer", (c) => c.primaryKey().autoIncrement())
+        .addColumn("workspace_id", "integer", (c) => c.notNull().references("workspaces.id"))
+        .addColumn("name", "text", (c) => c.notNull())
+        .addColumn("path", "text", (c) => c.notNull().unique())
+        .addColumn("default_workflow", "text", (c) => c.notNull())
+        .addColumn("max_concurrent", "integer", (c) => c.notNull().defaultTo(1))
+        .addColumn("base_branch", "text", (c) => c.notNull().defaultTo("main"))
+        .addColumn("setup", "text")
+        .addUniqueConstraint("projects_workspace_name", ["workspace_id", "name"])
+        .execute();
+      await sql`
+        INSERT INTO projects_new
+          (id, workspace_id, name, path, default_workflow, max_concurrent, base_branch, setup)
+        SELECT id, workspace_id, name, path, default_workflow, max_concurrent, base_branch, setup
+        FROM projects
+      `.execute(db);
+      await db.schema.dropTable("projects").execute();
+      await db.schema.alterTable("projects_new").renameTo("projects").execute();
+
+      const violations = await sql<{ table: string }>`PRAGMA foreign_key_check`.execute(db);
+      await sql`PRAGMA foreign_keys = ON`.execute(db);
+      if (violations.rows.length > 0) {
+        throw new Error(
+          `外部キーが壊れています: ${violations.rows.map((r) => r.table).join(", ")}`,
+        );
+      }
+    },
+  },
 };
+
+/** 名前を [a-z0-9-]+ に丸める。空になれば "project"。 */
+function nameFrom(dirName: string): string {
+  return dirName.toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "") || "project";
+}
 
 /** ファイルを動的 import しない（権限も要らず、deno check で型検査される）。 */
 const provider: MigrationProvider = {
@@ -831,7 +902,18 @@ const provider: MigrationProvider = {
  */
 // deno-lint-ignore no-explicit-any
 export async function migrateToLatest(db: Kysely<any>): Promise<void> {
-  const { error, results } = await new Migrator({ db, provider }).migrateToLatest();
+  throwIfFailed(await new Migrator({ db, provider }).migrateToLatest());
+}
+
+/** name まで（name を含む）流す。テストが古い番号の形の DB を作るのに使う。失敗の投げ方は migrateToLatest と同じ。 */
+// deno-lint-ignore no-explicit-any
+export async function migrateTo(db: Kysely<any>, name: string): Promise<void> {
+  throwIfFailed(await new Migrator({ db, provider }).migrateTo(name));
+}
+
+function throwIfFailed(
+  { error, results }: { error?: unknown; results?: { migrationName: string; status: string }[] },
+) {
   if (error !== undefined) {
     const failed = results?.find((r) => r.status === "Error")?.migrationName;
     const reason = error instanceof Error ? error.message : String(error);

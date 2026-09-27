@@ -1,7 +1,8 @@
 import { test } from "@std/testing/bdd";
 import assert from "node:assert/strict";
 import { openDb } from "../../src/db/migrate.ts";
-import { getTask, insertProject, insertTask } from "../../src/db/tasks.ts";
+import { getTask, insertTask } from "../../src/db/tasks.ts";
+import { seedProject } from "../helpers/project.ts";
 import { getStepOutputs, getStepRun, listStepRuns } from "../../src/db/stepRuns.ts";
 import {
   commitStepBoundary,
@@ -15,13 +16,7 @@ import type { StepRunStatus } from "../../src/db/stepRuns.ts";
 
 async function fixture() {
   const d = await openDb(":memory:");
-  const pid = await insertProject(d, {
-    path: "/repo",
-    default_workflow: "f",
-    max_concurrent: 1,
-    base_branch: "main",
-    setup: null,
-  });
+  const pid = (await seedProject(d, { path: "/repo" })).id;
   await insertTask(d, {
     id: "t1",
     project_id: pid,

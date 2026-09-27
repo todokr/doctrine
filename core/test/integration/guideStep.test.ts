@@ -12,7 +12,8 @@ import { ensureDoctrineOutExcluded } from "../../src/domain/worktree.ts";
 import { createMockAdapter } from "../../src/adapter/mock.ts";
 import { parseWorkflow } from "../../src/workflow/schema.ts";
 import { openDb } from "../../src/db/migrate.ts";
-import { getTask, insertProject, insertTask } from "../../src/db/tasks.ts";
+import { getTask, insertTask } from "../../src/db/tasks.ts";
+import { seedProject } from "../helpers/project.ts";
 import { getStepOutputs, listStepRuns } from "../../src/db/stepRuns.ts";
 import { guideJsonSchema } from "../../../shared/guide/jsonSchema.ts";
 import type { Db } from "../../src/db/schema.ts";
@@ -32,13 +33,7 @@ beforeEach(async () => {
   await writeFile(join(repo, "README.md"), "a\nb\nc\nd\n");
 
   db = await openDb(":memory:");
-  const pid = await insertProject(db, {
-    path: repo,
-    default_workflow: "f",
-    max_concurrent: 1,
-    base_branch: "main",
-    setup: null,
-  });
+  const pid = (await seedProject(db, { path: repo })).id;
   await insertTask(db, {
     id: "t1",
     project_id: pid,

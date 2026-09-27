@@ -6,7 +6,8 @@ import { join } from "node:path";
 import { applyApproval, runTask } from "../../src/domain/engine.ts";
 import { parseWorkflow } from "../../src/workflow/schema.ts";
 import { openDb } from "../../src/db/migrate.ts";
-import { getTask, insertProject, insertTask } from "../../src/db/tasks.ts";
+import { getTask, insertTask } from "../../src/db/tasks.ts";
+import { seedProject } from "../helpers/project.ts";
 import { lastRejectedReview, listStepRuns } from "../../src/db/stepRuns.ts";
 import { createWorktree } from "../../src/domain/worktree.ts";
 import { reviewRefName } from "../../src/domain/reviewTree.ts";
@@ -46,13 +47,7 @@ async function fixture(): Promise<{ db: Db; repo: string; worktree: string; logR
     baseBranch: "main",
   });
   const db = await openDb(":memory:");
-  const pid = await insertProject(db, {
-    path: repo,
-    default_workflow: "f",
-    max_concurrent: 1,
-    base_branch: "main",
-    setup: null,
-  });
+  const pid = (await seedProject(db, { path: repo })).id;
   await insertTask(db, {
     id: "t1",
     project_id: pid,

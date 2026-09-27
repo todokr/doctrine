@@ -9,6 +9,7 @@ import { basename, dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { openDb, openDbOn } from "../../src/db/migrate.ts";
 import { getTask, insertTask, listTasks } from "../../src/db/tasks.ts";
+import { getWorkspace } from "../../src/db/workspaces.ts";
 import { listStepRuns } from "../../src/db/stepRuns.ts";
 import { captureTree, reviewRefName } from "../../src/domain/reviewTree.ts";
 import {
@@ -119,9 +120,15 @@ test("project.add でプロジェクトを登録し、設定を読む", async ()
   const h = createHandler(ctx);
   const p = await h("project.add", { path: repo }, NOOP_CONN) as {
     id: number;
+    workspace_id: number;
+    name: string;
     default_workflow: string;
   };
   assert.equal(p.default_workflow, "feature");
+  assert.equal(p.name, "repo");
+  const w = await getWorkspace(ctx.db, p.workspace_id);
+  assert.equal(w?.path, repo);
+  assert.equal(w?.name, "repo");
   const list = await h("project.list", {}, NOOP_CONN) as unknown[];
   assert.equal(list.length, 1);
 });
@@ -1539,6 +1546,8 @@ const TASK_SUMMARY_SHAPE: Record<keyof TaskSummary, (v: unknown) => boolean> = {
 
 const PROJECT_SHAPE: Record<keyof ProjectSummary, (v: unknown) => boolean> = {
   id: isNumber,
+  workspace_id: isNumber,
+  name: isString,
   path: isString,
   default_workflow: isString,
   max_concurrent: isNumber,
