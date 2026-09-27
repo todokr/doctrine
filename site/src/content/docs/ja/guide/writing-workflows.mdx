@@ -5,24 +5,22 @@ sidebar:
   order: 20
 ---
 
-`dctl workspace-add --path <root>` が作った雛形を、プロジェクトに合わせて編集する。root がリポジトリなら、そのリポジトリに `.doctrine/workspace.yaml` もできる。配置場所は2つ。
+`dctl workspace-add --path <root>` が作った雛形を、プロジェクトに合わせて編集します。root がリポジトリなら、そのリポジトリには `.doctrine/workspace.yaml` もできます。編集するファイルは次の 2 つです。
 
 - `<project>/.doctrine/project.yaml` — プロジェクト全体の設定
 - `<project>/.doctrine/workflows/<name>.yaml` — 手順そのもの
 
 ```yaml
 # .doctrine/project.yaml
-setup: pnpm install --frozen-lockfile   # 全ワークフローの先頭に自動挿入される
+setup: pnpm install --frozen-lockfile   # 全ワークフローの先頭に自動で差し込まれる
 defaultWorkflow: default
 maxConcurrent: 1
 baseBranch: main
 ```
 
-`setup` は省略できる。`defaultWorkflow` は必須。`maxConcurrent` は省略すると 1、`baseBranch` は省略すると `main`、`tracker` は省略すると GitHub Issues になる。
+必須なのは `defaultWorkflow` だけです。`setup` は省略できます。省略したときの値は、`maxConcurrent` が 1、`baseBranch` が `main`、`tracker` が GitHub Issues になります。
 
-Issue を GitHub Issues ではなく Linear から取り込みたいときは、`project.yaml` に
-`tracker` を書く（`team` は Linear のチームのキー。例 `ENG`）。書かなければ GitHub Issues
-を使う。1 つのプロジェクトで両方を混ぜることはできない。
+Issue を Linear から取り込むときは、`project.yaml` に `tracker` を書きます。`team` には Linear のチームのキー（例: `ENG`）を書きます。1 つのプロジェクトで GitHub Issues と Linear は混ぜられません。
 
 ```yaml
 # .doctrine/project.yaml
@@ -31,21 +29,17 @@ tracker:
   team: ENG
 ```
 
-Linear の Personal API key は、設定ディレクトリ（既定は `~/.config/doctrine`。
-`DOCTRINE_CONFIG_DIR` で変わる）の `config.json` に `linearApiKey` として置く。
+Linear の Personal API key は、設定ディレクトリの `config.json` に `linearApiKey` として置きます。設定ディレクトリは既定で `~/.config/doctrine` で、`DOCTRINE_CONFIG_DIR` で変えられます。
 
 ```json
 { "linearApiKey": "lin_api_..." }
 ```
 
-平文で置くので、手で作るときは `chmod 600` にする。dctld が書き直すときは 0o600 で作る。
-画面の設定から全体の実行枠を変えても、このキーは残る。
+キーは平文で置くので、手で作るときは `chmod 600` にしてください。dctld がこのファイルを書き直すときは、パーミッション 0o600 で作ります。画面の設定から全体の実行枠を変えても、キーは消えません。
 
-雛形の `default.yaml` は、計画 → 計画レビュー → 実装 → 検証 → コードレビュー → ガイド → 人のレビュー
-の順に並んでいる。役割ごとに `session` を分け（`planner` / `plan-reviewer` / `implementer` /
-`code-reviewer` / `guide`）、役割の間は `.doctrine-out/` の下のファイル
-（`plan.md` / `plan-review.md` / `implement-notes.md` / `review.md`）で受け渡す。
-プロンプトや `allowedTools` の全文は雛形を見る。骨格だけ書くと次のとおり。
+## 雛形の default.yaml は、計画から人のレビューまでを役割ごとに分けている
+
+雛形の `default.yaml` は、計画 → 計画レビュー → 実装 → 検証 → コードレビュー → ガイド → 人のレビュー の順に並んでいます。役割ごとに `session` を分け（`planner` / `plan-reviewer` / `implementer` / `code-reviewer` / `guide`）、役割の間は `.doctrine-out/` の下のファイル（`plan.md` / `plan-review.md` / `implement-notes.md` / `review.md`）で受け渡します。プロンプトと `allowedTools` の全文は雛形を見てください。骨格だけを抜き出すと次のようになります。
 
 ```yaml
 # .doctrine/workflows/default.yaml（骨格。プロンプトと allowedTools は省略）
@@ -54,7 +48,7 @@ steps:
   - id: plan                # 計画 → .doctrine-out/plan.md
     type: agent
     session: planner
-  - id: plan-review         # 計画のレビュー。1行目に verdict: approve / reject を書く
+  - id: plan-review         # 計画のレビュー。1 行目に verdict: approve / reject を書く
     type: agent
     session: plan-reviewer
   - id: plan-gate           # verdict を grep で見る。通らなければ計画へ差し戻す
@@ -68,7 +62,7 @@ steps:
     type: command
     run: "true"             # ← 自分のプロジェクトのテストコマンドに書き換える
     onFailure: { goto: implement, maxAttempts: 3, feed: "{{ steps.verify.last_stdout }}{{ steps.verify.last_stderr }}" }
-  - id: agent-review        # コードレビュー。1行目に verdict: approve / reject / escalate
+  - id: agent-review        # コードレビュー。1 行目に verdict: approve / reject / escalate を書く
     type: agent
     session: code-reviewer
   - id: review-gate         # 通らなければ実装へ差し戻す
@@ -86,59 +80,34 @@ steps:
       files: [.doctrine-out/review.md, .doctrine-out/implement-notes.md, .doctrine-out/plan.md]
 ```
 
-`verify` の `feed` は、雛形では `last_stdout` と `last_stderr` の両方を渡す（骨格では1行に縮めてある）。
-各 `feed` にも、雛形では「計画がレビューで却下された:」のような前置きが付く。
+骨格では 1 行に縮めましたが、雛形の `verify` の `feed` は `last_stdout` と `last_stderr` の両方を渡します。雛形の各 `feed` には、「計画がレビューで却下された:」のような前置きも付いています。
 
-雛形のままでも検証は通るが、プロジェクトに合わせて書き換える場所が2つある。
+雛形のままでも検証は通ります。ただし、プロジェクトに合わせて書き換えるべき場所が 2 つあります。
 
-- **`verify` の `run`** — 雛形は何も検証しない `"true"`。型検査やテストのコマンドに書き換える
-- **`implement` の `allowedTools`** — `acceptEdits` では Bash がすべて拒否されるので、
-  実装中に流させたいコマンド（テストや lint）をここへ足す
+- **`verify` の `run`** — 雛形の `"true"` は何も検証しません。型検査やテストのコマンドに書き換えてください
+- **`implement` の `allowedTools`** — `acceptEdits` のままでは Bash がすべて拒否されます。実装中に実行させたいコマンド（テストや lint）をここに足してください
 
-エージェントによるレビューの差し戻しは、専用の分岐ではなく `command` ステップの `grep` で表す。
-審査役が書いたファイルの1行目の `verdict:` をゲートが見て、通らなければファイルの中身を
-標準出力に出して非0で終わり、`onFailure` が前の工程へ戻す（`feed` にはその中身が渡る）。
-`verdict: escalate` は実装者には直せない指摘で、`review-gate` を通して人のレビューへ進める。
+エージェントのレビューで差し戻す仕組みは、専用の分岐ではなく、`command` ステップの `grep` で表します。審査役が書いたファイルの 1 行目の `verdict:` をゲートが見ます。通らなければゲートはファイルの中身を標準出力に出して非 0 で終わり、`onFailure` が前の工程へ戻します。そのとき `feed` にはファイルの中身が渡ります。`verdict: escalate` は実装者には直せない指摘を表し、`review-gate` を通して人のレビューへ進めます。
 
-`agent-review` が読む `git diff <baseBranch>...HEAD` の `<baseBranch>` は、雛形を作った時点の
-`project.yaml` の `baseBranch` が文字列で埋め込まれる（テンプレート変数に `baseBranch` が無いため）。
-後から `baseBranch` を変えたら、`default.yaml` の `agent-review` のプロンプトも直す。
-PR の作成（`open-pr`）は雛形に入っていない。
+`agent-review` が読む `git diff <baseBranch>...HEAD` の `<baseBranch>` には、雛形を作った時点の `project.yaml` の `baseBranch` が文字列で埋め込まれます。テンプレート変数に `baseBranch` が無いためです。後から `baseBranch` を変えたら、`default.yaml` の `agent-review` のプロンプトも直してください。なお、PR を作るステップ（`open-pr`）は雛形に入っていません。
 
-## ステップは5種類
+## ステップは 5 種類
 
-- **`command`** — worktree内でシェルコマンドを実行する。非0終了でステップ失敗。
-- **`agent`** — Claude Code を headless 実行する。会話を role 単位（`session: <role>`）で
-  記録し再開可能。`allowedTools:` に文字列のリストを書くと、そのツールを個別に許可できる
-  （`- "Bash(git diff:*)"` のように1要素1パターンで書く）。`permissionMode: acceptEdits`
-  のままでは Bash はすべて拒否されるので、使わせたいコマンドはここに書く。
-  doctrine は `agent` と `guide` のすべてのステップに、組み込みのシステムプロンプト
-  （Bash を1回1コマンドに保ち、`git -C` を使わない指示）を `--append-system-prompt` で常に付ける。
-  `;` `&&` `||` `|` で繋ぐこと、リダイレクト・ループ・コマンド置換で複数のことをまとめること、
-  `git -C` を使うことを禁じる。先頭一致の許可に合わず拒否されるためである。
-  ワークフロー側から書き換えたり足したりはできない。
-- **`approval`** — ワークフローを `suspended` にし、人の承認・却下・追加コメントを待つ。
-- **`guide`** — Review Guide を作る。置くだけでガイドが worktree に置かれる。
-  プロンプトは doctrine が持つので `prompt` は書けない。`session` は必須で、ガイドを別の役割に
-  書かせるか（`session: guide`）、実装の会話を継がせるか（`session: implementer`）を毎回決める。
-  `model` / `permissionMode` / `allowedTools` は `agent` と同じ書き方で任意。エージェントが
-  diff を読むには Bash が要るので、`allowedTools: ["Bash(git diff:*)"]` などを書く。
-  出力は `.doctrine-out/guide.json` に `{ tree, createdAt, guide }` の封筒で置かれる
-  （`tree` は説明している時点のツリー。`tree` と `createdAt` は doctrine が書く）。
-  形・id の整合・指す hunk とパスの実在のどれかに落ちるとステップは失敗し、`guide.json` は
-  書かれない。
-- **`poll`** — `run` を `interval` ごとに実行して、外の状態の変化（PR のマージなど）を待つ。
-  `interval` は省略すると `1m`。`30s` / `5m` / `2h` の形で書き、30 秒以上にする。
-  終了コードで次を決める。
+- **`command`** — worktree の中でシェルコマンドを実行します。終了コードが 0 以外ならステップは失敗します。
+- **`agent`** — Claude Code を画面なし（headless）で実行します。会話は役割ごと（`session: <role>`）に記録され、あとから再開できます。`allowedTools:` に文字列のリストを書くと、ツールを個別に許可できます。書き方は `- "Bash(git diff:*)"` のように 1 要素に 1 パターンです。`permissionMode: acceptEdits` のままでは Bash がすべて拒否されるので、使わせたいコマンドはここに書きます。
+  - doctrine は `agent` と `guide` のすべてのステップに、組み込みのシステムプロンプトを `--append-system-prompt` で必ず付けます。中身は、Bash を 1 回に 1 コマンドに保ち、`git -C` を使わないという指示です。`;` `&&` `||` `|` でコマンドをつなぐこと、リダイレクト・ループ・コマンド置換で複数の処理をまとめること、`git -C` を使うことを禁じています。こうした書き方は、先頭一致で判定する許可に合わず、拒否されるからです。このシステムプロンプトは、ワークフロー側から書き換えることも足すこともできません。
+- **`approval`** — ワークフローを `suspended` にして、人の承認・却下・追加のコメントを待ちます。
+- **`guide`** — Review Guide を作ります。置くだけで、ガイドが worktree に書き出されます。
+  - プロンプトは doctrine が持っているので、`prompt` は書けません。`session` は必須で、ガイドを別の役割に書かせるか（`session: guide`）、実装の会話に続けて書かせるか（`session: implementer`）を毎回決めます。
+  - `model` / `permissionMode` / `allowedTools` は任意で、書き方は `agent` と同じです。エージェントが diff を読むには Bash が要るので、`allowedTools: ["Bash(git diff:*)"]` などを書きます。
+  - 出力は `.doctrine-out/guide.json` に `{ tree, createdAt, guide }` の形で置かれます。`tree` はガイドが説明している時点のツリーで、`tree` と `createdAt` は doctrine が書きます。形が正しくない・id が食い違う・指している hunk やパスが実在しない、のどれかに当たるとステップは失敗し、`guide.json` は書かれません。
+- **`poll`** — `run` を `interval` ごとに実行して、外の状態の変化（PR のマージなど）を待ちます。`interval` は `30s` / `5m` / `2h` の形で書き、30 秒以上にします。省略すると `1m` になります。次にどうするかは終了コードで決まります。
   - `0` — 済んだ。次のステップへ進む
-  - `75` — まだ。タスクは `waiting` になり、実行枠を占有せずに `interval` 後にもう一度実行する。
-    待っている間の実行は、`maxAttempts` の試行回数に数えない
+  - `75` — まだ。タスクは `waiting` になり、実行枠を占有しないまま、`interval` の後にもう一度実行する。待っている間の実行は、`maxAttempts` の試行回数に数えない
   - `2` — 諦める。タスクは `canceled` になる
   - それ以外 — 失敗。`onFailure` に従う
 
-  `run` は何度も実行されるので、再実行安全でなければならない
-  （[command ステップは再実行安全でなければならない](/ja/guide/idempotent-commands/)）。
-  設計は [`docs/superpowers/specs/2026-09-22-merge-wait-design.md`](https://github.com/todokr/doctrine/blob/develop/docs/superpowers/specs/2026-09-22-merge-wait-design.md) を参照。
+  `run` は何度も実行されるので、何度実行しても結果が変わらないコマンドにしておいてください。`gh pr create` や `git push` のような副作用のあるコマンドを書くと、実行のたびに PR が二重に立ったり、二重に push されたりします。設計は [`docs/superpowers/specs/2026-09-22-merge-wait-design.md`](https://github.com/todokr/doctrine/blob/develop/docs/superpowers/specs/2026-09-22-merge-wait-design.md) を参照してください。
 
 ```yaml
   - id: wait-merge
@@ -153,14 +122,11 @@ PR の作成（`open-pr`）は雛形に入っていない。
       esac
 ```
 
-失敗時の分岐は `onFailure`（`command` / `agent` / `guide` / `poll`）と `onReject`（`approval`）のみで、
-どちらも同じ形（`goto` / `maxAttempts` / `feed` / `onExhausted`）を持つ。分岐先へ戻った `agent` は
-同じ role のセッションIDで `--resume` されるので、会話は継続する（やり直しではない）。
-分岐が無い失敗と、`maxAttempts` を使い切った失敗は、タスクを `failed` にする。
+## 失敗したときの分岐は onFailure と onReject の 2 つだけ
 
-`onExhausted: suspend` を書くと、使い切ったときに `failed` にせず、人の判断を待つ（`suspended`）。
-承認すると回数を戻して `goto` 先から `feed` 付きでやり直し、却下すると `failed` になる。
-`approval` の `onReject` には書けない。
+失敗したときの分岐は、`onFailure`（`command` / `agent` / `guide` / `poll`）と `onReject`（`approval`）の 2 つだけです。どちらも同じ形（`goto` / `maxAttempts` / `feed` / `onExhausted`）を持ちます。分岐先へ戻った `agent` は、同じ役割のセッション ID で `--resume` されます。つまり会話は続き、やり直しにはなりません。分岐が書かれていない失敗と、`maxAttempts` を使い切った失敗は、タスクを `failed` にします。
+
+`onExhausted: suspend` を書くと、回数を使い切ったときに `failed` にはせず、人の判断を待ちます（`suspended`）。人が承認すると回数を戻し、`goto` 先から `feed` を付けてやり直します。却下すると `failed` になります。`approval` の `onReject` には `onExhausted` を書けません。
 
 ```yaml
   - id: implement
@@ -178,20 +144,17 @@ PR の作成（`open-pr`）は雛形に入っていない。
       feed: "テストが落ちた: {{ steps.verify.last_stderr }}"
 ```
 
-`feed` は `goto` の時点で展開され、戻り先のステップ種別によって渡り方が違う。
+`feed` は `goto` の時点で展開されます。どう渡るかは、戻り先のステップの種類で変わります。
 
-- `agent` — `feed` がそのステップの `prompt` の**代わりに**、同じ role の会話へ送られる
+- `agent` — `feed` が、そのステップの `prompt` の**代わりに**、同じ役割の会話へ送られる
 - `guide` — 組み込みのプロンプトの末尾に、前回の出力が受け付けられなかった理由として付く
 - `command` / `poll` — 使われない
 
-`guide` は `onFailure` を書かなければ「自分に戻る・3回・`last_stderr` を `feed` に渡す」が既定で効き、
-同じ会話に理由が戻る。
+`guide` は、`onFailure` を書かなければ「自分に戻る・3 回まで・`last_stderr` を `feed` に渡す」が既定で効きます。前回の出力が通らなかった理由は、同じ会話に戻ってきます。
 
-## role ごとの会話（`session`）
+## 役割ごとに会話を分ける（`session`）
 
-`agent` ステップに `session: <role>` を書くと、同じ role を持つステップ同士が1本の会話を
-共有する。差し戻しで同じ role の `agent` ステップへ戻ると、その会話が `--resume` される。
-`session` の値に使えるのは英数字・`-`・`_` だけ。
+`agent` ステップに `session: <role>` を書くと、同じ役割のステップ同士が 1 本の会話を共有します。差し戻しで同じ役割の `agent` ステップへ戻ると、その会話が `--resume` されます。`session` の値に使えるのは、英数字と `-`・`_` だけです。
 
 ```yaml
   - id: plan
@@ -205,15 +168,11 @@ PR の作成（`open-pr`）は雛形に入っていない。
     prompt: "{{ worktree.path }}/.doctrine-out/plan.md を実装してください"
 ```
 
-`session` を省略すると、すべての `agent` ステップが暗黙の既定ロールを共有する
-（今までどおり「タスクに会話は1本」）。役割を分けたときの詳しい設計は
-[`docs/superpowers/specs/2026-09-13-step-artifacts-design.md`](https://github.com/todokr/doctrine/blob/develop/docs/superpowers/specs/2026-09-13-step-artifacts-design.md) を参照。
+`session` を省略すると、すべての `agent` ステップが暗黙の既定の役割を共有します。これまでどおり、タスクごとに会話は 1 本になります。役割を分けたときの詳しい設計は [`docs/superpowers/specs/2026-09-13-step-artifacts-design.md`](https://github.com/todokr/doctrine/blob/develop/docs/superpowers/specs/2026-09-13-step-artifacts-design.md) を参照してください。
 
-## `approval` ステップに読ませるファイル（`review.files`）
+## `approval` ステップで人に読ませるファイルは `review.files` に書く
 
-`approval` ステップは差分（diff）を見て判断されるのが基本だが、計画の承認のように
-そもそも diff が無い（`.doctrine-out/plan.md` を読んで判断する）ステップもある。
-何を見ればよいかはワークフローの作者しか知らないので、`review.files` に列挙する。
+`approval` ステップでは、差分（diff）を見て判断するのが基本です。ただ、計画の承認のように、そもそも diff が無く、`.doctrine-out/plan.md` を読んで判断するステップもあります。何を見ればよいかはワークフローの作者にしか分からないので、`review.files` に並べます。
 
 ```yaml
   - id: plan
@@ -230,50 +189,30 @@ PR の作成（`open-pr`）は雛形に入っていない。
         - .doctrine-out/plan.md
 ```
 
-パスは worktree からの相対パスのみ。絶対パス（`/` 始まり）・`..` を含むパス・
-`~` 始まりのパス・空文字は、ワークフローの読み込み時（スキーマ検証）で日本語の
-エラーメッセージとともに落ちる。`review.files` を書くなら1件以上必要で、
-空配列（`review: { files: [] }`）は書けない。
+パスは worktree からの相対パスで書きます。絶対パス（`/` 始まり）、`..` を含むパス、`~` 始まりのパス、空文字は、ワークフローを読み込むとき（スキーマ検証）に日本語のエラーメッセージを出して落ちます。`review.files` を書くなら 1 件以上が必要で、空配列（`review: { files: [] }`）は書けません。
 
-doctrine は宣言されたファイルの中身を理解しない。読んで、worktree の中にあることを
-確かめて、そのまま渡すだけである。実行時にも `realpath` で worktree 配下かを
-再確認しており（worktree 内のシンボリックリンクが外を指すケースに備えるため）、
-配下を指していなければ中身を読まずに `outside_worktree` として返す。ファイルごとに
-起こりうる結果は次のとおり:
+doctrine は、並べられたファイルの中身を解釈しません。読んで、worktree の中にあることを確かめて、そのまま渡すだけです。実行時にも `realpath` で worktree の配下にあるかを確かめ直します。worktree の中のシンボリックリンクが外を指している場合に備えるためで、配下を指していなければ中身は読まずに `outside_worktree` を返します。ファイルごとの結果は次のどれかになります。
 
 - 無ければ `missing`
-- 64KB（`MAX_REVIEW_FILE_BYTES`）を超えていれば `too_large`（中身は返さず大きさだけ返す）
+- 64KB（`MAX_REVIEW_FILE_BYTES`）を超えていれば `too_large`（中身は返さず、大きさだけを返す）
 - worktree の外を指していれば `outside_worktree`
 - UTF-8 のテキストとして読めなければ `binary`
-- ここまでを通れば `ok`（中身と大きさを返す）
+- どれにも当たらなければ `ok`（中身と大きさを返す）
 
-## 変数は5系統だけ
+## 使える変数は 5 系統だけ
 
 - `{{ task.id }}` `{{ task.title }}` `{{ task.prompt }}` `{{ task.branch }}`
-- `{{ issue.url }}` `{{ issue.parent_url }}` `{{ issue.closes }}`
-  — Intake から投入されたタスクの sub-issue の URL、親 Issue の URL、`Closes <sub-issue の URL>`
-  （Linear の Issue では、PR で閉じないので `Linear: <URL>`）。
-  Intake 由来でないタスクではどれも空文字。
+- `{{ issue.url }}` `{{ issue.parent_url }}` `{{ issue.closes }}` — Intake から投入されたタスクの sub-issue の URL、親 Issue の URL、`Closes <sub-issue の URL>`。Linear の Issue は PR では閉じないので、`{{ issue.closes }}` は `Linear: <URL>` になります。Intake から投入されていないタスクでは、どれも空文字になります。
 - `{{ worktree.path }}`
 - `{{ project.path }}`
-- `{{ steps.<id>.last_stdout }}` `{{ steps.<id>.last_stderr }}` `{{ steps.<id>.exitCode }}`
-  — `agent` ステップの `last_stdout` は最終応答テキスト、`approval` ステップの
-  `last_stdout` は却下コメントそのもの。
+- `{{ steps.<id>.last_stdout }}` `{{ steps.<id>.last_stderr }}` `{{ steps.<id>.exitCode }}` — `agent` ステップの `last_stdout` は最終応答のテキスト、`approval` ステップの `last_stdout` は却下のコメントそのものになります。
 
-未知の変数、まだ実行されていないステップの `steps.<id>.*`、閉じていない `{{` は、
-ワークフローの読み込み時ではなく、そのステップを実行するときにエラーになる。
-展開した値の中に `{{ ... }}` があっても、展開し直さない。
+未知の変数、まだ実行されていないステップの `steps.<id>.*`、閉じていない `{{` は、ワークフローを読み込むときではなく、そのステップを実行するときにエラーになります。展開した値の中に `{{ ... }}` があっても、もう一度は展開しません。
 
-## `setup` は予約されたステップid
+## ステップ id `setup` は予約されている
 
-`project.yaml` の `setup` は特別な機構ではなく、ただの `command` ステップに
-名前を付けて全ワークフローの先頭に自動挿入しているだけ（新品 worktree に
-`node_modules` が無い問題への対処）。そのぶん、ユーザー定義のワークフローで
-ステップid `setup` を使うと自動挿入された方と衝突するため、検証時にエラーになる。
-ステップid は英数字・`-`・`_` だけで書き、同じワークフローの中で重複させられない。
+`project.yaml` の `setup` は特別な仕組みではありません。ただの `command` ステップに名前を付けて、全ワークフローの先頭に自動で差し込んでいるだけです。新しく作った worktree に `node_modules` が無い問題に対処するためにあります。そのため、自分で書いたワークフローでステップ id に `setup` を使うと、自動で差し込まれたステップとぶつかり、検証でエラーになります。ステップ id は英数字と `-`・`_` だけで書き、同じワークフローの中で重複させられません。
 
 ## 作成済みのタスクに定義の変更は効かない
 
-タスクは作成時のワークフロー YAML と、`project.yaml` の `setup` を保存し、以後はそれに従う。
-そのため YAML を直しても、走っているタスクや承認待ちのタスクには効かない。
-新しい定義で走らせるには、タスクを作り直す。
+タスクは、作成した時点のワークフロー YAML と `project.yaml` の `setup` を保存し、以後はそれに従って進みます。そのため、YAML を直しても、走っているタスクや承認待ちのタスクには効きません。新しい定義で走らせたいときは、タスクを作り直してください。
