@@ -170,7 +170,7 @@ type SetupPolicy = {
 対象プロジェクトごとにタスクを 1 つ作る。
 
 - タイトル: `<プロジェクト名> のワークフローを作る`
-- `prompt`: `policy` を文章にしたもの（`setupPrompt(policy)`）。draft のエージェントが `{{ task.prompt }}` で読む。
+- `prompt`: `policy` を文章にしたものに、出発点の雛形 `defaultWorkflowYamlFor(project.base_branch)` と、PR を開く方針なら open-pr / wait-merge / sync の例を続けたもの（`setupPrompt(policy, baseBranch)`）。draft のエージェントが `{{ task.prompt }}` で読む。雛形や例をワークフローの prompt に直接書かないのは、ステップの prompt が `expand` を通り、`{{ }}` を字面のまま残す手段が無いため（`task.prompt` に入れた値は再展開されない）。
 - `workflow_name`: `setup`
 - `workflow_yaml`: 同梱ワークフローの本文（`setupWorkflowYaml()`）
 - `workflow_setup`: NULL。`project.yaml` の setup（依存のインストールなど）は、YAML を書くだけのこのタスクには要らない。
@@ -195,7 +195,7 @@ draft → validate → review → apply
 
 **draft** への指示:
 
-- 出発点は雛形 `defaultWorkflowYamlFor(baseBranch)` の出力で、プロンプトに埋め込む。方針に合わせて、雛形のステップを削る・足す。
+- 出発点は `{{ task.prompt }}` に入っている雛形。方針に合わせて、雛形のステップを削る・足す。
   PR を開く方針なら、雛形のコメントにある open-pr の例と、doctrine 自身の `wait-merge` / `sync` の形を足す。
 - 検証コマンド（verify の `run`）、implement の `allowedTools`、baseBranch は、リポジトリ（package.json・mise.toml・Makefile・CI の設定など）から決める。
 - 方針とリポジトリが食い違えば（例: remote が無いのに PR を開く方針）、`.doctrine-out/setup-notes.md` に書き、方針よりリポジトリで動く形を選ぶ。
