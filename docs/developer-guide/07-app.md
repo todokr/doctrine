@@ -159,5 +159,5 @@ React も Tauri も持ち込まず、同名の `*.test.ts` で単体テストす
 - `mise run app:dev` — ブラウザで開く。Tauri の `invoke` が無いのでデーモンには繋がらない
 - PFD の図の目視: `mise run app:dev` の上で http://localhost:1420/pfd-preview.html（`app/src/dev/pfdPreview.tsx`）
 - [`app/src/fixtures.ts`](../../app/src/fixtures.ts) はテストと開発用プレビュー専用で、**画面から import しない**。デモモードは無く、画面のデータは必ずデーモンから来る
-- 別のデーモンに繋ぐときは `DOCTRINE_SOCKET` / `DOCTRINE_STATE_DIR` を設定して起動する
+- 別のデーモンに繋ぐときは `DOCTRINE_SOCKET` / `DOCTRINE_STATE_DIR` を設定して起動する。設定（`config.json`）も分けるときは `DOCTRINE_CONFIG_DIR` も設定する
 - `shared/protocol.ts` の union（`TaskState` など）に値を足したら、アプリ側の網羅的な `Record`（`tone.ts` の表など）も同じ変更で足す。足さないと `app:build` が落ちる
