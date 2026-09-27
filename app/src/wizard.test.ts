@@ -143,6 +143,17 @@ describe("submitWizard", () => {
     expect(r.tasks).toEqual([{ id: "t-5e70" }]);
   });
 
+  test("Linear のチームのキーは前後の空白を落として送る", async () => {
+    const calls = daemon({
+      "workspace.add": () => Promise.resolve({ ...ADDED_WORKSPACE, created: [] }),
+    });
+    await submitWizard(detected("/Users/me/work", DETECT_PARENT, {
+      step: "confirm",
+      tracker: { kind: "linear", team: " ENG ", states: { inReview: "In Review" } },
+    }));
+    expect((calls[0][1] as { tracker: unknown }).tracker).toEqual({ kind: "linear", team: "ENG", states: { inReview: "In Review" } });
+  });
+
   test("選ばなかったリポジトリは projects に入れない", async () => {
     const calls = daemon({
       "workspace.add": () => Promise.resolve(ADDED_WORKSPACE),

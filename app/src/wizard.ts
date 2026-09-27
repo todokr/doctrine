@@ -200,7 +200,7 @@ export async function submitWizard(s: WizardState): Promise<{ tasks: TaskSummary
   // workspace.yaml があれば、中身はそちらが決める
   const init = s.detection.existing ? {} : {
     projects: Object.fromEntries(s.projects.filter((p) => p.selected).map((p) => [p.name, p.dir])),
-    tracker: s.tracker,
+    tracker: s.tracker.kind === "linear" ? { ...s.tracker, team: s.tracker.team.trim() } : s.tracker,
   };
   const added = await rpc("workspace.add", { path: s.path, ...init });
   const targets = setupTargets(added, added.created);
