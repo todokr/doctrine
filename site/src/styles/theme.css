@@ -33,6 +33,11 @@
    Starlight の .hero は後から読み込まれるので、main を足して詳細度で勝つ。 */
 @media (min-width: 50rem) {
   main .hero {
-    padding-block: clamp(1.5rem, 0.5rem + 5vmin, 4rem);
+    padding-block: 0
   }
+}
+
+.page header.header {
+    background: transparent;
+    border-bottom: none;
 }

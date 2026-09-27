@@ -3,7 +3,7 @@ title: doctrine
 description: doctrine の使い方を読めるドキュメントサイト。
 template: splash
 hero:
-  title: <span>作業は渡す、</span><span>理解は譲らない</span>
+  title: <span>作業は渡す。</span><span>理解は譲らない。</span>
   tagline: <strong>doctrine</strong> — 手元のマシンで動く AI 駆動開発基盤
   image:
     file: ../../../assets/general.png
@@ -21,16 +21,16 @@ import ValueFilm from '../../../components/ValueFilm/ValueFilm.astro';
 
 <ValueFilm />
 
-## 判断以外は、doctrine に。
+## 判断以外は doctrine に。
 
-エージェントに任せた作業は、決めた手順どおりに進む。人に届くのは、判断が要るものだけ。
+決めた手順どおりエージェントが仕事を進める。人は判断にフォーカスする。
 
-<FeatureRow title="Epic をまるごと渡す">
-  大きな Issue は、レビューしきれる PR 1 つ分ずつに割る。その前に、判断が要る論点を質問にまとめて返す。いきなりコードを書き始めはしない。
+<FeatureRow title="Issue を分解する">
+  大きな Issue を、レビュー可能なサイズのタスクに分解する。判断が要る論点は人に判断させる。いきなりコードを書き始めることはしない。
   <FeatureDiagram slot="visual" variant="split" />
 </FeatureRow>
 
-<FeatureRow title="マージしたら、次が動く">
+<FeatureRow title="マージしたら次が動く">
   上流の PR がマージされると、それを待っていた下流のタスクが自動で始まる。何を待っていたか覚えておく必要も、コマンドを叩く必要もない。
   <FeatureDiagram slot="visual" variant="flow" />
 </FeatureRow>
@@ -40,7 +40,7 @@ import ValueFilm from '../../../components/ValueFilm/ValueFilm.astro';
   <FeatureDiagram slot="visual" variant="conflict" />
 </FeatureRow>
 
-<FeatureRow title="上限に当たっても、続きから">
+<FeatureRow title="上限に当たっても続きから">
   Claude の利用上限で止まっても、途中の作業は捨てない。枠が戻れば、同じ会話の続きから再開する。
   <FeatureDiagram slot="visual" variant="limit" />
 </FeatureRow>
@@ -48,7 +48,7 @@ import ValueFilm from '../../../components/ValueFilm/ValueFilm.astro';
 ## 読み進める
 
 <CardGrid>
-  <LinkCard title="Concepts" description="doctrine が解く問題と、提供する価値" href="/ja/concepts/" />
-  <LinkCard title="Guide" description="ワークフローの書き方と運用" href="/ja/guide/writing-workflows/" />
+  <LinkCard title="Quick Start" description="クイックスタート" href="/ja/quick-start/" />
   <LinkCard title="Examples" description="具体的なワークフローの例" href="/ja/examples/" />
+  <LinkCard title="Guide" description="ワークフローの書き方と運用" href="/ja/guide/writing-workflows/" />
 </CardGrid>
