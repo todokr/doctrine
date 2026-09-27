@@ -328,6 +328,8 @@ Intake の計画の正本もこのマシンにあり、チームから見える�
 
 - **doctrine** — 本プロダクト
 - **`dctl` / `dctld` / `.doctrine/`** — CLI・デーモン・プロジェクト設定ディレクトリ
+- **workspace** — 1〜N 個のプロジェクト（git リポジトリ）の束。root の `.doctrine/workspace.yaml` に
+書き、`dctl workspace-add --path <root>` で登録する。リポジトリが 1 つならそのリポジトリが root になる
 - **タスク** — 1つのワークフロー実行。1つの worktree と1つのブランチを持つ
 - **ワークフロー** — 手順の宣言的定義。プロジェクト内にYAMLで置く
 - **ステップ** — ワークフロー定義中の1要素。`command` / `agent` / `approval` / `guide` / `poll` の5種

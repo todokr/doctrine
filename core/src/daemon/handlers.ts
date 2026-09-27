@@ -1,22 +1,19 @@
-import { basename, isAbsolute, join } from "@std/path";
+import { isAbsolute, join } from "@std/path";
 import { computeDiff, mergeBase, type TaskDiff } from "../domain/diff.ts";
 import { branchOf, type Step, type Workflow, WorkflowValidationError } from "../workflow/schema.ts";
 import {
   applyProjectConfig,
   parseProjectConfig,
-  type ProjectConfig,
   type ProjectConfigInput,
   withSetupStep,
   writeProjectYaml,
 } from "../workflow/project.ts";
 import { applyWorkflowChanges, writeWorkflowYaml } from "../workflow/save.ts";
-import { ensureProjectScaffold } from "../workflow/scaffold.ts";
 import { pinOf, type WorkflowLoader } from "../workflow/load.ts";
 import {
   getProject,
   getProjectByPath,
   getTask,
-  insertProject,
   insertTask,
   listProjects,
   listTasks,
@@ -24,7 +21,13 @@ import {
   type TaskRow,
   type TaskState,
 } from "../db/tasks.ts";
-import { insertWorkspace, projectNameFrom } from "../db/workspaces.ts";
+import { listWorkspaces } from "../db/workspaces.ts";
+import {
+  addWorkspace,
+  syncProjectRow,
+  toWorkspaceSummary,
+  updateWorkspace,
+} from "./workspaceRegistry.ts";
 import { getStepRun, lastRejectedReview, lastStepRun, listStepRuns } from "../db/stepRuns.ts";
 import { commitStepBoundary, StateConflictError } from "../db/boundary.ts";
 import type { Db } from "../db/schema.ts";
@@ -248,23 +251,6 @@ function readWorkflowChanges(params: Record<string, unknown>): WorkflowStepChang
   return changes as WorkflowStepChange[];
 }
 
-/** project.yaml から読んだ設定を projects の行へ写す。 */
-async function syncProjectRow(
-  ctx: DaemonContext,
-  projectId: number,
-  cfg: ProjectConfig,
-): Promise<void> {
-  await ctx.db.updateTable("projects")
-    .set({
-      default_workflow: cfg.defaultWorkflow,
-      max_concurrent: cfg.maxConcurrent,
-      base_branch: cfg.baseBranch,
-      setup: cfg.setup ?? null,
-    })
-    .where("id", "=", projectId)
-    .execute();
-}
-
 /** params.config を取り出す。オブジェクトでなければ投げる。値の型検証は applyProjectConfig に任せる。 */
 function readProjectConfigInput(params: Record<string, unknown>): ProjectConfigInput {
   const config = params.config;
@@ -318,44 +304,24 @@ async function intakeBase(project: ProjectRow): Promise<string> {
 export function createHandler(ctx: DaemonContext): Handler {
   return async (method, params, conn) => {
     switch (method) {
-      case "project.add": {
-        // Task 3 で workspace.add に置き換えるまでのつなぎ: プロジェクト 1 つの workspace を作る
-        const path = req(params, "path");
-        // 最初に叩く init 的なコマンドなので、2回目はエラーにせず登録済みと伝えるだけにする
-        const existing = await getProjectByPath(ctx.db, path);
-        if (existing) return { ...existing, created: [], alreadyRegistered: true };
-
-        const { created } = await ensureProjectScaffold(path);
-        const cfg = parseProjectConfig(
-          await Deno.readTextFile(join(path, ".doctrine", "project.yaml")),
-        );
-        const dir = basename(path);
-        const id = await ctx.db.transaction().execute(async (trx) => {
-          const workspace_id = await insertWorkspace(trx, { path, name: dir });
-          return await insertProject(trx, {
-            workspace_id,
-            name: projectNameFrom(dir),
-            path,
-            default_workflow: cfg.defaultWorkflow,
-            max_concurrent: cfg.maxConcurrent,
-            base_branch: cfg.baseBranch,
-            setup: cfg.setup ?? null,
-          });
-        });
-        return { ...(await getProject(ctx.db, id)), created, alreadyRegistered: false };
+      case "workspace.add": {
+        const r = await addWorkspace(ctx.db, req(params, "path"));
+        return {
+          ...(await toWorkspaceSummary(ctx.db, r.workspaceId)),
+          created: r.created,
+          alreadyRegistered: r.alreadyRegistered,
+        };
       }
+      case "workspace.update": {
+        const r = await updateWorkspace(ctx.db, req(params, "path"));
+        return await toWorkspaceSummary(ctx.db, r.workspaceId);
+      }
+      case "workspace.list":
+        return await Promise.all(
+          (await listWorkspaces(ctx.db)).map((w) => toWorkspaceSummary(ctx.db, w.id)),
+        );
       case "project.list":
         return await listProjects(ctx.db);
-      case "project.update": {
-        const path = req(params, "path");
-        const project = await getProjectByPath(ctx.db, path);
-        if (!project) throw new Error(`未登録のプロジェクトです: ${path}`);
-        const cfg = parseProjectConfig(
-          await Deno.readTextFile(join(path, ".doctrine", "project.yaml")),
-        );
-        await syncProjectRow(ctx, project.id, cfg);
-        return await getProject(ctx.db, project.id);
-      }
       case "project.config.get": {
         const project = await reqProject(ctx, params);
         return parseProjectConfig(
@@ -377,7 +343,7 @@ export function createHandler(ctx: DaemonContext): Handler {
           );
         });
         await writeProjectYaml(project.path, text);
-        await syncProjectRow(ctx, project.id, config);
+        await syncProjectRow(ctx.db, project.id, config);
         return await getProject(ctx.db, project.id);
       }
 

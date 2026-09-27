@@ -60,10 +60,11 @@ export const USAGE = `使い方: dctl <コマンド> [引数]
   logs <task-id> [--tail <n>] [--step_run_id <n>] [--follow]
   diff <task-id> [--since last_review]
 
-プロジェクト
-  projects
-  project-add --path <path>       .doctrine/ の雛形を作って登録する
-  project-update --path <path>    .doctrine/project.yaml の変更を取り込む
+workspace
+  workspaces
+  workspace-add --path <root>     .doctrine/ の雛形を作って workspace とプロジェクトを登録する
+  workspace-update --path <root>  workspace.yaml と各 project.yaml の変更を取り込む
+  projects                        登録済みのプロジェクト
 
 Intake
   intake ls [--project <path>] [--include_closed]
@@ -109,10 +110,12 @@ export function parseArgv(argv: string[]): { method: string; params: Record<stri
       return { method: "task.diff", params: { task_id: positional[0], ...flags } };
     case "projects":
       return { method: "project.list", params: {} };
-    case "project-add":
-      return { method: "project.add", params: flags };
-    case "project-update":
-      return { method: "project.update", params: flags };
+    case "workspaces":
+      return { method: "workspace.list", params: {} };
+    case "workspace-add":
+      return { method: "workspace.add", params: flags };
+    case "workspace-update":
+      return { method: "workspace.update", params: flags };
     case "intake": {
       // 読むだけ。承認は人だけが行うので、操作のサブコマンドは足さない。
       const [sub, intakeId] = positional;

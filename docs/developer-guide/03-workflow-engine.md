@@ -11,7 +11,7 @@
 | `workflow/template.ts` | `{{ ... }}` の展開 |
 | `workflow/project.ts` | `project.yaml` の検証、`setup` の自動挿入（`withSetupStep`）、画面からの保存 |
 | `workflow/load.ts` | ディスクからの読み込み、作成時の固定（`pinOf`）、タスクが従う定義の解決（`taskWorkflow`） |
-| `workflow/scaffold.ts` | `dctl project-add` が作る `.doctrine/` の雛形 |
+| `workflow/scaffold.ts` | `dctl workspace-add` が作る `.doctrine/` の雛形 |
 | `workflow/save.ts` | 画面からのステップ編集を、コメントを残したまま YAML に当てる |
 | `domain/engine.ts` | `decide`（純粋な進行規則）、`runTask`（1 タスクを次に止まる地点まで進める）、`applyApproval` |
 | `domain/stepRunner.ts` | ステップ 1 回の実行。ログの書き出し、`StepOutcome` を返す |

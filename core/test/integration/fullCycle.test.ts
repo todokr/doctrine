@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, test } from "@std/testing/bdd";
 import assert from "node:assert/strict";
-import { access, mkdtemp, readFile, rm } from "node:fs/promises";
+import { access, mkdtemp, readFile, realpath, rm } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { tmpdir } from "node:os";
@@ -32,7 +32,7 @@ let root: string;
 const contexts: DaemonContext[] = [];
 
 beforeEach(async () => {
-  root = await mkdtemp(join(tmpdir(), "doctrine-e2e-"));
+  root = await realpath(await mkdtemp(join(tmpdir(), "doctrine-e2e-")));
   process.env.DOCTRINE_STATE_DIR = join(root, "state");
 });
 afterEach(async () => {
@@ -97,7 +97,7 @@ test("setup → agent → command → approval → 承認 → 完了まで通る
     ".doctrine/workflows/feature.yaml": WORKFLOW,
   });
   const { ctx, events, handler } = await context();
-  await handler("project.add", { path: repo }, NOOP_CONN);
+  await handler("workspace.add", { path: repo }, NOOP_CONN);
   const t = await handler("task.create", {
     project: repo,
     title: "マーカーを作る",
@@ -192,7 +192,7 @@ test("却下すると実装ステップへ戻り、コメントがエージェ�
   });
   const adapter = createMockAdapter({ result: { ok: true, text: "やりました" } });
   const { ctx, handler } = await context(adapter);
-  await handler("project.add", { path: repo }, NOOP_CONN);
+  await handler("workspace.add", { path: repo }, NOOP_CONN);
   const t = await handler(
     "task.create",
     { project: repo, title: "T", prompt: "作って" },
@@ -230,7 +230,7 @@ test("プロジェクト枠1のとき、承認待ちのタスクが次のタス�
     ".doctrine/workflows/feature.yaml": WORKFLOW,
   });
   const { ctx, handler } = await context();
-  await handler("project.add", { path: repo }, NOOP_CONN);
+  await handler("workspace.add", { path: repo }, NOOP_CONN);
   const a = await handler("task.create", { project: repo, title: "A", prompt: "p" }, NOOP_CONN) as {
     id: string;
   };
@@ -263,7 +263,7 @@ test("失敗したタスクの worktree は残る", async () => {
       'name: fail\nsteps:\n  - id: boom\n    type: command\n    run: "exit 9"\n',
   });
   const { ctx, handler } = await context();
-  await handler("project.add", { path: repo }, NOOP_CONN);
+  await handler("workspace.add", { path: repo }, NOOP_CONN);
   const t = await handler("task.create", { project: repo, title: "T", prompt: "p" }, NOOP_CONN) as {
     id: string;
   };
@@ -287,7 +287,7 @@ test("完了したタスクは worktree を消すがブランチは残す", asyn
       'name: simple\nsteps:\n  - id: ok\n    type: command\n    run: "echo hi"\n',
   });
   const { ctx, handler } = await context();
-  await handler("project.add", { path: repo }, NOOP_CONN);
+  await handler("workspace.add", { path: repo }, NOOP_CONN);
   const t = await handler("task.create", { project: repo, title: "T", prompt: "p" }, NOOP_CONN) as {
     id: string;
   };
@@ -319,7 +319,7 @@ async function runSolo(adapter: ReturnType<typeof createMockAdapter>) {
     ".doctrine/workflows/solo.yaml": AGENT_ONLY,
   });
   const { ctx, handler } = await context(adapter);
-  await handler("project.add", { path: repo }, NOOP_CONN);
+  await handler("workspace.add", { path: repo }, NOOP_CONN);
   const t = await handler("task.create", { project: repo, title: "T", prompt: "p" }, NOOP_CONN) as {
     id: string;
   };

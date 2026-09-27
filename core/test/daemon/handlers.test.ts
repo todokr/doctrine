@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, test } from "@std/testing/bdd";
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -29,6 +29,7 @@ import { loadWorkflowFromDisk, taskWorkflow } from "../../src/workflow/load.ts";
 import type {
   DaemonSlots,
   ProjectSummary,
+  WorkspaceSummary,
   ServerEvent,
   TaskGuide,
   TaskSummary,
@@ -62,7 +63,7 @@ const NOOP_CONN = { follow() {}, unfollow() {}, isFollowing: () => false };
 const contexts: DaemonContext[] = [];
 
 beforeEach(async () => {
-  root = await mkdtemp(join(tmpdir(), "doctrine-daemon-"));
+  root = await realpath(await mkdtemp(join(tmpdir(), "doctrine-daemon-")));
   repo = await makeRepo(root, {
     "README.md": "x\n",
     ".doctrine/project.yaml": "defaultWorkflow: feature\nmaxConcurrent: 1\nbaseBranch: main\n",
@@ -115,17 +116,15 @@ async function unpin(ctx: DaemonContext, taskId: string): Promise<void> {
     .execute();
 }
 
-test("project.add でプロジェクトを登録し、設定を読む", async () => {
+test("workspace.add でプロジェクトを登録し、設定を読む", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
-  const p = await h("project.add", { path: repo }, NOOP_CONN) as {
-    id: number;
-    workspace_id: number;
-    name: string;
-    default_workflow: string;
-  };
+  const ws = await h("workspace.add", { path: repo }, NOOP_CONN) as WorkspaceSummary;
+  const p = ws.projects[0];
   assert.equal(p.default_workflow, "feature");
   assert.equal(p.name, "repo");
+  assert.equal(ws.path, repo);
+  assert.equal(ws.name, "repo");
   const w = await getWorkspace(ctx.db, p.workspace_id);
   assert.equal(w?.path, repo);
   assert.equal(w?.name, "repo");
@@ -136,7 +135,7 @@ test("project.add でプロジェクトを登録し、設定を読む", async ()
 test("task.create は queued のタスクを作り、worktree はまだ作らない", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
   const t = await h("task.create", { project: repo, title: "T", prompt: "直して" }, NOOP_CONN) as {
     id: string;
   };
@@ -149,7 +148,7 @@ test("task.create は queued のタスクを作り、worktree はまだ作らな
 test("不正なワークフロー名はタスク作成時に落とす", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
   await assert.rejects(() =>
     h("task.create", { project: repo, title: "T", prompt: "p", workflow: "nonexistent" }, NOOP_CONN)
   );
@@ -162,7 +161,7 @@ test("非冪等コマンドを含むワークフローは task.create の応答�
     join(repo, ".doctrine", "workflows", "risky.yaml"),
     "name: risky\nsteps:\n  - id: open-pr\n    type: command\n    run: gh pr create --fill\n",
   );
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
   const created = await h(
     "task.create",
     { project: repo, title: "T", prompt: "p", workflow: "risky" },
@@ -177,7 +176,7 @@ test("非冪等コマンドを含むワークフローは task.create の応答�
 test("冪等なワークフローは task.create で警告を出さない", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
   const created = await h(
     "task.create",
     { project: repo, title: "T", prompt: "p" },
@@ -190,7 +189,7 @@ test("冪等なワークフローは task.create で警告を出さない", asyn
 test("task.list は紐づけ付きのタスクの intake_id・intake_process_id・issue_url・parent_issue_url を読み戻せる", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
   const [project] = await h("project.list", {}, NOOP_CONN) as ProjectSummary[];
   await insertIntake(ctx.db, {
     id: "i1",
@@ -225,7 +224,7 @@ test("task.list は紐づけ付きのタスクの intake_id・intake_process_id�
 test("task.create で作ったタスクは紐づけを持たない", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
   const created = await h(
     "task.create",
     {
@@ -256,7 +255,7 @@ test("tick は非冪等コマンドの警告を毎周期 ctx.warnings に積み�
     join(repo, ".doctrine", "workflows", "risky.yaml"),
     "name: risky\nsteps:\n  - id: push\n    type: command\n    run: git push\n",
   );
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
   await h("task.create", { project: repo, title: "T", prompt: "p", workflow: "risky" }, NOOP_CONN);
   const afterCreate = ctx.warnings.recent().length; // task.create 自身が積んだ分
 
@@ -286,7 +285,7 @@ test("却下ループを何度回しても task.approve/task.reject は警告を
       "    onReject:\n      goto: noop\n      maxAttempts: 5\n" +
       "  - id: push\n    type: command\n    run: git push\n",
   );
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
   const t = await h(
     "task.create",
     { project: repo, title: "T", prompt: "p", workflow: "risky-loop" },
@@ -334,7 +333,7 @@ test("tick で枠を取り、worktree を作って approval まで進む", async
   const events: ServerEvent[] = [];
   const ctx = await context(events);
   const h = createHandler(ctx);
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
   const t = await h("task.create", { project: repo, title: "T", prompt: "p" }, NOOP_CONN) as {
     id: string;
   };
@@ -349,7 +348,7 @@ test("tick で枠を取り、worktree を作って approval まで進む", async
 test("task.approve で queued に戻り、行列の先頭に入る", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
   // approval の後にもステップがあるワークフロー。承認直後に completed になってしまう
   // 1ステップだけの workflow では「queued に戻る」経路を確認できない。
   await writeFile(
@@ -372,7 +371,7 @@ test("task.approve で queued に戻り、行列の先頭に入る", async () =>
 test("task.reject はコメントを必須にする", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
   const t = await h("task.create", { project: repo, title: "T", prompt: "p" }, NOOP_CONN) as {
     id: string;
   };
@@ -384,7 +383,7 @@ test("task.reject はコメントを必須にする", async () => {
 test("task.cancel は canceled にして worktree を残す", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
   const t = await h("task.create", { project: repo, title: "T", prompt: "p" }, NOOP_CONN) as {
     id: string;
   };
@@ -400,7 +399,7 @@ test("task.cancel は canceled にして worktree を残す", async () => {
 test("task.list は state でフィルタできる", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
   await h("task.create", { project: repo, title: "A", prompt: "p" }, NOOP_CONN);
   await h("task.create", { project: repo, title: "B", prompt: "p" }, NOOP_CONN);
   const queued = await h("task.list", { state: "queued" }, NOOP_CONN) as unknown[];
@@ -410,7 +409,8 @@ test("task.list は state でフィルタできる", async () => {
 test("worktree.list はタスク・Intake・孤児の worktree を全部返す", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
-  const project = await h("project.add", { path: repo }, NOOP_CONN) as { id: number };
+  const project = (await h("workspace.add", { path: repo }, NOOP_CONN) as WorkspaceSummary)
+    .projects[0];
   const t = await h("task.create", { project: repo, title: "T", prompt: "p" }, NOOP_CONN) as {
     id: string;
   };
@@ -474,7 +474,7 @@ test("worktree.list はタスク・Intake・孤児の worktree を全部返す",
 test("worktree.list は終端状態のタスクと未コミットの変更を返す", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
   const t = await h("task.create", { project: repo, title: "T", prompt: "p" }, NOOP_CONN) as {
     id: string;
   };
@@ -496,7 +496,7 @@ test("worktree.list は終端状態のタスクと未コミットの変更を返
 test("worktree.list はディスクから消えた worktree を返さない", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
   const gone = await createWorktree({
     repoPath: repo,
     worktreePath: worktreePathFor(repo, "gone"),
@@ -513,7 +513,7 @@ test("worktree.list はディスクから消えた worktree を返さない", as
 test("DB の worktree_path は worktree.list と同じ表記（実パス）で保存される", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
   const t = await h("task.create", { project: repo, title: "T", prompt: "p" }, NOOP_CONN) as {
     id: string;
   };
@@ -540,7 +540,7 @@ test("未知のメソッドはエラーになる", async () => {
 test("完了したタスクの worktree は削除され、ブランチは残る", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
   // approval を含まない、すぐ終わるワークフローに差し替える
   await writeFile(
     join(repo, ".doctrine", "workflows", "quick.yaml"),
@@ -568,7 +568,7 @@ test("完了したタスクの worktree は削除され、ブランチは残る"
 test("未コミットの変更が残っていたら削除せず警告する", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
   await writeFile(
     join(repo, ".doctrine", "workflows", "dirty.yaml"),
     'name: dirty\nsteps:\n  - id: a\n    type: command\n    run: "touch leftover.txt"\n',
@@ -589,7 +589,7 @@ test("差し戻しは task.get の stepRuns と stepRun.finished の両方から
   const events: ServerEvent[] = [];
   const ctx = await context(events);
   const h = createHandler(ctx);
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
   // 既定ワークフローの plan-gate と同じ形（非0で終わって前のステップへ戻るゲート）。
   await writeFile(
     join(repo, ".doctrine", "workflows", "gate.yaml"),
@@ -645,7 +645,7 @@ test("差し戻しは task.get の stepRuns と stepRun.finished の両方から
 test("失敗したタスクの worktree は削除しない", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
   await writeFile(
     join(repo, ".doctrine", "workflows", "boom.yaml"),
     'name: boom\nsteps:\n  - id: a\n    type: command\n    run: "exit 1"\n',
@@ -664,7 +664,7 @@ test("失敗したタスクの worktree は削除しない", async () => {
 test("作成時の定義を持たないタスクは、tick 時点でワークフローが読めなければ failed になり、以後 tick で再試行されない", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
   await writeFile(
     join(repo, ".doctrine", "workflows", "vanishing.yaml"),
     'name: vanishing\nsteps:\n  - id: a\n    type: command\n    run: "true"\n',
@@ -695,7 +695,7 @@ test("作成時の定義を持たないタスクは、tick 時点でワークフ
 test("runTask が例外を投げても daemon は落ちず、タスクは failed になる", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
   // {{ steps.nope.last_stdout }} は存在しないステップの出力を参照する。
   // expand() はこれを意図的に例外として投げ、runTask はそれを握りつぶさず
   // 伝播させる（ワークフロー作者に見える形にするため）。
@@ -720,7 +720,7 @@ test("stepRun.started の step_run_id は本物で、task.logs から引ける",
   const events: ServerEvent[] = [];
   const ctx = await context(events);
   const h = createHandler(ctx);
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
   await writeFile(
     join(repo, ".doctrine", "workflows", "quick.yaml"),
     'name: quick\nsteps:\n  - id: a\n    type: command\n    run: "true"\n',
@@ -772,7 +772,7 @@ test("ratelimit.sample と ratelimit.recent は、生の resetsAt を ISO 8601 �
     result: { ok: true, text: "done" },
   });
   const h = createHandler(ctx);
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
   await writeFile(
     join(repo, ".doctrine", "workflows", "one.yaml"),
     'name: one\nsteps:\n  - id: a\n    type: agent\n    prompt: "p"\n',
@@ -814,7 +814,7 @@ test("worktree 作成に失敗したタスクは failed になり、他プロジ
     join(repo, ".doctrine", "project.yaml"),
     "defaultWorkflow: feature\nmaxConcurrent: 1\nbaseBranch: nonexistent-base\n",
   );
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
   const broken = await h(
     "task.create",
     { project: repo, title: "broken", prompt: "p" },
@@ -822,14 +822,14 @@ test("worktree 作成に失敗したタスクは failed になり、他プロジ
   ) as { id: string };
 
   // 健全な別プロジェクト: 同じ pass で普通に進めるはず。
-  const healthyRoot = await mkdtemp(join(tmpdir(), "doctrine-daemon-healthy-"));
+  const healthyRoot = await realpath(await mkdtemp(join(tmpdir(), "doctrine-daemon-healthy-")));
   const healthyRepo = await makeRepo(healthyRoot, {
     "README.md": "x\n",
     ".doctrine/project.yaml": "defaultWorkflow: feature\nmaxConcurrent: 1\nbaseBranch: main\n",
     ".doctrine/workflows/feature.yaml":
       "name: feature\nsteps:\n  - id: review\n    type: approval\n    title: 見て\n",
   });
-  await h("project.add", { path: healthyRepo }, NOOP_CONN);
+  await h("workspace.add", { path: healthyRepo }, NOOP_CONN);
   const healthy = await h(
     "task.create",
     { project: healthyRepo, title: "healthy", prompt: "p" },
@@ -875,7 +875,7 @@ async function midFlight(
   const workflow = o.workflow ?? TWO_AGENTS;
   const name = parseWorkflow(workflow).workflow.name;
   await writeFile(join(repo, ".doctrine", "workflows", `${name}.yaml`), workflow);
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
   const t = await h(
     "task.create",
     { project: repo, title: "T", prompt: "p", workflow: name },
@@ -1007,7 +1007,7 @@ test("running のタスクに task.cancel を送ると、走っていた実行�
 test("最終ステップの approval を承認したら worktree は削除され、ブランチは残る", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
   // beforeEach の feature.yaml は approval 1ステップだけ。承認がそのまま完了になる。
   const t = await h("task.create", { project: repo, title: "T", prompt: "p" }, NOOP_CONN) as {
     id: string;
@@ -1039,7 +1039,7 @@ test("最終ステップの approval でも未コミットの変更が残って�
     'name: dirtyapproval\nsteps:\n  - id: a\n    type: command\n    run: "touch leftover.txt"\n' +
       "  - id: review\n    type: approval\n    title: 見て\n",
   );
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
   const t = await h(
     "task.create",
     { project: repo, title: "T", prompt: "p", workflow: "dirtyapproval" },
@@ -1074,7 +1074,7 @@ test("最終ステップの approval でも未コミットの変更が残って�
 test("tick が重なって呼ばれても maxConcurrent: 1 のプロジェクトで2件が走り出さない", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
   const a = await h("task.create", { project: repo, title: "A", prompt: "p" }, NOOP_CONN) as {
     id: string;
   };
@@ -1144,7 +1144,8 @@ test("tick が重なって呼ばれても maxConcurrent: 1 のプロジェクト
 test("窓の中に priority 0 のタスクが入っても maxConcurrent: 1 のプロジェクトで2件が走り出さない", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
-  const project = await h("project.add", { path: repo }, NOOP_CONN) as { id: number };
+  const project = (await h("workspace.add", { path: repo }, NOOP_CONN) as WorkspaceSummary)
+    .projects[0];
   const a = await h("task.create", { project: repo, title: "A", prompt: "p" }, NOOP_CONN) as {
     id: string;
   };
@@ -1210,14 +1211,15 @@ test("窓の中に別プロジェクトの priority 0 が入っても globalLimi
   const ctx = await context();
   ctx.globalLimit = 1;
   const h = createHandler(ctx);
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
   const repo2 = await makeRepo(join(root, "two"), {
     "README.md": "y\n",
     ".doctrine/project.yaml": "defaultWorkflow: feature\nmaxConcurrent: 1\nbaseBranch: main\n",
     ".doctrine/workflows/feature.yaml":
       "name: feature\nsteps:\n  - id: review\n    type: approval\n    title: 見て\n",
   });
-  const project2 = await h("project.add", { path: repo2 }, NOOP_CONN) as { id: number };
+  const project2 = (await h("workspace.add", { path: repo2 }, NOOP_CONN) as WorkspaceSummary)
+    .projects[0];
   const a = await h("task.create", { project: repo, title: "A", prompt: "p" }, NOOP_CONN) as {
     id: string;
   };
@@ -1265,7 +1267,7 @@ test("tick が例外で抜けても再入ガードは解放され、次の周期
   const sqlite = new DatabaseSync(":memory:");
   ctx.db = await openDbOn(sqlite);
   const h = createHandler(ctx);
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
   const a = await h("task.create", { project: repo, title: "A", prompt: "p" }, NOOP_CONN) as {
     id: string;
   };
@@ -1303,7 +1305,7 @@ test("受付候補を読んだ後に cancel が届いたタスクは、running �
   const sqlite = new DatabaseSync(":memory:");
   ctx.db = await openDbOn(sqlite);
   const h = createHandler(ctx);
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
   const a = await h("task.create", { project: repo, title: "A", prompt: "p" }, NOOP_CONN) as {
     id: string;
   };
@@ -1338,32 +1340,33 @@ test("受付候補を読んだ後に cancel が届いたタスクは、running �
   assert.deepEqual(ctx.warnings.recent(), [], "見送りは失敗ではない");
 });
 
-// --- project.add は最初に叩くコマンドなので、足りない .doctrine の雛形を作る ---
+// --- workspace.add は最初に叩くコマンドなので、足りない .doctrine の雛形を作る ---
 
 /** .doctrine を持たない、最初のコミットだけ済んだリポジトリ */
 async function bareRepo(name: string): Promise<string> {
   return await makeRepo(join(root, name), { "README.md": "x\n" });
 }
 
-test("project.add: .doctrine が無ければ雛形を作り、そのままタスクを作れる", async () => {
+test("workspace.add: .doctrine が無ければ雛形を作り、そのままタスクを作れる", async () => {
   const bare = await bareRepo("bare");
   const ctx = await context();
   const h = createHandler(ctx);
-  const p = await h("project.add", { path: bare }, NOOP_CONN) as {
-    default_workflow: string;
+  const p = await h("workspace.add", { path: bare }, NOOP_CONN) as WorkspaceSummary & {
     created: string[];
   };
 
+  const workspaceYaml = join(bare, ".doctrine", "workspace.yaml");
   const projectYaml = join(bare, ".doctrine", "project.yaml");
   const workflowYaml = join(bare, ".doctrine", "workflows", "default.yaml");
+  assert.ok(existsSync(workspaceYaml), "workspace.yaml が作られている");
   assert.ok(existsSync(projectYaml), "project.yaml が作られている");
   assert.ok(existsSync(workflowYaml), "既定のワークフローが作られている");
   assert.deepEqual(
     [...p.created].sort(),
-    [projectYaml, workflowYaml].sort(),
+    [workspaceYaml, projectYaml, workflowYaml].sort(),
     "作ったファイルをレスポンスで伝える（ユーザーのリポジトリに未追跡ファイルが増えるため）",
   );
-  assert.equal(p.default_workflow, "default");
+  assert.equal(p.projects[0].default_workflow, "default");
 
   // 雛形が検証を通らなければ、ここで落ちる
   const t = await h("task.create", { project: bare, title: "T", prompt: "直して" }, NOOP_CONN) as {
@@ -1372,10 +1375,10 @@ test("project.add: .doctrine が無ければ雛形を作り、そのままタス
   assert.equal((await getTask(ctx.db, t.id))!.state, "queued");
 });
 
-test("project.add: 既定のワークフローは 4 章の手順（計画→レビュー→実装→検証→レビュー→ガイド→人）になっている", async () => {
+test("workspace.add: 既定のワークフローは 4 章の手順（計画→レビュー→実装→検証→レビュー→ガイド→人）になっている", async () => {
   const bare = await bareRepo("bare");
   const h = createHandler(await context());
-  await h("project.add", { path: bare }, NOOP_CONN);
+  await h("workspace.add", { path: bare }, NOOP_CONN);
   const { workflow } = parseWorkflow(
     await readFile(join(bare, ".doctrine", "workflows", "default.yaml"), "utf8"),
   );
@@ -1392,20 +1395,20 @@ test("project.add: 既定のワークフローは 4 章の手順（計画→レ�
   ]);
 });
 
-test("project.add: 雛形の project.yaml に setup を書かない（パッケージマネージャを強制しない）", async () => {
+test("workspace.add: 雛形の project.yaml に setup を書かない（パッケージマネージャを強制しない）", async () => {
   const bare = await bareRepo("bare");
   const h = createHandler(await context());
-  const p = await h("project.add", { path: bare }, NOOP_CONN) as { setup: string | null };
+  const p = (await h("workspace.add", { path: bare }, NOOP_CONN) as WorkspaceSummary).projects[0];
   assert.equal(p.setup, null);
   const text = await readFile(join(bare, ".doctrine", "project.yaml"), "utf8");
   assert.equal(/^\s*setup\s*:/m.test(text), false, "setup キーが書かれていない");
 });
 
-test("project.add: ベースブランチは main 決め打ちではなく git から取る", async () => {
+test("workspace.add: ベースブランチは main 決め打ちではなく git から取る", async () => {
   const bare = await bareRepo("bare");
   await run("git", ["-C", bare, "branch", "-m", "trunk"]);
   const h = createHandler(await context());
-  const p = await h("project.add", { path: bare }, NOOP_CONN) as { base_branch: string };
+  const p = (await h("workspace.add", { path: bare }, NOOP_CONN) as WorkspaceSummary).projects[0];
   assert.equal(p.base_branch, "trunk");
   assert.equal(
     baseBranchWrittenIn(await readFile(join(bare, ".doctrine", "project.yaml"), "utf8")),
@@ -1413,26 +1416,25 @@ test("project.add: ベースブランチは main 決め打ちではなく git �
   );
 });
 
-test("project.add: 既存の project.yaml は上書きしない", async () => {
+test("workspace.add: 既存の project.yaml は上書きしない", async () => {
   const before = await readFile(join(repo, ".doctrine", "project.yaml"), "utf8");
   const h = createHandler(await context());
-  const p = await h("project.add", { path: repo }, NOOP_CONN) as {
+  const p = await h("workspace.add", { path: repo }, NOOP_CONN) as WorkspaceSummary & {
     created: string[];
-    default_workflow: string;
   };
   assert.equal(await readFile(join(repo, ".doctrine", "project.yaml"), "utf8"), before);
-  assert.deepEqual(p.created, []);
-  assert.equal(p.default_workflow, "feature");
+  assert.deepEqual(p.created, [join(repo, ".doctrine", "workspace.yaml")]);
+  assert.equal(p.projects[0].default_workflow, "feature");
 });
 
-test("project.add: project.yaml が指すワークフローが無ければ、何も作らずに分かる形で失敗する", async () => {
+test("workspace.add: project.yaml が指すワークフローが無ければ、何も作らずに分かる形で失敗する", async () => {
   const r = await makeRepo(join(root, "partial"), {
     "README.md": "x\n",
     ".doctrine/project.yaml": "defaultWorkflow: feature\n",
   });
   const h = createHandler(await context());
   await assert.rejects(
-    () => h("project.add", { path: r }, NOOP_CONN),
+    () => h("workspace.add", { path: r }, NOOP_CONN),
     (e: unknown) => {
       const m = (e as Error).message;
       assert.match(m, /feature/, "どのワークフローが無いのか名前を出す");
@@ -1448,22 +1450,22 @@ test("project.add: project.yaml が指すワークフローが無ければ、何
   assert.equal((await h("project.list", {}, NOOP_CONN) as unknown[]).length, 0);
 });
 
-test("project.add: git リポジトリでなければ .doctrine を作らずに失敗する", async () => {
+test("workspace.add: git リポジトリでなければ .doctrine を作らずに失敗する", async () => {
   const plain = join(root, "plain");
   await mkdir(plain);
   const h = createHandler(await context());
-  await assert.rejects(() => h("project.add", { path: plain }, NOOP_CONN), /git/);
+  await assert.rejects(() => h("workspace.add", { path: plain }, NOOP_CONN), /git/);
   assert.equal(existsSync(join(plain, ".doctrine")), false);
 });
 
-test("project.add: リポジトリのサブディレクトリを指したら、ルートを案内して失敗する", async () => {
+test("workspace.add: リポジトリのサブディレクトリを指したら、ルートを案内して失敗する", async () => {
   const bare = await bareRepo("bare");
   const sub = join(bare, "packages", "app");
   await mkdir(sub, { recursive: true });
   const h = createHandler(await context());
   const realRoot = await Deno.realPath(bare);
   await assert.rejects(
-    () => h("project.add", { path: sub }, NOOP_CONN),
+    () => h("workspace.add", { path: sub }, NOOP_CONN),
     (e: unknown) => {
       // サブディレクトリのパスはルートを前方一致で含むので、それを取り除いた後にも
       // ルートが残っていることを確かめる — 単に sub のパスを含むエラー（NotFound 等）
@@ -1479,11 +1481,10 @@ test("project.add: リポジトリのサブディレクトリを指したら、�
   assert.equal(existsSync(join(sub, ".doctrine")), false);
 });
 
-test("project.add: 同じパスで2回呼んでも失敗せず、登録済みとして同じプロジェクトを返す", async () => {
+test("workspace.add: 同じパスで2回呼んでも失敗せず、登録済みとして同じ workspace を返す", async () => {
   const h = createHandler(await context());
-  const first = await h("project.add", { path: repo }, NOOP_CONN) as { id: number };
-  const second = await h("project.add", { path: repo }, NOOP_CONN) as {
-    id: number;
+  const first = await h("workspace.add", { path: repo }, NOOP_CONN) as WorkspaceSummary;
+  const second = await h("workspace.add", { path: repo }, NOOP_CONN) as WorkspaceSummary & {
     alreadyRegistered: boolean;
   };
   assert.equal(second.id, first.id);
@@ -1496,7 +1497,7 @@ function baseBranchWrittenIn(text: string): string {
   return m ? m[1] : "";
 }
 
-test("project.add: project.yaml が無くても、既にあるワークフローファイルは上書きしない", async () => {
+test("workspace.add: project.yaml が無くても、既にあるワークフローファイルは上書きしない", async () => {
   const custom =
     "name: default\nsteps:\n  - id: mine\n    type: approval\n    title: 自分で書いた\n";
   const r = await makeRepo(join(root, "wfonly"), {
@@ -1504,7 +1505,7 @@ test("project.add: project.yaml が無くても、既にあるワークフロー
     ".doctrine/workflows/default.yaml": custom,
   });
   const h = createHandler(await context());
-  const p = await h("project.add", { path: r }, NOOP_CONN) as { created: string[] };
+  const p = await h("workspace.add", { path: r }, NOOP_CONN) as { created: string[] };
   assert.equal(
     await readFile(join(r, ".doctrine", "workflows", "default.yaml"), "utf8"),
     custom,
@@ -1512,9 +1513,30 @@ test("project.add: project.yaml が無くても、既にあるワークフロー
   );
   assert.deepEqual(
     p.created,
-    [join(r, ".doctrine", "project.yaml")],
-    "作ったのは project.yaml だけ",
+    [join(r, ".doctrine", "workspace.yaml"), join(r, ".doctrine", "project.yaml")],
+    "作ったのは workspace.yaml と project.yaml だけ",
   );
+});
+
+test("workspace.list は workspace ごとにプロジェクトを返す", async () => {
+  const repo2 = await makeRepo(join(root, "two"), {
+    "README.md": "x\n",
+    ".doctrine/project.yaml": "defaultWorkflow: feature\nmaxConcurrent: 1\nbaseBranch: main\n",
+    ".doctrine/workflows/feature.yaml":
+      "name: feature\nsteps:\n  - id: review\n    type: approval\n    title: 見て\n",
+  });
+  const h = createHandler(await context());
+  await h("workspace.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo2 }, NOOP_CONN);
+  const list = await h("workspace.list", {}, NOOP_CONN) as WorkspaceSummary[];
+  assert.equal(list.length, 2);
+  assert.deepEqual(list.map((w) => w.projects.length), [1, 1]);
+  assert.deepEqual(list.map((w) => w.projects[0].path), [repo, repo2]);
+});
+
+test("project.add は未知のメソッドになった", async () => {
+  const h = createHandler(await context());
+  await assert.rejects(() => h("project.add", { path: repo }, NOOP_CONN), /未知のメソッドです/);
 });
 
 /** keyof を鍵にすることで、型に欄を足したらこの表も直さないと deno task check が落ちる。
@@ -1569,7 +1591,7 @@ function assertShape(
 test("task.list / project.list / task.cancel の応答が protocol.ts の型を満たす", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
   const t = await h("task.create", { project: repo, title: "た", prompt: "p" }, NOOP_CONN) as {
     id: string;
   };
@@ -1596,7 +1618,7 @@ test("task.list / project.list / task.cancel の応答が protocol.ts の型を�
 test("worktree を消すとそのタスクのレビュー参照も消える", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
   const t = await h("task.create", { project: repo, title: "T", prompt: "p" }, NOOP_CONN) as {
     id: string;
   };
@@ -1626,7 +1648,7 @@ test("worktree を消すとそのタスクのレビュー参照も消える", as
 test("削除を拒否されたら参照は残す", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
   const t = await h("task.create", { project: repo, title: "T", prompt: "p" }, NOOP_CONN) as {
     id: string;
   };
@@ -1710,7 +1732,7 @@ test("worktree.remove はパスが実パスでなくても受け付ける", asyn
 test("worktree.remove は DB に対応のない worktree をパスで消す", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
   const orphan = await createDetachedWorktree({
     repoPath: repo,
     worktreePath: worktreePathFor(repo, "orphan"),
@@ -1727,7 +1749,7 @@ test("worktree.remove は DB に対応のない worktree をパスで消す", as
 test("worktree.remove は worktree 置き場の外のパスを拒否する", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
   const elsewhere = await createDetachedWorktree({
     repoPath: repo,
     worktreePath: join(root, "elsewhere"),
@@ -1749,7 +1771,7 @@ test("worktree.remove は worktree 置き場の外のパスを拒否する", asy
 test("worktree.remove は git worktree list に出ないパスを拒否する", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
   const stray = join(stateDir(), "worktrees", basename(repo), "stray");
   await mkdir(stray, { recursive: true });
 
@@ -1805,7 +1827,8 @@ async function intakeWithWorktree(
   ctx: DaemonContext,
   h: ReturnType<typeof createHandler>,
 ): Promise<string> {
-  const project = await h("project.add", { path: repo }, NOOP_CONN) as { id: number };
+  const project = (await h("workspace.add", { path: repo }, NOOP_CONN) as WorkspaceSummary)
+    .projects[0];
   await addIntake(ctx, project.id);
   const worktree = await createDetachedWorktree({
     repoPath: repo,
@@ -1848,7 +1871,7 @@ async function suspendedTask(
   ctx: DaemonContext,
   h: ReturnType<typeof createHandler>,
 ): Promise<string> {
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
   const t = await h("task.create", { project: repo, title: "T", prompt: "p" }, NOOP_CONN) as {
     id: string;
   };
@@ -1920,7 +1943,7 @@ test("resume 後に再び suspended に入ると新しい awaiting 行が立ち�
 test("paused のタスクを resume しても、閉じるべき awaiting 行が無いので何も壊れない", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
   const t = await h("task.create", { project: repo, title: "T", prompt: "p" }, NOOP_CONN) as {
     id: string;
   };
@@ -1935,7 +1958,7 @@ test("paused のタスクを resume しても、閉じるべき awaiting 行が�
 test("task.context は承認待ちのタスクの経緯を返す", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
   const t = await h(
     "task.create",
     { project: repo, title: "T", prompt: "在庫の引当を冪等にして" },
@@ -1958,7 +1981,7 @@ test("task.context は承認待ちのタスクの経緯を返す", async () => {
 test("task.context は承認待ちでないタスクでも呼べる", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
   const t = await h(
     "task.create",
     { project: repo, title: "T", prompt: "やって" },
@@ -1980,7 +2003,7 @@ test("task.context は承認待ちでないタスクでも呼べる", async () =
 test("作成時の定義を持たないタスクは task.context はワークフローが読めなくても経緯を返す", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
   const t = await h(
     "task.create",
     { project: repo, title: "T", prompt: "やって" },
@@ -2008,7 +2031,7 @@ test("task.get は setup を先頭に含む steps を返す", async () => {
   );
   const ctx = await context();
   const h = createHandler(ctx);
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
   const t = await h("task.create", { project: repo, title: "T", prompt: "やって" }, NOOP_CONN) as {
     id: string;
   };
@@ -2029,7 +2052,7 @@ test("task.get は setup を先頭に含む steps を返す", async () => {
 test("作成時の定義を持たないタスクは task.get はワークフロー YAML が読めないとき steps を null にし、task と stepRuns は従来どおり返す", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
   const t = await h("task.create", { project: repo, title: "T", prompt: "やって" }, NOOP_CONN) as {
     id: string;
   };
@@ -2061,7 +2084,7 @@ test("task.context は無いタスクを名指しで断る", async () => {
 test("task.diff は worktree の未コミット・未追跡の変更を返す", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
   const t = await h("task.create", { project: repo, title: "T", prompt: "直して" }, NOOP_CONN) as {
     id: string;
   };
@@ -2096,7 +2119,7 @@ test("task.diff は worktree の未コミット・未追跡の変更を返す", 
 test("worktree の無いタスクの task.diff は失敗する", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
   const t = await h("task.create", { project: repo, title: "T", prompt: "直して" }, NOOP_CONN) as {
     id: string;
   };
@@ -2110,7 +2133,7 @@ test("worktree の無いタスクの task.diff は失敗する", async () => {
 test("since に未知の値を渡すと失敗する", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
   const t = await h("task.create", { project: repo, title: "T", prompt: "直して" }, NOOP_CONN) as {
     id: string;
   };
@@ -2134,7 +2157,7 @@ test("差し戻し後、since: last_review は前回レビュー以降の差分�
   );
   const ctx = await context();
   const h = createHandler(ctx);
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
   const t = await h(
     "task.create",
     { project: repo, title: "T", prompt: "直して", workflow: "loop" },
@@ -2219,7 +2242,7 @@ test("差し戻し後に承認が挟まっても since: last_review の基準は
   );
   const ctx = await context();
   const h = createHandler(ctx);
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
   const t = await h(
     "task.create",
     { project: repo, title: "T", prompt: "直して", workflow: "keep" },
@@ -2280,7 +2303,7 @@ test("差し戻し後に承認が挟まっても since: last_review の基準は
 test("差し戻しの記録が無ければ since: last_review は全体に倒す", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
   const t = await h("task.create", { project: repo, title: "T", prompt: "直して" }, NOOP_CONN) as {
     id: string;
   };
@@ -2312,7 +2335,7 @@ test("tick で完了したタスクは、stateChanged の後に task.cleanedUp �
   const events: ServerEvent[] = [];
   const ctx = await context(events);
   const h = createHandler(ctx);
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
   await writeFile(
     join(repo, ".doctrine", "workflows", "quick.yaml"),
     'name: quick\nsteps:\n  - id: a\n    type: command\n    run: "true"\n',
@@ -2342,7 +2365,7 @@ test("最終ステップが approval でも、stateChanged の後に task.cleane
   const events: ServerEvent[] = [];
   const ctx = await context(events);
   const h = createHandler(ctx);
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
   // beforeEach の feature.yaml は approval 1ステップだけ。承認がそのまま完了になる。
   const t = await h("task.create", { project: repo, title: "T", prompt: "p" }, NOOP_CONN) as {
     id: string;
@@ -2363,7 +2386,7 @@ test("削除を拒否したら outcome: refused と理由を載せて届く", as
   const events: ServerEvent[] = [];
   const ctx = await context(events);
   const h = createHandler(ctx);
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
   await writeFile(
     join(repo, ".doctrine", "workflows", "dirty.yaml"),
     'name: dirty\nsteps:\n  - id: a\n    type: command\n    run: "touch leftover.txt"\n',
@@ -2407,7 +2430,7 @@ test("daemon.warnings は溜まった警告を新しい順に返す", async () =
 test("task.logs は step_run_id を省くと最新のステップ実行の末尾を返す", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
   await writeFile(
     join(repo, ".doctrine", "workflows", "two.yaml"),
     "name: two\nsteps:\n" +
@@ -2456,7 +2479,7 @@ test("task.logs の follow は接続の追従先を上書きし、false でや�
     unfollow: () => following = null,
     isFollowing: (id: string) => following === id,
   };
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
   const a = await h("task.create", { project: repo, title: "A", prompt: "p" }, NOOP_CONN) as {
     id: string;
   };
@@ -2481,7 +2504,7 @@ test("task.logs の follow は接続の追従先を上書きし、false でや�
 /** 指定した期限で上限待ちに置いたタスクを1件作る。 */
 async function rateLimitedTask(ctx: DaemonContext, deadline: string): Promise<string> {
   const h = createHandler(ctx);
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
   const t = await h("task.create", { project: repo, title: "T", prompt: "直して" }, NOOP_CONN) as {
     id: string;
   };
@@ -2676,7 +2699,7 @@ test("上限を超えた guide.json は too_large を返す", async () => {
 test("worktree の無いタスクの task.guide は失敗する", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
   const t = await h("task.create", { project: repo, title: "T", prompt: "直して" }, NOOP_CONN) as {
     id: string;
   };
@@ -2710,7 +2733,8 @@ test("tick は Intake の実行をタスクより先に受け付ける", async (
   ctx.globalLimit = 1;
   ctx.adapter = createMockAdapter({ result: questionsOut([question("q1")]), delayMs: 100 });
   const h = createHandler(ctx);
-  const project = await h("project.add", { path: repo }, NOOP_CONN) as { id: number };
+  const project = (await h("workspace.add", { path: repo }, NOOP_CONN) as WorkspaceSummary)
+    .projects[0];
   await addIntake(ctx, project.id);
   await enqueueIntakeRun(ctx.db, "i1", "investigate", { logRoot: ctx.logRoot, resume: false });
   const t = await h("task.create", { project: repo, title: "T", prompt: "p" }, NOOP_CONN) as {
@@ -2728,7 +2752,8 @@ test("tick は Intake の実行をタスクより先に受け付ける", async (
 test("Intake の実行が例外で落ちたら、行を failed・Intake を要確認にして警告に残す", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
-  const project = await h("project.add", { path: repo }, NOOP_CONN) as { id: number };
+  const project = (await h("workspace.add", { path: repo }, NOOP_CONN) as WorkspaceSummary)
+    .projects[0];
   await addIntake(ctx, project.id);
   // worktree が消えていて、書き換えの検出（changedPaths）が try の外で例外を投げる
   await updateIntake(ctx.db, "i1", {
@@ -2751,7 +2776,8 @@ test("Intake の実行が例外で落ちたら、行を failed・Intake を要�
 test("worktree.list は Intake の worktree を孤児にしない", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
-  const project = await h("project.add", { path: repo }, NOOP_CONN) as { id: number };
+  const project = (await h("workspace.add", { path: repo }, NOOP_CONN) as WorkspaceSummary)
+    .projects[0];
   await addIntake(ctx, project.id);
   const worktree = await createDetachedWorktree({
     repoPath: repo,
@@ -2803,7 +2829,7 @@ const DEFAULT_STEPS = [
 test("workflow.list: .doctrine/workflows の YAML を名前順に、検証の可否と既定の印とともに返す", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
   await writeFile(join(repo, ".doctrine/workflows/default.yaml"), await repoDefaultYaml());
   await writeFile(join(repo, ".doctrine/workflows/broken.yaml"), BROKEN_SCHEMA);
   await writeFile(join(repo, ".doctrine/workflows/notes.txt"), "not a workflow");
@@ -2837,7 +2863,7 @@ test("workflow.list: project の setup を先頭に差し込んだ steps を返�
   );
   const ctx = await context();
   const h = createHandler(ctx);
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
   await writeFile(join(repo, ".doctrine/workflows/default.yaml"), await repoDefaultYaml());
 
   const list = await h("workflow.list", { project: repo }, NOOP_CONN) as WorkflowListEntry[];
@@ -2860,7 +2886,7 @@ test("workflow.list: project の setup を先頭に差し込んだ steps を返�
 test("workflow.list: 既定の印は DB の default_workflow で決め、project.yaml を読み直さない", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
   await writeFile(join(repo, ".doctrine/workflows/default.yaml"), await repoDefaultYaml());
   await writeFile(
     join(repo, ".doctrine", "project.yaml"),
@@ -2875,7 +2901,7 @@ test("workflow.list: 既定の印は DB の default_workflow で決め、project
 test("workflow.list: 不正な既定のワークフローも default: true と issues を返す", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
   await writeFile(join(repo, ".doctrine/workflows/feature.yaml"), BROKEN_GOTO);
 
   const list = await h("workflow.list", { project: repo }, NOOP_CONN) as WorkflowListEntry[];
@@ -2889,7 +2915,7 @@ test("workflow.list: 不正な既定のワークフローも default: true と i
 test("workflow.list: workflows ディレクトリが無ければ空を返す", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
   await rm(join(repo, ".doctrine", "workflows"), { recursive: true });
 
   const list = await h("workflow.list", { project: repo }, NOOP_CONN) as WorkflowListEntry[];
@@ -2908,7 +2934,7 @@ test("workflow.list: 未登録のプロジェクトは失敗する", async () =>
 test("workflow.get: default.yaml の 13 ステップの設定と分岐を返す", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
   await writeFile(join(repo, ".doctrine/workflows/default.yaml"), await repoDefaultYaml());
 
   const detail = await h(
@@ -3018,7 +3044,7 @@ test("workflow.get: default.yaml の 13 ステップの設定と分岐を返す"
 test("workflow.get: 書かれていない任意の欄は null で返す", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
 
   const detail = await h(
     "workflow.get",
@@ -3039,7 +3065,7 @@ test("workflow.get: 書かれていない任意の欄は null で返す", async 
 test("workflow.get: 壊れた YAML は検証エラーの内容を返す", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
   await writeFile(join(repo, ".doctrine/workflows/syntax.yaml"), BROKEN_SYNTAX);
   await writeFile(join(repo, ".doctrine/workflows/schema.yaml"), BROKEN_SCHEMA);
   await writeFile(join(repo, ".doctrine/workflows/goto.yaml"), BROKEN_GOTO);
@@ -3080,7 +3106,7 @@ test("workflow.get: 壊れた YAML は検証エラーの内容を返す", async 
 test("workflow.get: 無いワークフローや不正な名前は失敗する", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
 
   await assert.rejects(h("workflow.get", { project: repo, name: "nonexistent" }, NOOP_CONN));
   await assert.rejects(
@@ -3092,7 +3118,7 @@ test("workflow.get: 無いワークフローや不正な名前は失敗する", 
 test("workflow.get: 一覧に出た名前はそのまま引ける", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
   await writeFile(
     join(repo, ".doctrine/workflows/my.flow.yaml"),
     "name: feature\nsteps:\n  - id: review\n    type: approval\n    title: 見て\n",
@@ -3120,7 +3146,8 @@ test("daemon.slots は全体の実行枠・使っている数・枠待ちを返�
   const ctx = await context();
   ctx.globalLimit = 2;
   const h = createHandler(ctx);
-  const project = await h("project.add", { path: repo }, NOOP_CONN) as { id: number };
+  const project = (await h("workspace.add", { path: repo }, NOOP_CONN) as WorkspaceSummary)
+    .projects[0];
   const a = await h(
     "task.create",
     { project: repo, title: "A", prompt: "p" },
@@ -3149,7 +3176,7 @@ test("daemon.slots は全体の実行枠・使っている数・枠待ちを返�
 test("daemon.slots の枠待ちは受付順に並ぶ", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
   const x = await h(
     "task.create",
     { project: repo, title: "X", prompt: "p", priority: 2 },
@@ -3168,7 +3195,8 @@ test("daemon.slots の枠待ちは受付順に並ぶ", async () => {
 test("終わった Intake の queued の実行は枠待ちに出さない", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
-  const project = await h("project.add", { path: repo }, NOOP_CONN) as { id: number };
+  const project = (await h("workspace.add", { path: repo }, NOOP_CONN) as WorkspaceSummary)
+    .projects[0];
   await addIntake(ctx, project.id);
   await enqueueIntakeRun(ctx.db, "i1", "investigate", { logRoot: ctx.logRoot, resume: false });
   await updateIntake(ctx.db, "i1", { state: "canceled" });
@@ -3189,7 +3217,7 @@ test("daemon.setGlobalLimit で値を変えると次の tick でその数まで 
   ctx.adapter = createMockAdapter({ result: { ok: true, text: "done" }, delayMs: 3000 });
   ctx.globalLimit = 1;
   const h = createHandler(ctx);
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
   for (const title of ["A", "B", "C"]) {
     await h(
       "task.create",

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, test } from "@std/testing/bdd";
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openDb } from "../../src/db/migrate.ts";
@@ -27,7 +27,7 @@ let root: string;
 const contexts: DaemonContext[] = [];
 
 beforeEach(async () => {
-  root = await mkdtemp(join(tmpdir(), "doctrine-taskctx-e2e-"));
+  root = await realpath(await mkdtemp(join(tmpdir(), "doctrine-taskctx-e2e-")));
   process.env.DOCTRINE_STATE_DIR = join(root, "state");
 });
 afterEach(async () => {
@@ -101,7 +101,7 @@ test("approval の時点で task.context から計画の本文が取れる（完
     ".doctrine/workflows/guided.yaml": GUIDED,
   });
   const { ctx, handler } = await context();
-  await handler("project.add", { path: repo }, NOOP_CONN);
+  await handler("workspace.add", { path: repo }, NOOP_CONN);
   const t = await handler(
     "task.create",
     { project: repo, title: "在庫の引当", prompt: "在庫の引当を冪等にして" },
@@ -152,7 +152,7 @@ test("2回差し戻したタスクで、両方のレビューが返る（完了�
     ".doctrine/workflows/guided.yaml": GUIDED,
   });
   const { ctx, handler } = await context();
-  await handler("project.add", { path: repo }, NOOP_CONN);
+  await handler("workspace.add", { path: repo }, NOOP_CONN);
   const t = await handler(
     "task.create",
     { project: repo, title: "T", prompt: "やって" },

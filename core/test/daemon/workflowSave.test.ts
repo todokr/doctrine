@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, test } from "@std/testing/bdd";
 import assert from "node:assert/strict";
-import { readdir, readFile, rm } from "node:fs/promises";
+import { readdir, readFile, realpath, rm } from "node:fs/promises";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -34,10 +34,11 @@ let repo: string;
 let defaultYaml: string;
 
 beforeEach(async () => {
-  root = await mkdtemp(join(tmpdir(), "doctrine-workflowsave-"));
+  root = await realpath(await mkdtemp(join(tmpdir(), "doctrine-workflowsave-")));
   defaultYaml = await repoDefaultYaml();
   repo = await makeRepo(root, {
     "README.md": "x\n",
+    ".doctrine/workspace.yaml": "projects:\n  repo: .\n",
     ".doctrine/project.yaml": PROJECT_YAML,
     ".doctrine/workflows/default.yaml": defaultYaml,
   });
@@ -71,7 +72,7 @@ async function context(events: ServerEvent[] = []): Promise<DaemonContext> {
 test("workflow.save は変更を作業ツリーのファイルに書き、コメントを残し、コミットしない", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
 
   const result = await h("workflow.save", {
     project: repo,
@@ -120,7 +121,7 @@ test("workflow.save は変更を作業ツリーのファイルに書き、コメ
 test("workflow.save は goto に存在しないステップを入れると書かずにエラーを返す", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
 
   const before = await readFile(join(repo, ".doctrine", "workflows", "default.yaml"), "utf8");
 
@@ -151,7 +152,7 @@ test("workflow.save は gh pr create を含む run に警告を返す", async ()
   const events: ServerEvent[] = [];
   const ctx = await context(events);
   const h = createHandler(ctx);
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
 
   const result = await h("workflow.save", {
     project: repo,
@@ -167,7 +168,7 @@ test("workflow.save は gh pr create を含む run に警告を返す", async ()
 test("workflow.save は無いワークフロー・不正な名前・未登録のプロジェクト・changes の欠落を断る", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
 
   await assert.rejects(
     () => h("workflow.save", { project: repo, name: "nope", changes: [] }, NOOP_CONN),

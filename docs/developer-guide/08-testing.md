@@ -106,7 +106,7 @@ test("setup → agent → command → approval → 承認 → 完了まで通る
     ".doctrine/workflows/feature.yaml": WORKFLOW,
   });
   const { ctx, handler } = await context();
-  await handler("project.add", { path: repo }, NOOP_CONN);
+  await handler("workspace.add", { path: repo }, NOOP_CONN);
   const t = await handler("task.create", { project: repo, title: "...", prompt: "..." }, NOOP_CONN);
   await tick(ctx);
   await until(async () => (await getTask(ctx.db, t.id))?.state === "suspended", 5000, "承認待ちに着く");

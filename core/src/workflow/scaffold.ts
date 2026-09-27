@@ -1,12 +1,14 @@
-import { join } from "@std/path";
+import { basename, dirname, join } from "@std/path";
 import { runCommand } from "../util/exec.ts";
+import { projectNameFrom } from "../db/workspaces.ts";
 import { parseProjectConfig } from "./project.ts";
+import { WORKSPACE_YAML, workspaceYamlFor } from "./workspace.ts";
 
-/** project-add が雛形を作るときのワークフロー名 */
+/** workspace-add が雛形を作るときのワークフロー名 */
 export const DEFAULT_WORKFLOW_NAME = "default";
 
 /**
- * project-add は最初に叩くコマンドなので、足りない `.doctrine/` の雛形をここで作る。
+ * workspace-add は最初に叩くコマンドなので、足りない `.doctrine/` の雛形をここで作る。
  *
  * - 既存のファイルは決して上書きしない。ユーザーが書いた設定を黙って消さないため
  * - project.yaml が既にあるなら、それが指すワークフローを勝手に作らない。
@@ -48,11 +50,46 @@ export async function ensureProjectScaffold(path: string): Promise<{ created: st
   return { created };
 }
 
-async function assertRepoRoot(path: string): Promise<void> {
-  let top: string;
+/**
+ * <root>/.doctrine/workspace.yaml が無ければ、root が git リポジトリのルートなら
+ * projects: { <丸めた名前>: . } で書く。root が git リポジトリでなく workspace.yaml も無ければ投げる
+ * （何を束ねるかは人が書く）。既にある workspace.yaml の中身は検証しない。
+ */
+export async function ensureWorkspaceScaffold(root: string): Promise<{ created: string[] }> {
+  const yamlPath = join(root, WORKSPACE_YAML);
+  if (await exists(yamlPath)) return { created: [] };
+
+  const top = await gitTopLevel(root);
+  if (top === null) {
+    throw new Error(
+      `workspace.yaml がありません: ${yamlPath}` +
+        `（${root} は git リポジトリではありません。束ねるリポジトリを projects に書いてください）`,
+    );
+  }
+  const realRoot = await Deno.realPath(root);
+  if (realRoot !== top) {
+    throw new Error(
+      `リポジトリのルートを指定してください: ${top}（${root} はそのサブディレクトリです）`,
+    );
+  }
+  await Deno.mkdir(dirname(yamlPath), { recursive: true });
+  const text = workspaceYamlFor([{ name: projectNameFrom(basename(realRoot)), path: "." }]);
+  await Deno.writeTextFile(yamlPath, text, { createNew: true });
+  return { created: [yamlPath] };
+}
+
+/** git のトップレベル（実パス）。git リポジトリの中でなければ null。 */
+async function gitTopLevel(path: string): Promise<string | null> {
   try {
-    top = (await runCommand("git", ["-C", path, "rev-parse", "--show-toplevel"])).stdout.trim();
+    return (await runCommand("git", ["-C", path, "rev-parse", "--show-toplevel"])).stdout.trim();
   } catch {
+    return null;
+  }
+}
+
+async function assertRepoRoot(path: string): Promise<void> {
+  const top = await gitTopLevel(path);
+  if (top === null) {
     throw new Error(
       `git リポジトリではありません: ${path}` +
         `（doctrine はタスクごとに git worktree を作るため、git リポジトリのルートを指定してください）`,
@@ -103,7 +140,7 @@ async function exists(p: string): Promise<boolean> {
 /** setup は書かない — doctrine はパッケージマネージャを強制しない（spec 3章） */
 function projectYamlFor(baseBranch: string | undefined): string {
   const lines = [
-    "# doctrine のプロジェクト設定（dctl project-add が雛形として作成）",
+    "# doctrine のプロジェクト設定（dctl workspace-add が雛形として作成）",
     "#",
     "# setup: 新しい worktree で最初に走らせるコマンド。例: pnpm install --frozen-lockfile",
     "#   doctrine はパッケージマネージャを決めないので、必要なら自分で書く。",
@@ -147,7 +184,7 @@ export function defaultWorkflowYamlFor(baseBranch: string | undefined): string {
   const base = baseBranch ?? "main";
   const readOnly = toolLines(READ_ONLY_TOOLS);
   const implementTools = toolLines([...READ_ONLY_TOOLS, "Bash(git add:*)", "Bash(git commit:*)"]);
-  return `# doctrine の既定ワークフロー（dctl project-add が雛形として作成）
+  return `# doctrine の既定ワークフロー（dctl workspace-add が雛形として作成）
 # plan → plan-review → plan-gate → implement → verify → agent-review → review-gate → guide → review
 #
 # エージェントを planner / plan-reviewer / implementer / code-reviewer / guide の5つの役割に分け、

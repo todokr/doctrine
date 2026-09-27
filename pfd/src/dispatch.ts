@@ -36,7 +36,7 @@ export async function dispatch(input: DispatchInput): Promise<DispatchResult> {
   if (lost.length > 0) {
     throw new Error(
       lost.map((s) =>
-        `記録にあるタスク ${s.task_id}（プロセス ${s.id}）が dctl ls に見当たりません。dctld と、<project> が dctl project-add に渡したパスと一致しているかを確かめてください`
+        `記録にあるタスク ${s.task_id}（プロセス ${s.id}）が dctl ls に見当たりません。dctld と、<project> が dctl workspace-add で登録されたパス（dctl projects の path）と一致しているかを確かめてください`
       ).join("\n"),
     );
   }

@@ -1,6 +1,11 @@
-import { test } from "@std/testing/bdd";
+import { afterEach, beforeEach, test } from "@std/testing/bdd";
 import assert from "node:assert/strict";
-import { defaultWorkflowYamlFor } from "../../src/workflow/scaffold.ts";
+import { mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { defaultWorkflowYamlFor, ensureWorkspaceScaffold } from "../../src/workflow/scaffold.ts";
+import { parseWorkspaceConfig } from "../../src/workflow/workspace.ts";
+import { makeRepo } from "../helpers/repo.ts";
 import {
   type AgentStep,
   type ApprovalStep,
@@ -11,6 +16,25 @@ import {
   type Step,
 } from "../../src/workflow/schema.ts";
 import { expand, type TemplateContext } from "../../src/workflow/template.ts";
+
+let root: string;
+
+beforeEach(async () => {
+  root = await realpath(await mkdtemp(join(tmpdir(), "doctrine-scaffold-")));
+});
+
+afterEach(async () => {
+  await rm(root, { recursive: true, force: true });
+});
+
+async function pathExists(p: string): Promise<boolean> {
+  try {
+    await stat(p);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 function stepsOf(baseBranch: string | undefined = "main"): Step[] {
   return parseWorkflow(defaultWorkflowYamlFor(baseBranch)).workflow.steps;
@@ -125,4 +149,55 @@ test("baseBranch が agent-review の diff の範囲に入る", () => {
 test("baseBranch が取れなければ main にする", () => {
   const review = byId(stepsOf(undefined), "agent-review") as AgentStep;
   assert.ok(review.prompt.includes("main...HEAD"));
+});
+
+test("ensureWorkspaceScaffold: リポジトリのルートなら projects: { repo: . } の雛形を書く", async () => {
+  const repo = await makeRepo(join(root, "solo"), { "README.md": "x\n" });
+  const { created } = await ensureWorkspaceScaffold(repo);
+  const yamlPath = join(repo, ".doctrine", "workspace.yaml");
+  assert.deepEqual(created, [yamlPath]);
+  const cfg = parseWorkspaceConfig(await readFile(yamlPath, "utf8"), "repo");
+  assert.deepEqual(cfg.projects, [{ name: "repo", path: "." }]);
+});
+
+test("ensureWorkspaceScaffold: workspace.yaml があれば触らない", async () => {
+  const repo = await makeRepo(join(root, "solo"), {
+    ".doctrine/workspace.yaml": "projects:\n  a: x\n",
+  });
+  const { created } = await ensureWorkspaceScaffold(repo);
+  assert.deepEqual(created, []);
+  assert.equal(
+    await readFile(join(repo, ".doctrine", "workspace.yaml"), "utf8"),
+    "projects:\n  a: x\n",
+  );
+});
+
+test("ensureWorkspaceScaffold: git 管理外で workspace.yaml が無ければ投げ、何も作らない", async () => {
+  const plain = join(root, "plain");
+  await mkdir(plain);
+  await assert.rejects(ensureWorkspaceScaffold(plain), (e: Error) => {
+    assert.match(e.message, /workspace\.yaml/);
+    assert.match(e.message, /git/);
+    return true;
+  });
+  assert.equal(await pathExists(join(plain, ".doctrine")), false);
+});
+
+test("ensureWorkspaceScaffold: git 管理外でも workspace.yaml があれば何もしない", async () => {
+  const plain = join(root, "plain");
+  await mkdir(join(plain, ".doctrine"), { recursive: true });
+  await writeFile(join(plain, ".doctrine", "workspace.yaml"), "projects:\n  a: x\n");
+  const { created } = await ensureWorkspaceScaffold(plain);
+  assert.deepEqual(created, []);
+});
+
+test("ensureWorkspaceScaffold: リポジトリのサブディレクトリでは root を案内して投げる", async () => {
+  const repo = await makeRepo(join(root, "solo"), { "README.md": "x\n" });
+  const sub = join(repo, "packages", "app");
+  await mkdir(sub, { recursive: true });
+  await assert.rejects(ensureWorkspaceScaffold(sub), (e: Error) => {
+    assert.ok(e.message.includes(repo));
+    return true;
+  });
+  assert.equal(await pathExists(join(sub, ".doctrine")), false);
 });

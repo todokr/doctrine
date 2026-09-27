@@ -305,6 +305,8 @@ export type ProjectSummary = {
   setup: string | null;
 };
 
+export type WorkspaceSummary = { id: number; path: string; name: string; projects: ProjectSummary[] };
+
 /**
  * project.yaml の設定（project.config.get が返す。core/src/workflow/project.ts の ProjectConfig と同じ形）。
  * setup は書かれていなければ無い。
@@ -525,6 +527,14 @@ export type Methods = {
     result: TaskSummary & { warnings: string[] };
   };
   "project.list": { params: Record<string, never>; result: ProjectSummary[] };
+  "workspace.list": { params: Record<string, never>; result: WorkspaceSummary[] };
+  /** <path>/.doctrine/workspace.yaml と各プロジェクトの .doctrine/ の雛形を作り（既存は上書きしない）、登録する。2 回目は alreadyRegistered: true。 */
+  "workspace.add": {
+    params: { path: string };
+    result: WorkspaceSummary & { created: string[]; alreadyRegistered: boolean };
+  };
+  /** workspace.yaml と各 project.yaml を読み直して DB を合わせる。 */
+  "workspace.update": { params: { path: string }; result: WorkspaceSummary };
   /**
    * <project>/.doctrine/workflows/*.yaml を名前の昇順で。検証に落ちたものも issues とともに返す。
    * 既定の印と、setup を差し込んだ後のステップの列を添える。
