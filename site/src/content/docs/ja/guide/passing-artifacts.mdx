@@ -2,11 +2,10 @@
 title: ステップ間で成果物を渡す
 description: agent ステップの間で計画やレビュー結果をファイルで受け渡す方法。
 sidebar:
-  order: 60
+  order: 30
 ---
 
-前段の `agent` ステップが後段へ計画やレビュー結果を渡したいときは、worktree 内の
-ファイルに書かせ、後段は `{{ worktree.path }}` でパスを組み立てて読ませる。
+前段の `agent` ステップから後段へ計画やレビュー結果を渡すときは、前段に worktree の中のファイルへ書かせます。後段には、`{{ worktree.path }}` でパスを組み立てて読ませます。
 
 ```yaml
   - id: plan
@@ -20,19 +19,15 @@ sidebar:
     prompt: "{{ worktree.path }}/.doctrine-out/plan.md の内容をレビューしてください"
 ```
 
-`.doctrine-out/` という名前は規約であり、doctrine が強制するものではない
-（プロンプトで指示する自由な文字列）。ただし doctrine は worktree 作成時に、
-この名前を `.git/info/exclude` へ自動で追記する。`.git/info/exclude` はリポジトリ共通のファイルで、
-プロジェクトの `.gitignore` は書き換えない。これにより:
+## `.doctrine-out/` は git の差分に混ざらない
 
-- `completed` の後始末（Guide の「worktree は失敗・中止時に残る」）が、この中間ファイルを「未コミットの変更」として
-  誤って削除拒否しない
-- レビュー画面の diff にも混ざらない。diff を取るときも `.doctrine-out/` を除いているので、
-  `.git/info/exclude` への追記とは別にも守られている
+`.doctrine-out/` という名前は慣例で、doctrine が強制するものではありません。プロンプトで指示する、ただの文字列です。ただし doctrine は、worktree を作るときにこの名前を `.git/info/exclude` へ自動で書き足します。`.git/info/exclude` はリポジトリで共通のファイルで、プロジェクトの `.gitignore` は書き換えません。これで次の 2 つが守られます。
 
-対象を別の名前にしたい場合でも、この自動追記の対象は `.doctrine-out/` に固定されている
-点に注意する（変えたい場合は自分で `.git/info/exclude` に追記する）。
+- タスクが `completed` になると worktree は削除されますが、未コミットの変更が残っていると削除は拒否されます。この中間ファイルがその「未コミットの変更」と見なされて、削除を誤って拒まれることはありません
+- レビュー画面の diff にも混ざりません。diff を取るときにも `.doctrine-out/` を除いているので、`.git/info/exclude` への書き足しとは別にも守られています
 
-短い結果なら、ファイルを介さず `{{ steps.<id>.last_stdout }}`（`agent` の最終応答）でも渡せる。
-書かせたファイルを人に見せたいときは、`approval` の `review.files` に並べる
-（[ワークフローを書く](/ja/guide/writing-workflows/)）。
+別の名前のディレクトリを使う場合は注意が必要です。自動で書き足されるのは `.doctrine-out/` だけなので、使う名前は自分で `.git/info/exclude` に書き足してください。
+
+## 短い結果や人に見せたいファイルの渡し方
+
+短い結果なら、ファイルを使わずに `{{ steps.<id>.last_stdout }}`（`agent` の最終応答）でも渡せます。書かせたファイルを人に見せたいときは、`approval` の `review.files` に並べます（[ワークフローを書く](/ja/guide/writing-workflows/)）。

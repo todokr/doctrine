@@ -122,11 +122,8 @@ function Problem({ t }: { t: number }) {
   const o = window01(t, S.problem[0] - 1, S.problem[1]);
   return (
     <Layer opacity={o}>
-      <Caption t={t} from={-1} to={2.6}>
-        エージェントは、速く書く。
-      </Caption>
-      <Caption t={t} from={2.6} to={5}>
-        でも、<span className="vf-em">理解</span>が追いつかない。
+      <Caption t={t} from={-1} to={5}>
+        エージェントが書く速さに、理解が追いつかない。
       </Caption>
       {PRS.map((pr, i) => {
         const appear = 0.3 + i * 0.42;
@@ -150,19 +147,13 @@ function Problem({ t }: { t: number }) {
           </div>
         );
       })}
-      <div
-        className="vf-counter"
-        style={{ opacity: easeOut(progress(t, 2.8, 3.4)) }}
-      >
-        レビュー待ち <strong>{Math.min(PRS.length, Math.max(0, Math.floor((t - 0.3) / 0.42) + 1))}</strong> 件
-      </div>
     </Layer>
   );
 }
 
 /* 転換: doctrine が答えを出す。 */
 
-export const BRIDGE_COPY = '理解を追いつかせる。';
+export const BRIDGE_COPY = '理解をあきらめない。';
 
 function Bridge({ t, images }: { t: number; images: FilmImages }) {
   const o = window01(t, S.bridge[0], S.bridge[1], 0.4);
@@ -244,10 +235,10 @@ function HandOver({ t, images, loading }: { t: number; images: FilmImages; loadi
   return (
     <Layer opacity={o}>
       <Caption t={t} from={5} to={8.6} size={60}>
-        Epic を渡すと、まず<span className="vf-em">論点が質問で</span>返ってくる。
+        Issue をもとに、<span className="vf-em">論点を洗い出す</span>。
       </Caption>
       <Caption t={t} from={8.6} to={12} size={60}>
-        答えると、PR 1 つ分ずつの<span className="vf-em">プロセスに分解</span>される。
+        小さな<span className="vf-em">タスクに分解</span>する。
       </Caption>
       <div className="vf-layer" style={{ opacity: qOpacity }}>
         <ScreenWindow image={images.question} view={qView} label="Intake — 回答待ち" loading={loading} style={{ left: 210, top: 230 }} />
@@ -327,13 +318,13 @@ function Engine({ t }: { t: number }) {
   return (
     <Layer opacity={o}>
       <Caption t={t} from={12} to={14.7} size={60}>
-        依存関係に沿って、<span className="vf-em">次のタスクが自動で</span>投入される。
+        依存関係に沿って、<span className="vf-em">タスクを自動で投入</span>する。
       </Caption>
       <Caption t={t} from={14.7} to={17.3} size={60}>
-        conflict したら、<span className="vf-em">取り込んで直す</span>。
+        conflict したら、<span className="vf-em">自動で修正</span>する。
       </Caption>
       <Caption t={t} from={17.3} to={20} size={60}>
-        利用上限に当たっても、<span className="vf-em">待って再開</span>する。
+        利用上限に当たっても、<span className="vf-em">自動で再開</span>する。
       </Caption>
       <svg className="vf-graph" width={WIDTH} height={HEIGHT} viewBox={`0 0 ${WIDTH} ${HEIGHT}`}>
         {EDGES.map(([from, to]) => {
@@ -370,9 +361,6 @@ function Engine({ t }: { t: number }) {
           </div>
         );
       })}
-      <div className="vf-footnote" style={{ opacity: window01(t, 13, 20, 0.5) }}>
-        この間、人はコマンドを 1 つも叩かない
-      </div>
     </Layer>
   );
 }
@@ -395,7 +383,7 @@ function Judge({ t, images, loading }: { t: number; images: FilmImages; loading:
   return (
     <Layer opacity={o}>
       <Caption t={t} from={20} to={23.2} size={60}>
-        届くのは、<span className="vf-em">何を・なぜ変えたか</span>の説明。
+        人は、<span className="vf-em">何を・なぜ変えたか</span>をもとにレビューする。
       </Caption>
       <Caption t={t} from={23.2} to={26} size={60}>
         人は、<span className="vf-em">理解してから</span>判断する。
@@ -458,12 +446,12 @@ function EndCard({ t, images }: { t: number; images: FilmImages }) {
       />
       <div className="vf-end" style={{ opacity: text, transform: `translateY(${(1 - text) * 20}px)` }}>
         <div className="vf-end-title">
-          作業は渡す、
+          作業は渡す。
           <br />
-          理解は渡さない
+          理解は譲らない。
         </div>
         <div className="vf-end-sub">
-          <strong>doctrine</strong> — 手元のマシンで動く software factory
+          <strong>doctrine</strong> — 手元のマシンで動く AI 駆動開発基盤
         </div>
       </div>
     </Layer>
