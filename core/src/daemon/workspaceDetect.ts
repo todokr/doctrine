@@ -2,7 +2,7 @@ import { basename, join } from "@std/path";
 import type { Db } from "../db/schema.ts";
 import { getWorkspaceByPath, projectNameFrom } from "../db/workspaces.ts";
 import { parseWorkspaceConfig, WORKSPACE_YAML } from "../workflow/workspace.ts";
-import { gitTopLevel } from "../workflow/scaffold.ts";
+import { gitTopLevel, requireNotSubdirectory } from "../workflow/scaffold.ts";
 import { resolveRoot } from "./workspaceRegistry.ts";
 import type { WorkspaceDetection } from "../../../shared/protocol.ts";
 
@@ -16,12 +16,7 @@ import type { WorkspaceDetection } from "../../../shared/protocol.ts";
 export async function detectWorkspace(db: Db, path: string): Promise<WorkspaceDetection> {
   const root = await resolveRoot(path);
 
-  const top = await gitTopLevel(root);
-  if (top !== null && top !== root) {
-    throw new Error(
-      `リポジトリのルートを指定してください: ${top}（${root} はそのサブディレクトリです）`,
-    );
-  }
+  const top = await requireNotSubdirectory(root);
   const isRepoRoot = top === root;
 
   const repositories = isRepoRoot ? [] : await listSubRepositories(root);
@@ -48,12 +43,14 @@ export async function detectWorkspace(db: Db, path: string): Promise<WorkspaceDe
 
 /**
  * root 直下の git リポジトリのルートを名前順に返す。`.` で始まるディレクトリは見ない。
- * シンボリックリンクも辿る（realPath で束ねたい先を確かめる）。
+ * シンボリックリンクも辿って git リポジトリかどうかを確かめるが、返す dir はエントリ名
+ * そのもの（symlink ならそのリンクの名前）。workspace.add の projects にそのまま
+ * `{ name: dir }` として渡せる、root からの相対パスにするため。
  */
 async function listSubRepositories(
   root: string,
 ): Promise<{ dir: string; suggestedName: string }[]> {
-  const found: { name: string; dir: string; suggestedName: string }[] = [];
+  const found: { name: string; suggestedName: string }[] = [];
   for await (const entry of Deno.readDir(root)) {
     if (entry.name.startsWith(".")) continue;
     const dir = join(root, entry.name);
@@ -66,9 +63,9 @@ async function listSubRepositories(
     if (!stat.isDirectory) continue;
     const real = await Deno.realPath(dir);
     if (await gitTopLevel(dir) === real) {
-      found.push({ name: entry.name, dir: real, suggestedName: projectNameFrom(entry.name) });
+      found.push({ name: entry.name, suggestedName: projectNameFrom(entry.name) });
     }
   }
   found.sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
-  return found.map(({ dir, suggestedName }) => ({ dir, suggestedName }));
+  return found.map(({ name, suggestedName }) => ({ dir: name, suggestedName }));
 }

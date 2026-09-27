@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, test } from "@std/testing/bdd";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -46,13 +46,26 @@ test("リポジトリのルートを選ぶと isRepoRoot で repositories は空
 });
 
 test("git 管理外のディレクトリなら直下のリポジトリを名前順に返し、suggestedName を丸める", async () => {
-  const myRepo = await initRepoAt(join(root, "My_Repo"));
-  const zzz = await initRepoAt(join(root, "zzz"));
+  await initRepoAt(join(root, "My_Repo"));
+  await initRepoAt(join(root, "zzz"));
+  const r = await detectWorkspace(db, root);
+  assert.equal(r.isRepoRoot, false);
+  // dir は root からの相対パス（root 直下のエントリ名そのもの）。workspace.add の
+  // projects にそのまま { [suggestedName]: dir } として渡せる形。
+  assert.deepEqual(r.repositories, [
+    { dir: "My_Repo", suggestedName: "my-repo" },
+    { dir: "zzz", suggestedName: "zzz" },
+  ]);
+});
+
+test("root 直下のエントリが symlink でも、dir はそのリンクの名前になる", async () => {
+  const real = await initRepoAt(join(root, "real-repo"));
+  await symlink(real, join(root, "link-repo"));
   const r = await detectWorkspace(db, root);
   assert.equal(r.isRepoRoot, false);
   assert.deepEqual(r.repositories, [
-    { dir: myRepo, suggestedName: "my-repo" },
-    { dir: zzz, suggestedName: "zzz" },
+    { dir: "link-repo", suggestedName: "link-repo" },
+    { dir: "real-repo", suggestedName: "real-repo" },
   ]);
 });
 

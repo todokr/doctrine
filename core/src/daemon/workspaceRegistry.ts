@@ -8,7 +8,11 @@ import {
   listProjectsOf,
 } from "../db/workspaces.ts";
 import { parseProjectConfig, type ProjectConfig, type TrackerConfig } from "../workflow/project.ts";
-import { ensureProjectScaffold, ensureWorkspaceScaffold } from "../workflow/scaffold.ts";
+import {
+  ensureProjectScaffold,
+  ensureWorkspaceScaffold,
+  requireNotSubdirectory,
+} from "../workflow/scaffold.ts";
 import {
   parseWorkspaceConfig,
   WORKSPACE_YAML,
@@ -38,10 +42,11 @@ export async function addWorkspace(
   let projects: ResolvedProject[];
   let claims: Map<string, ProjectRow>;
   try {
-    // init から書いた workspace.yaml の名前・パスが不正（名前の形が違う、指す先が無いなど）
-    // なら、書いたファイルを残さない。既にあった workspace.yaml はここで消さない
-    // （scaffold.created に入らない）。DB の衝突（checkClaim）もファイルを書く前の検証なので、
-    // ここに含める。
+    // init から書いた workspace.yaml の名前・パスが不正（名前の形が違う、指す先が無い、
+    // git リポジトリでないなど）なら、書いたファイルを残さない。既にあった workspace.yaml は
+    // ここで消さない（scaffold.created に入らない）。DB の衝突（checkClaim）もファイルを
+    // 書く前の検証なので、ここに含める。resolveProjects が全 projects を検証してから
+    // 下の ensureProjectScaffold のループに入るので、1件でも不正なら1件もスキャフォルドしない。
     cfg = await readConfig(root);
     projects = await resolveProjects(root, cfg);
     claims = new Map<string, ProjectRow>();
@@ -162,6 +167,11 @@ async function readConfig(root: string): Promise<WorkspaceConfig> {
   return parseWorkspaceConfig(text, basename(root));
 }
 
+/**
+ * projects の各エントリを実パスに解決し、git リポジトリのルートであることまで確かめる。
+ * ここで全件を検証してから呼び出し側が ensureProjectScaffold に進むので、1件でも
+ * 不正なら（存在しない・リポジトリでない・重複）1件もスキャフォルドしない。
+ */
 async function resolveProjects(root: string, cfg: WorkspaceConfig): Promise<ResolvedProject[]> {
   const resolved: ResolvedProject[] = [];
   const seen = new Map<string, string>();
@@ -182,6 +192,11 @@ async function resolveProjects(root: string, cfg: WorkspaceConfig): Promise<Reso
       throw new Error(
         `projects の ${other} と ${entry.name} が同じリポジトリ ${real} を指しています`,
       );
+    }
+    // ensureProjectScaffold（assertRepoRoot）が同じことを確かめるが、それは1件ずつ
+    // スキャフォルドしながら呼ぶので手遅れ。ここで先に全件を確かめる。
+    if (await requireNotSubdirectory(real) === null) {
+      throw new Error(`projects の ${entry.name} が指すパスは git リポジトリではありません: ${real}`);
     }
     seen.set(real, entry.name);
     resolved.push({ name: entry.name, path: real });

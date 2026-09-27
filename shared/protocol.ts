@@ -334,6 +334,9 @@ export type TrackerConfig =
  *
  * isRepoRoot が true なら root 自身を束ねるので repositories は空。false なら root 直下の
  * git リポジトリのルートを名前順に返す（`.` で始まるディレクトリは見ない）。
+ * repositories[].dir は root からの相対パス（root 直下のエントリ名そのもので、symlink
+ * ならそのリンクの名前。絶対パスではない）。workspace.add の projects にそのまま
+ * `{ [suggestedName]: dir }` として渡せる。
  * existing は root/.doctrine/workspace.yaml があれば読んだ中身。alreadyRegistered は
  * root が既に workspace として登録済みか。
  */

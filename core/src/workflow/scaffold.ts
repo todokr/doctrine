@@ -74,17 +74,12 @@ export async function ensureWorkspaceScaffold(
     return { created: [yamlPath] };
   }
 
-  const top = await gitTopLevel(root);
+  const realRoot = await Deno.realPath(root);
+  const top = await requireNotSubdirectory(realRoot);
   if (top === null) {
     throw new Error(
       `workspace.yaml がありません: ${yamlPath}` +
         `（${root} は git リポジトリではありません。束ねるリポジトリを projects に書いてください）`,
-    );
-  }
-  const realRoot = await Deno.realPath(root);
-  if (realRoot !== top) {
-    throw new Error(
-      `リポジトリのルートを指定してください: ${top}（${root} はそのサブディレクトリです）`,
     );
   }
   await Deno.mkdir(dirname(yamlPath), { recursive: true });
@@ -102,18 +97,28 @@ export async function gitTopLevel(path: string): Promise<string | null> {
   }
 }
 
+/**
+ * root が git リポジトリの中で、かつそのルートでなければ「サブディレクトリです」で投げる。
+ * root は実パスで渡すこと（git はシンボリックリンク解決後の実パスを返すので、揃えないと
+ * 常に不一致になる）。git リポジトリの外なら投げずに null を返す（意味づけは呼び出し側に任せる）。
+ */
+export async function requireNotSubdirectory(root: string): Promise<string | null> {
+  const top = await gitTopLevel(root);
+  if (top !== null && top !== root) {
+    throw new Error(
+      `リポジトリのルートを指定してください: ${top}（${root} はそのサブディレクトリです）`,
+    );
+  }
+  return top;
+}
+
 async function assertRepoRoot(path: string): Promise<void> {
-  const top = await gitTopLevel(path);
+  const real = await Deno.realPath(path);
+  const top = await requireNotSubdirectory(real);
   if (top === null) {
     throw new Error(
       `git リポジトリではありません: ${path}` +
         `（doctrine はタスクごとに git worktree を作るため、git リポジトリのルートを指定してください）`,
-    );
-  }
-  // git はシンボリックリンク解決後の実パスを返すので、こちらも揃えてから比べる
-  if (await Deno.realPath(path) !== top) {
-    throw new Error(
-      `リポジトリのルートを指定してください: ${top}（${path} はそのサブディレクトリです）`,
     );
   }
 }

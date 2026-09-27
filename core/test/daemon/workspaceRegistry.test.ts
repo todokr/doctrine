@@ -349,6 +349,26 @@ test("init の projects が指すパスが無ければ workspace.yaml を残さ�
   assert.deepEqual(await listWorkspaces(db), []);
 });
 
+test("init の projects が既存の git 管理外ディレクトリを指すなら、他のプロジェクトも含めて何もスキャフォルドせずに投げる", async () => {
+  // .doctrine を持たない、まだ雛形を書いていないリポジトリ（repoAt は最初から
+  // project.yaml を持つので使えない — スキャフォルドが走ったかどうかを見分けられない）
+  const plain = await makeRepo(join(root, "plain"), { "README.md": "x\n" });
+  const notGit = join(root, "not-a-repo");
+  await mkdir(notGit, { recursive: true });
+  const tp = join(root, "tp-notgit");
+  await mkdir(tp, { recursive: true });
+  await assert.rejects(
+    addWorkspace(db, tp, { projects: { plain: "../plain/repo", b: "../not-a-repo" } }),
+    /git リポジトリではありません/,
+  );
+  assert.equal(await pathExists(join(tp, ".doctrine", "workspace.yaml")), false);
+  // plain は正当なリポジトリだが、b の検証が先に全件終わるまでスキャフォルドは走らない
+  assert.equal(await pathExists(join(plain, ".doctrine")), false);
+  assert.equal(await pathExists(join(notGit, ".doctrine")), false);
+  assert.deepEqual(await listWorkspaces(db), []);
+  assert.deepEqual(await listWorkspaces(db), []);
+});
+
 test("created の default.yaml は summary.projects の path から作った絶対パスと一致する（symlink 経由の root でも）", async () => {
   const plain = await makeRepo(join(root, "plain"), { "README.md": "x\n" });
   await symlink(plain, join(root, "plain-link"));
