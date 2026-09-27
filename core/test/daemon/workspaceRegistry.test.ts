@@ -338,6 +338,17 @@ test("不正な projects（名前の形が違う）なら workspace.yaml を残�
   assert.deepEqual(await listWorkspaces(db), []);
 });
 
+test("init の projects が指すパスが無ければ workspace.yaml を残さずに投げる", async () => {
+  const tp = join(root, "tp-nopath");
+  await mkdir(tp, { recursive: true });
+  await assert.rejects(
+    addWorkspace(db, tp, { projects: { a: "../nope" } }),
+    /指すパスがありません/,
+  );
+  assert.equal(await pathExists(join(tp, ".doctrine", "workspace.yaml")), false);
+  assert.deepEqual(await listWorkspaces(db), []);
+});
+
 test("created の default.yaml は summary.projects の path から作った絶対パスと一致する（symlink 経由の root でも）", async () => {
   const plain = await makeRepo(join(root, "plain"), { "README.md": "x\n" });
   await symlink(plain, join(root, "plain-link"));
@@ -349,4 +360,5 @@ test("created の default.yaml は summary.projects の path から作った絶�
   assert.equal(project.path, plain);
   assert.ok(r.created.includes(join(project.path, ".doctrine", "workflows", "default.yaml")));
   assert.ok(r.created.includes(join(project.path, ".doctrine", "project.yaml")));
+  assert.ok(r.created.includes(join(summary.path, ".doctrine", "workspace.yaml")));
 });

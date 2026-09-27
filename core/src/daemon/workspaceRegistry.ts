@@ -33,22 +33,25 @@ export async function addWorkspace(
   const scaffold = await ensureWorkspaceScaffold(root, init);
   const created = scaffold.created;
   const yamlPath = join(root, WORKSPACE_YAML);
+
   let cfg: WorkspaceConfig;
+  let projects: ResolvedProject[];
+  let claims: Map<string, ProjectRow>;
   try {
+    // init から書いた workspace.yaml の名前・パスが不正（名前の形が違う、指す先が無いなど）
+    // なら、書いたファイルを残さない。既にあった workspace.yaml はここで消さない
+    // （scaffold.created に入らない）。DB の衝突（checkClaim）もファイルを書く前の検証なので、
+    // ここに含める。
     cfg = await readConfig(root);
+    projects = await resolveProjects(root, cfg);
+    claims = new Map<string, ProjectRow>();
+    for (const p of projects) {
+      const claimed = await checkClaim(db, null, p);
+      if (claimed) claims.set(p.path, claimed);
+    }
   } catch (e) {
-    // init から書いた workspace.yaml が不正（名前の形が違う等）なら、書いたファイルを残さない。
-    // 既にあった workspace.yaml はここで消さない（scaffold.created に入らない）。
     if (scaffold.created.includes(yamlPath)) await Deno.remove(yamlPath);
     throw e;
-  }
-  const projects = await resolveProjects(root, cfg);
-
-  // ファイルを書く前に DB の衝突で断り、断ったリポジトリに project.yaml を書き残さない
-  const claims = new Map<string, ProjectRow>();
-  for (const p of projects) {
-    const claimed = await checkClaim(db, null, p);
-    if (claimed) claims.set(p.path, claimed);
   }
 
   const configs = new Map<string, ProjectConfig>();
