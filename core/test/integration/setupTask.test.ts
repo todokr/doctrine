@@ -70,7 +70,11 @@ async function pathWithoutDctl(): Promise<string[]> {
 async function installDctlShim(): Promise<void> {
   const bin = join(root, "bin");
   await mkdir(bin, { recursive: true });
-  await writeFile(join(bin, "dctl"), `#!/bin/sh\nexec deno run -A '${DCTL_TS}' "$@"\n`);
+  // deno は PATH から探さない。dctl を除いた PATH から deno の入ったディレクトリが消えることがある
+  await writeFile(
+    join(bin, "dctl"),
+    `#!/bin/sh\nexec '${Deno.execPath()}' run -A '${DCTL_TS}' "$@"\n`,
+  );
   await chmod(join(bin, "dctl"), 0o755);
   process.env.PATH = [bin, ...await pathWithoutDctl()].join(delimiter);
 }
