@@ -14,29 +14,36 @@ hero:
       icon: right-arrow
 ---
 
-import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
+import { CardGrid, LinkCard } from '@astrojs/starlight/components';
+import FeatureRow from '../../../components/Features/FeatureRow.astro';
+import FeatureDiagram from '../../../components/Features/FeatureDiagram.astro';
 import ValueFilm from '../../../components/ValueFilm/ValueFilm.astro';
 
 <ValueFilm />
 
-## 人の手は判断にだけ使う
+## 判断以外は、doctrine に。
 
-エージェントに任せた作業は、事前に定めた手順に沿って進む。判断以外の作業は doctrine が引き受ける。
+エージェントに任せた作業は、決めた手順どおりに進む。人に届くのは、判断が要るものだけ。
 
-<CardGrid>
-  <Card title="Epic の分割支援" icon="puzzle">
-    Epic 粒度の Issue を、PR 1 つでレビューしきれるプロセスに PFD で分解する。論点は質問として先にまとめて届く（[Intake](/ja/concepts/features/#intake--pfd-による分解)）
-  </Card>
-  <Card title="依存関係に沿った投入" icon="list-format">
-    上流の PR がマージされると、その成果物を待っていた下流のタスクが自動で作られる（[Intake](/ja/concepts/features/#intake--pfd-による分解)）
-  </Card>
-  <Card title="conflict の自動修復" icon="random">
-    PR を開いた後に baseBranch と conflict したら、取り込んで直し、テストを通して push し直す（[マージ待ち](/ja/concepts/features/#マージ待ちと-conflict-の自動修復)）
-  </Card>
-  <Card title="利用上限からの自動再開" icon="rocket">
-    Claude の利用上限に当たっても作業は捨てられず、枠が明ければ同じ会話から続く（[利用上限での待機](/ja/concepts/features/#利用上限での待機)）
-  </Card>
-</CardGrid>
+<FeatureRow title="Epic をまるごと渡す">
+  大きな Issue は、レビューしきれる PR 1 つ分ずつに割る。その前に、判断が要る論点を質問にまとめて返す。いきなりコードを書き始めはしない。
+  <FeatureDiagram slot="visual" variant="split" />
+</FeatureRow>
+
+<FeatureRow title="マージしたら、次が動く">
+  上流の PR がマージされると、それを待っていた下流のタスクが自動で始まる。何を待っていたか覚えておく必要も、コマンドを叩く必要もない。
+  <FeatureDiagram slot="visual" variant="flow" />
+</FeatureRow>
+
+<FeatureRow title="conflict は自分で直す">
+  PR を開いた後に baseBranch とぶつかっても、取り込んで直し、テストを通して push し直す。手元でブランチを直す必要はない。
+  <FeatureDiagram slot="visual" variant="conflict" />
+</FeatureRow>
+
+<FeatureRow title="上限に当たっても、続きから">
+  Claude の利用上限で止まっても、途中の作業は捨てない。枠が戻れば、同じ会話の続きから再開する。
+  <FeatureDiagram slot="visual" variant="limit" />
+</FeatureRow>
 
 ## 読み進める
 

@@ -1,0 +1,290 @@
+---
+// トップページの機能紹介に添える概念図。4 図とも左が前・右が後の時間軸で描き、
+// アクセント色は「doctrine が動いた箇所」、成功色は「済み」、警告色は「ぶつかる・止まる」にだけ使う。
+interface Props {
+  variant: 'split' | 'flow' | 'conflict' | 'limit';
+}
+const { variant } = Astro.props;
+
+const labels: Record<Props['variant'], string> = {
+  split: '大きな Epic が、人への質問を経て、PR 大の 4 つのタスクに分かれる図',
+  flow: '先に済んでいた上流と、いまマージされた上流がそろい、下流のタスクが動き出す図',
+  conflict: 'base に新しいコミットが乗って PR とぶつかり、base を取り込んで直し、テストを通して push する図',
+  limit: '利用枠が上限に達するとタスクが待機し、枠が戻ると途切れた位置から続きが進む図',
+};
+
+const PR_ROWS = [30, 88, 146, 204];
+---
+
+<svg class="fd" viewBox="0 0 560 260" role="img" aria-label={labels[variant]}>
+  <defs>
+    <pattern id={`fd-hatch-${variant}`} width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <line x1="0" y1="0" x2="0" y2="8" class="hatch" />
+    </pattern>
+    <marker id={`fd-n-${variant}`} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" class="fill-n" />
+    </marker>
+    <marker id={`fd-a-${variant}`} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" class="fill-a" />
+    </marker>
+  </defs>
+
+  {
+    variant === 'split' && (
+      <g>
+        <rect x="24" y="70" width="136" height="120" rx="8" class="box-n" />
+        <text x="92" y="136" class="t-lg" text-anchor="middle">Epic</text>
+        <line x1="160" y1="130" x2="212" y2="130" class="ln-n" marker-end={`url(#fd-n-${variant})`} />
+
+        <rect x="216" y="78" width="112" height="104" rx="8" class="box-a" />
+        {[104, 130, 156].map((y) => (
+          <g>
+            <text x="232" y={y + 6} class="t-md fill-a">?</text>
+            <line x1="250" y1={y} x2="312" y2={y} class="stub" />
+          </g>
+        ))}
+        <line x1="264" y1="186" x2="264" y2="210" class="ln-n" marker-end={`url(#fd-n-${variant})`} />
+        <line x1="280" y1="210" x2="280" y2="186" class="ln-n" marker-end={`url(#fd-n-${variant})`} />
+        <circle cx="272" cy="226" r="8" class="person" />
+        <path d="M256,256 a16,16 0 0 1 32,0" class="person" />
+
+        {PR_ROWS.map((y) => (
+          <path d={`M328,130 C362,130 362,${y + 18} 394,${y + 18}`} class="ln-a" marker-end={`url(#fd-a-${variant})`} />
+        ))}
+        {PR_ROWS.map((y) => (
+          <g>
+            <rect x="398" y={y} width="136" height="36" rx="8" class="box-o" />
+            <line x1="410" y1={y + 18} x2="470" y2={y + 18} class="stub" />
+            <rect x="488" y={y + 8} width="36" height="20" rx="4" class="tag" />
+            <text x="506" y={y + 23} class="t-sm" text-anchor="middle">PR</text>
+          </g>
+        ))}
+      </g>
+    )
+  }
+
+  {
+    variant === 'flow' && (
+      <g>
+        <path d="M200,70 C290,70 290,130 356,130" class="ln-n" />
+        <path d="M200,190 C290,190 290,130 356,130" class="ln-a thick" marker-end={`url(#fd-a-${variant})`} />
+
+        <rect x="40" y="44" width="160" height="52" rx="8" class="box-n" />
+        <text x="58" y="77" class="t-md fill-s">✓</text>
+        <line x1="84" y1="70" x2="184" y2="70" class="stub" />
+        <text x="40" y="116" class="t-sm fill-n">マージ済み</text>
+
+        <rect x="40" y="164" width="160" height="52" rx="8" class="box-s" />
+        <text x="58" y="197" class="t-md fill-s">✓</text>
+        <line x1="84" y1="190" x2="184" y2="190" class="stub" />
+        <text x="40" y="236" class="t-sm fill-a">いまマージ</text>
+
+        <rect x="360" y="104" width="160" height="52" rx="8" class="box-a" />
+        <text x="378" y="136" class="t-md fill-a">▶</text>
+        <line x1="402" y1="130" x2="504" y2="130" class="stub" />
+        <text x="360" y="176" class="t-sm fill-a">自動で開始</text>
+      </g>
+    )
+  }
+
+  {
+    variant === 'conflict' && (
+      <g>
+        <line x1="40" y1="80" x2="530" y2="80" class="ln-n" />
+        <path d="M60,80 L120,180 L312,180" class="ln-n" />
+        <text x="40" y="64" class="t-sm fill-n">base</text>
+        <text x="124" y="206" class="t-sm fill-n">PR</text>
+
+        <line x1="220" y1="90" x2="220" y2="173" class="ln-w dashed" />
+        <rect x="208" y="118" width="24" height="32" class="bg" />
+        <path d="M226,118 L211,137 L220,137 L214,150 L230,131 L221,131 Z" class="fill-w" />
+        <text x="204" y="139" class="t-sm fill-w" text-anchor="end">ぶつかる</text>
+
+        <path d="M220,80 L313,173" class="ln-a thick" marker-end={`url(#fd-a-${variant})`} />
+        <text x="280" y="118" class="t-sm fill-a">取り込んで直す</text>
+        <line x1="328" y1="180" x2="440" y2="180" class="ln-a thick" marker-end={`url(#fd-a-${variant})`} />
+        <text x="450" y="185" class="t-sm fill-a">push</text>
+
+        <circle cx="60" cy="80" r="7" class="dot-n" />
+        <circle cx="160" cy="180" r="7" class="dot-n" />
+        <circle cx="220" cy="80" r="7" class="dot-w" />
+        <circle cx="320" cy="180" r="8" class="dot-a" />
+        <text x="320" y="214" class="t-sm fill-s" text-anchor="middle">✓ テスト</text>
+      </g>
+    )
+  }
+
+  {
+    variant === 'limit' && (
+      <g>
+        <text x="20" y="80" class="t-sm fill-n">利用枠</text>
+        <text x="20" y="184" class="t-sm fill-n">タスク</text>
+
+        <line x1="270" y1="26" x2="270" y2="206" class="ln-n guide" />
+        <line x1="400" y1="26" x2="400" y2="206" class="ln-n guide" />
+        <text x="270" y="232" class="t-sm fill-w" text-anchor="middle">上限に当たる</text>
+        <text x="400" y="232" class="t-sm fill-n" text-anchor="middle">枠が戻る</text>
+
+        <line x1="90" y1="110" x2="530" y2="110" class="ln-n baseline" />
+        <line x1="90" y1="40" x2="530" y2="40" class="ln-n baseline" />
+        <text x="84" y="45" class="t-xs fill-n" text-anchor="end">100%</text>
+        <polyline points="90,108 270,40" class="ln-n" />
+        <line x1="270" y1="40" x2="400" y2="40" class="ln-w thick" />
+        <polyline points="400,40 400,108 530,84" class="ln-n" />
+
+        <rect x="90" y="162" width="180" height="32" rx="6" class="bar-s" />
+        <rect x="270" y="162" width="130" height="32" class="wait" fill={`url(#fd-hatch-${variant})`} />
+        <text x="335" y="183" class="t-sm fill-w" text-anchor="middle">‖ 待機</text>
+        <rect x="400" y="162" width="70" height="32" class="bar-a" />
+        <rect x="470" y="162" width="60" height="32" rx="6" class="box-o" />
+        <text x="404" y="152" class="t-sm fill-a">続きから</text>
+      </g>
+    )
+  }
+</svg>
+
+<style>
+  .fd {
+    --n: var(--sl-color-gray-3);
+    --a: var(--sl-color-accent);
+    --s: #3fb27f;
+    --w: #ef6b63;
+    display: block;
+    width: 100%;
+    height: auto;
+    font-family: var(--sl-font);
+    color: var(--sl-color-white);
+  }
+  :global([data-theme='light']) .fd {
+    --s: #16a34a;
+    --w: #dc2626;
+  }
+  text {
+    fill: currentColor;
+  }
+  .t-sm {
+    font-size: 14px;
+  }
+  .t-md {
+    font-size: 18px;
+    font-weight: 700;
+  }
+  .t-lg {
+    font-size: 22px;
+    font-weight: 700;
+  }
+  .fill-n {
+    fill: var(--n);
+  }
+  .fill-a {
+    fill: var(--a);
+  }
+  .fill-s {
+    fill: var(--s);
+  }
+  .fill-w {
+    fill: var(--w);
+  }
+  .ln-n,
+  .ln-a,
+  .ln-w {
+    fill: none;
+    stroke-width: 2;
+  }
+  .ln-n {
+    stroke: var(--n);
+  }
+  .ln-a {
+    stroke: var(--a);
+  }
+  .ln-w {
+    stroke: var(--w);
+  }
+  .thick {
+    stroke-width: 3;
+  }
+  .dashed {
+    stroke-dasharray: 4 4;
+  }
+  .box-n,
+  .box-a,
+  .box-s,
+  .box-o {
+    stroke-width: 2;
+  }
+  .box-n {
+    stroke: var(--n);
+    fill: color-mix(in srgb, var(--n) 12%, transparent);
+  }
+  .box-a {
+    stroke: var(--a);
+    fill: color-mix(in srgb, var(--a) 18%, transparent);
+  }
+  .box-s {
+    stroke: var(--n);
+    fill: color-mix(in srgb, var(--s) 16%, transparent);
+  }
+  .box-o {
+    stroke: var(--n);
+    fill: none;
+  }
+  .tag {
+    fill: color-mix(in srgb, var(--n) 20%, transparent);
+  }
+  .stub {
+    stroke: var(--n);
+    stroke-width: 3;
+    stroke-linecap: round;
+    opacity: 0.5;
+  }
+  .person {
+    fill: none;
+    stroke: var(--sl-color-white);
+    stroke-width: 2;
+  }
+  .bg {
+    fill: var(--sl-color-bg);
+  }
+  .dot-n,
+  .dot-w {
+    fill: var(--sl-color-bg);
+    stroke-width: 2;
+  }
+  .dot-n {
+    stroke: var(--n);
+  }
+  .dot-w {
+    stroke: var(--w);
+  }
+  .dot-a {
+    fill: var(--a);
+  }
+  .bar-s {
+    fill: var(--s);
+    opacity: 0.85;
+  }
+  .bar-a {
+    fill: var(--a);
+    opacity: 0.85;
+  }
+  .t-xs {
+    font-size: 12px;
+  }
+  .guide {
+    stroke-dasharray: 2 4;
+    opacity: 0.7;
+  }
+  .baseline {
+    stroke-width: 1;
+    opacity: 0.35;
+  }
+  .wait {
+    stroke: var(--n);
+    stroke-width: 1;
+  }
+  .hatch {
+    stroke: var(--n);
+    stroke-width: 2;
+    opacity: 0.35;
+  }
+</style>
