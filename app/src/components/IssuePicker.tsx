@@ -1,8 +1,15 @@
 import { useEffect, useState } from "react";
-import type { IssueDetail, TrackerKind, TrackerStatus } from "../../../shared/intake/tracker.ts";
-import type { IntakeSummary, TrackerIssue } from "../../../shared/protocol.ts";
+import type { IssueDetail, TrackerKind } from "../../../shared/intake/tracker.ts";
+import type { IntakeSummary, TrackerIssue, WorkspaceSummary } from "../../../shared/protocol.ts";
 import { type Cached, revalidate, trackerCache, trackerCacheKey } from "../trackerCache";
-import { issueIdentifier, issueTarget, parseIssueInput, trackerGuidance, type IssueTarget } from "../intake";
+import {
+  issueIdentifier,
+  issueTarget,
+  parseIssueInput,
+  trackerGuidance,
+  type IssueTarget,
+  workspacePathOf,
+} from "../intake";
 import { clock, type Loaded } from "../model";
 import { useIntakeRpc, useStore } from "../store";
 import { StatusDot } from "./StatusDot";
@@ -37,12 +44,17 @@ function Refreshing({ refreshing, error }: { refreshing: boolean; error: string 
 }
 
 export function TrackerUnavailable(
-  { status, onRetry }: { status: Extract<TrackerStatus, { ok: false }>; onRetry: () => void },
+  { status, root, project, onRetry }: {
+    status: { reason: string; message: string };
+    root: string;
+    project?: string;
+    onRetry: () => void;
+  },
 ) {
-  const g = trackerGuidance(status);
+  const g = trackerGuidance(status, root);
   return (
     <div className="box attn">
-      <h2>{g.title}</h2>
+      <h2>{project ? `${project}: ${g.title}` : g.title}</h2>
       <p>{g.fix}</p>
       {g.command && <p><span className="mono">{g.command}</span></p>}
       <pre className="block">{status.message}</pre>
@@ -126,7 +138,7 @@ export function IssuePreview(
 export function IssueChooser(
   {
     kind,
-    target,
+    targets,
     assignee,
     onAssignee,
     searchText,
@@ -143,7 +155,7 @@ export function IssueChooser(
     onPickDirect,
   }: {
     kind: TrackerKind;
-    target: { id: string; name: string };
+    targets: { id: string; name: string }[];
     assignee: "me" | "any";
     onAssignee: (assignee: "me" | "any") => void;
     searchText: string;
@@ -164,7 +176,7 @@ export function IssueChooser(
 ) {
   return (
     <div style={{ display: "grid", gap: 10 }}>
-      {kind === "linear" && <p className="hint">{`Linear のチーム ${target.name} の Issue`}</p>}
+      {kind === "linear" && <p className="hint">{`Linear のチーム ${targets[0].name} の Issue`}</p>}
       <div className="actions">
         <div className="seg">
           <button aria-pressed={assignee === "me"} onClick={() => onAssignee("me")}>自分が担当</button>
@@ -214,7 +226,16 @@ export function IssuePicker() {
   const { s, dispatch } = useStore();
   const api = useIntakeRpc();
   const [projectId, setProjectId] = useState(() => s.project !== "all" ? s.project : s.projects[0]?.id);
-  const path = s.projects.find((p) => p.id === projectId)?.path;
+  const project = s.projects.find((p) => p.id === projectId);
+  const [workspaces, setWorkspaces] = useState<WorkspaceSummary[] | null>(null);
+  useEffect(() => {
+    api.workspaces().then(setWorkspaces).catch((e) =>
+      dispatch({ type: "toast", message: `workspace を読み込めませんでした（${errorMessage(e)}）` })
+    );
+    // 初回だけ
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const root = workspaces ? workspacePathOf(project, workspaces) : undefined;
   const [statusTick, setStatusTick] = useState(0);
   const [assignee, setAssignee] = useState<"me" | "any">("me");
   const [searchText, setSearchText] = useState("");
@@ -227,24 +248,24 @@ export function IssuePicker() {
   useEffect(() => {
     setPicked(null);
     setDirect("");
-  }, [path]);
+  }, [root]);
 
-  // トラッカーが使えるかはプロジェクトごとに違うので、状態もプロジェクトごとに持つ
+  // トラッカーが使えるかは workspace ごとに違うので、状態も workspace ごとに持つ
   const statusCached = useTrackerCached(
-    path ? trackerCacheKey.status(path) : null,
-    () => api.trackerStatus(path!),
+    root ? trackerCacheKey.status(root) : null,
+    () => api.trackerStatus(root!),
     statusTick,
   );
   const status = statusCached.loaded;
   const trackerOk = status.kind === "ok" && status.value.ok;
   const issuesCached = useTrackerCached(
-    path && trackerOk ? trackerCacheKey.issues(path, assignee, search) : null,
-    () => api.issues(path!, { assignee, search }),
+    root && trackerOk ? trackerCacheKey.issues(root, assignee, search) : null,
+    () => api.issues(root!, { assignee, search }),
   );
   const issues = issuesCached.loaded;
   const detailCached = useTrackerCached(
-    path && picked ? trackerCacheKey.issue(path, picked.url) : null,
-    () => api.issue(path!, picked!.url),
+    root && picked ? trackerCacheKey.issue(root, picked.url) : null,
+    () => api.issue(root!, picked!.url),
   );
   const detail: Loaded<IssueDetail> | undefined = picked ? detailCached.loaded : undefined;
 
@@ -264,7 +285,9 @@ export function IssuePicker() {
     </>
   );
 
-  if (!path) return <div className="pad">{head}<p className="hint">プロジェクトがありません</p></div>;
+  if (!project) return <div className="pad">{head}<p className="hint">プロジェクトがありません</p></div>;
+  if (workspaces === null) return <div className="pad">{head}<p className="hint">読み込み中</p></div>;
+  if (!root) return <div className="pad">{head}<p className="hint">workspace が見つかりません</p></div>;
   if (status.kind === "loading") return <div className="pad">{head}<p className="hint">読み込み中</p></div>;
   if (status.kind === "error") {
     return (
@@ -281,11 +304,12 @@ export function IssuePicker() {
     return (
       <div className="pad">
         {head}
-        <TrackerUnavailable status={status.value} onRetry={() => setStatusTick((t) => t + 1)} />
+        <TrackerUnavailable status={status.value} root={root} onRetry={() => setStatusTick((t) => t + 1)} />
       </div>
     );
   }
-  const target = status.value.target;
+  const failed = status.value.targets.filter((t) => !t.ok);
+  const usable = status.value.targets.filter((t): t is Extract<typeof t, { ok: true }> => t.ok);
 
   const choose = (url: string) => {
     const listed = issues.kind === "ok" ? issues.value.find((i) => i.url === url) : undefined;
@@ -293,13 +317,27 @@ export function IssuePicker() {
   };
   const title = picked?.title || (detail?.kind === "ok" ? detail.value.title : "");
 
+  const failedBoxes = failed.map((f) => (
+    <TrackerUnavailable key={f.project} status={f} root={root} project={f.project} onRetry={() => setStatusTick((t) => t + 1)} />
+  ));
+
+  if (usable.length === 0) {
+    return (
+      <div className="pad">
+        {head}
+        {failedBoxes}
+      </div>
+    );
+  }
+
   return (
     <div className="pad">
       {head}
+      {failedBoxes}
       <div className="picker">
         <IssueChooser
           kind={status.value.kind}
-          target={target}
+          targets={usable.map((t) => t.target)}
           assignee={assignee}
           onAssignee={setAssignee}
           searchText={searchText}
@@ -314,7 +352,7 @@ export function IssuePicker() {
           direct={direct}
           onDirect={setDirect}
           onPickDirect={() => {
-            const url = parseIssueInput(direct, target);
+            const url = parseIssueInput(direct, usable.map((t) => t.target));
             if (url === null) dispatch({ type: "toast", message: "番号か URL を読めません" });
             else choose(url);
           }}
@@ -329,7 +367,7 @@ export function IssuePicker() {
             onStart={async () => {
               setPending(true);
               try {
-                const { alreadyActive: _, ...intake } = await api.start(path, picked.url);
+                const { alreadyActive: _, ...intake } = await api.start(root, picked.url);
                 dispatch({ type: "intake.started", intake });
               } catch (e) {
                 dispatch({ type: "toast", message: `Intake を始められませんでした（${errorMessage(e)}）` });

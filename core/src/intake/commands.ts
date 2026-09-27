@@ -22,7 +22,8 @@ import { soleProjectOf } from "../db/workspaces.ts";
 import { cancelTask } from "../domain/cancelTask.ts";
 import { assertIntakeTransition, isIntakeTerminal } from "../domain/intakeStates.ts";
 import { killStaleChild, type ProcessProbe } from "../domain/recovery.ts";
-import type { Tracker } from "../tracker/tracker.ts";
+import type { Tracker, TrackerOf } from "../tracker/tracker.ts";
+import type { WorkspaceRef, WorkspaceTracker } from "../tracker/workspaceTracker.ts";
 import type { Pfd } from "../../../shared/intake/pfd.ts";
 import { validateAnswers } from "../../../shared/intake/validateQuestion.ts";
 import { loadApprovedPlan } from "./dispatch.ts";
@@ -55,14 +56,19 @@ async function requireIntake(db: Db, intakeId: string): Promise<IntakeRow> {
  */
 export async function startIntake(
   db: Db,
-  tracker: Pick<Tracker, "readIssue" | "kind" | "advanceIssue">,
-  o: { workspaceId: number; projectPath: string; issueUrl: string; logRoot: string },
+  wt: Pick<WorkspaceTracker, "tracker" | "projectPathFor">,
+  o: { workspaceId: number; issueUrl: string; logRoot: string },
 ): Promise<{ intake: IntakeRow; alreadyActive: boolean; problems: string[] }> {
   // gh が使えなくても、進行中の Intake は開けるように、gh を呼ぶ前にも引く。
   const opened = await findOpenIntakeByIssue(db, o.issueUrl);
   if (opened) return { intake: opened, alreadyActive: true, problems: [] };
 
-  const issue = await tracker.readIssue(o.projectPath, o.issueUrl);
+  const projectPath = await wt.projectPathFor(o.issueUrl);
+  if (projectPath === null) {
+    throw new Error(`この Issue は workspace のどのリポジトリにもありません: ${o.issueUrl}`);
+  }
+  const tracker = wt.tracker;
+  const issue = await tracker.readIssue(projectPath, o.issueUrl);
   const canonical = await findOpenIntakeByIssue(db, issue.url);
   if (canonical) return { intake: canonical, alreadyActive: true, problems: [] };
 
@@ -82,7 +88,7 @@ export async function startIntake(
     // 失敗しても開始は成功させる。承認の後の見張りの周が issue_phase を見てやり直す
     const problems: string[] = [];
     try {
-      await advanceParentIssue(db, tracker, { projectPath: o.projectPath, intake });
+      await advanceParentIssue(db, tracker, { projectPath, intake });
     } catch (e) {
       problems.push(
         `親 Issue の Linear の状態を進められませんでした: ${e instanceof Error ? e.message : e}`,
@@ -335,11 +341,9 @@ export async function cancelIntake(
   db: Db,
   deps: {
     probe: ProcessProbe;
-    trackerOf: (
-      projectPath: string,
-    ) => Promise<Pick<Tracker, "closeIssue" | "closesViaPullRequest">>;
+    trackerOf: TrackerOf;
   },
-  o: { intakeId: string; mode: "leave" | "stop"; projectPath: string },
+  o: { intakeId: string; mode: "leave" | "stop"; workspace: WorkspaceRef; projectPath: string },
 ): Promise<CancelOutcome> {
   const intake = await requireIntake(db, o.intakeId);
   const revising = intake.revising === 1;
@@ -381,7 +385,7 @@ export async function cancelIntake(
   }
   try {
     const project = await soleProjectOf(db, intake.workspace_id);
-    const tracker = await deps.trackerOf(o.projectPath);
+    const tracker = (await deps.trackerOf(o.workspace)).tracker;
     const closed = await closeSubIssuesOnCancel(db, tracker, {
       projectPath: o.projectPath,
       intakeId: intake.id,

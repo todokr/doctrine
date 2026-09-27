@@ -19,7 +19,6 @@ baseBranch: main
     defaultWorkflow: "feature",
     maxConcurrent: 1,
     baseBranch: "main",
-    tracker: { kind: "github" },
   });
 });
 
@@ -96,7 +95,6 @@ test("applyProjectConfig は値を当ててもコメントを残す", () => {
     defaultWorkflow: "feature",
     maxConcurrent: 3,
     baseBranch: "develop",
-    tracker: { kind: "github" },
   });
 });
 
@@ -164,103 +162,30 @@ test("applyProjectConfig は壊れた YAML なら WorkflowValidationError を投
   );
 });
 
-test("tracker を省略すると GitHub Issues を使う", () => {
-  const cfg = parseProjectConfig("defaultWorkflow: f\n");
-  assert.deepEqual(cfg.tracker, { kind: "github" });
-});
-
-test("tracker に github を書ける", () => {
-  const cfg = parseProjectConfig("defaultWorkflow: f\ntracker:\n  kind: github\n");
-  assert.deepEqual(cfg.tracker, { kind: "github" });
-});
-
-test("tracker に Linear のチームを書ける", () => {
-  const cfg = parseProjectConfig(
-    "defaultWorkflow: f\ntracker:\n  kind: linear\n  team: ENG\n",
-  );
-  assert.deepEqual(cfg.tracker, { kind: "linear", team: "ENG" });
-});
-
-const LINEAR_HEAD = "defaultWorkflow: f\ntracker:\n  kind: linear\n  team: ENG\n";
-
-test("tracker: linear は段階ごとの状態の名前を持てる", () => {
-  const cfg = parseProjectConfig(`${LINEAR_HEAD}  states:\n    inReview: レビュー中\n`);
-  assert.deepEqual(cfg.tracker, {
-    kind: "linear",
-    team: "ENG",
-    states: { inReview: "レビュー中" },
-  });
-});
-
-test("tracker.states に知らない段階があれば弾く", () => {
+test("tracker が残った project.yaml は移し先を示して落ちる", () => {
   assert.throws(
-    () => parseProjectConfig(`${LINEAR_HEAD}  states:\n    done: X\n`),
-    WorkflowValidationError,
+    () => parseProjectConfig("defaultWorkflow: default\ntracker:\n  kind: linear\n  team: ENG\n"),
+    (e: unknown) => {
+      assert(e instanceof WorkflowValidationError);
+      assert(e.message.includes("workspace.yaml"));
+      assert(e.issues.every((i) => !i.includes("認識できないキー")));
+      return true;
+    },
   );
 });
 
-test("tracker.states の名前が空なら弾く", () => {
+test("applyProjectConfig も tracker が残った project.yaml を移し先を示して断る", () => {
   assert.throws(
-    () => parseProjectConfig(`${LINEAR_HEAD}  states:\n    todo: ""\n`),
-    WorkflowValidationError,
+    () =>
+      applyProjectConfig("defaultWorkflow: f\ntracker:\n  kind: github\n", {
+        defaultWorkflow: "f",
+        maxConcurrent: 1,
+        baseBranch: "main",
+      }),
+    (e: unknown) => {
+      assert(e instanceof WorkflowValidationError);
+      assert(e.message.includes("workspace.yaml"));
+      return true;
+    },
   );
-});
-
-test("Linear の tracker に team が無ければ落とす", () => {
-  try {
-    parseProjectConfig("defaultWorkflow: f\ntracker:\n  kind: linear\n");
-    assert.fail("Should have thrown WorkflowValidationError");
-  } catch (e) {
-    assert(e instanceof WorkflowValidationError);
-    assert(e.issues.some((i) => i.includes("tracker.team")));
-  }
-});
-
-test("Linear の team が空文字なら落とす", () => {
-  assert.throws(
-    () => parseProjectConfig('defaultWorkflow: f\ntracker:\n  kind: linear\n  team: ""\n'),
-    WorkflowValidationError,
-  );
-});
-
-test("github の tracker に team を書くと落とす", () => {
-  try {
-    parseProjectConfig("defaultWorkflow: f\ntracker:\n  kind: github\n  team: ENG\n");
-    assert.fail("Should have thrown WorkflowValidationError");
-  } catch (e) {
-    assert(e instanceof WorkflowValidationError);
-    assert(e.issues.some((i) => i.includes("認識できないキー") && i.includes("team")));
-  }
-});
-
-test("知らない kind は落とし、選べる値を示す", () => {
-  try {
-    parseProjectConfig("defaultWorkflow: f\ntracker:\n  kind: jira\n");
-    assert.fail("Should have thrown WorkflowValidationError");
-  } catch (e) {
-    assert(e instanceof WorkflowValidationError);
-    assert(
-      e.issues.some((i) =>
-        i.includes("tracker.kind") && i.includes("github") && i.includes("linear")
-      ),
-    );
-  }
-});
-
-test("tracker が null なら落とす", () => {
-  assert.throws(
-    () => parseProjectConfig("defaultWorkflow: f\ntracker:\n"),
-    WorkflowValidationError,
-  );
-});
-
-test("applyProjectConfig は tracker を消さない", () => {
-  const { text, config } = applyProjectConfig(
-    "defaultWorkflow: f\ntracker:\n  kind: linear\n  team: ENG # チーム\n",
-    { defaultWorkflow: "f", maxConcurrent: 2, baseBranch: "develop" },
-  );
-  assert.deepEqual(config.tracker, { kind: "linear", team: "ENG" });
-  assert(text.includes("team: ENG"));
-  assert(text.includes("# チーム"));
-  assert.deepEqual(parseProjectConfig(text).tracker, { kind: "linear", team: "ENG" });
 });

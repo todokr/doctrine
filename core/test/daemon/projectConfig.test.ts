@@ -73,7 +73,6 @@ test("project.config.get は project.yaml の設定を返す", async () => {
     defaultWorkflow: "feature",
     maxConcurrent: 1,
     baseBranch: "main",
-    tracker: { kind: "github" },
   });
 });
 
@@ -106,7 +105,6 @@ test("project.config.save は project.yaml と projects の行の両方を変え
     maxConcurrent: 3,
     baseBranch: "develop",
     setup: "pnpm i",
-    tracker: { kind: "github" },
   });
 
   const entries = await readdir(join(repo, ".doctrine"));
@@ -139,7 +137,7 @@ test("project.config.save で setup を空にすると project.yaml から setup
   assert(!text.includes("setup:"));
 });
 
-test("project.config.save は project.yaml の tracker を残す", async () => {
+test("project.config.save は tracker が残った project.yaml を移し先を示して断る", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
   await h("workspace.add", { path: repo }, NOOP_CONN);
@@ -147,14 +145,23 @@ test("project.config.save は project.yaml の tracker を残す", async () => {
     join(repo, ".doctrine", "project.yaml"),
     HEADER_YAML + "tracker:\n  kind: linear\n  team: ENG\n",
   );
+  const before = await readFile(join(repo, ".doctrine", "project.yaml"), "utf8");
 
-  await h("project.config.save", {
-    project: repo,
-    config: { defaultWorkflow: "other", maxConcurrent: 2, baseBranch: "main" },
-  }, NOOP_CONN);
+  await assert.rejects(
+    () =>
+      h("project.config.save", {
+        project: repo,
+        config: { defaultWorkflow: "other", maxConcurrent: 2, baseBranch: "main" },
+      }, NOOP_CONN),
+    (e: unknown) => {
+      assert(e instanceof WorkflowValidationError);
+      assert(e.message.includes("workspace.yaml"));
+      return true;
+    },
+  );
 
-  const text = await readFile(join(repo, ".doctrine", "project.yaml"), "utf8");
-  assert.deepEqual(parseProjectConfig(text).tracker, { kind: "linear", team: "ENG" });
+  const after = await readFile(join(repo, ".doctrine", "project.yaml"), "utf8");
+  assert.equal(after, before);
 });
 
 test("project.config.save は maxConcurrent が0なら書かずにエラーを返す", async () => {

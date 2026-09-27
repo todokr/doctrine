@@ -14,7 +14,7 @@ function deferred<T>() {
 const flush = () => new Promise((r) => setTimeout(r, 0));
 
 describe("trackerCacheKey", () => {
-  test("一覧のキーはプロジェクト・担当・検索語で分かれる", () => {
+  test("一覧のキーは workspace・担当・検索語で分かれる", () => {
     const keys = new Set([
       trackerCacheKey.issues("/a", "me", ""),
       trackerCacheKey.issues("/a", "any", ""),

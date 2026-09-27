@@ -4,7 +4,6 @@ import { defaultGhRun, type GhRun, graphqlArgs, parseGhJson } from "./gh.ts";
 import type { SubIssue, Tracker } from "../tracker/tracker.ts";
 
 const repoSchema = z.object({ id: z.string(), nameWithOwner: z.string() });
-const repoIdSchema = z.object({ id: z.string() });
 
 const listSchema = z.array(z.object({
   url: z.string(),
@@ -59,24 +58,25 @@ const STATE_REASON = { completed: "COMPLETED", not_planned: "NOT_PLANNED" } as c
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 export function ghTracker(run: GhRun = defaultGhRun): Tracker {
-  /** projectPath → リポジトリの node id。createSubIssue の repositoryId に使う。 */
-  const repoIds = new Map<string, string>();
+  /** projectPath → リポジトリ。createSubIssue の repositoryId・projectPathFor の nameWithOwner に使う。 */
+  const repos = new Map<string, { id: string; nameWithOwner: string }>();
 
-  async function repoIdOf(projectPath: string): Promise<string> {
-    const known = repoIds.get(projectPath);
+  async function repoOf(projectPath: string): Promise<{ id: string; nameWithOwner: string }> {
+    const known = repos.get(projectPath);
     if (known !== undefined) return known;
-    const { id } = parseGhJson(
-      repoIdSchema,
-      await run(["repo", "view", "--json", "id"], projectPath),
+    const repo = parseGhJson(
+      repoSchema,
+      await run(["repo", "view", "--json", "id,nameWithOwner"], projectPath),
       "gh repo view",
     );
-    repoIds.set(projectPath, id);
-    return id;
+    repos.set(projectPath, repo);
+    return repo;
   }
 
   return {
     kind: "github",
     closesViaPullRequest: true,
+    repoOf,
     async status(projectPath): Promise<TrackerStatus> {
       try {
         await run(["--version"], projectPath);
@@ -95,7 +95,7 @@ export function ghTracker(run: GhRun = defaultGhRun): Tracker {
         return { ok: false, reason: "no_github_remote", message: message(e) };
       }
       const repo = parseGhJson(repoSchema, out, "gh repo view");
-      repoIds.set(projectPath, repo.id);
+      repos.set(projectPath, repo);
       return { ok: true, target: { id: repo.id, name: repo.nameWithOwner } };
     },
 
@@ -137,7 +137,7 @@ export function ghTracker(run: GhRun = defaultGhRun): Tracker {
     },
 
     async createSubIssue(projectPath, parent, o) {
-      const repositoryId = await repoIdOf(projectPath);
+      const repositoryId = (await repoOf(projectPath)).id;
       const args = graphqlArgs(CREATE_SUB_ISSUE, {
         repositoryId,
         parentIssueId: parent.nodeId,

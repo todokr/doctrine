@@ -7,6 +7,7 @@ import type {
   TrackerStatus,
 } from "../../../shared/intake/tracker.ts";
 import type { PrFact } from "../../../shared/intake/processStatus.ts";
+import type { WorkspaceRef, WorkspaceTracker } from "./workspaceTracker.ts";
 
 export type SubIssue = { ref: IssueRef; body: string; state: "OPEN" | "CLOSED" };
 
@@ -15,6 +16,8 @@ export interface Tracker {
   readonly kind: TrackerKind;
   /** PR 本文の Closes がマージ時に sub-issue を閉じるか。false なら Intake がマージを検知して閉じる。 */
   readonly closesViaPullRequest: boolean;
+  /** GitHub だけが持つ。プロジェクトのリポジトリ。パスごとに覚える。 */
+  repoOf?(projectPath: string): Promise<{ id: string; nameWithOwner: string }>;
   status(projectPath: string): Promise<TrackerStatus>;
   listIssues(
     projectPath: string,
@@ -42,8 +45,18 @@ export interface Tracker {
   advanceIssue(projectPath: string, issue: IssueRef, phase: IssuePhase): Promise<void>;
 }
 
-/** プロジェクトのパスから、そのプロジェクトが使う Tracker を返す。project.yaml が読めなければ投げる。 */
-export type TrackerOf = (projectPath: string) => Promise<Tracker>;
+/** workspace.yaml を読んで作る。無い・読めないときは WorkspaceConfigError を投げる。 */
+export type TrackerOf = (ws: WorkspaceRef) => Promise<WorkspaceTracker>;
+
+export class WorkspaceConfigError extends Error {
+  constructor(
+    readonly reason: "workspace_config_missing" | "workspace_config_invalid",
+    message: string,
+  ) {
+    super(message);
+    this.name = "WorkspaceConfigError";
+  }
+}
 
 export interface PrWatcher {
   /** 渡したブランチはすべて Map のキーになる。PR が無ければ空配列。 */

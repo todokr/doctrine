@@ -4,7 +4,8 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { trackerFor } from "../../src/daemon/tracker.ts";
-import { WorkflowValidationError } from "../../src/workflow/schema.ts";
+import { WorkspaceConfigError } from "../../src/tracker/tracker.ts";
+import type { WorkspaceRef } from "../../src/tracker/workspaceTracker.ts";
 import { fakeTracker } from "../helpers/tracker.ts";
 
 let dir: string;
@@ -17,9 +18,13 @@ afterEach(async () => {
   await rm(dir, { recursive: true, force: true });
 });
 
-async function writeProjectYaml(text: string) {
+async function writeWorkspaceYaml(text: string) {
   await mkdir(join(dir, ".doctrine"), { recursive: true });
-  await writeFile(join(dir, ".doctrine", "project.yaml"), text);
+  await writeFile(join(dir, ".doctrine", "workspace.yaml"), text);
+}
+
+function ref(): WorkspaceRef {
+  return { path: dir, projects: [{ name: "a", path: join(dir, "a") }] };
 }
 
 function setup(o: { linearApiKey: string | undefined } = { linearApiKey: "lin_x" }) {
@@ -41,60 +46,73 @@ function setup(o: { linearApiKey: string | undefined } = { linearApiKey: "lin_x"
   return { github, linearCalls, trackerOf };
 }
 
-const LINEAR_YAML = "defaultWorkflow: f\ntracker:\n  kind: linear\n  team: ENG\n";
+const LINEAR = "projects:\n  a: a\ntracker:\n  kind: linear\n  team: ENG\n";
 
-test("tracker の宣言が無いプロジェクトは GitHub の Tracker を使う", async () => {
-  await writeProjectYaml("defaultWorkflow: f\n");
+test("tracker の宣言が無い workspace は GitHub の Tracker を使う", async () => {
+  await writeWorkspaceYaml("projects:\n  a: a\n");
   const { github, linearCalls, trackerOf } = setup();
-  assert.equal(await trackerOf(dir), github);
+  const wt = await trackerOf(ref());
+  assert.equal(wt.kind, "github");
+  assert.equal(wt.tracker, github);
   assert.equal(linearCalls.length, 0);
 });
 
-test("tracker: github のプロジェクトは GitHub の Tracker を使う", async () => {
-  await writeProjectYaml("defaultWorkflow: f\ntracker:\n  kind: github\n");
-  const { github, linearCalls, trackerOf } = setup();
-  assert.equal(await trackerOf(dir), github);
-  assert.equal(linearCalls.length, 0);
-});
-
-test("tracker: linear のプロジェクトは Linear の Tracker を config の API key とチームで作る", async () => {
-  await writeProjectYaml(LINEAR_YAML);
+test("tracker: linear の workspace は Linear の Tracker を config の API key とチームで作る", async () => {
+  await writeWorkspaceYaml(LINEAR);
   const { linearCalls, trackerOf } = setup({ linearApiKey: "lin_x" });
-  assert.equal((await trackerOf(dir)).kind, "linear");
+  const wt = await trackerOf(ref());
+  assert.equal(wt.kind, "linear");
   assert.deepEqual(linearCalls, [{ apiKey: "lin_x", team: "ENG" }]);
 });
 
 test("tracker.states があれば Linear の Tracker に渡す", async () => {
-  await writeProjectYaml(`${LINEAR_YAML}  states:\n    inReview: レビュー中\n`);
+  await writeWorkspaceYaml(`${LINEAR}  states:\n    inReview: レビュー中\n`);
   const { linearCalls, trackerOf } = setup();
-  await trackerOf(dir);
+  await trackerOf(ref());
   assert.deepEqual(linearCalls, [
     { apiKey: "lin_x", team: "ENG", states: { inReview: "レビュー中" } },
   ]);
 });
 
 test("linearApiKey が無くても Linear の Tracker を返す", async () => {
-  await writeProjectYaml(LINEAR_YAML);
+  await writeWorkspaceYaml(LINEAR);
   const { linearCalls, trackerOf } = setup({ linearApiKey: undefined });
-  assert.equal((await trackerOf(dir)).kind, "linear");
+  const wt = await trackerOf(ref());
+  assert.equal(wt.kind, "linear");
   assert.deepEqual(linearCalls, [{ apiKey: undefined, team: "ENG" }]);
 });
 
-test("project.yaml を書き換えると次の呼び出しから効く", async () => {
-  await writeProjectYaml("defaultWorkflow: f\n");
-  const { github, trackerOf } = setup();
-  assert.equal(await trackerOf(dir), github);
-  await writeProjectYaml(LINEAR_YAML);
-  assert.equal((await trackerOf(dir)).kind, "linear");
+test("workspace.yaml の書き換えは再起動なしで効く", async () => {
+  await writeWorkspaceYaml("projects:\n  a: a\n");
+  const { trackerOf } = setup();
+  assert.equal((await trackerOf(ref())).kind, "github");
+  await writeWorkspaceYaml(LINEAR);
+  assert.equal((await trackerOf(ref())).kind, "linear");
 });
 
-test("project.yaml が無ければ投げる", async () => {
+test("workspace.yaml が無ければ workspace_config_missing", async () => {
   const { trackerOf } = setup();
-  await assert.rejects(trackerOf(dir), /project\.yaml がありません/);
+  await assert.rejects(trackerOf(ref()), (e: unknown) => {
+    assert.ok(e instanceof WorkspaceConfigError);
+    assert.equal(e.reason, "workspace_config_missing");
+    assert.ok(e.message.includes("workspace.yaml"));
+    return true;
+  });
 });
 
-test("project.yaml が壊れていれば投げる", async () => {
-  await writeProjectYaml("defaultWorkflow: f\ntracker:\n  kind: jira\n");
+test("workspace.yaml が壊れていれば workspace_config_invalid", async () => {
+  await writeWorkspaceYaml("projects:\n  a: a\ntracker:\n  kind: jira\n");
   const { trackerOf } = setup();
-  await assert.rejects(trackerOf(dir), WorkflowValidationError);
+  await assert.rejects(trackerOf(ref()), (e: unknown) => {
+    assert.ok(e instanceof WorkspaceConfigError);
+    assert.equal(e.reason, "workspace_config_invalid");
+    return true;
+  });
+});
+
+test("プロジェクトは workspace.yaml ではなく渡した WorkspaceRef から取る", async () => {
+  await writeWorkspaceYaml("projects:\n  x: elsewhere\n");
+  const { trackerOf } = setup();
+  const wt = await trackerOf(ref());
+  assert.equal((await wt.status())[0].project, "a");
 });
