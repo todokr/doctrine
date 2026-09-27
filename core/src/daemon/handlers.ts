@@ -21,7 +21,7 @@ import {
   type TaskRow,
   type TaskState,
 } from "../db/tasks.ts";
-import { listWorkspaces } from "../db/workspaces.ts";
+import { getWorkspaceByPath, listWorkspaces, soleProjectOf } from "../db/workspaces.ts";
 import {
   addWorkspace,
   syncProjectRow,
@@ -277,14 +277,14 @@ function broadcastIntakeTransition(ctx: DaemonContext, t: IntakeTransition): voi
 /** 行を読み直して IntakeDetail にする。 */
 async function intakeDetailOf(ctx: DaemonContext, intakeId: string) {
   const row = (await getIntake(ctx.db, intakeId))!;
-  return await toIntakeDetail(ctx.db, row, ctx.intakeWatcher.health(row.project_id));
+  return await toIntakeDetail(ctx.db, row, ctx.intakeWatcher.health(row.workspace_id));
 }
 
 /** 操作が返した遷移をイベントにして配り、読み直した行の要約を返す。 */
 async function settleIntakeCommand(ctx: DaemonContext, t: IntakeTransition) {
   broadcastIntakeTransition(ctx, t);
   const row = (await getIntake(ctx.db, t.intakeId))!;
-  return await toIntakeSummary(ctx.db, row, ctx.intakeWatcher.health(row.project_id));
+  return await toIntakeSummary(ctx.db, row, ctx.intakeWatcher.health(row.workspace_id));
 }
 
 /**
@@ -737,7 +737,7 @@ export function createHandler(ctx: DaemonContext): Handler {
           throw e;
         });
         const open = new Map(
-          (await listIntakes(ctx.db, { projectId: project.id }))
+          (await listIntakes(ctx.db, { workspaceId: project.workspace_id }))
             .map((i) => [i.issue_url, i.id]),
         );
         return issues.map((i) => ({ ...i, intake_id: open.get(i.url) ?? null }));
@@ -750,9 +750,12 @@ export function createHandler(ctx: DaemonContext): Handler {
 
       case "intake.start": {
         const project = await reqProject(ctx, params);
+        // プロジェクトが複数ある workspace はここで断る（soleProjectOf がまだプロジェクトを
+        // 1 つに絞れない）。何も書き込まずに reject する。
+        await soleProjectOf(ctx.db, project.workspace_id);
         const tracker = await ctx.trackerOf(project.path);
         const { intake, alreadyActive, problems } = await startIntake(ctx.db, tracker, {
-          projectId: project.id,
+          workspaceId: project.workspace_id,
           projectPath: project.path,
           issueUrl: req(params, "issue_url"),
           logRoot: ctx.logRoot,
@@ -761,29 +764,29 @@ export function createHandler(ctx: DaemonContext): Handler {
         const summary = await toIntakeSummary(
           ctx.db,
           intake,
-          ctx.intakeWatcher.health(intake.project_id),
+          ctx.intakeWatcher.health(intake.workspace_id),
         );
         return { ...summary, alreadyActive };
       }
       case "intake.list": {
-        const filter: { projectId?: number; includeClosed?: boolean } = {
+        const filter: { workspaceId?: number; includeClosed?: boolean } = {
           includeClosed: params.include_closed === true,
         };
-        if (typeof params.project === "string") {
-          const project = await getProjectByPath(ctx.db, params.project);
-          // task.list と違い、未登録のプロジェクトで全件を返さない。
-          if (!project) return [];
-          filter.projectId = project.id;
+        if (typeof params.workspace === "string") {
+          const workspace = await getWorkspaceByPath(ctx.db, params.workspace);
+          // task.list と違い、未登録の workspace で全件を返さない。
+          if (!workspace) return [];
+          filter.workspaceId = workspace.id;
         }
         const rows = await listIntakes(ctx.db, filter);
         return await Promise.all(
-          rows.map((r) => toIntakeSummary(ctx.db, r, ctx.intakeWatcher.health(r.project_id))),
+          rows.map((r) => toIntakeSummary(ctx.db, r, ctx.intakeWatcher.health(r.workspace_id))),
         );
       }
       case "intake.get": {
         const intake = await getIntake(ctx.db, req(params, "intake_id"));
         if (!intake) throw new Error("Intake がありません");
-        return await toIntakeDetail(ctx.db, intake, ctx.intakeWatcher.health(intake.project_id));
+        return await toIntakeDetail(ctx.db, intake, ctx.intakeWatcher.health(intake.workspace_id));
       }
       case "intake.answer":
         return await settleIntakeCommand(
@@ -816,7 +819,7 @@ export function createHandler(ctx: DaemonContext): Handler {
           }),
         );
         // 承認は commit 済み。最初の投入は待たず、その失敗で承認を失敗させない（request は reject しない）
-        void ctx.intakeWatcher.request(summary.project_id);
+        void ctx.intakeWatcher.request(summary.workspace_id);
         return summary;
       }
       case "intake.revise":
@@ -836,7 +839,7 @@ export function createHandler(ctx: DaemonContext): Handler {
           }),
         );
         // 元の計画に戻った。止めていた投入は待たずに再開する（request は reject しない）
-        void ctx.intakeWatcher.request(summary.project_id);
+        void ctx.intakeWatcher.request(summary.workspace_id);
         return summary;
       }
       case "intake.draft":
@@ -856,7 +859,7 @@ export function createHandler(ctx: DaemonContext): Handler {
         }
         const intake = await getIntake(ctx.db, intakeId);
         if (!intake) throw new Error("Intake がありません");
-        const project = (await getProject(ctx.db, intake.project_id))!;
+        const project = await soleProjectOf(ctx.db, intake.workspace_id);
         const outcome = await cancelIntake(
           ctx.db,
           { probe: defaultProbe(), trackerOf: ctx.trackerOf },
@@ -884,7 +887,7 @@ export function createHandler(ctx: DaemonContext): Handler {
         ctx.broadcast({ event: "intake.updated", intake_id: intakeId });
         const row = (await getIntake(ctx.db, intakeId))!;
         // sub-issue を閉じ、下流を投入し、goal が揃えば completed へ移す
-        await ctx.intakeWatcher.request(row.project_id);
+        await ctx.intakeWatcher.request(row.workspace_id);
         return await intakeDetailOf(ctx, intakeId);
       }
       case "intake.redispatch": {
@@ -901,7 +904,7 @@ export function createHandler(ctx: DaemonContext): Handler {
         const intakeId = req(params, "intake_id");
         const intake = await getIntake(ctx.db, intakeId);
         if (!intake) throw new Error("Intake がありません");
-        await ctx.intakeWatcher.request(intake.project_id);
+        await ctx.intakeWatcher.request(intake.workspace_id);
         return await intakeDetailOf(ctx, intakeId);
       }
       case "intake.setDispatchPaused": {
@@ -909,18 +912,18 @@ export function createHandler(ctx: DaemonContext): Handler {
         if (typeof params.paused !== "boolean") throw new Error("paused は必須です");
         const row = await setDispatchPaused(ctx.db, { intakeId, paused: params.paused });
         ctx.broadcast({ event: "intake.updated", intake_id: intakeId });
-        if (!params.paused) void ctx.intakeWatcher.request(row.project_id);
-        return await toIntakeSummary(ctx.db, row, ctx.intakeWatcher.health(row.project_id));
+        if (!params.paused) void ctx.intakeWatcher.request(row.workspace_id);
+        return await toIntakeSummary(ctx.db, row, ctx.intakeWatcher.health(row.workspace_id));
       }
       case "intake.closeIssue": {
         const intake = await getIntake(ctx.db, req(params, "intake_id"));
         if (!intake) throw new Error("Intake がありません");
-        const project = (await getProject(ctx.db, intake.project_id))!;
+        const project = await soleProjectOf(ctx.db, intake.workspace_id);
         const row = await closeParentIssue(ctx.db, await ctx.trackerOf(project.path), {
           intakeId: intake.id,
           projectPath: project.path,
         });
-        return await toIntakeSummary(ctx.db, row, ctx.intakeWatcher.health(row.project_id));
+        return await toIntakeSummary(ctx.db, row, ctx.intakeWatcher.health(row.workspace_id));
       }
 
       case "intake.logs": {
@@ -993,7 +996,9 @@ async function worktreeEntries(db: Db): Promise<WorktreeEntry[]> {
       if (t.worktree_path !== null) tasks.set(await canonical(t.worktree_path), t);
     }
     const intakes = new Map<string, IntakeRow>();
-    for (const i of await listIntakes(db, { projectId: project.id, includeClosed: true })) {
+    for (
+      const i of await listIntakes(db, { workspaceId: project.workspace_id, includeClosed: true })
+    ) {
       if (i.worktree_path !== null) intakes.set(await canonical(i.worktree_path), i);
     }
     const entries = await Promise.all(
@@ -1093,7 +1098,10 @@ async function resolveRemoveTarget(
       }
     }
     for (
-      const intake of await listIntakes(ctx.db, { projectId: project.id, includeClosed: true })
+      const intake of await listIntakes(ctx.db, {
+        workspaceId: project.workspace_id,
+        includeClosed: true,
+      })
     ) {
       if (intake.worktree_path && await canonical(intake.worktree_path) === real) {
         return { kind: "intake", intake, project, worktreePath };

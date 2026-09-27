@@ -26,7 +26,7 @@ import type {
   IntakeRunRow,
   IntakeState,
 } from "../db/schema.ts";
-import { getProject } from "../db/tasks.ts";
+import { soleProjectOf } from "../db/workspaces.ts";
 import { assertIntakeTransition } from "../domain/intakeStates.ts";
 import {
   classifyRateLimit,
@@ -293,8 +293,7 @@ export async function runIntakeRun(db: Db, runId: number, deps: IntakeRunnerDeps
   let sessionId: string;
   let prompt: string;
   try {
-    const project = await getProject(db, intake.project_id);
-    if (project === undefined) throw new Error(`プロジェクト ${intake.project_id} がありません`);
+    const project = await soleProjectOf(db, intake.workspace_id);
 
     worktree = intake.worktree_path ?? await createDetachedWorktree({
       repoPath: project.path,

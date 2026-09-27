@@ -10,7 +10,8 @@ import {
 } from "../db/intakes.ts";
 import { loadQuestionSets } from "./questionSet.ts";
 import type { Db, IntakeDraftRow, IntakeRow } from "../db/schema.ts";
-import { getProject, getTask } from "../db/tasks.ts";
+import { getTask } from "../db/tasks.ts";
+import { listProjectsOf } from "../db/workspaces.ts";
 import type { AttentionReason, CommentReply } from "../../../shared/intake/decomposer.ts";
 import type { Pfd } from "../../../shared/intake/pfd.ts";
 import type { PrFact, ProcessStatus } from "../../../shared/intake/processStatus.ts";
@@ -72,8 +73,10 @@ export async function processProgressOf(
 async function processStatusesOf(db: Db, row: IntakeRow): Promise<ProcessFacts[]> {
   const approval = await latestApproval(db, row.id);
   if (!approval) return [];
+  const projects = await listProjectsOf(db, row.workspace_id);
+  if (projects.length !== 1) return [];
   const pfd = JSON.parse((await getDraft(db, approval.draft_id))!.pfd) as Pfd;
-  const project = (await getProject(db, row.project_id))!;
+  const project = projects[0];
   const progress = await processProgressOf(db, row.id);
 
   return computeProcessStatuses({
@@ -97,7 +100,7 @@ function summaryOf(
   const statuses = facts.map((f) => f.status);
   return {
     id: row.id,
-    project_id: row.project_id,
+    workspace_id: row.workspace_id,
     issue_url: row.issue_url,
     issue_title: row.issue_title,
     state: row.state,

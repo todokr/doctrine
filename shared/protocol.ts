@@ -438,7 +438,7 @@ export type NewComment = FeedbackComment;
 /** intake.list の 1 行（V-2）。UI に見せてよい列だけを宣言する。 */
 export type IntakeSummary = {
   id: string;
-  project_id: number;
+  workspace_id: number;
   issue_url: string;
   issue_title: string;
   state: IntakeState;
@@ -596,7 +596,7 @@ export type Methods = {
     result: IntakeSummary & { alreadyActive: boolean };
   };
   "intake.list": {
-    params: { project?: string; include_closed?: boolean };
+    params: { workspace?: string; include_closed?: boolean };
     result: IntakeSummary[];
   };
   "intake.get": { params: { intake_id: string }; result: IntakeDetail };

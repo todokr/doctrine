@@ -17,6 +17,7 @@ export type Fixture = {
   repo: string;
   db: Db;
   projectId: number;
+  workspaceId: number;
   logRoot: string;
   originalStateDir: string | undefined;
 };
@@ -28,15 +29,17 @@ export async function createFixture(): Promise<Fixture> {
   Deno.env.set("DOCTRINE_STATE_DIR", join(root, "state"));
   const repo = await makeRepo(root, { "README.md": "x\n" });
   const db = await openDb(":memory:");
-  const projectId = (await seedProject(db, { path: repo })).id;
+  const p = await seedProject(db, { path: repo });
+  const projectId = p.id;
+  const workspaceId = p.workspace_id;
   await insertIntake(db, {
     id: "i1",
-    project_id: projectId,
+    workspace_id: workspaceId,
     issue_url: "https://github.com/o/r/issues/1",
     issue_node_id: "N1",
     issue_title: "T",
   });
-  return { root, repo, db, projectId, logRoot: join(root, "logs"), originalStateDir };
+  return { root, repo, db, projectId, workspaceId, logRoot: join(root, "logs"), originalStateDir };
 }
 
 export async function destroyFixture(f: Fixture): Promise<void> {

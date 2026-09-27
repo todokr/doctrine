@@ -3,6 +3,7 @@ import type { ServerEvent } from "../../../shared/protocol.ts";
 import type { Db, ProjectRow, TaskRow } from "../db/schema.ts";
 import { getProject, getTask } from "../db/tasks.ts";
 import { getIntake } from "../db/intakes.ts";
+import { getWorkspace } from "../db/workspaces.ts";
 import type { Workflow } from "../workflow/schema.ts";
 import type { WarningLog } from "../daemon/warnings.ts";
 import type { Notifier } from "./notifier.ts";
@@ -67,11 +68,11 @@ export async function notificationFor(
   if (ev.event === "intake.stateChanged" && ev.to in INTAKE_LABELS) {
     const intake = await getIntake(deps.db, ev.intake_id);
     if (!intake) return null;
-    const project = await getProject(deps.db, intake.project_id);
-    if (!project) return null;
+    const workspace = await getWorkspace(deps.db, intake.workspace_id);
+    if (!workspace) return null;
     const n = issueNumberOf(intake.issue_url);
     const issue = `${n === null ? "" : `#${n} `}${intake.issue_title}`;
-    return { title, body: `[${basename(project.path)}] ${issue} — ${INTAKE_LABELS[ev.to]}` };
+    return { title, body: `[${basename(workspace.path)}] ${issue} — ${INTAKE_LABELS[ev.to]}` };
   }
   return null;
 }

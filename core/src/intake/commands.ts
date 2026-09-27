@@ -17,7 +17,8 @@ import {
 import { advanceParentIssue } from "./issueStateSync.ts";
 import { loadQuestionSets } from "./questionSet.ts";
 import type { Db, IntakeRow, IntakeState } from "../db/schema.ts";
-import { getProject, type TaskState } from "../db/tasks.ts";
+import type { TaskState } from "../db/tasks.ts";
+import { soleProjectOf } from "../db/workspaces.ts";
 import { cancelTask } from "../domain/cancelTask.ts";
 import { assertIntakeTransition, isIntakeTerminal } from "../domain/intakeStates.ts";
 import { killStaleChild, type ProcessProbe } from "../domain/recovery.ts";
@@ -55,7 +56,7 @@ async function requireIntake(db: Db, intakeId: string): Promise<IntakeRow> {
 export async function startIntake(
   db: Db,
   tracker: Pick<Tracker, "readIssue" | "kind" | "advanceIssue">,
-  o: { projectId: number; projectPath: string; issueUrl: string; logRoot: string },
+  o: { workspaceId: number; projectPath: string; issueUrl: string; logRoot: string },
 ): Promise<{ intake: IntakeRow; alreadyActive: boolean; problems: string[] }> {
   // gh が使えなくても、進行中の Intake は開けるように、gh を呼ぶ前にも引く。
   const opened = await findOpenIntakeByIssue(db, o.issueUrl);
@@ -70,7 +71,7 @@ export async function startIntake(
     const intake = await db.transaction().execute(async (trx) => {
       const row = await insertIntake(trx, {
         id,
-        project_id: o.projectId,
+        workspace_id: o.workspaceId,
         issue_url: issue.url,
         issue_node_id: issue.nodeId,
         issue_title: issue.title,
@@ -379,7 +380,7 @@ export async function cancelIntake(
     }
   }
   try {
-    const project = (await getProject(db, intake.project_id))!;
+    const project = await soleProjectOf(db, intake.workspace_id);
     const tracker = await deps.trackerOf(o.projectPath);
     const closed = await closeSubIssuesOnCancel(db, tracker, {
       projectPath: o.projectPath,
@@ -419,7 +420,7 @@ export async function completeHumanProcess(
   if (!plan || !process || process.actor !== "human") {
     throw new Error(`人のプロセスではありません: ${o.processId}`);
   }
-  const project = (await getProject(db, intake.project_id))!;
+  const project = await soleProjectOf(db, intake.workspace_id);
   const status = computeProcessStatuses({
     pfd: plan.pfd,
     baseBranch: project.base_branch,

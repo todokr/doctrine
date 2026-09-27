@@ -26,7 +26,7 @@ const entry = (overrides: Partial<WorktreeEntry> = {}): WorktreeEntry => ({
 
 const intake = (id: string, state: IntakeSummary["state"]): IntakeSummary => ({
   id,
-  project_id: 1,
+  workspace_id: 1,
   issue_url: `https://github.com/o/r/issues/1`,
   issue_title: "タイトル",
   state,

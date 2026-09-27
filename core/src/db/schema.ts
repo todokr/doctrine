@@ -160,7 +160,8 @@ export interface RateLimitSamplesTable {
  */
 export interface IntakesTable {
   id: string;
-  project_id: number;
+  /** 0016 までは project_id だった。第 1 段の Intake はこの workspace のただ 1 つのプロジェクトで動く（soleProjectOf）。 */
+  workspace_id: number;
   issue_url: string;
   issue_node_id: string;
   issue_title: string;

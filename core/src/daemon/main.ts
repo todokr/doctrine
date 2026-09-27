@@ -201,7 +201,7 @@ export async function startDaemon(o: {
   for (const project of await listProjects(db)) {
     const known = [
       ...(await listTasks(db, { projectId: project.id })).map((t) => t.worktree_path),
-      ...(await listIntakes(db, { projectId: project.id, includeClosed: true }))
+      ...(await listIntakes(db, { workspaceId: project.workspace_id, includeClosed: true }))
         .map((i) => i.worktree_path),
     ].filter((p): p is string => p !== null);
     for (const orphan of await findOrphans(project.path, known)) {

@@ -227,7 +227,7 @@ async function addIntake(
 ) {
   await insertIntake(d, {
     id,
-    project_id: p,
+    workspace_id: p,
     issue_url: `https://github.com/o/r/issues/${id}`,
     issue_node_id: `N${id}`,
     issue_title: id,

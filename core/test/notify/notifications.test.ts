@@ -21,7 +21,7 @@ const workflow: Workflow = {
 } as Workflow;
 
 async function seed(db: Db) {
-  const project_id = (await seedProject(db, { path: "/work/myproj" })).id;
+  const p = await seedProject(db, { path: "/work/myproj" });
   await insertTask(db, {
     id: "t1",
     title: "ログインを直す",
@@ -29,21 +29,21 @@ async function seed(db: Db) {
     workflow_name: "f",
     branch: "b1",
     priority: 0,
-    project_id,
+    project_id: p.id,
   });
   await insertIntake(db, {
     id: "i1",
     issue_url: "https://github.com/o/r/issues/54",
     issue_node_id: "N1",
     issue_title: "通知を出す",
-    project_id,
+    workspace_id: p.workspace_id,
   });
   await insertIntake(db, {
     id: "i2",
     issue_url: "https://linear.app/acme/issue/ENG-12/tsuchi",
     issue_node_id: "N2",
     issue_title: "Linear の件",
-    project_id,
+    workspace_id: p.workspace_id,
   });
 }
 
