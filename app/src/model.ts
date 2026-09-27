@@ -350,6 +350,7 @@ export function toProject(p: ProjectSummary): Project {
   return {
     id: projectKey(p.path),
     daemonId: p.id,
+    workspaceId: p.workspace_id,
     path: p.path,
     def: p.default_workflow,
     color: `hsl(${h} 45% 38%)`,

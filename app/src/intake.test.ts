@@ -55,6 +55,7 @@ import {
   normalizeReply,
   openQuestionSet,
   parseIssueInput,
+  projectOfIntake,
   rejectionText,
   setWholeComment,
   toggleOption,
@@ -377,13 +378,28 @@ describe("intakeOrder", () => {
   test("プロジェクトで絞る", () => {
     const out = intakeOrder(INTAKES, PROJECTS, "shop-api", false);
     expect(out.length).toBeGreaterThan(0);
-    expect(out.every((i) => i.project_id === 2)).toBe(true);
+    expect(out.every((i) => i.workspace_id === 2)).toBe(true);
   });
 
   test("状態だけ変わった行も一覧から消えない", () => {
     const stale = { ...INTAKES[6], state: "answering" as const, needs_human: false };
     expect(intakeSection(stale)).toBe("working");
     expect(intakeOrder([stale], PROJECTS, "all", false)).toEqual([stale]);
+  });
+});
+
+describe("projectOfIntake", () => {
+  test("workspace にプロジェクトが 1 つならそれを返す", () => {
+    expect(projectOfIntake({ workspace_id: 2 }, PROJECTS)).toEqual(PROJECTS[1]);
+  });
+
+  test("workspace にプロジェクトが 2 つなら undefined", () => {
+    const extra = { ...PROJECTS[1], id: "extra", daemonId: 9, workspaceId: 1 };
+    expect(projectOfIntake({ workspace_id: 1 }, [...PROJECTS, extra])).toBeUndefined();
+  });
+
+  test("どのプロジェクトの workspace でもなければ undefined", () => {
+    expect(projectOfIntake({ workspace_id: 99 }, PROJECTS)).toBeUndefined();
   });
 });
 

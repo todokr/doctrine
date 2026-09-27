@@ -7,6 +7,7 @@ import {
   intakeProgress,
   intakeSection,
   issueNumber,
+  projectOfIntake,
   taskIntakeMark,
 } from "../intake";
 import { GROUPS, ago, countReview, groupOf, hm, sidebarOrder, staleDaysOf, timeLabel, visibleTasks } from "../model";
@@ -91,7 +92,7 @@ function Item({ t }: { t: Task }) {
 
 function IntakeItem({ i }: { i: IntakeSummary }) {
   const { s, dispatch } = useStore();
-  const p = s.projects.find((x) => x.daemonId === i.project_id);
+  const p = projectOfIntake(i, s.projects);
   const num = issueNumber(i.issue_url);
   const progress = intakeProgress(i);
   return (

@@ -168,8 +168,17 @@ export function visibleIntakes(
   project: string,
 ): IntakeSummary[] {
   if (project === "all") return intakes;
-  const daemonId = projects.find((p) => p.id === project)?.daemonId;
-  return intakes.filter((i) => i.project_id === daemonId);
+  const workspaceId = projects.find((p) => p.id === project)?.workspaceId;
+  return intakes.filter((i) => i.workspace_id === workspaceId);
+}
+
+/** Intake の workspace のただ 1 つのプロジェクト。workspace にプロジェクトが 1 つでなければ undefined。 */
+export function projectOfIntake(
+  i: Pick<IntakeSummary, "workspace_id">,
+  projects: Project[],
+): Project | undefined {
+  const matches = projects.filter((p) => p.workspaceId === i.workspace_id);
+  return matches.length === 1 ? matches[0] : undefined;
 }
 
 /** サイドバーの描画も j/k もこの順を使う */
@@ -522,7 +531,7 @@ export function watchAlert(watch: WatchHealth): string | null {
 export function summaryOf(d: IntakeDetail): IntakeSummary {
   return {
     id: d.id,
-    project_id: d.project_id,
+    workspace_id: d.workspace_id,
     issue_url: d.issue_url,
     issue_title: d.issue_title,
     state: d.state,

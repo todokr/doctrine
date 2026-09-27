@@ -530,6 +530,10 @@ describe("toProject / toTask", () => {
     expect(toProject(summary({ id: 7 })).daemonId).toBe(7);
   });
 
+  test("workspace_id を workspaceId に持つ", () => {
+    expect(toProject(summary({ workspace_id: 5 })).workspaceId).toBe(5);
+  });
+
   test("同じパスからは同じ色が出る", () => {
     expect(toProject(summary()).color).toBe(toProject(summary()).color);
     expect(toProject(summary()).color).not.toBe(toProject(summary({ path: "/x/y" })).color);
