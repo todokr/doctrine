@@ -39,13 +39,11 @@ ${tools}
 
       手順は次のとおりです。
 
-      1. リポジトリを調べて、次の3つを決めます。package.json・mise.toml・Makefile・justfile・
+      1. リポジトリを調べて、次の2つを決めます。package.json・mise.toml・Makefile・justfile・
          deno.json・Cargo.toml・pyproject.toml・CI の設定（.github/workflows など）・README・
          CLAUDE.md のうち、あるものを読みます。
          - verify の run: 型検査・lint・テストを通すコマンド。CI が回しているものに揃えます。
            依存の取得が要るなら先頭に置きます（例: pnpm install --frozen-lockfile && pnpm test）。
-         - implement の allowedTools: verify で使うコマンドと、実装中にテストを回すコマンドを
-           "Bash(<コマンド>:*)" の形で足します。雛形にある読み取り系と git add / git commit は残します。
          - baseBranch: 雛形の agent-review が差分を取る範囲（git diff <ブランチ>...HEAD）の
            ブランチを、リポジトリの既定ブランチ（git log や CI の設定から分かる範囲）と見比べ、
            違っていたら書き換えます。書き換えたら、足すステップの例にある --base・sync・wait-merge の
@@ -57,7 +55,7 @@ ${tools}
          実行時に展開するものです。書き換えずにそのまま残してください。
       3. できたワークフローを {{ worktree.path }}/.doctrine-out/default.yaml に書きます。
       4. {{ worktree.path }}/.doctrine-out/setup-notes.md に次を書きます。承認の画面で人が読みます。
-         - 決めたこと: verify の run、implement の allowedTools に足したコマンド、baseBranch と、
+         - 決めたこと: verify の run、baseBranch と、
            それぞれの根拠にしたファイル
          - 方針とリポジトリの食い違い（例: remote が無いのに PR を開く方針）と、どちらを選んだか。
            食い違ったら、方針よりリポジトリで動く形を選びます。無ければ「なし」と書きます

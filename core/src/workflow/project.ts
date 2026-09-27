@@ -19,7 +19,7 @@ export type ProjectConfig = {
 const schema = z.object({
   setup: z.string().min(1).optional(),
   defaultWorkflow: z.string().min(1),
-  maxConcurrent: z.number().int().min(1).default(1),
+  maxConcurrent: z.number().int().min(1).default(5),
   baseBranch: z.string().min(1).default("main"),
 }).strict();
 

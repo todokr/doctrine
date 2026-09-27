@@ -3,7 +3,13 @@ import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { defaultWorkflowYamlFor, ensureWorkspaceScaffold } from "../../src/workflow/scaffold.ts";
+import {
+  defaultWorkflowYamlFor,
+  ensureProjectScaffold,
+  ensureWorkspaceScaffold,
+  READ_ONLY_TOOLS,
+} from "../../src/workflow/scaffold.ts";
+import { parseProjectConfig } from "../../src/workflow/project.ts";
 import { parseWorkspaceConfig } from "../../src/workflow/workspace.ts";
 import { makeRepo } from "../helpers/repo.ts";
 import {
@@ -106,6 +112,27 @@ test("人のレビューには計画・実装メモ・レビュー結果を見�
     ".doctrine-out/implement-notes.md",
     ".doctrine-out/plan.md",
   ]);
+});
+
+test("implement は auto で動き、コマンドを列挙しない", () => {
+  const implement = byId(stepsOf(), "implement") as AgentStep;
+  assert.equal(implement.permissionMode, "auto");
+  assert.equal(implement.allowedTools, undefined);
+});
+
+test("計画と審査の役は読み取り系の許可だけで、コードを書き換えられない", () => {
+  for (const id of ["plan", "plan-review", "agent-review"]) {
+    const step = byId(stepsOf(), id) as AgentStep;
+    assert.equal(step.permissionMode, "acceptEdits", id);
+    assert.deepEqual(step.allowedTools, READ_ONLY_TOOLS, id);
+  }
+});
+
+test("project.yaml の雛形は maxConcurrent: 5", async () => {
+  const repo = await makeRepo(join(root, "solo"), { "README.md": "x\n" });
+  await ensureProjectScaffold(repo);
+  const cfg = parseProjectConfig(await readFile(join(repo, ".doctrine", "project.yaml"), "utf8"));
+  assert.equal(cfg.maxConcurrent, 5);
 });
 
 test("guide ステップは diff を読めるだけの許可を持つ", () => {
