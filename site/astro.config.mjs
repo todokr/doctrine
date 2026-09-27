@@ -3,8 +3,12 @@ import starlight from '@astrojs/starlight';
 import react from '@astrojs/react';
 
 export default defineConfig({
+  // GitHub Pages のプロジェクトサイト（https://todokr.github.io/doctrine/）として公開する。
+  site: 'https://todokr.github.io',
+  base: '/doctrine',
   // ルートロケールがないので `/` にページができない。`/ja/` へ送る。
-  redirects: { '/': '/ja/' },
+  // リダイレクト先には base が付かないので、自分で付ける。
+  redirects: { '/': '/doctrine/ja/' },
   integrations: [
     starlight({
       title: 'doctrine',
