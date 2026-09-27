@@ -189,6 +189,10 @@ export function defaultWorkflowYamlFor(baseBranch: string | undefined): string {
 # エージェントを planner / plan-reviewer / implementer / code-reviewer / guide の5つの役割に分け、
 # 役割の間は .doctrine-out/ のファイルで成果物を受け渡す。
 #
+# この雛形は PR を開くステップを持たない（gh pr create は再実行で二重に効くため）。
+# 足すときは PR 本文に {{ issue.closes }} を入れる。Intake から投入されたタスクの PR は
+# sub-issue を閉じ、Intake 由来でないタスクでは空文字になる。例（--base は雛形を作った時点の値）:
+#   run: "git push -u origin HEAD && { gh pr view --json url --jq .url || { cat .doctrine-out/implement-notes.md; if [ -n '{{ issue.closes }}' ]; then printf '\\\\n%s\\\\n' '{{ issue.closes }}'; fi; } | gh pr create --base ${base} --title \\"{{ task.title }}\\" --body-file -; }"
 name: ${DEFAULT_WORKFLOW_NAME}
 steps:
   - id: plan
