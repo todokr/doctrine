@@ -463,7 +463,7 @@ function EndCard({ t, images }: { t: number; images: FilmImages }) {
           理解は譲らない
         </div>
         <div className="vf-end-sub">
-          <strong>doctrine</strong> — 手元のマシンで動く software factory
+          <strong>doctrine</strong> — 手元のマシンで動く AI 駆動開発基盤
         </div>
       </div>
     </Layer>
