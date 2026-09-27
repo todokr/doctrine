@@ -9,7 +9,8 @@ import {
   writeProjectYaml,
 } from "../workflow/project.ts";
 import { applyWorkflowChanges, writeWorkflowYaml } from "../workflow/save.ts";
-import { pinOf, type WorkflowLoader } from "../workflow/load.ts";
+import { pinOf, type WorkflowLoader, type WorkflowPin } from "../workflow/load.ts";
+import { SETUP_WORKFLOW_NAME, setupPrompt, setupWorkflowYaml } from "../workflow/setupWorkflow.ts";
 import {
   getProject,
   getProjectByPath,
@@ -21,7 +22,7 @@ import {
   type TaskRow,
   type TaskState,
 } from "../db/tasks.ts";
-import { listWorkspaces } from "../db/workspaces.ts";
+import { listProjectsOf, listWorkspaces } from "../db/workspaces.ts";
 import {
   addWorkspace,
   syncProjectRow,
@@ -98,6 +99,7 @@ import type {
   IntakeLogs,
   RateLimitSample,
   ServerEvent,
+  SetupPolicy,
   StepRunDenials,
   StepView,
   TaskGuide,
@@ -410,23 +412,55 @@ export function createHandler(ctx: DaemonContext): Handler {
           : project.default_workflow;
         // 不正な定義はタスク作成時に落とす
         const loaded = await ctx.loadWorkflow(projectPath, workflowName);
-        const id = crypto.randomUUID();
-        const task = await insertTask(ctx.db, {
-          id,
-          project_id: project.id,
+        const task = await createTaskRow(ctx.db, project, {
           title,
           prompt,
-          workflow_name: workflowName,
-          branch: branchNameFor(id, title),
-          priority: typeof params.priority === "number" ? params.priority : 2,
-          ...pinOf(loaded, project),
+          workflowName,
+          pin: pinOf(loaded, project),
+          priority: typeof params.priority === "number" ? params.priority : undefined,
         });
         // タスク作成時だけがこの warnings の出口。以後 tick・承認は保存した
         // 作成時の中身を読み直すだけで、ディスクを読まないので警告は積まない。
-        for (const w of loaded.warnings) ctx.warnings.push(`作成時の検証: ${w}`, id);
+        for (const w of loaded.warnings) ctx.warnings.push(`作成時の検証: ${w}`, task.id);
         // dctl add はレスポンスをそのまま表示するCLIなので、ここに乗せておけば
         // ログを探しに行かなくてもユーザーの目の前に出る。
         return { ...task, warnings: loaded.warnings };
+      }
+      case "workspace.setup": {
+        const workspace = reqNumber(params, "workspace");
+        const names = params.projects;
+        if (!Array.isArray(names) || names.some((n) => typeof n !== "string")) {
+          throw new Error("projects は文字列の配列で渡してください");
+        }
+        const policy = params.policy as SetupPolicy | undefined;
+        if (!policy || typeof policy !== "object") throw new Error("policy は必須です");
+        if (policy.pr === "branch_only" && policy.sync) {
+          throw new Error("PR を開かない方針（pr: branch_only）では sync を true にできません");
+        }
+        const projects = await listProjectsOf(ctx.db, workspace);
+        const targets = (names as string[]).map((name) => {
+          const project = projects.find((p) => p.name === name);
+          if (!project) {
+            throw new Error(`workspace ${workspace} にプロジェクト ${name} はありません`);
+          }
+          return project;
+        });
+        const workflowYaml = setupWorkflowYaml();
+        return await ctx.db.transaction().execute(async (trx) => {
+          const tasks: TaskRow[] = [];
+          for (const project of targets) {
+            tasks.push(
+              await createTaskRow(trx, project, {
+                title: `${project.name} のワークフローを作る`,
+                prompt: setupPrompt(policy, project.base_branch),
+                workflowName: SETUP_WORKFLOW_NAME,
+                // 依存のインストールなどの setup は、YAML を書くだけのこのタスクには要らない
+                pin: { workflow_yaml: workflowYaml, workflow_setup: null },
+              }),
+            );
+          }
+          return tasks;
+        });
       }
       case "task.list": {
         const filter: { projectId?: number; state?: TaskState } = {};
@@ -948,6 +982,25 @@ export function createHandler(ctx: DaemonContext): Handler {
         throw new Error(`未知のメソッドです: ${method}`);
     }
   };
+}
+
+/** タスクの行を 1 つ入れる。ワークフローは作成時の中身（pin）で固定する。priority の既定は 2。 */
+async function createTaskRow(
+  db: Db,
+  project: ProjectRow,
+  t: { title: string; prompt: string; workflowName: string; pin: WorkflowPin; priority?: number },
+): Promise<TaskRow> {
+  const id = crypto.randomUUID();
+  return await insertTask(db, {
+    id,
+    project_id: project.id,
+    title: t.title,
+    prompt: t.prompt,
+    workflow_name: t.workflowName,
+    branch: branchNameFor(id, t.title),
+    priority: t.priority ?? 2,
+    ...t.pin,
+  });
 }
 
 /** ログファイルの末尾 tail 行（既定 200）。まだファイルが無い実行は空で返す。 */
