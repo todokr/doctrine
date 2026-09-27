@@ -118,3 +118,22 @@ test("PR を開く方針のステップの例は、雛形の後ろに足せば p
     assert.ok(blocks[1].includes("{{ issue.closes }}"));
   }
 });
+
+test("draft のプロンプトは worktree に無い .doctrine/ のファイルを読ませない", () => {
+  // ウィザードの流れでは .doctrine/ は元のリポジトリで未追跡なので、worktree には無い
+  assert.ok(!draftStep().prompt.includes(".doctrine/project.yaml"));
+});
+
+test("draft のプロンプトは baseBranch を変えたら例のブランチも揃え、setup-notes.md に書くよう言う", () => {
+  const prompt = draftStep().prompt;
+  assert.match(prompt, /--base/);
+  assert.match(prompt, /wait-merge/);
+  assert.match(prompt, /雛形のブランチと食い違っていた/);
+});
+
+test("sync しない wait-merge の例は、gh の失敗ですぐ suspend することと再開の仕方を書く", () => {
+  const prompt = setupPrompt({ ...FULL, sync: false }, "main");
+  const example = yamlBlocks(prompt)[1];
+  assert.match(example, /すぐに suspend/);
+  assert.match(example, /承認すると wait-merge から/);
+});

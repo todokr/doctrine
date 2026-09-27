@@ -231,3 +231,40 @@ test("dctl が PATH に無ければ、validate の feed に deno task install �
   assert.match(adapter.calls[1].prompt, /deno task install/);
   await until(async () => await stateOf(ctx, taskId) === "failed", WAIT_MS, "上限で failed");
 });
+
+test("ウィザードの流れ: .doctrine/ の無いリポジトリで init 付きの workspace.add から apply まで通る", async () => {
+  await installDctlShim();
+  // ウィザードが置いた .doctrine/ は未追跡なので、コミット済みの main から切った worktree には無い
+  const inWorktree: boolean[] = [];
+  const adapter = draftingAdapter(async (cwd) => {
+    inWorktree.push(await access(join(cwd, ".doctrine")).then(() => true, () => false));
+    await writeOut(cwd, DRAFTED);
+  });
+  const repo = await makeRepo(join(root, "fresh"), { "README.md": "x\n" });
+  const { ctx, handler } = await context(adapter);
+
+  const added = await handler(
+    "workspace.add",
+    { path: repo, projects: { app: "." }, tracker: { kind: "github" } },
+    NOOP_CONN,
+  ) as { id: number; projects: { name: string; path: string }[]; created: string[] };
+  // app の setupTargets と同じ突き合わせ
+  const targets = added.projects
+    .filter((p) => added.created.includes(`${p.path}/.doctrine/workflows/default.yaml`))
+    .map((p) => p.name);
+  assert.deepEqual(targets, ["app"]);
+
+  const [t] = await handler(
+    "workspace.setup",
+    { workspace: added.id, projects: targets, policy: POLICY },
+    NOOP_CONN,
+  ) as TaskSummary[];
+  await tick(ctx);
+  await approveToCompletion(ctx, handler, t.id);
+
+  assert.deepEqual(inWorktree, [false]);
+  assert.equal(
+    await readFile(join(repo, ".doctrine", "workflows", "default.yaml"), "utf8"),
+    DRAFTED,
+  );
+});

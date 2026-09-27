@@ -46,9 +46,10 @@ ${tools}
            依存の取得が要るなら先頭に置きます（例: pnpm install --frozen-lockfile && pnpm test）。
          - implement の allowedTools: verify で使うコマンドと、実装中にテストを回すコマンドを
            "Bash(<コマンド>:*)" の形で足します。雛形にある読み取り系と git add / git commit は残します。
-         - baseBranch: .doctrine/project.yaml の baseBranch と、リポジトリの既定ブランチ
-           （git log や CI の設定から分かる範囲）を見ます。雛形の agent-review が差分を取る
-           範囲（git diff <ブランチ>...HEAD）に使われているので、違っていたら書き換えます。
+         - baseBranch: 雛形の agent-review が差分を取る範囲（git diff <ブランチ>...HEAD）の
+           ブランチを、リポジトリの既定ブランチ（git log や CI の設定から分かる範囲）と見比べ、
+           違っていたら書き換えます。書き換えたら、足すステップの例にある --base・sync・wait-merge の
+           ブランチも同じものに直し、雛形のブランチと食い違っていたことを setup-notes.md に書きます。
       2. 雛形を出発点に、方針に合わせてステップを削る・足す・書き換えます。
          ステップを削ったら、そのステップへの goto と、そのステップの成果物（plan.md など）を
          読むように書いたプロンプトも合わせて直します。
@@ -279,6 +280,8 @@ function prStepsExample(base: string, sync: boolean): string {
         CLOSED) echo "PR がマージされずに閉じられました"; exit 2 ;;
         *) exit 75 ;;
       esac
+    # gh が失敗すると、一時的な不調でも間を置かずに 3 回試し、すぐに suspend する。
+    # suspend したらタスクの画面で承認すると wait-merge から待ち直す（却下すると failed）。
     onFailure:
       goto: wait-merge
       maxAttempts: 3
