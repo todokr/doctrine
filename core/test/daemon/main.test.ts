@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, test } from "@std/testing/bdd";
 import assert from "node:assert/strict";
-import { chmod, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type ChildProcess, spawn } from "node:child_process";
@@ -65,6 +65,7 @@ test("生きているデーモンのソケットは横取りせず、二重起�
     dbPath: join(root, "a.db"),
     socketPath: sock,
     logRoot: join(root, "logs-a"),
+    configPath: join(root, "config.json"),
     tickMs: 1_000_000,
   });
   daemons.push(d1);
@@ -75,6 +76,7 @@ test("生きているデーモンのソケットは横取りせず、二重起�
         dbPath: join(root, "b.db"),
         socketPath: sock,
         logRoot: join(root, "logs-b"),
+        configPath: join(root, "config.json"),
         tickMs: 1_000_000,
       }),
     /既に動作しています/,
@@ -95,6 +97,7 @@ test("ECONNREFUSEDな古いソケットファイルは掃除して起動でき�
     dbPath: join(root, "c.db"),
     socketPath: sock,
     logRoot: join(root, "logs-c"),
+    configPath: join(root, "config.json"),
     tickMs: 1_000_000,
   });
   daemons.push(d);
@@ -119,6 +122,7 @@ test("ソケットに繋げるか判定できない（権限拒否など）な�
         dbPath: join(root, "d.db"),
         socketPath: sock,
         logRoot: join(root, "logs-d"),
+        configPath: join(root, "config.json"),
         tickMs: 1_000_000,
       }),
     (err: Error) => {
@@ -134,7 +138,11 @@ test("状態ディレクトリが存在しなくても、0o700 で作って起�
   const prev = Deno.env.get("DOCTRINE_STATE_DIR");
   Deno.env.set("DOCTRINE_STATE_DIR", state);
   try {
-    const d = await startDaemon({ socketPath: join(root, "dctld.sock"), tickMs: 1_000_000 });
+    const d = await startDaemon({
+      socketPath: join(root, "dctld.sock"),
+      configPath: join(root, "config.json"),
+      tickMs: 1_000_000,
+    });
     daemons.push(d);
 
     const s = await stat(state);
@@ -289,4 +297,35 @@ test("daemon.setGlobalLimit で変えた値は再起動しても残る", async (
 
   const slots = await call(sock, "daemon.slots", {}) as DaemonSlots;
   assert.equal(slots.global_limit, 6);
+});
+
+test("configPath を渡さなければ全体の実行枠は設定ディレクトリに保存され、状態ディレクトリには作らない", async () => {
+  const sock = join(root, "dctld.sock");
+  const state = join(root, "state");
+  const configDir = join(root, "nested", "config");
+  const prevState = Deno.env.get("DOCTRINE_STATE_DIR");
+  const prevConfig = Deno.env.get("DOCTRINE_CONFIG_DIR");
+  Deno.env.set("DOCTRINE_STATE_DIR", state);
+  Deno.env.set("DOCTRINE_CONFIG_DIR", configDir);
+  try {
+    const d1 = await startDaemon({ socketPath: sock, tickMs: 1_000_000 });
+    daemons.push(d1);
+    await call(sock, "daemon.setGlobalLimit", { global_limit: 6 });
+    await d1.stop();
+    daemons.splice(daemons.indexOf(d1), 1);
+
+    const saved = JSON.parse(await readFile(join(configDir, "config.json"), "utf8"));
+    assert.equal(saved.globalLimit, 6);
+    await assert.rejects(() => stat(join(state, "config.json")));
+
+    const d2 = await startDaemon({ socketPath: sock, tickMs: 1_000_000 });
+    daemons.push(d2);
+    const slots = await call(sock, "daemon.slots", {}) as DaemonSlots;
+    assert.equal(slots.global_limit, 6);
+  } finally {
+    if (prevState === undefined) Deno.env.delete("DOCTRINE_STATE_DIR");
+    else Deno.env.set("DOCTRINE_STATE_DIR", prevState);
+    if (prevConfig === undefined) Deno.env.delete("DOCTRINE_CONFIG_DIR");
+    else Deno.env.set("DOCTRINE_CONFIG_DIR", prevConfig);
+  }
 });

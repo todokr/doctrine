@@ -1,11 +1,47 @@
 ---
 title: doctrine
 description: doctrine の使い方を読めるドキュメントサイト。
+template: splash
+hero:
+  title: <span>作業は渡す、</span><span>理解は渡さない</span>
+  tagline: <strong>doctrine</strong> — 手元のマシンで動く software factory
+  image:
+    file: ../../../assets/general.png
+    alt: 二角帽に軍服、白いひげの将軍が人差し指を立てている
+  actions:
+    - text: Quick Start
+      link: /ja/quick-start/
+      icon: right-arrow
 ---
 
-doctrine のドキュメントです。使い始めから考え方、具体例までを順に読めます。
+import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
+import ValueFilm from '../../../components/ValueFilm/ValueFilm.astro';
 
-- [Quick Start](/ja/quick-start/)
-- [Guide](/ja/guide/writing-workflows/)
-- [Concepts](/ja/concepts/)
-- [Examples](/ja/examples/)
+<ValueFilm />
+
+## 人の手は判断にだけ使う
+
+エージェントに任せた作業は、事前に定めた手順に沿って進む。判断以外の作業は doctrine が引き受ける。
+
+<CardGrid>
+  <Card title="Epic の分割支援" icon="puzzle">
+    Epic 粒度の Issue を、PR 1 つでレビューしきれるプロセスに PFD で分解する。論点は質問として先にまとめて届く（[Intake](/ja/concepts/features/#intake--pfd-による分解)）
+  </Card>
+  <Card title="依存関係に沿った投入" icon="list-format">
+    上流の PR がマージされると、その成果物を待っていた下流のタスクが自動で作られる（[Intake](/ja/concepts/features/#intake--pfd-による分解)）
+  </Card>
+  <Card title="conflict の自動修復" icon="random">
+    PR を開いた後に baseBranch と conflict したら、取り込んで直し、テストを通して push し直す（[マージ待ち](/ja/concepts/features/#マージ待ちと-conflict-の自動修復)）
+  </Card>
+  <Card title="利用上限からの自動再開" icon="rocket">
+    Claude の利用上限に当たっても作業は捨てられず、枠が明ければ同じ会話から続く（[利用上限での待機](/ja/concepts/features/#利用上限での待機)）
+  </Card>
+</CardGrid>
+
+## 読み進める
+
+<CardGrid>
+  <LinkCard title="Concepts" description="doctrine が解く問題と、提供する価値" href="/ja/concepts/" />
+  <LinkCard title="Guide" description="ワークフローの書き方と運用" href="/ja/guide/writing-workflows/" />
+  <LinkCard title="Examples" description="具体的なワークフローの例" href="/ja/examples/" />
+</CardGrid>

@@ -31,6 +31,7 @@ cargo test --lib relay::
 ```
 
 - core のテストは `--allow-all` が要る。実際に `git init` や `git worktree` を作り、git・sh・偽の gh を子プロセスで起動し、`DOCTRINE_STATE_DIR` を書き換える
+- `startDaemon` を呼ぶテストは `configPath` を必ず渡す。渡さないと `DOCTRINE_STATE_DIR` を向けていても本物の `~/.config/doctrine/config.json` を読み書きする
 - CI は `TZ=UTC` と `TZ=Asia/Tokyo` の 2 通りで回す。時刻を扱う変更は手元でも `TZ=UTC deno task test` を試す
 - テスト名・コメント・エラーメッセージは日本語で書く
 

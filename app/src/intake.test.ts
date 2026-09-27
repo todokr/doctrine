@@ -459,6 +459,7 @@ describe("trackerGuidance", () => {
     const g = trackerGuidance({ ok: false, reason: "no_api_key", message: "" });
     expect(g.title).toBe("Linear の API key がありません");
     expect(g.fix).toContain("config.json");
+    expect(g.fix).toContain("~/.config/doctrine");
     expect(g.fix).toContain("linearApiKey");
     expect(g.fix).toContain("起動し直す");
     expect(g.command).toContain("linearApiKey");

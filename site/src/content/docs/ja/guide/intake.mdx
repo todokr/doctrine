@@ -37,7 +37,7 @@ GitHub を使うときの前提:
 
 Linear を使うときの前提:
 
-- 状態ディレクトリの `config.json` に `{ "linearApiKey": "lin_api_..." }` を書き、`dctld` を起動し直している。状態ディレクトリは既定で `~/.local/state/doctrine` で、`DOCTRINE_STATE_DIR` で変えられる。
+- 設定ディレクトリの `config.json` に `{ "linearApiKey": "lin_api_..." }` を書き、`dctld` を起動し直している。設定ディレクトリは既定で `~/.config/doctrine`（`XDG_CONFIG_HOME` があれば `$XDG_CONFIG_HOME/doctrine`）で、`DOCTRINE_CONFIG_DIR` で変えられる。
 
 前提が欠けていると、Issue を選ぶ画面に案内と「もう一度確かめる」ボタンが出る。
 

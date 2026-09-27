@@ -9,7 +9,7 @@
    `ConnectionRefused` / `NotFound` なら古いソケットファイルとみなして消す。それ以外（権限エラーなど）は判定できないので拒否する。
    `server.listen()` はパスを無条件に unlink するので、この検査が無いと 2 つのデーモンが同じ DB に書く
 3. DB を開く（`<stateRoot>/doctrine.db`）。親ディレクトリを `0o700` で作り、`PRAGMA journal_mode = WAL`、`foreign_keys = ON`、マイグレーションを適用する。失敗したら起動しない
-4. `config.json` を読む（失敗しても投げず、既定値と警告を返す）
+4. `config.json` を読む（設定ディレクトリ。[4.6](#46-ディスク上の配置)）（失敗しても投げず、既定値と警告を返す）
 5. `DaemonContext` を組み立てる。本物のアダプタ、`workflowOf`（作成時に固定した定義を読む）、`trackerOf`、Intake の見張り、警告ログなど
 6. サーバを作って listen する
 7. **クラッシュ復帰**（[3.12](03-workflow-engine.md)）。listen の後に行うので復帰中にも RPC が届きうる。そのため復帰の書き込みも `requireState` 付き
@@ -186,6 +186,8 @@
 | 変数 | 意味 |
 | --- | --- |
 | `DOCTRINE_STATE_DIR` | 状態ディレクトリ。既定は `~/.local/state/doctrine`。空文字は未設定として扱う（`util/home.ts:stateRoot`） |
+| `DOCTRINE_CONFIG_DIR` | 設定ディレクトリ。空文字は未設定として扱う（`util/home.ts:configRoot`）。`DOCTRINE_STATE_DIR` とは独立で、状態だけを隔離しても設定は既定の場所から読み書きする |
+| `XDG_CONFIG_HOME` | `DOCTRINE_CONFIG_DIR` が無いときの設定ディレクトリの親（`$XDG_CONFIG_HOME/doctrine`）。無いか相対パスなら `~/.config` |
 | `DOCTRINE_SOCKET` | ソケットパスを直接指定する |
 | `XDG_RUNTIME_DIR` | ソケットの置き場（OS を問わない） |
 | `DOCTRINE_DCTLD` | アプリが起動する dctld の絶対パス（無ければ PATH の `dctld`） |
@@ -195,7 +197,6 @@
 ```
 <stateRoot>/
 ├── doctrine.db            SQLite（WAL なので -wal / -shm も並ぶ）
-├── config.json            デーモンの設定（0o600）
 ├── dctld.sock             macOS で XDG_RUNTIME_DIR が無いときのソケット
 ├── dctld.log              アプリが dctld を起動したときだけ作る stdout / stderr
 ├── logs/
@@ -205,6 +206,17 @@
     ├── <task-id>/            タスクの worktree
     └── intake-<intake-id>/   Intake の detached worktree
 ```
+
+### 設定ディレクトリ（`0o700`）
+
+解決順は次のとおり（`util/home.ts:configRoot`）。
+
+1. `DOCTRINE_CONFIG_DIR`
+2. `$XDG_CONFIG_HOME/doctrine`
+3. `~/.config/doctrine`
+
+置かれるのは `config.json`（`0o600`）だけで、書き込み時にディレクトリが無ければ作る。
+状態ディレクトリと分けているのは、設定が人の決めた値で、消えると意図が失われるため。状態ディレクトリのものは消えても設定は失われない。
 
 状態ディレクトリの外に置くものが 2 つある。
 
@@ -228,7 +240,7 @@
 | `globalLimit` | 全体の実行枠（既定 4） | 起動時に読み、`daemon.setGlobalLimit` で即時に変わる |
 | `linearApiKey` | Linear の Personal API key | 起動時に 1 度だけ読む。変えたらデーモンの再起動が要る |
 
-スキーマは `.strict()` で、読めない・壊れている・知らないキーがある場合は既定値と警告で起動する。書き込みは tmp に `0o600` で書いてから rename する。
+置き場は設定ディレクトリ。スキーマは `.strict()` で、読めない・壊れている・知らないキーがある場合は既定値と警告で起動する。書き込みは tmp に `0o600` で書いてから rename する。
 `project.yaml` の `tracker` は呼ぶたびに読み直すので、こちらは再起動が要らない。
 
 ## 4.7 dctl
