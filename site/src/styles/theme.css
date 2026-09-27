@@ -12,3 +12,14 @@
   --sl-color-accent: #ad7625;
   --sl-color-accent-high: #684612;
 }
+
+/* トップページのヒーロー。キャラクターの背後にアクセントカラーのにじみを敷く。 */
+.hero > img {
+  max-width: min(22rem, 70vw);
+  filter: drop-shadow(0 0 3rem color-mix(in srgb, var(--sl-color-accent) 45%, transparent));
+}
+
+/* タイトルを読点の後でだけ折り返す。 */
+.hero h1 span {
+  display: inline-block;
+}
