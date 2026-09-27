@@ -18,12 +18,14 @@ export const PARENT_URL = "https://github.com/o/r/issues/1";
 /** 承認まで済み、state が active の Intake（id は i1）を 1 つ持つ DB。 */
 export async function seedActive(
   pfd: Pfd = example(),
-): Promise<{ db: Db; projectId: number; runId: number }> {
+): Promise<{ db: Db; projectId: number; workspaceId: number; runId: number }> {
   const db = await openDb(":memory:");
-  const projectId = (await seedProject(db, { path: "/repo", default_workflow: "feature" })).id;
+  const p = await seedProject(db, { path: "/repo", default_workflow: "feature" });
+  const projectId = p.id;
+  const workspaceId = p.workspace_id;
   await insertIntake(db, {
     id: "i1",
-    project_id: projectId,
+    workspace_id: workspaceId,
     issue_url: PARENT_URL,
     issue_node_id: "I_1",
     issue_title: "親",
@@ -46,5 +48,5 @@ export async function seedActive(
   await insertApproval(db, { intake_id: "i1", draft_id: draft.id, hash: draft.hash });
   await insertProcesses(db, "i1", pfd.processes.map((p) => p.id));
   await updateIntake(db, "i1", { state: "active" });
-  return { db, projectId, runId };
+  return { db, projectId, workspaceId, runId };
 }

@@ -48,8 +48,8 @@ test("project-add / project-update は未知のコマンド", () => {
 test("dctl intake ls / get", () => {
   assert.deepEqual(parseArgv(["intake", "ls"]), { method: "intake.list", params: {} });
   assert.deepEqual(
-    parseArgv(["intake", "ls", "--project", "/r", "--include_closed"]),
-    { method: "intake.list", params: { project: "/r", include_closed: true } },
+    parseArgv(["intake", "ls", "--workspace", "/r", "--include_closed"]),
+    { method: "intake.list", params: { workspace: "/r", include_closed: true } },
   );
   assert.deepEqual(
     parseArgv(["intake", "get", "i1"]),

@@ -2,7 +2,7 @@ import { fakeBaseSync } from "../helpers/watcher.ts";
 import { afterEach, beforeEach, test } from "@std/testing/bdd";
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
-import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openDb } from "../../src/db/migrate.ts";
@@ -19,6 +19,7 @@ import type {
   IntakeLogs,
   IntakeSummary,
   ServerEvent,
+  WorkspaceSummary,
 } from "../../../shared/protocol.ts";
 import type { PrFact } from "../../../shared/intake/processStatus.ts";
 import type { IntakeState } from "../../../shared/intake/state.ts";
@@ -864,7 +865,34 @@ test("tracker.issue は未登録のプロジェクトを拒む", async () => {
   );
 });
 
-test("intake.list は project で絞る", async () => {
+test("プロジェクトが 2 つの workspace では intake.start を断る", async () => {
+  const { call } = await setup();
+  const files = {
+    "README.md": "x\n",
+    ".doctrine/project.yaml": "defaultWorkflow: feature\nmaxConcurrent: 1\nbaseBranch: main\n",
+    ".doctrine/workflows/feature.yaml":
+      "name: feature\nsteps:\n  - id: review\n    type: approval\n    title: 見て\n",
+  };
+  // makeRepo(dir, files) は dir/repo にリポジトリを作るので、workspace.yaml の相対パスは
+  // ../wa/repo・../wb/repo になる（root 自身が beforeEach で git リポジトリになっている）。
+  const wa = await makeRepo(join(root, "wa"), files);
+  await makeRepo(join(root, "wb"), files);
+  const ws = join(root, "ws");
+  await mkdir(join(ws, ".doctrine"), { recursive: true });
+  await writeFile(
+    join(ws, ".doctrine", "workspace.yaml"),
+    "projects:\n  a: ../wa/repo\n  b: ../wb/repo\n",
+  );
+  await call("workspace.add", { path: ws });
+
+  await assert.rejects(
+    () => call("intake.start", { project: wa, issue_url: ISSUE }),
+    /プロジェクトが複数ある workspace の Intake はまだ扱えません/,
+  );
+  assert.deepEqual(await call<IntakeSummary[]>("intake.list", { include_closed: true }), []);
+});
+
+test("intake.list は workspace で絞る", async () => {
   const { call } = await setup();
   const otherRoot = await realpath(await mkdtemp(join(tmpdir(), "doctrine-intake-rpc-other-")));
   try {
@@ -879,8 +907,12 @@ test("intake.list は project で絞る", async () => {
     await call("intake.start", { project: other, issue_url: "https://github.com/o/r/issues/2" });
 
     assert.equal((await call<IntakeSummary[]>("intake.list")).length, 2);
-    assert.equal((await call<IntakeSummary[]>("intake.list", { project: repo })).length, 1);
-    assert.deepEqual(await call("intake.list", { project: "/not-registered" }), []);
+    const filtered = await call<IntakeSummary[]>("intake.list", { workspace: repo });
+    assert.equal(filtered.length, 1);
+    const workspaces = await call<WorkspaceSummary[]>("workspace.list");
+    const repoWorkspace = workspaces.find((w) => w.path === repo)!;
+    assert.equal(filtered[0].workspace_id, repoWorkspace.id);
+    assert.deepEqual(await call("intake.list", { workspace: "/not-registered" }), []);
   } finally {
     await rm(otherRoot, { recursive: true, force: true });
   }

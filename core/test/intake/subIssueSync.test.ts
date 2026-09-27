@@ -22,10 +22,10 @@ const PARENT = { url: PARENT_URL, nodeId: "I_1" };
 
 async function fixture(processIds = ["1", "2", "3", "4"]) {
   const d: Db = await openDb(":memory:");
-  const projectId = (await seedProject(d, { path: "/repo" })).id;
+  const workspaceId = (await seedProject(d, { path: "/repo" })).workspace_id;
   await insertIntake(d, {
     id: "i1",
-    project_id: projectId,
+    workspace_id: workspaceId,
     issue_url: PARENT_URL,
     issue_node_id: "I_1",
     issue_title: "T",

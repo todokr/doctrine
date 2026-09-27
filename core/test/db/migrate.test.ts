@@ -6,7 +6,7 @@ import { sql } from "kysely";
 import { openDb, openDbOn } from "../../src/db/migrate.ts";
 import { getTask, insertTask, listTasks } from "../../src/db/tasks.ts";
 import { migrateToLatest } from "../../src/db/migrations.ts";
-import type { Database, Db } from "../../src/db/schema.ts";
+import type { Database, Db, ProjectRow } from "../../src/db/schema.ts";
 import { seedProject } from "../helpers/project.ts";
 
 const dirs: string[] = [];
@@ -24,8 +24,13 @@ function db() {
   return openDb(":memory:");
 }
 
-async function seed(d: Db) {
+async function seed(d: Db): Promise<number> {
   return (await seedProject(d, { path: "/repo", default_workflow: "feature" })).id;
+}
+
+/** intake のテスト用。workspace_id はプロジェクトの行から引く（intakes は project_id を持たない）。 */
+async function seedWorkspace(d: Db): Promise<ProjectRow> {
+  return await seedProject(d, { path: "/repo", default_workflow: "feature" });
 }
 
 /**
@@ -241,7 +246,7 @@ const COLUMNS = {
   },
   intakes: {
     id: true,
-    project_id: true,
+    workspace_id: true,
     issue_url: true,
     issue_node_id: true,
     issue_title: true,
@@ -512,6 +517,7 @@ test("開き直してもマイグレーションは二度流れず、データ�
     "0013_waiting",
     "0014_issue_phase",
     "0015_workspace",
+    "0016_intake_workspace",
   ]);
   await first.destroy();
 
@@ -533,6 +539,7 @@ test("開き直してもマイグレーションは二度流れず、データ�
       "0013_waiting",
       "0014_issue_phase",
       "0015_workspace",
+      "0016_intake_workspace",
     ]);
     assert.equal((await second.selectFrom("projects").selectAll().execute()).length, 1);
   } finally {
@@ -574,6 +581,7 @@ test("pending_feed を足す前に作られたDBファイルは、行を保っ�
       "0013_waiting",
       "0014_issue_phase",
       "0015_workspace",
+      "0016_intake_workspace",
     ]);
     const old = await getTask(d, "old");
     assert.equal(old?.state, "suspended", "既存の行は残る");
@@ -1050,14 +1058,14 @@ test("0004: step_outputs の列が last_stdout / last_stderr に改名され、�
 
 function insertIntakeRow(
   d: Db,
-  projectId: number,
+  workspaceId: number,
   id: string,
   issueUrl: string,
   state: Database["intakes"]["state"] = "investigating",
 ) {
   return d.insertInto("intakes").values({
     id,
-    project_id: projectId,
+    workspace_id: workspaceId,
     issue_url: issueUrl,
     issue_node_id: `I_${id}`,
     issue_title: "T",
@@ -1080,21 +1088,21 @@ function newTask(id: string) {
 
 test("0009: tasks の intake_id と intake_process_id は両方 null か両方非 null でなければならない", async () => {
   const d = await db();
-  const pid = await seed(d);
-  await insertIntakeRow(d, pid, "i1", "https://github.com/o/r/issues/1");
+  const p = await seedWorkspace(d);
+  await insertIntakeRow(d, p.workspace_id, "i1", "https://github.com/o/r/issues/1");
 
   await assert.rejects(
-    () => insertTask(d, { ...newTask("t1"), project_id: pid, intake_id: "i1" }),
+    () => insertTask(d, { ...newTask("t1"), project_id: p.id, intake_id: "i1" }),
     /CHECK/,
   );
   await assert.rejects(
-    () => insertTask(d, { ...newTask("t2"), project_id: pid, intake_process_id: "p1" }),
+    () => insertTask(d, { ...newTask("t2"), project_id: p.id, intake_process_id: "p1" }),
     /CHECK/,
   );
 
   const linked = await insertTask(d, {
     ...newTask("t3"),
-    project_id: pid,
+    project_id: p.id,
     intake_id: "i1",
     intake_process_id: "p1",
     issue_url: "https://github.com/o/r/issues/2",
@@ -1105,7 +1113,7 @@ test("0009: tasks の intake_id と intake_process_id は両方 null か両方�
   assert.equal(linked.issue_url, "https://github.com/o/r/issues/2");
   assert.equal(linked.parent_issue_url, "https://github.com/o/r/issues/1");
 
-  const plain = await insertTask(d, { ...newTask("t4"), project_id: pid });
+  const plain = await insertTask(d, { ...newTask("t4"), project_id: p.id });
   assert.equal(plain.intake_id, null);
   assert.equal(plain.intake_process_id, null);
   assert.equal(plain.issue_url, null);
@@ -1143,18 +1151,18 @@ test("0009: 移行前からあるタスクは紐づけ列が null のまま残�
 
 test("0009: 終わっていない Intake は同じ Issue に 1 つだけ", async () => {
   const d = await db();
-  const pid = await seed(d);
+  const p = await seedWorkspace(d);
   const url = "https://github.com/o/r/issues/1";
-  await insertIntakeRow(d, pid, "i1", url);
-  await assert.rejects(() => insertIntakeRow(d, pid, "i2", url), /UNIQUE/);
+  await insertIntakeRow(d, p.workspace_id, "i1", url);
+  await assert.rejects(() => insertIntakeRow(d, p.workspace_id, "i2", url), /UNIQUE/);
 
   await d.updateTable("intakes").set({ state: "canceled" }).where("id", "=", "i1").execute();
-  await insertIntakeRow(d, pid, "i2", url);
+  await insertIntakeRow(d, p.workspace_id, "i2", url);
 
   await d.updateTable("intakes").set({ state: "completed" }).where("id", "=", "i2").execute();
-  await insertIntakeRow(d, pid, "i3", url);
+  await insertIntakeRow(d, p.workspace_id, "i3", url);
 
-  await insertIntakeRow(d, pid, "i4", "https://github.com/o/r/issues/2");
+  await insertIntakeRow(d, p.workspace_id, "i4", "https://github.com/o/r/issues/2");
   const open = await d.selectFrom("intakes").select("id")
     .where("state", "not in", ["completed", "canceled"]).orderBy("id").execute();
   assert.deepEqual(open.map((r) => r.id), ["i3", "i4"]);
@@ -1162,8 +1170,8 @@ test("0009: 終わっていない Intake は同じ Issue に 1 つだけ", async
 
 test("0009: intakes.state は 8 値だけを受け付ける", async () => {
   const d = await db();
-  const pid = await seed(d);
-  await insertIntakeRow(d, pid, "i1", "https://github.com/o/r/issues/1");
+  const p = await seedWorkspace(d);
+  await insertIntakeRow(d, p.workspace_id, "i1", "https://github.com/o/r/issues/1");
   for (
     const state of [
       "investigating",
@@ -1193,8 +1201,8 @@ test("0009: intakes.state は 8 値だけを受け付ける", async () => {
 
 test("0009: intake_runs の purpose と status は CHECK で固められている", async () => {
   const d = await db();
-  const pid = await seed(d);
-  await insertIntakeRow(d, pid, "i1", "https://github.com/o/r/issues/1");
+  const p = await seedWorkspace(d);
+  await insertIntakeRow(d, p.workspace_id, "i1", "https://github.com/o/r/issues/1");
   const run = { intake_id: "i1", attempt: 1, log_path: "" };
   await d.insertInto("intake_runs").values({ ...run, purpose: "investigate", status: "queued" })
     .execute();
@@ -1216,8 +1224,8 @@ test("0009: intake_runs の purpose と status は CHECK で固められてい�
 
 test("0010: 改訂の範囲の列は null で足される", async () => {
   const d = await db();
-  const pid = await seed(d);
-  await insertIntakeRow(d, pid, "i1", "https://github.com/o/r/issues/1");
+  const p = await seedWorkspace(d);
+  await insertIntakeRow(d, p.workspace_id, "i1", "https://github.com/o/r/issues/1");
   const run = await d.insertInto("intake_runs")
     .values({ intake_id: "i1", attempt: 1, log_path: "", purpose: "decompose", status: "queued" })
     .executeTakeFirstOrThrow();
@@ -1382,9 +1390,64 @@ test("0015: 既存のプロジェクトを 1 つずつの workspace に移し、
     },
   ]);
   assert.equal((await getTask(d, "t1"))?.project_id, 1);
-  const intake = await d.selectFrom("intakes").select("project_id").where("id", "=", "i1")
+  const intake = await d.selectFrom("intakes").select("workspace_id").where("id", "=", "i1")
     .executeTakeFirstOrThrow();
-  assert.equal(intake.project_id, 2);
+  assert.equal(intake.workspace_id, 2);
   const { rows: violations } = await sql`PRAGMA foreign_key_check`.execute(d);
   assert.deepEqual(violations, []);
+});
+
+test("0016: Intake をプロジェクトの workspace に付け替え、終わった Intake も移り、外部キーが壊れない", async () => {
+  const sqlite = new DatabaseSync(":memory:");
+  const d = await openDbOn(sqlite, "0015_workspace");
+  sqlite.exec(`
+    INSERT INTO workspaces (id, path, name) VALUES (1, '/w/a', 'a'), (2, '/w/b', 'b');
+    INSERT INTO projects (id, workspace_id, name, path, default_workflow)
+      VALUES (1, 1, 'a', '/w/a', 'f'), (2, 2, 'b', '/w/b', 'f');
+    INSERT INTO intakes (id, project_id, issue_url, issue_node_id, issue_title, state,
+                         created_at, updated_at)
+      VALUES ('i1', 2, 'https://github.com/o/r/issues/1', 'I_1', 'T', 'completed',
+              '2026-09-26', '2026-09-26'),
+             ('i2', 2, 'https://github.com/o/r/issues/2', 'I_2', 'T', 'investigating',
+              '2026-09-26', '2026-09-26');
+    INSERT INTO intake_runs (intake_id, purpose, attempt, status, log_path)
+      VALUES ('i2', 'investigate', 1, 'success', '');
+    INSERT INTO tasks (id, project_id, title, prompt, workflow_name, state, branch,
+                       intake_id, intake_process_id, created_at, updated_at)
+      VALUES ('t1', 1, 'T', 'P', 'f', 'completed', 'b', 'i1', 'p1', '2026-09-26', '2026-09-26');
+  `);
+  await migrateToLatest(d);
+
+  const rows = (await d.selectFrom("intakes").select(["id", "workspace_id"]).orderBy("id").execute())
+    .map((r) => ({ ...r }));
+  assert.deepEqual(rows, [{ id: "i1", workspace_id: 2 }, { id: "i2", workspace_id: 2 }]);
+
+  const cols = (await columnsOf(d, "intakes")).map((c) => c.name);
+  assert.ok(!cols.includes("project_id"));
+  assert.ok(cols.includes("workspace_id"));
+
+  const i1 = await d.selectFrom("intakes").selectAll().where("id", "=", "i1")
+    .executeTakeFirstOrThrow();
+  assert.equal(i1.state, "completed");
+  const i2 = await d.selectFrom("intakes").selectAll().where("id", "=", "i2")
+    .executeTakeFirstOrThrow();
+  assert.equal(i2.issue_url, "https://github.com/o/r/issues/2");
+
+  const { rows: violations } = await sql`PRAGMA foreign_key_check`.execute(d);
+  assert.deepEqual(violations, []);
+
+  assert.equal((await d.selectFrom("intake_runs").selectAll().execute()).length, 1);
+  assert.equal((await getTask(d, "t1"))?.intake_id, "i1");
+
+  await assert.rejects(
+    () =>
+      insertIntakeRow(d, 2, "i3", "https://github.com/o/r/issues/2"),
+    /UNIQUE/,
+  );
+  await insertIntakeRow(d, 2, "i4", "https://github.com/o/r/issues/1");
+
+  const { rows: idx } = await sql<{ name: string }>`
+    SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'uq_intakes_open_issue'
+  `.execute(d);
+  assert.equal(idx.length, 1);
 });
