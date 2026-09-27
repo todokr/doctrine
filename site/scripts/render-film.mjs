@@ -2,13 +2,14 @@
 //
 //   pnpm render:film                     ビルドして 30 秒・30fps の mp4 を film-out/doctrine.mp4 に出す
 //   pnpm render:film --frames 0,12,27.5  指定した時刻の静止画だけを film-out/ に出す
-//   pnpm render:film --url http://localhost:4400/film/  起動済みのサーバーを使う（ビルドを省く）
+//   pnpm render:film --url http://localhost:4400/doctrine/film/  起動済みのサーバーを使う（ビルドを省く）
 //
 // インストール済みの Google Chrome と ffmpeg を使う。
 import { spawn } from 'node:child_process';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { parseArgs } from 'node:util';
 import { chromium } from 'playwright-core';
+import config from '../astro.config.mjs';
 
 const DURATION = 30;
 const FPS = 30;
@@ -42,7 +43,7 @@ const startPreview = async () => {
 };
 
 const preview = values.url ? null : await startPreview();
-const url = values.url ?? `${preview.origin}/film/`;
+const url = values.url ?? `${preview.origin}${config.base ?? ''}/film/`;
 
 const browser = await chromium.launch({ channel: 'chrome' });
 try {
