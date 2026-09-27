@@ -398,14 +398,14 @@ export function trackerGuidance(
       return {
         title: "Linear の API key がありません",
         fix:
-          "状態ディレクトリ（既定は ~/.local/state/doctrine。DOCTRINE_STATE_DIR で変わる）の config.json に、Linear の Personal API key を linearApiKey として書き、dctld を起動し直す",
+          "設定ディレクトリ（既定は ~/.config/doctrine。DOCTRINE_CONFIG_DIR で変わる）の config.json に、Linear の Personal API key を linearApiKey として書き、dctld を起動し直す",
         command: '{ "linearApiKey": "lin_api_..." }',
       };
     case "invalid_api_key":
       return {
         title: "Linear の API key が使えません",
         fix:
-          "Linear で Personal API key を作り直し、状態ディレクトリの config.json の linearApiKey を書き換えて dctld を起動し直す",
+          "Linear で Personal API key を作り直し、設定ディレクトリの config.json の linearApiKey を書き換えて dctld を起動し直す",
         command: null,
       };
     case "team_not_found":
