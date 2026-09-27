@@ -30,7 +30,6 @@
 | `cli/dctl.ts:main` | `DOCTRINE_SOCKET ?? socketPath()` なので、空文字の `DOCTRINE_SOCKET` を空のパスとして使う |
 | `daemon/handlers.ts` の `task.list` | 未登録のプロジェクトを渡すと絞り込みが外れて全件を返す（`intake.list` は空を返す） |
 | `daemon/handlers.ts` の `task.logs` | `step_run_id` がそのタスクのものかを確かめない（`intake.logs` は確かめる） |
-| `shared/protocol.ts:Methods` | `project.add` / `project.update` が載っていない。中継は素通しなのでアプリからも呼べる |
 | `domain/guidePrompt.ts` | エージェントに実行させる diff が `git diff -M` で `-C` が無い。hunk 一覧は `-M -C` で作るので、コピーを含む変更では id が合わない |
 | `domain/guideInputs.ts` | diff が 2 MiB で打ち切られても、プロンプトにはそれが伝わらない |
 | `adapter/claude.ts:structuredOutputOf` | 構造化出力のキー `structured_output` は、コメント自身が「未実測」としている |
@@ -51,7 +50,7 @@
 | 箇所 | 実際 |
 | --- | --- |
 | 5.2「`poll` は待っている間は実行枠を占有しない」 | 全体枠は返すが、プロジェクト枠は握る |
-| 4.2・5.4「標準ワークフローは PR を開いた後も `poll` でマージを待つ」 | それは doctrine 自身の `.doctrine/workflows/default.yaml`。`dctl project-add` の雛形は `review` で終わる |
+| 4.2・5.4「標準ワークフローは PR を開いた後も `poll` でマージを待つ」 | それは doctrine 自身の `.doctrine/workflows/default.yaml`。`dctl workspace-add` の雛形は `review` で終わる |
 | 5.5「枠が明ければ同じ会話から続く」 | その役割の最初の呼び出しで上限に当たったときは、新しい会話で始め直す |
 | 5.3「解説生成の入力には Issue ... を用いる」 | プロンプトに入るのはタスクの prompt・テスト結果・差し戻しで、計画などはエージェントが `.doctrine-out/` から自分で読む |
 | 5.3「コピーも移動として表示する」 | コピーは「コピー」と表示する。移動は畳むだけで diff から除かない |

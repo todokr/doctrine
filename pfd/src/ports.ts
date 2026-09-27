@@ -39,7 +39,7 @@ export function realPorts(run: Run = runStdout): Ports {
       );
       if (new Set(rows.map((r) => r.project_id)).size > 1) {
         throw new Error(
-          `dctl ls --project ${projectPath} がプロジェクトで絞り込まれていません。${projectPath} が dctl project-add に渡したパスと完全に一致しているか確かめてください`,
+          `dctl ls --project ${projectPath} がプロジェクトで絞り込まれていません。${projectPath} が dctl workspace-add で登録されたパス（dctl projects の path）と完全に一致しているか確かめてください`,
         );
       }
       return rows.map((r) => ({ id: r.id, title: r.title, state: r.state, branch: r.branch }));

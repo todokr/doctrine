@@ -45,19 +45,20 @@
 実装は `handlers.ts:createHandler` の `switch` で、未知のメソッドは `未知のメソッドです` を投げる。
 デーモンは DB の行をそのまま返すので実際の応答には型より多い列が載るが、UI が頼ってよいのは型に書いた分だけである。
 
-`project.add` / `project.update` の 2 つは `Methods` に無い（dctl 専用）。ただし中継は何でも通すので、アプリからも呼べてしまう。
+`workspace.*` は `Methods` に載っている。
 
-### プロジェクトとワークフローの設定
+### workspace・プロジェクト・ワークフローの設定
 
 | method | すること |
 | --- | --- |
-| `project.add` | `.doctrine/` の雛形を作り（既存のファイルは上書きしない）、`projects` に登録する。2 回目は `alreadyRegistered: true` |
-| `project.update` | `project.yaml` を読み直して DB の行に写す |
+| `workspace.add` | `workspace.yaml` と `.doctrine/` の雛形を作り（既存のファイルは上書きしない）、workspace とプロジェクトを登録する。ほかの workspace にあるリポジトリは、その workspace がそれ 1 つだけで Intake を持たなければ吸収する。2 回目は `alreadyRegistered: true` |
+| `workspace.update` | `workspace.yaml` と各 `project.yaml` を読み直して DB の行に写す。外すプロジェクトにタスクか Intake の記録があれば断る |
+| `workspace.list` | 登録済みの workspace と、そのプロジェクト |
 | `project.list` | 登録済みのプロジェクト |
 | `project.config.get` / `project.config.save` | `project.yaml` の読み書き。保存はコメントと `tracker` を残し、DB の行も同期する |
 | `workflow.list` / `workflow.get` / `workflow.save` | `.doctrine/workflows/*.yaml` の一覧・詳細・ステップ単位の編集（検証に落ちたら書かない。コミットはしない）。`workflow.list` の各要素は `default`（`projects.default_workflow` と名前が一致するか）を持ち、検証を通ったものは `steps`（setup を差し込んだ後の `StepView` の列。`task.get` の `steps` と同じ形）も持つ |
 
-`project.yaml` を手で編集しただけでは DB の `projects` 行（`max_concurrent` など）は変わらない。`project.update` か画面からの保存で写る。
+`project.yaml` を手で編集しただけでは DB の `projects` 行（`max_concurrent` など）は変わらない。`workspace.update` か画面からの保存で写る。
 
 ### タスク
 
@@ -254,7 +255,7 @@
 | `pause` / `resume` / `cancel <id>` | `task.pause` / `task.resume` / `task.cancel` |
 | `logs <id> [--tail] [--step_run_id] [--follow]` | `task.logs` |
 | `diff <id> [--since last_review]` | `task.diff` |
-| `projects` / `project-add --path` / `project-update --path` | `project.list` / `project.add` / `project.update` |
+| `projects` / `workspaces` / `workspace-add --path` / `workspace-update --path` | `project.list` / `workspace.list` / `workspace.add` / `workspace.update` |
 | `intake ls` / `intake get <id>` / `intake logs <id>` | `intake.list` / `intake.get` / `intake.logs` |
 | `worktrees` / `gc <id>` / `gc --path <path>` | `worktree.list` / `worktree.remove` |
 | `ratelimit` / `slots` / `slots set --limit <n>` | `ratelimit.recent` / `daemon.slots` / `daemon.setGlobalLimit` |

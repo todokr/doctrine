@@ -1,0 +1,3 @@
+# doctrine の workspace 設定（dctl workspace-add が雛形として作成）
+projects:
+  doctrine: .

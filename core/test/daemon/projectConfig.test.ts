@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, test } from "@std/testing/bdd";
 import assert from "node:assert/strict";
-import { readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { readdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -30,7 +30,7 @@ let root: string;
 let repo: string;
 
 beforeEach(async () => {
-  root = await mkdtemp(join(tmpdir(), "doctrine-projectconfig-"));
+  root = await realpath(await mkdtemp(join(tmpdir(), "doctrine-projectconfig-")));
   repo = await makeRepo(root, {
     "README.md": "x\n",
     ".doctrine/project.yaml": HEADER_YAML,
@@ -67,7 +67,7 @@ async function context(events: ServerEvent[] = []): Promise<DaemonContext> {
 test("project.config.get は project.yaml の設定を返す", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
   const cfg = await h("project.config.get", { project: repo }, NOOP_CONN) as ProjectConfig;
   assert.deepEqual(cfg, {
     defaultWorkflow: "feature",
@@ -80,7 +80,7 @@ test("project.config.get は project.yaml の設定を返す", async () => {
 test("project.config.save は project.yaml と projects の行の両方を変え、コメントを残す", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
 
   const result = await h("project.config.save", {
     project: repo,
@@ -122,7 +122,7 @@ test("project.config.save は project.yaml と projects の行の両方を変え
 test("project.config.save で setup を空にすると project.yaml から setup のキーが消え、行の setup が null になる", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
 
   await h("project.config.save", {
     project: repo,
@@ -142,7 +142,7 @@ test("project.config.save で setup を空にすると project.yaml から setup
 test("project.config.save は project.yaml の tracker を残す", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
   await writeFile(
     join(repo, ".doctrine", "project.yaml"),
     HEADER_YAML + "tracker:\n  kind: linear\n  team: ENG\n",
@@ -160,7 +160,7 @@ test("project.config.save は project.yaml の tracker を残す", async () => {
 test("project.config.save は maxConcurrent が0なら書かずにエラーを返す", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
   const before = await readFile(join(repo, ".doctrine", "project.yaml"), "utf8");
 
   await assert.rejects(
@@ -181,7 +181,7 @@ test("project.config.save は maxConcurrent が0なら書かずにエラーを�
 test("project.config.save は存在しない defaultWorkflow なら書かずにエラーを返す", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
   const before = await readFile(join(repo, ".doctrine", "project.yaml"), "utf8");
 
   await assert.rejects(

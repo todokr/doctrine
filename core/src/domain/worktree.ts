@@ -49,7 +49,7 @@ const DOCTRINE_OUT_EXCLUDE_LINE = ".doctrine-out/";
 /**
  * `.doctrine-out/` を `.git/info/exclude` に追記し、git status / task.diff の
  * write-tree の両方から見えなくする。プロジェクトの `.gitignore` は書き換えない
- * （project-add が「既存のファイルを上書きしない」原則を持つのと同じ理由）。
+ * （workspace-add が「既存のファイルを上書きしない」原則を持つのと同じ理由）。
  *
  * `git rev-parse --git-path` は、リポジトリのルートから呼ぶと相対パスを、
  * リンクされた worktree から呼ぶと絶対パスを返す（common dir を指すため）。

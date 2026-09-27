@@ -27,7 +27,7 @@
 | `github/` / `linear/` / `tracker/` | Issue トラッカーの抽象と 2 つの実装、PR の見張り | 6 |
 | `intake/` | Intake のコマンド、runner、会話、出力検証、改訂、投入、sub-issue 同期、見張り。`intake/pfd/` は PFD の検証・ハッシュ・状態計算・タスク prompt | 6 |
 | `util/` | 原子的書き込み、子プロセス実行、状態ディレクトリと設定ディレクトリの解決（`home.ts:stateRoot` / `home.ts:configRoot`） | — |
-| `workflow/` | ワークフロー YAML のスキーマ・読み込み・保存・テンプレート展開、`project.yaml`、`dctl project-add` が作る雛形 | 3 |
+| `workflow/` | ワークフロー YAML のスキーマ・読み込み・保存・テンプレート展開、`project.yaml`、`dctl workspace-add` が作る雛形 | 3 |
 
 **名前の衝突に注意する。** `core/src/intake/pfd/`、`shared/intake/pfd.ts`、`app/src/pfd.ts`、`app/src/components/PfdDiagram.tsx`
 は現役の Intake のコードで、トップレベルの `pfd/` とは別物である。
@@ -109,7 +109,7 @@ plan → plan-review → plan-gate → implement → verify → agent-review →
 | `open-pr` | command | push して PR を作る。再実行しても二重に作らないように書いてある |
 | `wait-merge` | poll | `gh pr view` でマージを待つ。conflict なら `sync` へ戻る |
 
-`dctl project-add` が他のリポジトリに作る雛形（`core/src/workflow/scaffold.ts:defaultWorkflowYamlFor`）とは別物である。
+`dctl workspace-add` が他のリポジトリに作る雛形（`core/src/workflow/scaffold.ts:defaultWorkflowYamlFor`）とは別物である。
 雛形は `review` で終わり、`verify` は何もしない `"true"` で、PR 作成とマージ待ちを持たない。
 
 doctrine のエージェントは `allowedTools` の許可が先頭一致なので、`cd core && ...` や `git -C` の形を使えない。

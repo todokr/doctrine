@@ -48,7 +48,7 @@ export type PrState = "OPEN" | "MERGED" | "CLOSED";
 
 export interface WorkspacesTable {
   id: Generated<number>;
-  /** workspace の root。0015 が移した行と project.add が作る行では、プロジェクトの path と同じ値。 */
+  /** workspace の root。0015 が移した行と workspace.add が作る 1 リポジトリだけの workspace では、プロジェクトの path と同じ値。 */
   path: string;
   name: string;
 }

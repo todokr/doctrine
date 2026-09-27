@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, test } from "@std/testing/bdd";
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openDb } from "../../src/db/migrate.ts";
@@ -39,7 +39,7 @@ const GUIDE_CHANGED = "name: feature\nsteps:\n" +
   "  - id: review\n    type: approval\n    title: 見て\n";
 
 beforeEach(async () => {
-  root = await mkdtemp(join(tmpdir(), "doctrine-workflow-pin-"));
+  root = await realpath(await mkdtemp(join(tmpdir(), "doctrine-workflow-pin-")));
   repo = await makeRepo(root, {
     "README.md": "x\n",
     ".doctrine/project.yaml": "defaultWorkflow: feature\nmaxConcurrent: 1\nbaseBranch: main\n",
@@ -79,20 +79,20 @@ async function context(): Promise<DaemonContext> {
   return ctx;
 }
 
-/** feature.yaml を書き換え、project.yaml に setup を足して project.update を通す。 */
+/** feature.yaml を書き換え、project.yaml に setup を足して workspace.update を通す。 */
 async function changeDefinition(h: ReturnType<typeof createHandler>): Promise<void> {
   await writeFile(join(repo, ".doctrine", "workflows", "feature.yaml"), CHANGED);
   await writeFile(
     join(repo, ".doctrine", "project.yaml"),
     "defaultWorkflow: feature\nmaxConcurrent: 1\nbaseBranch: main\nsetup: echo late\n",
   );
-  await h("project.update", { path: repo }, NOOP_CONN);
+  await h("workspace.update", { path: repo }, NOOP_CONN);
 }
 
 test("作成後に YAML と setup を変えても、tick は作成時の定義で始める", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
   const t = await h(
     "task.create",
     { project: repo, title: "T", prompt: "p" },
@@ -113,7 +113,7 @@ test("作成後に YAML と setup を変えても、tick は作成時の定義�
 test("作成後に goto を消しても、却下は作成時の onReject で noop へ戻る", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
   const t = await h(
     "task.create",
     { project: repo, title: "T", prompt: "p" },
@@ -134,7 +134,7 @@ test("作成後に goto を消しても、却下は作成時の onReject で noo
 test("作成後にステップを消しても、承認は作成時の定義の次のステップへ進む", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
   const t = await h(
     "task.create",
     { project: repo, title: "T", prompt: "p" },
@@ -157,7 +157,7 @@ test("作成後にステップを消しても、承認は作成時の定義の�
 test("承認待ちからの再開でも作成時の定義で進む", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
   const t = await h(
     "task.create",
     { project: repo, title: "T", prompt: "p" },
@@ -191,7 +191,7 @@ test("起動時の復帰は作成時の定義でステップの種別を決め�
       "  - id: impl\n    type: agent\n    prompt: やって\n" +
       "  - id: review\n    type: approval\n    title: 見て\n",
   );
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
   const t = await h(
     "task.create",
     { project: repo, title: "T", prompt: "p" },
@@ -221,7 +221,7 @@ test("起動時の復帰は作成時の定義でステップの種別を決め�
 test("task.get は作成時の定義の steps を返す", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
   const t = await h(
     "task.create",
     { project: repo, title: "T", prompt: "p" },
@@ -238,7 +238,7 @@ test("task.get は作成時の定義の steps を返す", async () => {
 test("task.context は作成時の定義でステップの種別を読む", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
   const t = await h(
     "task.create",
     { project: repo, title: "T", prompt: "p" },
@@ -261,7 +261,7 @@ test("task.context は作成時の定義でステップの種別を読む", asyn
 test("task.guide は作成時の定義にガイドステップが無ければ、ディスクに足されても none を返す", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
   const t = await h(
     "task.create",
     { project: repo, title: "T", prompt: "p" },
@@ -279,7 +279,7 @@ test("task.guide は作成時の定義にガイドステップが無ければ、
 test("新しく作るタスクは書き換えた後の定義と setup を使う", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
   const a = await h(
     "task.create",
     { project: repo, title: "A", prompt: "p" },
@@ -313,7 +313,7 @@ test("task.create は検証した YAML の中身と project の setup を保存�
   );
   const ctx = await context();
   const h = createHandler(ctx);
-  await h("project.add", { path: repo }, NOOP_CONN);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
   const t = await h(
     "task.create",
     { project: repo, title: "T", prompt: "p" },

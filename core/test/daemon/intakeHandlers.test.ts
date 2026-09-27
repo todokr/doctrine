@@ -2,7 +2,7 @@ import { fakeBaseSync } from "../helpers/watcher.ts";
 import { afterEach, beforeEach, test } from "@std/testing/bdd";
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openDb } from "../../src/db/migrate.ts";
@@ -41,7 +41,7 @@ let repo: string;
 const contexts: DaemonContext[] = [];
 
 beforeEach(async () => {
-  root = await mkdtemp(join(tmpdir(), "doctrine-intake-rpc-"));
+  root = await realpath(await mkdtemp(join(tmpdir(), "doctrine-intake-rpc-")));
   repo = await makeRepo(root, {
     "README.md": "x\n",
     ".doctrine/project.yaml": "defaultWorkflow: feature\nmaxConcurrent: 1\nbaseBranch: main\n",
@@ -124,7 +124,7 @@ async function setup(o: Options = {}) {
   const h = createHandler(ctx);
   const call: Call = <T>(method: string, params: Record<string, unknown> = {}) =>
     h(method, params, NOOP_CONN) as Promise<T>;
-  await call("project.add", { path: repo });
+  await call("workspace.add", { path: repo });
   return { ctx, events, call };
 }
 
@@ -866,7 +866,7 @@ test("tracker.issue は未登録のプロジェクトを拒む", async () => {
 
 test("intake.list は project で絞る", async () => {
   const { call } = await setup();
-  const otherRoot = await mkdtemp(join(tmpdir(), "doctrine-intake-rpc-other-"));
+  const otherRoot = await realpath(await mkdtemp(join(tmpdir(), "doctrine-intake-rpc-other-")));
   try {
     const other = await makeRepo(otherRoot, {
       "README.md": "y\n",
@@ -874,7 +874,7 @@ test("intake.list は project で絞る", async () => {
       ".doctrine/workflows/feature.yaml":
         "name: feature\nsteps:\n  - id: review\n    type: approval\n    title: 見て\n",
     });
-    await call("project.add", { path: other });
+    await call("workspace.add", { path: other });
     await call("intake.start", { project: repo, issue_url: ISSUE });
     await call("intake.start", { project: other, issue_url: "https://github.com/o/r/issues/2" });
 
@@ -1198,7 +1198,7 @@ test("実行中の出力は intake.logLine として、その Intake を追従�
   };
   const call: Call = <T>(method: string, params: Record<string, unknown> = {}) =>
     createHandler(ctx)(method, params, NOOP_CONN) as Promise<T>;
-  await call("project.add", { path: repo });
+  await call("workspace.add", { path: repo });
   const started = await toAnswering(ctx, call);
   const run = (await listIntakeRuns(ctx.db, started.id))[0];
 
@@ -1231,7 +1231,7 @@ async function twoProjects(o: { github: Tracker; linear: Tracker }) {
   const s = await setup({
     trackerOf: trackerFor({ linearApiKey: "lin_x", github: o.github, linear: () => o.linear }),
   });
-  await s.call("project.add", { path: linearRepo });
+  await s.call("workspace.add", { path: linearRepo });
   return { ...s, linearRepo };
 }
 

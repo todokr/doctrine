@@ -28,6 +28,23 @@ test("dctl add", () => {
   );
 });
 
+test("dctl workspace-add / workspace-update / workspaces", () => {
+  assert.deepEqual(parseArgv(["workspace-add", "--path", "x"]), {
+    method: "workspace.add",
+    params: { path: "x" },
+  });
+  assert.deepEqual(parseArgv(["workspace-update", "--path", "x"]), {
+    method: "workspace.update",
+    params: { path: "x" },
+  });
+  assert.deepEqual(parseArgv(["workspaces"]), { method: "workspace.list", params: {} });
+});
+
+test("project-add / project-update は未知のコマンド", () => {
+  assert.throws(() => parseArgv(["project-add", "--path", "x"]), /未知のコマンドです/);
+  assert.throws(() => parseArgv(["project-update", "--path", "x"]), /未知のコマンドです/);
+});
+
 test("dctl intake ls / get", () => {
   assert.deepEqual(parseArgv(["intake", "ls"]), { method: "intake.list", params: {} });
   assert.deepEqual(
