@@ -1,6 +1,6 @@
 import { describe, expect, test, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
-import { IntakeRetryHint, RetryButton, SetupDoneNotice, TaskActions } from "./components/TaskView";
+import { IntakeRetryHint, RetryButton, SetupDoneNotice, SetupRetryHint, TaskActions } from "./components/TaskView";
 import { retryInit } from "./composer";
 import { PROJECTS, seedTasks, setupTask } from "./fixtures";
 import type { Task } from "./types";
@@ -116,5 +116,28 @@ describe("SetupDoneNotice", () => {
   test("ほかのワークフローのタスクには出さない", () => {
     expect(renderToStaticMarkup(<SetupDoneNotice t={task("t-0a77")} />)).toBe("");
     expect(renderToStaticMarkup(<SetupDoneNotice t={{ ...setupTask("completed"), wf: "default" }} />)).toBe("");
+  });
+});
+
+describe("SetupRetryHint", () => {
+  test("worktree が残っていれば .doctrine-out/default.yaml を写す案内と、雛形を直す案内を出す", () => {
+    const h = renderToStaticMarkup(
+      <SetupRetryHint t={{ ...setupTask("failed"), worktree: "/Users/me/.doctrine/worktrees/t-5e70" }} />,
+    );
+    expect(h).toContain(".doctrine-out/default.yaml");
+    expect(h).toContain("shop-api");
+    expect(h).toContain(".doctrine/workflows/default.yaml");
+    expect(h).toContain("雛形");
+    expect(h).not.toContain("同じ内容で投入し直す");
+  });
+
+  test("worktree が無ければ雛形を直す案内だけを出す", () => {
+    const h = renderToStaticMarkup(<SetupRetryHint t={setupTask("canceled")} />);
+    expect(h).not.toContain(".doctrine-out/default.yaml");
+    expect(h).toContain("雛形");
+  });
+
+  test("ほかのワークフローのタスクには出さない", () => {
+    expect(renderToStaticMarkup(<SetupRetryHint t={task("t-e812")} />)).toBe("");
   });
 });

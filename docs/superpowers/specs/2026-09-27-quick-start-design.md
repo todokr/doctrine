@@ -222,7 +222,10 @@ setup のタスク（`workflow_name = setup`）が completed になったら、�
 
 > `.doctrine/workflows/default.yaml` を書き換えました（未コミット）。コミットしてから、Issue を取り込むかタスクを作ってください。
 
-failed になったときは、いまのタスクと同じく worktree が残る。承認の画面に出ていた `.doctrine-out/default.yaml` を手で直して置くか、タスクを作り直す。
+failed になったときは、いまのタスクと同じく worktree が残る。setup のタスクは作り直せない（`setup.yaml` はプロジェクトに無いのでコンポーザからは既定のワークフローで走ってしまい、登録済みの workspace はウィザードが受け付けない）。そのため failed と canceled のタスク画面には「同じ内容で投入し直す」を出さず、代わりに次の立て直し方を出す。
+
+- worktree が残っていれば、`.doctrine-out/default.yaml` を手で直して `<project>/.doctrine/workflows/default.yaml` に写す。
+- または、ウィザードが置いた雛形の `.doctrine/workflows/default.yaml` を直接直す。
 
 ## 6. ドキュメント
 

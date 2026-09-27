@@ -44,3 +44,12 @@ git commit -m "doctrine のワークフローを足す"
 ```
 
 これで準備は終わりである。Intake から Issue を取り込むか、「＋」からタスクを作る。ワークフローを後から直すときは[ワークフローを書く](/ja/guide/writing-workflows/)を読む。
+
+## うまくいかなかったとき
+
+setup のタスクが失敗したり中止したりしても、「同じ内容で投入し直す」は出ない。setup のタスクは作り直せないので、次のどちらかで `default.yaml` を置く。
+
+- worktree が残っていれば、中の `.doctrine-out/default.yaml` を直して、元のリポジトリの `.doctrine/workflows/default.yaml` に写す。
+- ウィザードが置いた雛形の `.doctrine/workflows/default.yaml` を、[ワークフローを書く](/ja/guide/writing-workflows/)を読みながら直接直す。
+
+どちらの場合も、置いたら上と同じくコミットする。
