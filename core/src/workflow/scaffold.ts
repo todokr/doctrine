@@ -103,10 +103,9 @@ async function exists(p: string): Promise<boolean> {
 /** setup は書かない — doctrine はパッケージマネージャを強制しない（spec 3章） */
 function projectYamlFor(baseBranch: string | undefined): string {
   const lines = [
-    "# doctrine のプロジェクト設定（dctl project-add が雛形として作成）",
+    "# doctrine のプロジェクト設定（dctl project-add が雛形として作成したもの）",
     "#",
     "# setup: 新しい worktree で最初に走らせるコマンド。例: pnpm install --frozen-lockfile",
-    "#   doctrine はパッケージマネージャを決めないので、必要なら自分で書く。",
     `defaultWorkflow: ${DEFAULT_WORKFLOW_NAME}`,
     "maxConcurrent: 1",
   ];
@@ -147,48 +146,12 @@ export function defaultWorkflowYamlFor(baseBranch: string | undefined): string {
   const base = baseBranch ?? "main";
   const readOnly = toolLines(READ_ONLY_TOOLS);
   const implementTools = toolLines([...READ_ONLY_TOOLS, "Bash(git add:*)", "Bash(git commit:*)"]);
-  return `# doctrine の既定ワークフロー（dctl project-add が雛形として作成）
+  return `# doctrine の既定ワークフロー（dctl project-add が雛形として作成したもの）
 # plan → plan-review → plan-gate → implement → verify → agent-review → review-gate → guide → review
 #
 # エージェントを planner / plan-reviewer / implementer / code-reviewer / guide の5つの役割に分け、
 # 役割の間は .doctrine-out/ のファイルで成果物を受け渡す。
-# 審査役を計画用と実装用で分けているのは、agent-review が計画審査のときの
-# 探索履歴を抱えたまま再開されないようにするため。
-# guide も同じ理由で独立した役割にしてあり、実装や審査の探索履歴を継がずに
-# 差分だけを読んでガイドを書く。
 #
-# 自分のプロジェクトに合わせて書き換えるのは次の2か所。
-#   - verify の run: いまは何も検証しない "true"。型検査・テストのコマンドに書き換える
-#   - implement の allowedTools: acceptEdits では Bash がすべて拒否されるので、
-#     実装中に流させたいコマンド（テストや lint）をここへ足す
-#
-# 2つのゲート（plan-gate / review-gate）は、審査役が書いた成果物ファイルの
-# 1行目の verdict を grep で見るだけの command ステップ。
-# reject なら成果物ファイルを stdout に出して落ち、onFailure で前の工程へ戻る。
-# feed はゲート自身の last_stdout（＝審査結果のファイルの中身）を渡す。
-#   plan-gate   が落ちたら plan へ（最大3回）
-#   verify      が落ちたら implement へ（最大3回）
-#   review-gate が落ちたら implement へ（最大3回）
-#   guide       の検証が落ちたら guide 自身へ（最大3回。onFailure を書かない既定の分岐）
-#   review（人の承認）で却下されたら implement へ（最大5回）
-# maxAttempts を使い切ってもゲートが通らない場合、タスクは failed になる。
-# そのとき worktree は削除されずに残るので、中を見て手で直すか、タスクを作り直す。
-#
-# review-gate は「verdict: escalate」も通す。implement が自分では直せない指摘
-# （許可されていないコマンドが要る、など）を implement へ戻しても同じ reject を
-# 繰り返して maxAttempts を使い切るだけなので、人の review へ進めて判断を仰ぐ。
-#
-# agent-review の git diff / git log の範囲（${base}）は、雛形を作った時点の
-# project.yaml の baseBranch を埋め込んである。テンプレート変数に baseBranch が無いため、
-# 後から baseBranch を変えたら、このファイルの ${base}... も直すこと。
-#
-# command ステップはクラッシュ復帰時に頭から再実行されるので、
-# 再実行しても安全なコマンドにすること（grep や pnpm test は安全、gh pr create は危険）。
-#
-# この雛形は PR を開くステップを持たない（gh pr create は再実行で二重に効くため）。
-# 足すときは PR 本文に {{ issue.closes }} を入れる。Intake から投入されたタスクの PR は
-# sub-issue を閉じ、Intake 由来でないタスクでは空文字になる。例（--base は雛形を作った時点の値）:
-#   run: "git push -u origin HEAD && { gh pr view --json url --jq .url || { cat .doctrine-out/implement-notes.md; if [ -n '{{ issue.closes }}' ]; then printf '\\\\n%s\\\\n' '{{ issue.closes }}'; fi; } | gh pr create --base ${base} --title \\"{{ task.title }}\\" --body-file -; }"
 name: ${DEFAULT_WORKFLOW_NAME}
 steps:
   - id: plan
