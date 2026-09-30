@@ -26,7 +26,7 @@ import type {
   IntakeRunRow,
   IntakeState,
 } from "../db/schema.ts";
-import { soleProjectOf, workspaceRefOf } from "../db/workspaces.ts";
+import { listProjectsOf, soleProjectOf, workspaceRefOf } from "../db/workspaces.ts";
 import { assertIntakeTransition } from "../domain/intakeStates.ts";
 import {
   classifyRateLimit,
@@ -455,6 +455,7 @@ async function settleOutput(
     purpose: run.purpose,
     askedIds: new Set(sets.flatMap(questionSetIds)),
     decisionIds: new Set(sets.filter((set) => set.reply !== null).flatMap(questionSetIds)),
+    projectNames: new Set((await listProjectsOf(db, intake.workspace_id)).map((p) => p.name)),
     feedbackCount: feedback.length,
     revision: run.purpose === "revise" ? await loadRevisionConstraints(db, intake.id) : null,
   });

@@ -37,7 +37,7 @@ import {
   questionsOut,
   reply,
 } from "./runnerHelper.ts";
-import { example, withDecision } from "./pfd/fixture.ts";
+import { example, withDecision, withProject } from "./pfd/fixture.ts";
 
 let f: Fixture;
 beforeEach(async () => {
@@ -172,6 +172,24 @@ test("(b) 検証に通らない PFD は案にならず、違反が同じ会話�
   const failed = (await listIntakeRuns(f.db, "i1")).filter((r) => r.status === "failed");
   assert.equal(failed.length, 1);
   assert.match(failed[0].issues!, /no_output/);
+  assert.equal((await getIntake(f.db, "i1"))!.state, "reviewing");
+});
+
+test("(b) workspace に無い project の PFD は案にならず、unknown_project が同じ会話へ返る", async () => {
+  const adapter = createMockAdapter({
+    result: {},
+    sequence: [questionsOut([]), pfdOut(withProject(example(), "ghost")), pfdOut(example())],
+  });
+  await enqueueIntakeRun(f.db, "i1", "investigate", opts());
+  await drive(f.db, depsOf(f, adapter));
+
+  const drafts = await listDrafts(f.db, "i1");
+  assert.equal(drafts.length, 1);
+  assert.equal(adapter.calls[2].kind, "resume");
+  assert.match(adapter.calls[2].prompt, /unknown_project/);
+  const failed = (await listIntakeRuns(f.db, "i1")).filter((r) => r.status === "failed");
+  assert.equal(failed.length, 1);
+  assert.match(failed[0].issues!, /unknown_project/);
   assert.equal((await getIntake(f.db, "i1"))!.state, "reviewing");
 });
 

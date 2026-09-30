@@ -27,6 +27,8 @@ export function checkDecomposerOutput(
     askedIds: ReadonlySet<string>;
     /** 答えのある質問と応答のある仮定の id（validatePfd の decisionIds）。 */
     decisionIds: ReadonlySet<string>;
+    /** workspace のプロジェクトの名前（validatePfd の projectNames）。 */
+    projectNames: ReadonlySet<string>;
     /**
      * 最新の案（latestDraft）に draft_id で付いているコメントの数。案が無ければ 0。
      * 「直前に送った文面が差し戻しか」では決めない。差し戻し → 検証落ち → やり直し、
@@ -90,11 +92,15 @@ export function checkDecomposerOutput(
 
   const issues: string[] = [];
   for (
-    const v of validatePfd(out.pfd, { decisionIds: ctx.decisionIds, frozen: null })
+    const v of validatePfd(out.pfd, {
+      decisionIds: ctx.decisionIds,
+      frozen: null,
+      projectNames: ctx.projectNames,
+    })
   ) {
     issues.push(`${v.rule} ${v.id}: ${v.message}`);
   }
-  if (ctx.revision) issues.push(...revisionIssues(out.pfd, ctx.revision));
+  if (ctx.revision) issues.push(...revisionIssues(out.pfd, ctx.revision, ctx.projectNames));
   const seen = new Set<number>();
   out.replies.forEach((r, i) => {
     if (!Number.isInteger(r.commentId) || r.commentId < 1 || r.commentId > ctx.feedbackCount) {

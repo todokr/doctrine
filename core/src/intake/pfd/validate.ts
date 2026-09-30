@@ -17,6 +17,8 @@ export type PfdRule =
   | "unused_artifact"
   | "no_verify"
   | "missing_definition"
+  | "missing_project"
+  | "unknown_project"
   | "cycle"
   | "goal_unreachable"
   | "decision_not_given"
@@ -33,6 +35,8 @@ export type ValidateContext = {
   decisionIds: ReadonlySet<string>;
   /** 改訂でないときは null。 */
   frozen: FrozenPart | null;
+  /** workspace のプロジェクトの名前。プロセスの project はこの中を指さなければならない。 */
+  projectNames: ReadonlySet<string>;
 };
 
 /**
@@ -128,6 +132,24 @@ export function validatePfd(pfd: Pfd, ctx: ValidateContext): Violation[] {
     const missing = (["purpose", "steps", "done_when"] as const).filter((k) => !p[k]);
     if (missing.length > 0) {
       add("missing_definition", p.id, `プロセス ${p.id} に ${missing.join(", ")} がありません`);
+    }
+  }
+
+  for (const p of pfd.processes) {
+    if (p.actor === "agent" && !p.project) {
+      add(
+        "missing_project",
+        p.id,
+        `プロセス ${p.id} は agent なので、project に投入するプロジェクトの名前が要ります`,
+      );
+    }
+    if (p.project && !ctx.projectNames.has(p.project)) {
+      add(
+        "unknown_project",
+        p.id,
+        `プロセス ${p.id} の project が workspace のプロジェクトにありません: ${p.project}` +
+          `（あるのは ${[...ctx.projectNames].join(", ")}）`,
+      );
     }
   }
 
