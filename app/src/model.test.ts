@@ -627,7 +627,7 @@ describe("workspace の一覧の取り直し", () => {
 });
 
 const PJ = [summary()];
-const t1 =(o: Partial<TaskSummary> = {}) => toTask(row(o), PJ);
+const t1 = (o: Partial<TaskSummary> = {}) => toTask(row(o), PJ);
 
 describe("toProject / toTask", () => {
   test("Intake の紐づけ列を写す", () => {
