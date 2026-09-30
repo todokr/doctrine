@@ -11,7 +11,7 @@ export type FakeIssue = {
 };
 
 export type TrackerCall =
-  | { op: "createSubIssue"; parentUrl: string; title: string; body: string }
+  | { op: "createSubIssue"; projectPath: string; parentUrl: string; title: string; body: string }
   | { op: "findSubIssues"; parentUrl: string }
   | { op: "updateIssue"; url: string; title: string; body: string }
   | { op: "closeIssue"; url: string; reason: "completed" | "not_planned" }
@@ -83,10 +83,11 @@ export function fakeTracker(o: { kind?: TrackerKind } = {}): FakeTracker {
     listIssues: unexpected("listIssues"),
     readIssue: (_projectPath, url) =>
       Promise.resolve({ url, nodeId: "I_1", title: "T", body: "B", comments: [] }),
-    createSubIssue: (_projectPath, parent, o) =>
+    createSubIssue: (projectPath, parent, o) =>
       settle(() => {
         const call: CreateCall = {
           op: "createSubIssue",
+          projectPath,
           parentUrl: parent.url,
           title: o.title,
           body: o.body,

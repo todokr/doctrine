@@ -28,6 +28,7 @@ const ctx = (o: Partial<Ctx> = {}): Ctx => ({
   purpose: "decompose",
   askedIds: new Set(),
   decisionIds: new Set(),
+  projectNames: new Set(["repo"]),
   feedbackCount: 0,
   revision: null,
   ...o,
@@ -137,6 +138,20 @@ test("PFD の規則違反を返す", () => {
   pfd.processes[0].outputs = [];
   const issues = issuesOf(checkDecomposerOutput(pfdOut(pfd), ctx()));
   assert.ok(issues.some((i) => i.includes("no_output")));
+});
+
+test("workspace に無い project の PFD は unknown_project で弾く", () => {
+  const issues = issuesOf(
+    checkDecomposerOutput(pfdOut(example()), ctx({ projectNames: new Set(["other"]) })),
+  );
+  assert.ok(issues.some((i) => /^unknown_project 1:/.test(i)), issues.join("\n"));
+});
+
+test("agent のプロセスに project が無い PFD は missing_project で弾く", () => {
+  const pfd = example();
+  delete pfd.processes[0].project;
+  const issues = issuesOf(checkDecomposerOutput(pfdOut(pfd), ctx()));
+  assert.ok(issues.some((i) => /^missing_project 1:/.test(i)), issues.join("\n"));
 });
 
 test("決定の成果物は答えのある質問を指せば通る", () => {

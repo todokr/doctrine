@@ -13,6 +13,7 @@ const processSchema = z.strictObject({
   id: z.string().min(1),
   name: z.string().min(1),
   actor: z.enum(["agent", "human"]),
+  project: z.string().min(1).optional(),
   inputs: z.array(z.string().min(1)),
   outputs: z.array(z.string().min(1)),
   purpose: z.string().optional(),

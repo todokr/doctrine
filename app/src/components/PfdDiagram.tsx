@@ -23,6 +23,7 @@ const nodeClass = (n: PfdNode, selected: boolean) =>
 const nodeLabel = (n: PfdNode) =>
   [
     `${n.kind === "artifact" ? "成果物" : "プロセス"} ${n.label}`,
+    n.project && `プロジェクト ${n.project}`,
     n.look && LOOK[n.look].word,
     n.comments > 0 && `コメント ${n.comments} 件`,
   ]
@@ -77,6 +78,9 @@ export function PfdDiagram({ view, selected, onSelect }: { view: PfdView; select
               <text x={n.x + 8} y={n.y + 16} className="pfd-mark">
                 {n.marks.join(" ")}
               </text>
+              {n.project !== null && (
+                <text x={n.x + n.w - 8} y={n.y + 16} textAnchor="end" className="pfd-project">{n.project}</text>
+              )}
               <text x={n.x + n.w / 2} y={n.y + 31} textAnchor="middle" className="pfd-label">
                 {n.lines.map((line, i) => (
                   <tspan key={i} x={n.x + n.w / 2} dy={i === 0 ? 0 : 13}>{line}</tspan>

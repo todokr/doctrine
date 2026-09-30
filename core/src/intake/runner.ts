@@ -1,3 +1,4 @@
+import { join } from "@std/path";
 import type { AgentAdapter, AgentResult, RateLimitObservation } from "../adapter/types.ts";
 import { denialsColumn } from "../db/boundary.ts";
 import {
@@ -25,8 +26,9 @@ import type {
   IntakeRunPurpose,
   IntakeRunRow,
   IntakeState,
+  ProjectRow,
 } from "../db/schema.ts";
-import { soleProjectOf, workspaceRefOf } from "../db/workspaces.ts";
+import { listProjectsOf, workspaceRefOf } from "../db/workspaces.ts";
 import { assertIntakeTransition } from "../domain/intakeStates.ts";
 import {
   classifyRateLimit,
@@ -36,13 +38,16 @@ import {
 import { driveAgent, logPathFor, openLog, type RunnerDeps } from "../domain/stepRunner.ts";
 import { BUILTIN_APPEND_SYSTEM_PROMPT } from "../domain/systemPrompt.ts";
 import {
+  canonical,
   changedPaths,
   checkoutDetached,
   createDetachedWorktree,
   intakeWorktreePathFor,
+  listIntakeWorktrees,
   restoreWorktree,
 } from "../domain/worktree.ts";
 import type { TrackerOf } from "../tracker/tracker.ts";
+import type { WorkspaceTracker } from "../tracker/workspaceTracker.ts";
 import { READ_ONLY_TOOLS } from "../workflow/scaffold.ts";
 import {
   type AttentionReason,
@@ -56,13 +61,27 @@ import { canonicalJson } from "../../../shared/intake/pfd.ts";
 import { consecutiveInvalid, continuationMessage, MAX_INVALID_OUTPUTS } from "./conversation.ts";
 import { checkDecomposerOutput } from "./output.ts";
 import { pfdHash } from "./pfd/hash.ts";
-import { buildInitialPrompt, buildRevisionPrompt } from "./prompt.ts";
+import { buildInitialPrompt, buildRevisionPrompt, type PromptProject } from "./prompt.ts";
 import { loadRevisionConstraints } from "./revision.ts";
 
 export { MAX_INVALID_OUTPUTS } from "./conversation.ts";
 
-/** 読むだけの道具（spec 7 章）。Write・Edit・gh・dctl は含めない。 */
-export const INTAKE_ALLOWED_TOOLS: readonly string[] = ["Read", "Grep", "Glob", ...READ_ONLY_TOOLS];
+/**
+ * 読むだけの道具（spec 7 章）。Write・Edit・gh・dctl は含めない。
+ * cwd が git リポジトリでないので、git の許可はプロジェクトごとの git -C <名前> に展開する（workspace spec 5 章）。
+ */
+export function intakeAllowedTools(projectNames: readonly string[]): string[] {
+  const tools: string[] = ["Read", "Grep", "Glob"];
+  for (const t of READ_ONLY_TOOLS) {
+    if (t.startsWith("Bash(git ")) {
+      const rest = t.slice("Bash(git ".length);
+      for (const name of projectNames) tools.push(`Bash(git -C ${name} ${rest}`);
+    } else {
+      tools.push(t);
+    }
+  }
+  return tools;
+}
 
 export type IntakeRunnerDeps = {
   db: Db;
@@ -243,15 +262,34 @@ async function conversationRows(
   };
 }
 
+/** プロンプトに載せるプロジェクト。GitHub なら repoOf の nameWithOwner、失敗したら repo は null。 */
+async function promptProjectsOf(
+  projects: readonly ProjectRow[],
+  wt: WorkspaceTracker,
+): Promise<PromptProject[]> {
+  return await Promise.all(projects.map(async (p) => {
+    let repo: string | null = null;
+    if (wt.kind === "github" && wt.tracker.repoOf) {
+      try {
+        repo = (await wt.tracker.repoOf(p.path)).nameWithOwner;
+      } catch {
+        repo = null;
+      }
+    }
+    return { name: p.name, baseBranch: p.base_branch, repo };
+  }));
+}
+
 /** 会話の最初に送る文面。revise は承認済みの計画と固定された部分を載せる。 */
 async function firstPromptOf(
   db: Db,
   intake: IntakeRow,
   run: IntakeRunRow,
-  issue: IssueDetail,
+  opening: { issue: IssueDetail; projects: PromptProject[] },
   rows: ConversationRows,
 ): Promise<string> {
-  if (run.purpose !== "revise") return buildInitialPrompt({ issue });
+  const { issue, projects } = opening;
+  if (run.purpose !== "revise") return buildInitialPrompt({ issue, projects });
   const constraints = await loadRevisionConstraints(db, intake.id);
   const approved = constraints.approved.pfd;
   const decisions = decisionTexts(await loadQuestionSets(db, intake.id));
@@ -265,7 +303,60 @@ async function firstPromptOf(
       approved,
       rows.comments.filter((c) => c.run_id === intake.revision_run_id),
     ),
+    projects,
   });
+}
+
+/**
+ * 親ディレクトリを作り、登録中のプロジェクトのうち子 worktree が無いものを baseBranch から作り足す。
+ * 外されたプロジェクトの子は残す。戻り値は親の実パス。
+ */
+async function prepareIntakeWorktrees(
+  db: Db,
+  intake: IntakeRow,
+  projects: readonly ProjectRow[],
+): Promise<string> {
+  const parent = intake.worktree_path ?? intakeWorktreePathFor(intake.id);
+  await Deno.mkdir(parent, { recursive: true });
+  const canonicalParent = await canonical(parent);
+  for (const p of projects) {
+    const child = join(canonicalParent, p.name);
+    try {
+      await Deno.stat(child);
+    } catch (e) {
+      if (!(e instanceof Deno.errors.NotFound)) throw e;
+      await createDetachedWorktree({
+        repoPath: p.path,
+        worktreePath: child,
+        baseBranch: p.base_branch,
+      });
+    }
+  }
+  if (intake.worktree_path === null) {
+    await updateIntake(db, intake.id, { worktree_path: canonicalParent });
+  }
+  return canonicalParent;
+}
+
+/**
+ * 親の下の子 worktree（外されたプロジェクトの分も含む）の書き換えを <名前>/<パス> で集め、
+ * 書き換えのあった子を巻き戻す。書き換えが無ければ空配列。
+ */
+async function revertWrites(parentPath: string): Promise<string[]> {
+  const children = await listIntakeWorktrees(parentPath);
+  const paths: string[] = [];
+  const changedChildren: typeof children = [];
+  for (const child of children) {
+    const changed = await changedPaths(child.path);
+    if (changed.length > 0) {
+      changedChildren.push(child);
+      for (const p of changed) paths.push(`${child.name}/${p}`);
+    }
+  }
+  for (const child of changedChildren) {
+    await restoreWorktree(child.path);
+  }
+  return paths;
 }
 
 /**
@@ -292,21 +383,20 @@ export async function runIntakeRun(db: Db, runId: number, deps: IntakeRunnerDeps
   let worktree: string;
   let sessionId: string;
   let prompt: string;
+  let projects: ProjectRow[];
   try {
-    const project = await soleProjectOf(db, intake.workspace_id);
-
-    worktree = intake.worktree_path ?? await createDetachedWorktree({
-      repoPath: project.path,
-      worktreePath: intakeWorktreePathFor(project.path, intake.id),
-      baseBranch: project.base_branch,
-    });
-    if (intake.worktree_path === null) {
-      await updateIntake(db, intake.id, { worktree_path: worktree });
+    projects = await listProjectsOf(db, intake.workspace_id);
+    if (projects.length === 0) {
+      throw new Error(`workspace ${intake.workspace_id} にプロジェクトがありません`);
     }
+
+    worktree = await prepareIntakeWorktrees(db, intake, projects);
 
     // 改訂に入った直後の会話は、承認の後に進んだ baseBranch から読ませる
     if (run.purpose === "revise" && fresh) {
-      await checkoutDetached(worktree, project.base_branch);
+      for (const p of projects) {
+        await checkoutDetached(join(worktree, p.name), p.base_branch);
+      }
     }
 
     const rows = await conversationRows(db, intake, run);
@@ -316,14 +406,16 @@ export async function runIntakeRun(db: Db, runId: number, deps: IntakeRunnerDeps
       drafts: rows.drafts,
       comments: rows.comments,
     });
-    const issue = continuation === null || fresh
+    const opening = continuation === null || fresh
       ? await (async () => {
         const wt = await deps.trackerOf(await workspaceRefOf(db, intake.workspace_id));
-        const projectPath = (await wt.projectPathFor(intake.issue_url)) ?? project.path;
-        return wt.tracker.readIssue(projectPath, intake.issue_url);
+        const projectPath = (await wt.projectPathFor(intake.issue_url)) ?? projects[0].path;
+        const issue = await wt.tracker.readIssue(projectPath, intake.issue_url);
+        const promptProjects = await promptProjectsOf(projects, wt);
+        return { issue, projects: promptProjects };
       })()
       : null;
-    const firstPrompt = () => firstPromptOf(db, intake, run, issue!, rows);
+    const firstPrompt = () => firstPromptOf(db, intake, run, opening!, rows);
 
     if (fresh) {
       sessionId = crypto.randomUUID();
@@ -369,7 +461,7 @@ export async function runIntakeRun(db: Db, runId: number, deps: IntakeRunnerDeps
       {
         cwd: worktree,
         sessionId,
-        allowedTools: [...INTAKE_ALLOWED_TOOLS],
+        allowedTools: intakeAllowedTools(projects.map((p) => p.name)),
         appendSystemPrompt: BUILTIN_APPEND_SYSTEM_PROMPT,
         jsonSchema: decomposerJsonSchema(),
       },
@@ -388,9 +480,8 @@ export async function runIntakeRun(db: Db, runId: number, deps: IntakeRunnerDeps
   const { result, rateLimits } = driven;
 
   // 書き換えの検出は結果の成否より先に見る。出力は捨てて、worktree を戻す。
-  const changed = await changedPaths(worktree);
+  const changed = await revertWrites(worktree);
   if (changed.length > 0) {
-    await restoreWorktree(worktree);
     await settle(db, deps, {
       run,
       intake,
@@ -455,6 +546,7 @@ async function settleOutput(
     purpose: run.purpose,
     askedIds: new Set(sets.flatMap(questionSetIds)),
     decisionIds: new Set(sets.filter((set) => set.reply !== null).flatMap(questionSetIds)),
+    projectNames: new Set((await listProjectsOf(db, intake.workspace_id)).map((p) => p.name)),
     feedbackCount: feedback.length,
     revision: run.purpose === "revise" ? await loadRevisionConstraints(db, intake.id) : null,
   });

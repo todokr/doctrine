@@ -15,7 +15,7 @@ import { ghTracker } from "../../src/github/ghTracker.ts";
 import { type SubIssueSyncInput, syncSubIssues } from "../../src/intake/subIssueSync.ts";
 import { fakeGh, parseGraphqlArgs } from "../helpers/gh.ts";
 import { type FakeTracker, fakeTracker, type TrackerCall } from "../helpers/fakeTracker.ts";
-import { example } from "./pfd/fixture.ts";
+import { example, withProject } from "./pfd/fixture.ts";
 
 const PARENT_URL = "https://github.com/o/r/issues/1";
 const PARENT = { url: PARENT_URL, nodeId: "I_1" };
@@ -34,6 +34,7 @@ async function fixture(processIds = ["1", "2", "3", "4"]) {
   const ft = fakeTracker();
   const input = (pfd: Pfd = example()): SubIssueSyncInput => ({
     projectPath: "/repo",
+    projectPaths: new Map([["repo", "/repo"]]),
     intake: { id: "i1", issue_url: PARENT_URL, issue_node_id: "I_1" },
     pfd,
   });
@@ -259,6 +260,7 @@ test("改訂: 増えたプロセスを作る", async () => {
     id: "5",
     name: "ドキュメントを書く",
     actor: "agent",
+    project: "repo",
     inputs: ["endpoint"],
     outputs: ["docs"],
   });
@@ -395,4 +397,44 @@ test("行の無いプロセスは失敗として扱い、残りを進める", as
   const result = await syncSubIssues(d, ft.tracker, input());
   assert.deepEqual(result.failures.map((f) => [f.processId, f.op]), [["4", "record"]]);
   assert.deepEqual(result.created.toSorted(), ["1", "2", "3"]);
+});
+
+test("作成: プロセスの project のリポジトリに作り、project の無い人のプロセスは親 Issue のリポジトリに作る", async () => {
+  const { d, ft, input } = await fixture();
+  const pfd = example();
+  pfd.processes[0].project = "api";
+  pfd.processes[1].project = "web";
+  pfd.processes[3].project = "web";
+  const result = await syncSubIssues(d, ft.tracker, {
+    ...input(pfd),
+    projectPaths: new Map([["repo", "/repo"], ["api", "/api"], ["web", "/web"]]),
+  });
+  assert.deepEqual(result.failures, []);
+  assert.equal(result.created.length, 4);
+  const creates = ft.calls.filter((c): c is TrackerCall & { op: "createSubIssue" } =>
+    c.op === "createSubIssue"
+  );
+  const pathOf = (processId: string) =>
+    creates.find((c) => parseSubIssueMarker(c.body)!.processId === processId)!.projectPath;
+  assert.equal(pathOf("1"), "/api");
+  assert.equal(pathOf("2"), "/web");
+  assert.equal(pathOf("3"), "/repo");
+  assert.equal(pathOf("4"), "/web");
+  assert.ok(creates.every((c) => c.parentUrl === PARENT_URL));
+});
+
+test("作成: workspace に無いプロジェクトのプロセスは失敗として記録し、残りを作る", async () => {
+  const { d, ft, input } = await fixture();
+  const pfd = withProject(example(), "gone");
+  pfd.processes[0].project = "repo";
+  const result = await syncSubIssues(d, ft.tracker, input(pfd));
+  assert.deepEqual(
+    result.failures.map((f) => [f.processId, f.op]).toSorted(),
+    [["2", "create"], ["4", "create"]],
+  );
+  for (const f of result.failures) assert.ok(f.message.includes("gone"));
+  assert.deepEqual(result.created.toSorted(), ["1", "3"]);
+  assert.equal((await row(d, "2")).sub_issue_url, null);
+  assert.equal((await row(d, "4")).sub_issue_url, null);
+  assert.equal(count(ft, "createSubIssue"), 2);
 });

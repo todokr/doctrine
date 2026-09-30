@@ -1,4 +1,4 @@
-import { isAbsolute, join } from "@std/path";
+import { basename, dirname, isAbsolute, join } from "@std/path";
 import { computeDiff, mergeBase, type TaskDiff } from "../domain/diff.ts";
 import { branchOf, type Step, type Workflow, WorkflowValidationError } from "../workflow/schema.ts";
 import {
@@ -27,7 +27,6 @@ import {
   getWorkspaceByPath,
   listProjectsOf,
   listWorkspaces,
-  soleProjectOf,
   workspaceRefOf,
 } from "../db/workspaces.ts";
 import {
@@ -88,9 +87,11 @@ import {
   fetchBaseBranch,
   hasUncommittedChanges,
   isUnderWorktreesDir,
+  listIntakeWorktrees,
   listWorktrees,
   originRef,
   removeWorktree,
+  repoOfWorktree,
   UncommittedChangesError,
   worktreePathFor,
 } from "../domain/worktree.ts";
@@ -733,6 +734,11 @@ export function createHandler(ctx: DaemonContext): Handler {
             `終わっていない Intake（${target.intake.state}）の worktree は消せません`,
           );
         }
+        if (target.kind === "intake") {
+          await removeIntakeWorktrees(ctx.db, target.parentPath, params.force === true);
+          await updateIntake(ctx.db, target.intake.id, { worktree_path: null });
+          return { removed: target.parentPath };
+        }
         // 失敗したタスクの worktree は汚れているのが通常。force を明示しない限り
         // 未コミットの作業は失われず、削除は拒否される。
         await removeWorktree({
@@ -746,8 +752,6 @@ export function createHandler(ctx: DaemonContext): Handler {
             taskId: target.task.id,
             taskPatch: { worktree_path: null },
           });
-        } else if (target.kind === "intake") {
-          await updateIntake(ctx.db, target.intake.id, { worktree_path: null });
         }
         return { removed: target.worktreePath };
       }
@@ -834,9 +838,6 @@ export function createHandler(ctx: DaemonContext): Handler {
 
       case "intake.start": {
         const ws = await reqWorkspace(ctx, params);
-        // プロジェクトが複数ある workspace はここで断る（soleProjectOf がまだプロジェクトを
-        // 1 つに絞れない）。何も書き込まずに reject する。
-        await soleProjectOf(ctx.db, ws.id);
         const wt = await ctx.trackerOf(await workspaceRefOf(ctx.db, ws.id));
         const { intake, alreadyActive, problems } = await startIntake(ctx.db, wt, {
           workspaceId: ws.id,
@@ -942,7 +943,6 @@ export function createHandler(ctx: DaemonContext): Handler {
         }
         const intake = await getIntake(ctx.db, intakeId);
         if (!intake) throw new Error("Intake がありません");
-        const project = await soleProjectOf(ctx.db, intake.workspace_id);
         const outcome = await cancelIntake(
           ctx.db,
           { probe: defaultProbe(), trackerOf: ctx.trackerOf },
@@ -950,7 +950,6 @@ export function createHandler(ctx: DaemonContext): Handler {
             intakeId,
             mode: params.mode,
             workspace: await workspaceRefOf(ctx.db, intake.workspace_id),
-            projectPath: project.path,
           },
         );
         for (const t of outcome.stoppedTasks) {
@@ -1006,10 +1005,14 @@ export function createHandler(ctx: DaemonContext): Handler {
       case "intake.closeIssue": {
         const intake = await getIntake(ctx.db, req(params, "intake_id"));
         if (!intake) throw new Error("Intake がありません");
-        const project = await soleProjectOf(ctx.db, intake.workspace_id);
         const ref = await workspaceRefOf(ctx.db, intake.workspace_id);
         const wt = await ctx.trackerOf(ref);
-        const projectPath = (await wt.projectPathFor(intake.issue_url)) ?? project.path;
+        const projectPath = await wt.projectPathFor(intake.issue_url);
+        if (projectPath === null) {
+          throw new Error(
+            `この Issue は workspace のどのリポジトリにもありません: ${intake.issue_url}`,
+          );
+        }
         const row = await closeParentIssue(ctx.db, wt.tracker, {
           intakeId: intake.id,
           projectPath,
@@ -1123,7 +1126,7 @@ async function worktreeEntries(db: Db): Promise<WorktreeEntry[]> {
         }
         const key = await canonical(w.path);
         const task = tasks.get(key);
-        const intake = task ? undefined : intakes.get(key);
+        const intake = task ? undefined : intakes.get(dirname(key));
         const age = task?.updated_at ?? intake?.updated_at ??
           (stat.mtime ?? stat.birthtime ?? new Date()).toISOString();
         return {
@@ -1163,13 +1166,15 @@ async function releaseReviewRefs(
 
 type RemoveTarget =
   | { kind: "task"; task: TaskRow; project: ProjectRow; worktreePath: string }
-  | { kind: "intake"; intake: IntakeRow; project: ProjectRow; worktreePath: string }
+  | { kind: "intake"; intake: IntakeRow; parentPath: string }
   | { kind: "orphan"; project: ProjectRow; worktreePath: string };
 
 /**
  * worktree.remove の対象を task_id か path のどちらか一方から決める。
  * path は stateDir()/worktrees 配下で、かつそのプロジェクトの git worktree list に
- * 出るものだけを通す。タスクや Intake の worktree に当たればその持ち主として扱う。
+ * 出るものだけを通す。タスクの worktree に当たればその持ち主として扱う。Intake の子
+ * worktree と Intake の親ディレクトリ（git worktree list には出ない）は、その Intake の
+ * 全 worktree を対象にする。
  */
 async function resolveRemoveTarget(
   ctx: DaemonContext,
@@ -1213,13 +1218,80 @@ async function resolveRemoveTarget(
         includeClosed: true,
       })
     ) {
-      if (intake.worktree_path && await canonical(intake.worktree_path) === real) {
-        return { kind: "intake", intake, project, worktreePath };
+      if (intake.worktree_path && await canonical(intake.worktree_path) === dirname(real)) {
+        return { kind: "intake", intake, parentPath: intake.worktree_path };
       }
     }
     return { kind: "orphan", project, worktreePath };
   }
+
+  // 親ディレクトリは git worktree list に出ない。登録を外されたプロジェクトの子も出ない。
+  for (const intake of await listIntakes(ctx.db, { includeClosed: true })) {
+    if (intake.worktree_path === null) continue;
+    const parent = await canonical(intake.worktree_path);
+    if (parent === real) {
+      return { kind: "intake", intake, parentPath: intake.worktree_path };
+    }
+    // 名前を確かめないと、存在しないパスも canonical が resolve に倒れて一致してしまう
+    if (dirname(real) === parent && await hasIntakeChild(parent, basename(real))) {
+      return { kind: "intake", intake, parentPath: intake.worktree_path };
+    }
+  }
   throw new Error(`git worktree list に出ないパスは消せません: ${path}`);
+}
+
+async function hasIntakeChild(parentPath: string, name: string): Promise<boolean> {
+  try {
+    return (await listIntakeWorktrees(parentPath)).some((w) => w.name === name);
+  } catch (e) {
+    if (e instanceof Deno.errors.NotFound) return false;
+    throw e;
+  }
+}
+
+/**
+ * Intake の親ディレクトリの下の子 worktree を全部 git worktree remove してから親を消す。
+ * 子はそれを git worktree list に出すプロジェクトのリポジトリで消し、登録を外された
+ * プロジェクトの子は worktree 自身から元のリポジトリを引く。force でなければ、汚れた子が
+ * 1 つでもあれば何も消さずに投げる。途中で失敗したら親は残す。
+ */
+async function removeIntakeWorktrees(
+  db: Db,
+  parentPath: string,
+  force: boolean,
+): Promise<void> {
+  let children: { name: string; path: string }[] = [];
+  try {
+    children = await listIntakeWorktrees(parentPath);
+  } catch (e) {
+    if (!(e instanceof Deno.errors.NotFound)) throw e;
+  }
+
+  const repoOf = new Map<string, string>();
+  for (const project of await listProjects(db)) {
+    for (const w of await listWorktrees(project.path)) {
+      repoOf.set(await canonical(w.path), project.path);
+    }
+  }
+  const targets: { repoPath: string; worktreePath: string }[] = [];
+  for (const child of children) {
+    targets.push({
+      repoPath: repoOf.get(await canonical(child.path)) ?? await repoOfWorktree(child.path),
+      worktreePath: child.path,
+    });
+  }
+
+  if (!force) {
+    for (const t of targets) {
+      if (await hasUncommittedChanges(t.worktreePath)) {
+        throw new UncommittedChangesError(t.worktreePath);
+      }
+    }
+  }
+  for (const t of targets) await removeWorktree({ ...t, force });
+  await Deno.remove(parentPath, { recursive: true }).catch((e) => {
+    if (!(e instanceof Deno.errors.NotFound)) throw e;
+  });
 }
 
 /**

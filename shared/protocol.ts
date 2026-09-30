@@ -327,6 +327,14 @@ export type WorkspaceSummary = {
   path: string;
   name: string;
   projects: ProjectSummary[];
+  /** <path>/.doctrine/workspace.yaml の tracker。reason は WorkspaceTrackerStatus と同じ語 */
+  tracker:
+    | { ok: true; config: TrackerConfig }
+    | {
+      ok: false;
+      reason: "workspace_config_missing" | "workspace_config_invalid";
+      message: string;
+    };
 };
 
 /** project.yaml の tracker（core/src/workflow/project.ts の TrackerConfig と同じ形）。 */
@@ -634,7 +642,8 @@ export type Methods = {
   "daemon.slots": { params: Record<string, never>; result: DaemonSlots };
   /** global_limit は 1 以上の整数。すぐ効き、デーモンの設定ファイルに保存する。 */
   "daemon.setGlobalLimit": { params: { global_limit: number }; result: DaemonSlots };
-  /** task_id か path のどちらか一方。非終端のタスクと終わっていない Intake の worktree は force でも拒否される。 */
+  /** task_id か path のどちらか一方。非終端のタスクと終わっていない Intake の worktree は force でも拒否される。
+   * Intake の子 worktree か Intake の親ディレクトリを指すと、その Intake の全 worktree と親ディレクトリを消し、removed は親ディレクトリ。 */
   "worktree.remove": {
     params: { task_id: string; force?: boolean } | { path: string; force?: boolean };
     result: { removed: string };

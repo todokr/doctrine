@@ -13,7 +13,10 @@ import { sha256Hex } from "./pfd/hash.ts";
 import { processProgressOf } from "./view.ts";
 
 export type SubIssueSyncInput = {
+  /** 親 Issue のプロジェクトのパス。sub-issue の検索・更新・閉じと、project の無いプロセスの作成に使う。 */
   projectPath: string;
+  /** workspace のプロジェクトの名前 → パス。プロセスの project の sub-issue を作るリポジトリを引く。 */
+  projectPaths: ReadonlyMap<string, string>;
   intake: Pick<IntakeRow, "id" | "issue_url" | "issue_node_id">;
   /** 最新の承認の案。承認されていることは呼び出し側が確かめる。 */
   pfd: Pfd;
@@ -67,6 +70,9 @@ function topologicalOrder(pfd: Pfd): Process[] {
  * 取りやめとして閉じ、完了を記録した人のプロセスを completed で閉じる。
  * 初回・やり直し・改訂のすべてをこの 1 回の呼び出しで扱う。
  *
+ * sub-issue はプロセスの project のリポジトリに作る。project の無いプロセスは親 Issue のリポジトリ。
+ * 検索・更新・閉じは親 Issue のパスで行う（nodeId で動く）。
+ *
  * 行の読み出しに失敗したときだけ投げる。gh の呼び出しと行ごとの書き込みの失敗は
  * failures に入れ、残りのプロセスを続ける。intake_processes の行の追加と retired_at は承認の作業が持つ。
  */
@@ -75,7 +81,7 @@ export async function syncSubIssues(
   tracker: Tracker,
   input: SubIssueSyncInput,
 ): Promise<SubIssueSyncResult> {
-  const { projectPath, intake, pfd } = input;
+  const { projectPath, projectPaths, intake, pfd } = input;
   const parent: IssueRef = { url: intake.issue_url, nodeId: intake.issue_node_id };
   const result: SubIssueSyncResult = {
     created: [],
@@ -196,11 +202,20 @@ export async function syncSubIssues(
   if (canCreate) {
     for (const p of targets) {
       if (links.has(p.id) || found.has(p.id)) continue;
+      let createPath = projectPath;
+      if (p.project !== undefined) {
+        const path = projectPaths.get(p.project);
+        if (path === undefined) {
+          fail(p.id, "create", `プロジェクト ${p.project} が workspace にありません`);
+          continue;
+        }
+        createPath = path;
+      }
       const body = content(p);
       const made = await attempt(
         p.id,
         "create",
-        () => tracker.createSubIssue(projectPath, parent, body),
+        () => tracker.createSubIssue(createPath, parent, body),
       );
       if (!made.ok) continue;
       const ref = made.value;
@@ -260,18 +275,19 @@ export type SubIssueCloseResult = {
 /**
  * baseBranch へのマージを観測したプロセスの sub-issue を completed で閉じ、sub_issue_closed = 1 を記録する。
  * PR の Closes で sub-issue が閉じないトラッカーのときだけ呼ぶ（呼び出し側が closesViaPullRequest を見る）。
+ * projectPath は親 Issue のプロジェクトのパス。baseBranches に無いプロセスはマージ済みと見なさない。
  */
 export async function closeMergedSubIssues(
   db: Db,
   tracker: Pick<Tracker, "closeIssue">,
-  o: { projectPath: string; intakeId: string; baseBranch: string },
+  o: { projectPath: string; intakeId: string; baseBranches: ReadonlyMap<string, string> },
 ): Promise<SubIssueCloseResult> {
   const out: SubIssueCloseResult = { closed: [], failures: [] };
   const progress = await processProgressOf(db, o.intakeId);
   for (const r of await listProcesses(db, o.intakeId)) {
     if (r.retired_at !== null || r.sub_issue_url === null || r.sub_issue_closed !== 0) continue;
     const pr = progress.get(r.process_id)?.pr;
-    if (pr?.state !== "MERGED" || pr.baseRef !== o.baseBranch) continue;
+    if (pr?.state !== "MERGED" || pr.baseRef !== o.baseBranches.get(r.process_id)) continue;
     try {
       await tracker.closeIssue(
         o.projectPath,
@@ -293,12 +309,13 @@ export async function closeMergedSubIssues(
 /**
  * 中止（stop）の後始末。sub_issue_closed = 0 の sub-issue を閉じる。完了を記録した人のプロセスは completed、
  * マージ済みのプロセスは PR の Closes で閉じるトラッカーのときだけ触らず（閉じないトラッカーでは completed）、
- * それ以外は not_planned。
+ * それ以外は not_planned。projectPath は親 Issue のプロジェクトのパス。
+ * baseBranches に無いプロセスはマージ済みと見なさず、not_planned で閉じる。
  */
 export async function closeSubIssuesOnCancel(
   db: Db,
   tracker: Pick<Tracker, "closeIssue" | "closesViaPullRequest">,
-  o: { projectPath: string; intakeId: string; baseBranch: string },
+  o: { projectPath: string; intakeId: string; baseBranches: ReadonlyMap<string, string> },
 ): Promise<SubIssueCloseResult> {
   const out: SubIssueCloseResult = { closed: [], failures: [] };
   const progress = await processProgressOf(db, o.intakeId);
@@ -307,7 +324,9 @@ export async function closeSubIssuesOnCancel(
     const facts = progress.get(r.process_id);
     let reason: "completed" | "not_planned";
     if (facts?.humanDone) reason = "completed";
-    else if (facts?.pr?.state === "MERGED" && facts.pr.baseRef === o.baseBranch) {
+    else if (
+      facts?.pr?.state === "MERGED" && facts.pr.baseRef === o.baseBranches.get(r.process_id)
+    ) {
       if (tracker.closesViaPullRequest) continue;
       reason = "completed";
     } else reason = "not_planned";

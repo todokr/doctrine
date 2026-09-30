@@ -134,9 +134,29 @@ export async function containsCommit(
   return out.success;
 }
 
-/** Intake の worktree の置き場。worktreePathFor と同じ置き場の intake-<id>（spec 7 章）。 */
-export function intakeWorktreePathFor(projectPath: string, intakeId: string): string {
-  return worktreePathFor(projectPath, `intake-${intakeId}`);
+/** Intake の worktree を並べる親ディレクトリ。子は <親>/<プロジェクト名>（workspace spec 5 章）。 */
+export function intakeWorktreePathFor(intakeId: string): string {
+  return join(stateDir(), "worktrees", `intake-${intakeId}`);
+}
+
+export type IntakeWorktree = { name: string; path: string };
+
+/** 親の直下で .git を持つエントリ（子 worktree）を名前順で返す。path は join(parentPath, name)。 */
+export async function listIntakeWorktrees(parentPath: string): Promise<IntakeWorktree[]> {
+  const result: IntakeWorktree[] = [];
+  for await (const entry of Deno.readDir(parentPath)) {
+    if (!entry.isDirectory) continue;
+    const path = join(parentPath, entry.name);
+    try {
+      await Deno.stat(join(path, ".git"));
+    } catch (e) {
+      if (e instanceof Deno.errors.NotFound) continue;
+      throw e;
+    }
+    result.push({ name: entry.name, path });
+  }
+  result.sort((a, b) => a.name.localeCompare(b.name));
+  return result;
 }
 
 /** ブランチを作らずに baseBranch から detached で作る。戻り値は実パス（createWorktree と同じ）。 */
@@ -208,6 +228,18 @@ export async function removeWorktree(o: {
   const args = ["-C", o.repoPath, "worktree", "remove", o.worktreePath];
   if (o.force) args.push("--force");
   await runCommand("git", args);
+}
+
+/** リンクされた worktree の元のリポジトリの git ディレクトリ（git rev-parse --git-common-dir）。 */
+export async function repoOfWorktree(worktreePath: string): Promise<string> {
+  const { stdout } = await runCommand("git", [
+    "-C",
+    worktreePath,
+    "rev-parse",
+    "--git-common-dir",
+  ]);
+  const raw = stdout.trim();
+  return isAbsolute(raw) ? raw : join(worktreePath, raw);
 }
 
 /**

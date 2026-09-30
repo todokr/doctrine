@@ -43,9 +43,15 @@ export async function loadRevisionConstraints(
  * 「<rule> <id>: <message>」の文字列で返す。違反が無ければ空配列。
  *
  * retired_reused は PfdRule に足さない。validatePfd は案だけで決まる規則を持ち、これは DB の履歴で決まる。
+ * filter を frozen_changed 以外へ広げない。改訂の出力は output.ts が全規則で見ており、
+ * 承認の経路ではここで固定と取りやめだけを確かめ直す。広げると同じ違反が出力の検査と 2 重に出る。
  */
-export function revisionIssues(pfd: Pfd, c: RevisionConstraints): string[] {
-  const issues = validatePfd(pfd, { decisionIds: new Set(), frozen: c.frozen })
+export function revisionIssues(
+  pfd: Pfd,
+  c: RevisionConstraints,
+  projectNames: ReadonlySet<string>,
+): string[] {
+  const issues = validatePfd(pfd, { decisionIds: new Set(), frozen: c.frozen, projectNames })
     .filter((v) => v.rule === "frozen_changed")
     .map((v) => `${v.rule} ${v.id}: ${v.message}`);
   for (const p of pfd.processes) {

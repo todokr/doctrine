@@ -1,7 +1,11 @@
 import type { Pfd } from "../../../../shared/intake/pfd.ts";
 import type { ValidateContext } from "../../../src/intake/pfd/validate.ts";
 
-/** PFD spec 6.1 の例を、検証に通る形で埋めたもの。呼ぶたびに新しいオブジェクトを返す。 */
+/**
+ * PFD spec 6.1 の例を、検証に通る形で埋めたもの。呼ぶたびに新しいオブジェクトを返す。
+ * agent のプロセスの project の "repo" は、core のテストの workspace のプロジェクト名
+ * （seedProject が makeRepo の repo ディレクトリから付ける）。
+ */
 export function example(): Pfd {
   return {
     title: "利用状況の集計を画面に出す",
@@ -42,6 +46,7 @@ export function example(): Pfd {
         id: "1",
         name: "マイグレーションを書く",
         actor: "agent",
+        project: "repo",
         inputs: ["schema"],
         outputs: ["new-table"],
         purpose: "集計結果を置く場所を用意する",
@@ -52,6 +57,7 @@ export function example(): Pfd {
         id: "2",
         name: "API を実装する",
         actor: "agent",
+        project: "repo",
         inputs: ["new-table", "metric-definition"],
         outputs: ["endpoint"],
         purpose: "集計テーブルの数字を外から読めるようにする",
@@ -71,6 +77,7 @@ export function example(): Pfd {
         id: "4",
         name: "画面を繋ぐ",
         actor: "agent",
+        project: "repo",
         inputs: ["endpoint"],
         outputs: ["feature"],
         purpose: "利用者が集計を見られるようにする",
@@ -89,6 +96,7 @@ export function revised(): Pfd {
     id: "4b",
     name: "画面を 2 つに分けて繋ぐ",
     actor: "agent",
+    project: "repo",
     inputs: ["endpoint"],
     outputs: ["feature"],
     purpose: "利用者が集計を見られるようにする",
@@ -98,12 +106,47 @@ export function revised(): Pfd {
   return pfd;
 }
 
-export const noContext: ValidateContext = { decisionIds: new Set(), frozen: null };
+export const noContext: ValidateContext = {
+  decisionIds: new Set(),
+  frozen: null,
+  projectNames: new Set(["repo"]),
+};
 
 /** example() に、質問 q1 の回答を指す成果物 policy を足し、プロセス 2 の入力に加えたもの。 */
 export function withDecision(): Pfd {
   const pfd = example();
   pfd.artifacts.push({ id: "policy", name: "集計の方針", given: true, decision: "q1" });
   pfd.processes[1].inputs = ["new-table", "metric-definition", "policy"];
+  return pfd;
+}
+
+/** example() にプロセス 5（project: api）と成果物 extra を足す。渡した pfd をそのまま書き換えて返す。 */
+export function withProcess5(pfd: Pfd): Pfd {
+  pfd.processes.push({
+    id: "5",
+    name: "追加の API を実装する",
+    actor: "agent",
+    project: "api",
+    inputs: ["schema"],
+    outputs: ["extra"],
+    purpose: "追加のデータを外から読めるようにする",
+    steps: "GET /extra を足す",
+    done_when: "API のテストが通る",
+  });
+  pfd.artifacts.push({
+    id: "extra",
+    name: "追加 API",
+    given: false,
+    description: "追加のデータを返す GET /extra",
+    verify: "API のテストが通る",
+  });
+  return pfd;
+}
+
+/** agent のプロセスの project を name に置き換える。渡した pfd をそのまま書き換えて返す。 */
+export function withProject(pfd: Pfd, name: string): Pfd {
+  for (const p of pfd.processes) {
+    if (p.actor === "agent") p.project = name;
+  }
   return pfd;
 }

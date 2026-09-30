@@ -56,6 +56,7 @@ import {
   toProject,
   toRateLimitWindow,
   toTask,
+  toWorkspace,
   type Action,
   type State,
 } from "./model";
@@ -104,6 +105,7 @@ function initialState(): State {
     settings: { kind: "loading" },
     composer: null,
     wizard: null,
+    workspaces: [],
     workspacesChecked: false,
   };
 }
@@ -132,7 +134,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     async function refresh() {
       const token = refreshGate.begin();
       try {
-        const [projects, tasks, samples, intakes] = await Promise.all([
+        const [projects, tasks, samples, intakes, workspaces] = await Promise.all([
           rpc("project.list", {}),
           rpc("task.list", {}),
           // ratelimit.sample は agent ステップが走っている間しか飛ばない。開いた直後に
@@ -144,6 +146,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           rpc("intake.list", { include_closed: latest.current.showClosedIntakes }).catch(
             (): IntakeSummary[] | null => null,
           ),
+          // これが落ちても一覧は出す。落ちたときは null にして、前の workspace の一覧を残す
+          rpc("workspace.list", {}).catch((): WorkspaceSummary[] | null => null),
         ]);
         if (!alive || !refreshGate.isLatest(token)) return;
         refreshFailing = false;
@@ -161,11 +165,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           now: Date.now(),
         });
         if (intakes) dispatch({ type: "intakes.sync", intakes });
-
-        // 0 件ならウィザードを出す。読めなかった回は出さず、次の取り直しでまた読む
-        if (!latest.current.workspacesChecked) {
-          const workspaces = await rpc("workspace.list", {}).catch(() => null);
-          if (alive && workspaces) dispatch({ type: "workspaces.checked", count: workspaces.length });
+        if (workspaces) {
+          dispatch({ type: "workspaces.sync", workspaces: workspaces.map(toWorkspace) });
+          // 0 件ならウィザードを出す。読めなかった回は出さず、次の取り直しでまた読む
+          if (!latest.current.workspacesChecked) dispatch({ type: "workspaces.checked", count: workspaces.length });
         }
 
         // worktree.list は worktree ごとに git status を回す（重い）ので、タスク一覧の

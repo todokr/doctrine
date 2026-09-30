@@ -1,3 +1,4 @@
+import type { Pfd } from "../../../shared/intake/pfd.ts";
 import type { PrFact } from "../../../shared/intake/processStatus.ts";
 import type { WatchHealth } from "../../../shared/protocol.ts";
 import {
@@ -7,14 +8,16 @@ import {
   updateIntake,
   upsertPrObservation,
 } from "../db/intakes.ts";
-import type { Db, ProjectRow } from "../db/schema.ts";
-import { listWorkspaces, soleProjectOf, workspaceRefOf } from "../db/workspaces.ts";
+import type { Db, IntakeRow, ProjectRow } from "../db/schema.ts";
+import { listProjectsOf, listWorkspaces, workspaceRefOf } from "../db/workspaces.ts";
 import { assertIntakeTransition } from "../domain/intakeStates.ts";
-import type { PrWatcher, Tracker, TrackerOf } from "../tracker/tracker.ts";
+import type { PrWatcher, TrackerOf } from "../tracker/tracker.ts";
+import type { WorkspaceTracker } from "../tracker/workspaceTracker.ts";
 import { containsCommit, fetchBaseBranch, originRef } from "../domain/worktree.ts";
 import type { IntakeTransition } from "./commands.ts";
 import { dispatchIntake, loadApprovedPlan } from "./dispatch.ts";
 import { computeProcessStatuses, goalReached } from "./pfd/status.ts";
+import { baseBranchesOf, projectsOfProcesses } from "./processProject.ts";
 import { syncIssueStates } from "./issueStateSync.ts";
 import { closeMergedSubIssues, syncSubIssues } from "./subIssueSync.ts";
 import { processProgressOf } from "./view.ts";
@@ -52,23 +55,53 @@ export const gitBaseSync: BaseSync = {
     containsCommit(projectPath, originRef(baseBranch), commit),
 };
 
-/** baseBranch へのマージを観測したタスクのマージのコミットが、すべて origin の baseBranch に入っているか。 */
-async function mergesArrived(
+/**
+ * Intake のタスクのうち、自分のプロジェクトの baseBranch へのマージを観測したものについて、
+ * マージのコミットがそのプロジェクトの origin の baseBranch にまだ入っていないプロジェクトの id。
+ */
+async function projectsAwaitingMerges(
   db: Db,
   baseSync: BaseSync,
-  project: ProjectRow,
+  projects: ReadonlyMap<number, ProjectRow>,
   intakeId: string,
-): Promise<boolean> {
-  for (const progress of (await processProgressOf(db, intakeId)).values()) {
-    const pr = progress.pr;
-    if (pr?.state !== "MERGED" || pr.baseRef !== project.base_branch || !pr.mergeCommit) continue;
-    if (!await baseSync.contains(project.path, project.base_branch, pr.mergeCommit)) return false;
+): Promise<Set<number>> {
+  const merged = await db.selectFrom("intake_processes as p")
+    .innerJoin("tasks as t", "t.id", "p.current_task_id")
+    .innerJoin("pr_observations as o", "o.task_id", "t.id")
+    .select([
+      "t.project_id as project_id",
+      "o.base_ref as base_ref",
+      "o.merge_commit as merge_commit",
+    ])
+    .where("p.intake_id", "=", intakeId)
+    .where("p.retired_at", "is", null)
+    .where("o.state", "=", "MERGED")
+    .where("o.merge_commit", "is not", null)
+    .execute();
+  const awaiting = new Set<number>();
+  for (const m of merged) {
+    const project = projects.get(m.project_id);
+    if (!project || m.base_ref !== project.base_branch || awaiting.has(project.id)) continue;
+    if (!await baseSync.contains(project.path, project.base_branch, m.merge_commit!)) {
+      awaiting.add(project.id);
+    }
   }
-  return true;
+  return awaiting;
+}
+
+/** 最新の承認の案と、プロセス id → そのプロジェクトの base_branch。承認が無ければ null。 */
+async function approvedPlanOf(
+  db: Db,
+  intake: IntakeRow,
+): Promise<{ pfd: Pfd; baseBranches: Map<string, string> } | null> {
+  const plan = await loadApprovedPlan(db, intake.id);
+  if (!plan) return null;
+  const baseBranches = baseBranchesOf(await projectsOfProcesses(db, intake.workspace_id, plan.pfd));
+  return { pfd: plan.pfd, baseBranches };
 }
 
 /**
- * プロジェクトの active な Intake と、終わっていない改訂中の Intake について、current_task_id のタスクのうち、
+ * このプロジェクトのタスクのうち、active な Intake と、終わっていない改訂中の Intake の current_task_id のもので、
  * baseBranch へのマージがまだ観測されていないものの PR を、pullRequests の 1 回の呼び出しで引く。
  * 選んだ PR が前回の観測と違えば upsertPrObservation する。PR が無いタスクは書かない
  * （status.ts がタスクの状態から no_pr を出す）。対象が無ければ gh を呼ばない。
@@ -93,6 +126,7 @@ export async function observePullRequests(
       ])
     )
     .where("i.workspace_id", "=", project.workspace_id)
+    .where("t.project_id", "=", project.id)
     .where("p.retired_at", "is", null)
     .where((eb) =>
       eb.or([
@@ -181,27 +215,49 @@ export async function watchWorkspace(
     const watched = (await listIntakes(db, { workspaceId }))
       .filter((i) => i.state === "active" || i.revising === 1);
     if (watched.length === 0) return report;
-    const project = await soleProjectOf(db, workspaceId);
+    const projects = await listProjectsOf(db, workspaceId);
+    const byId = new Map(projects.map((p) => [p.id, p]));
     report.watched = watched.map((i) => i.id);
     const intakes = watched.filter((i) => i.state === "active");
 
     // 改訂中だけの周は tracker を使わないので、解決は active があるときだけ。失敗は同期だけを飛ばす
-    // sub-issue の作成を含む同期は第 1 段ではただ 1 つのプロジェクト（sole project）のパスのまま。
-    let tracker: Tracker | null = null;
+    // sub-issue はプロセスのプロジェクトに作る。検索・更新・閉じは親 Issue のプロジェクトのパスで行う。
+    let wt: WorkspaceTracker | null = null;
+    let projectPaths: ReadonlyMap<string, string> = new Map();
+    const parentPaths = new Map<string, string>();
     if (intakes.length > 0) {
       try {
-        tracker = (await deps.trackerOf(await workspaceRefOf(db, workspaceId))).tracker;
+        const ref = await workspaceRefOf(db, workspaceId);
+        wt = await deps.trackerOf(ref);
+        projectPaths = new Map(ref.projects.map((p) => [p.name, p.path]));
       } catch (e) {
         report.errors.push(`sub-issue の同期: ${describe(e)}`);
       }
     }
+    if (wt) {
+      for (const intake of intakes) {
+        try {
+          const path = await wt.projectPathFor(intake.issue_url);
+          if (path === null) {
+            report.errors.push(
+              `${intake.issue_url} の sub-issue の同期: この Issue は workspace のどのリポジトリにもありません: ${intake.issue_url}`,
+            );
+          } else parentPaths.set(intake.id, path);
+        } catch (e) {
+          report.errors.push(`${intake.issue_url} の sub-issue の同期: ${describe(e)}`);
+        }
+      }
+    }
+    const tracker = wt?.tracker ?? null;
+    const trackable = intakes.filter((i) => parentPaths.has(i.id));
 
-    for (const intake of tracker ? intakes : []) {
+    for (const intake of tracker ? trackable : []) {
       try {
         const plan = await loadApprovedPlan(db, intake.id);
         if (!plan) continue;
         const synced = await syncSubIssues(db, tracker!, {
-          projectPath: project.path,
+          projectPath: parentPaths.get(intake.id)!,
+          projectPaths,
           intake,
           pfd: plan.pfd,
         });
@@ -219,28 +275,44 @@ export async function watchWorkspace(
       }
     }
 
-    // 観測の失敗で投入を止めない（W-12）
-    try {
-      const observed = await observePullRequests(db, deps.prWatcher, project);
-      observed.changedIntakeIds.forEach((id) => report.updated.add(id));
-    } catch (e) {
-      report.errors.push(`PR の観測: ${describe(e)}`);
-    }
-
-    // 取り込めなかった周は投入しない。手元の古い baseBranch から切ると、下流が上流の成果物を持たずに始まる
-    let fetched = true;
-    try {
-      await deps.baseSync.fetch(project.path, project.base_branch);
-    } catch (e) {
-      fetched = false;
-      report.errors.push(`origin の ${project.base_branch} の取り込み: ${describe(e)}`);
-    }
-
-    for (const intake of fetched ? intakes : []) {
+    const unfetched = new Set<number>();
+    for (const project of projects) {
+      // 観測の失敗で投入を止めない（W-12）
       try {
-        // GitHub がマージを返しても、fetch に載るのが遅れることがある。載るまで次の周へ延ばす
-        if (!await mergesArrived(db, deps.baseSync, project, intake.id)) continue;
-        const dispatched = await dispatchIntake(db, intake.id, { loadWorkflow: deps.loadWorkflow });
+        const observed = await observePullRequests(db, deps.prWatcher, project);
+        observed.changedIntakeIds.forEach((id) => report.updated.add(id));
+      } catch (e) {
+        report.errors.push(`PR の観測（${project.name}）: ${describe(e)}`);
+      }
+
+      // 取り込めなかったプロジェクトのプロセスは投入しない。手元の古い baseBranch から切ると、下流が上流の成果物を持たずに始まる
+      try {
+        await deps.baseSync.fetch(project.path, project.base_branch);
+      } catch (e) {
+        unfetched.add(project.id);
+        report.errors.push(
+          `origin の ${project.base_branch} の取り込み（${project.name}）: ${describe(e)}`,
+        );
+      }
+    }
+    const fetchedProjects = new Map([...byId].filter(([id]) => !unfetched.has(id)));
+
+    for (const intake of intakes) {
+      try {
+        // GitHub がマージを返しても、fetch に載るのが遅れることがある。載るまで、そのプロジェクトの投入を次の周へ延ばす
+        const awaiting = await projectsAwaitingMerges(
+          db,
+          deps.baseSync,
+          fetchedProjects,
+          intake.id,
+        );
+        const skipProjects = new Set([...unfetched, ...awaiting]);
+        const dispatched = await dispatchIntake(
+          db,
+          intake.id,
+          { loadWorkflow: deps.loadWorkflow },
+          { skipProjects },
+        );
         if (dispatched.created.length > 0) report.updated.add(intake.id);
         for (const f of dispatched.errors) {
           report.errors.push(`${intake.issue_url} プロセス ${f.processId} の投入: ${f.message}`);
@@ -251,10 +323,10 @@ export async function watchWorkspace(
     }
 
     // 投入と PR の観測を済ませた後に揃える。同じ周で作ったタスク・観測した PR が段階に入る
-    for (const intake of tracker ? intakes : []) {
+    for (const intake of tracker ? trackable : []) {
       try {
         const synced = await syncIssueStates(db, tracker!, {
-          projectPath: project.path,
+          projectPath: parentPaths.get(intake.id)!,
           intake,
         });
         for (const f of synced.failures) {
@@ -268,12 +340,14 @@ export async function watchWorkspace(
     // PR の Closes で閉じないトラッカーでは、観測したマージで sub-issue を閉じる。
     // 状態の同期は閉じた sub-issue を飛ばすので、inReview へ進めた後に閉じる
     if (tracker && !tracker.closesViaPullRequest) {
-      for (const intake of intakes) {
+      for (const intake of trackable) {
         try {
+          const plan = await approvedPlanOf(db, intake);
+          if (!plan) continue;
           const closed = await closeMergedSubIssues(db, tracker, {
-            projectPath: project.path,
+            projectPath: parentPaths.get(intake.id)!,
             intakeId: intake.id,
-            baseBranch: project.base_branch,
+            baseBranches: plan.baseBranches,
           });
           for (const f of closed.failures) {
             report.errors.push(
@@ -289,11 +363,11 @@ export async function watchWorkspace(
 
     for (const intake of intakes) {
       try {
-        const plan = await loadApprovedPlan(db, intake.id);
+        const plan = await approvedPlanOf(db, intake);
         if (!plan) continue;
         const statuses = computeProcessStatuses({
           pfd: plan.pfd,
-          baseBranch: project.base_branch,
+          baseBranches: plan.baseBranches,
           revising: false,
           dispatchPaused: false,
           progress: await processProgressOf(db, intake.id),

@@ -10,6 +10,7 @@ import type {
   TaskContext,
   TaskDiff,
   TaskState,
+  Workspace,
 } from "./types";
 import type {
   IntakeDetail,
@@ -22,6 +23,7 @@ import type {
   TaskDetail,
   TaskSummary,
   Warning,
+  WorkspaceSummary,
   WorktreeEntry,
 } from "../../shared/protocol.ts";
 import { toolInputParts } from "../../shared/toolInput.ts";
@@ -344,16 +346,31 @@ export function projectKey(path: string): string {
 }
 
 /** 同じパスからは常に同じ色。色をデーモンに持たせる話は本specでは扱わない */
-export function toProject(p: ProjectSummary): Project {
+function pathColor(path: string): string {
   let h = 0;
-  for (const ch of p.path) h = (h * 31 + ch.charCodeAt(0)) % 360;
+  for (const ch of path) h = (h * 31 + ch.charCodeAt(0)) % 360;
+  return `hsl(${h} 45% 38%)`;
+}
+
+export function toProject(p: ProjectSummary): Project {
   return {
     id: projectKey(p.path),
     daemonId: p.id,
     workspaceId: p.workspace_id,
     path: p.path,
     def: p.default_workflow,
-    color: `hsl(${h} 45% 38%)`,
+    color: pathColor(p.path),
+  };
+}
+
+/** プロジェクト 1 つの workspace は root とリポジトリのパスが同じなので、そのプロジェクトと同じ色になる */
+export function toWorkspace(w: WorkspaceSummary): Workspace {
+  return {
+    id: w.id,
+    name: w.name,
+    path: w.path,
+    color: pathColor(w.path),
+    projects: w.projects.map(toProject),
   };
 }
 
@@ -580,6 +597,8 @@ export type State = {
   composer: Composer | null;
   /** null でなければ初回ウィザードを全画面で出す。workspace が 0 件で開いたものは閉じられない */
   wizard: { closable: boolean } | null;
+  /** workspace.list の結果。取り直しで置き換える。取れなかった回は前の値を残す */
+  workspaces: Workspace[];
   /** 起動後に workspace.list を読めたか。読めるまで取り直しのたびに読む */
   workspacesChecked: boolean;
 };
@@ -704,6 +723,7 @@ export type Action =
   | { type: "composer.close" }
   /** task.create と取り直しが済んだ後の後片付け。作ったタスクを選び、トーストを出す */
   | { type: "composer.created"; id: string; toast: string }
+  | { type: "workspaces.sync"; workspaces: Workspace[] }
   | { type: "workspaces.checked"; count: number }
   | { type: "wizard.open" }
   | { type: "wizard.close" }
@@ -822,6 +842,8 @@ export function reduce(s: State, a: Action): State {
         toast: a.toast,
       };
     }
+    case "workspaces.sync":
+      return { ...s, workspaces: a.workspaces };
     case "workspaces.checked":
       // 取り直しは同時に何本も走る。2 本目の応答でウィザードを開き直さない
       if (s.workspacesChecked) return s;

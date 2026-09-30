@@ -18,7 +18,7 @@ import { advanceParentIssue } from "./issueStateSync.ts";
 import { loadQuestionSets } from "./questionSet.ts";
 import type { Db, IntakeRow, IntakeState } from "../db/schema.ts";
 import type { TaskState } from "../db/tasks.ts";
-import { soleProjectOf } from "../db/workspaces.ts";
+import { listProjectsOf } from "../db/workspaces.ts";
 import { cancelTask } from "../domain/cancelTask.ts";
 import { assertIntakeTransition, isIntakeTerminal } from "../domain/intakeStates.ts";
 import { killStaleChild, type ProcessProbe } from "../domain/recovery.ts";
@@ -27,6 +27,7 @@ import type { WorkspaceRef, WorkspaceTracker } from "../tracker/workspaceTracker
 import type { Pfd } from "../../../shared/intake/pfd.ts";
 import { validateAnswers } from "../../../shared/intake/validateQuestion.ts";
 import { loadApprovedPlan } from "./dispatch.ts";
+import { baseBranchesOf, projectsOfProcesses } from "./processProject.ts";
 import { computeProcessStatuses } from "./pfd/status.ts";
 import { loadRevisionConstraints, processRowChanges, revisionIssues } from "./revision.ts";
 import { enqueueIntakeRun } from "./runner.ts";
@@ -232,7 +233,14 @@ export async function approveIntake(
     if (latest.hash !== o.hash) throw new Error("表示している案の内容が保存された案と異なります");
     const pfd = JSON.parse(latest.pfd) as Pfd;
     if (intake.revising === 1) {
-      const issues = revisionIssues(pfd, await loadRevisionConstraints(trx, intake.id));
+      const projectNames = new Set(
+        (await listProjectsOf(trx, intake.workspace_id)).map((p) => p.name),
+      );
+      const issues = revisionIssues(
+        pfd,
+        await loadRevisionConstraints(trx, intake.id),
+        projectNames,
+      );
       if (issues.length > 0) throw new Error(issues.join("\n"));
     }
     await updateIntake(
@@ -343,7 +351,7 @@ export async function cancelIntake(
     probe: ProcessProbe;
     trackerOf: TrackerOf;
   },
-  o: { intakeId: string; mode: "leave" | "stop"; workspace: WorkspaceRef; projectPath: string },
+  o: { intakeId: string; mode: "leave" | "stop"; workspace: WorkspaceRef },
 ): Promise<CancelOutcome> {
   const intake = await requireIntake(db, o.intakeId);
   const revising = intake.revising === 1;
@@ -384,12 +392,21 @@ export async function cancelIntake(
     }
   }
   try {
-    const project = await soleProjectOf(db, intake.workspace_id);
-    const tracker = (await deps.trackerOf(o.workspace)).tracker;
-    const closed = await closeSubIssuesOnCancel(db, tracker, {
-      projectPath: o.projectPath,
+    const plan = await loadApprovedPlan(db, intake.id);
+    const baseBranches = plan
+      ? baseBranchesOf(await projectsOfProcesses(db, intake.workspace_id, plan.pfd))
+      : new Map<string, string>();
+    const wt = await deps.trackerOf(o.workspace);
+    const projectPath = await wt.projectPathFor(intake.issue_url);
+    if (projectPath === null) {
+      throw new Error(
+        `この Issue は workspace のどのリポジトリにもありません: ${intake.issue_url}`,
+      );
+    }
+    const closed = await closeSubIssuesOnCancel(db, wt.tracker, {
+      projectPath,
       intakeId: intake.id,
-      baseBranch: project.base_branch,
+      baseBranches,
     });
     for (const f of closed.failures) {
       outcome.problems.push(
@@ -424,10 +441,10 @@ export async function completeHumanProcess(
   if (!plan || !process || process.actor !== "human") {
     throw new Error(`人のプロセスではありません: ${o.processId}`);
   }
-  const project = await soleProjectOf(db, intake.workspace_id);
+  const baseBranches = baseBranchesOf(await projectsOfProcesses(db, intake.workspace_id, plan.pfd));
   const status = computeProcessStatuses({
     pfd: plan.pfd,
-    baseBranch: project.base_branch,
+    baseBranches,
     revising: false,
     dispatchPaused: intake.dispatch_paused === 1,
     progress: await processProgressOf(db, intake.id),

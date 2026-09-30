@@ -12,12 +12,26 @@ import { commitStepBoundary } from "../../src/db/boundary.ts";
 import type { Db } from "../../src/db/schema.ts";
 import { getTask, insertTask, listTasks, type NewTask } from "../../src/db/tasks.ts";
 import { commitDispatch, dispatchIntake, redispatchProcess } from "../../src/intake/dispatch.ts";
-import { example, withDecision } from "./pfd/fixture.ts";
+import { example, withDecision, withProcess5 } from "./pfd/fixture.ts";
 import { question } from "./runnerHelper.ts";
-import { PARENT_URL, seedActive } from "./watchFixture.ts";
+import { addApi, PARENT_URL, seedActive } from "./watchFixture.ts";
 import { fakeWorkflowLoader } from "../helpers/watcher.ts";
+import type { WorkflowLoader } from "../../src/workflow/load.ts";
 
 const DEPS = { loadWorkflow: fakeWorkflowLoader() };
+
+/** (path, name) を記録し、/repo なら REPO_YAML、/api なら API_YAML を返すローダー。 */
+function recordingLoader() {
+  const REPO_YAML = 'name: feature\nsteps:\n  - id: a\n    type: command\n    run: "true"\n';
+  const API_YAML = 'name: api-flow\nsteps:\n  - id: a\n    type: command\n    run: "true"\n';
+  const calls: [string, string][] = [];
+  const loadWorkflow: WorkflowLoader = (path, name) => {
+    calls.push([path, name]);
+    const text = path === "/api" ? API_YAML : REPO_YAML;
+    return fakeWorkflowLoader(text)(path, name);
+  };
+  return { loadWorkflow, calls, REPO_YAML, API_YAML };
+}
 
 const SUB = (n: number) => `https://github.com/o/r/issues/${100 + n}`;
 
@@ -246,4 +260,118 @@ test("ワークフローが読めなければ投入せず、タスクを作ら�
     /ワークフロー/,
   );
   assert.equal((await listTasks(db)).length, 0);
+});
+
+test("ready なプロセスを、それぞれの project のプロジェクトに、そのプロジェクトのワークフローで作る", async () => {
+  const { db, projectId, workspaceId } = await seedActive(withProcess5(example()));
+  const apiId = await addApi(db, workspaceId);
+  await giveSubIssues(db, ["1", "5"]);
+  const loader = recordingLoader();
+  const report = await dispatchIntake(db, "i1", { loadWorkflow: loader.loadWorkflow });
+  assert.deepEqual(report.created.map((c) => c.processId).sort(), ["1", "5"]);
+
+  const repoTask = (await getTask(db, report.created.find((c) => c.processId === "1")!.taskId))!;
+  assert.equal(repoTask.project_id, projectId);
+  assert.equal(repoTask.workflow_name, "feature");
+  assert.equal(repoTask.workflow_yaml, loader.REPO_YAML);
+  const apiTask = (await getTask(db, report.created.find((c) => c.processId === "5")!.taskId))!;
+  assert.equal(apiTask.project_id, apiId);
+  assert.equal(apiTask.workflow_name, "api-flow");
+  assert.equal(apiTask.workflow_yaml, loader.API_YAML);
+  assert.deepEqual(
+    loader.calls.sort((a, b) => a[0].localeCompare(b[0])),
+    [["/api", "api-flow"], ["/repo", "feature"]],
+  );
+  assert.equal(loader.calls.length, 2);
+});
+
+test("上流が自分のプロジェクトの baseBranch にマージされると、下流を別のプロジェクトに作る", async () => {
+  const pfd = example();
+  pfd.processes.find((p) => p.id === "2")!.project = "api";
+  const { db, projectId, workspaceId } = await seedActive(pfd);
+  await addApi(db, workspaceId);
+  await makeProcess2Ready(db, projectId);
+  const report = await dispatchIntake(db, "i1", DEPS);
+  assert.deepEqual(report.created.map((c) => c.processId), ["2"]);
+  const task = (await getTask(db, report.created[0].taskId))!;
+  assert.equal(task.workflow_name, "api-flow");
+});
+
+test("project の無い agent のプロセスは errors に入れて見送り、ほかは作る", async () => {
+  const pfd = withProcess5(example());
+  pfd.processes[0].project = undefined;
+  const { db, workspaceId } = await seedActive(pfd);
+  await addApi(db, workspaceId);
+  await giveSubIssues(db, ["1", "5"]);
+  const report = await dispatchIntake(db, "i1", DEPS);
+  assert.deepEqual(report.created.map((c) => c.processId), ["5"]);
+  assert.equal(report.errors.length, 1);
+  assert.equal(report.errors[0].processId, "1");
+  assert.match(report.errors[0].message, /project がありません/);
+  const tasks = (await listTasks(db)).filter((t) => t.intake_process_id === "1");
+  assert.equal(tasks.length, 0);
+});
+
+test("workspace から外されたプロジェクトのプロセスは errors に入れて見送る", async () => {
+  const { db, projectId } = await seedActive();
+  await db.updateTable("projects").set({ name: "renamed" }).where("id", "=", projectId).execute();
+  await giveSubIssues(db);
+  const report = await dispatchIntake(db, "i1", DEPS);
+  assert.deepEqual(report.created, []);
+  assert.deepEqual(report.errors, [{
+    processId: "1",
+    message: "プロジェクト repo は workspace にありません",
+  }]);
+  assert.equal((await listTasks(db)).length, 0);
+});
+
+test("見送るプロセスだけなら、ワークフローを読まない", async () => {
+  const { db, projectId } = await seedActive();
+  await db.updateTable("projects").set({ name: "renamed" }).where("id", "=", projectId).execute();
+  await giveSubIssues(db);
+  const loader = recordingLoader();
+  await dispatchIntake(db, "i1", { loadWorkflow: loader.loadWorkflow });
+  assert.equal(loader.calls.length, 0);
+});
+
+test("skipProjects のプロジェクトのプロセスは作らず、errors にも入れず、ワークフローも読まない", async () => {
+  const { db, workspaceId } = await seedActive(withProcess5(example()));
+  const apiId = await addApi(db, workspaceId);
+  await giveSubIssues(db, ["1", "5"]);
+  const loader = recordingLoader();
+  const report = await dispatchIntake(db, "i1", { loadWorkflow: loader.loadWorkflow }, {
+    skipProjects: new Set([apiId]),
+  });
+  assert.deepEqual(report.created.map((c) => c.processId), ["1"]);
+  assert.deepEqual(report.errors, []);
+  assert.deepEqual(loader.calls, [["/repo", "feature"]]);
+  const tasks = (await listTasks(db)).filter((t) => t.intake_process_id === "5");
+  assert.equal(tasks.length, 0);
+});
+
+test("再投入のタスクもプロセスのプロジェクトに作る", async () => {
+  const pfd = example();
+  pfd.processes.find((p) => p.id === "1")!.project = "api";
+  const { db, workspaceId } = await seedActive(pfd);
+  await addApi(db, workspaceId);
+  const oldId = await failProcess1(db);
+  const loader = recordingLoader();
+  const { taskId } = await redispatchProcess(db, { intakeId: "i1", processId: "1" }, {
+    loadWorkflow: loader.loadWorkflow,
+  });
+  const task = (await getTask(db, taskId))!;
+  assert.equal(task.workflow_yaml, loader.API_YAML);
+  assert.deepEqual(loader.calls, [["/api", "api-flow"]]);
+  assert.notEqual(taskId, oldId);
+});
+
+test("workspace から外されたプロジェクトのプロセスは再投入できない", async () => {
+  const { db, projectId } = await seedActive();
+  await failProcess1(db);
+  await db.updateTable("projects").set({ name: "renamed" }).where("id", "=", projectId).execute();
+  await assert.rejects(
+    redispatchProcess(db, { intakeId: "i1", processId: "1" }, DEPS),
+    /repo は workspace にありません/,
+  );
+  assert.equal((await listTasks(db)).length, 1);
 });

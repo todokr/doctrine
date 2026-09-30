@@ -18,8 +18,10 @@ const issue = {
   comments: [{ author: "alice", body: "コメント本文", createdAt: "2026-09-01T00:00:00Z" }],
 };
 
+const projects = [{ name: "repo", baseBranch: "main", repo: "o/r" }];
+
 test("初回の prompt に Issue の本文とコメント、分解の規則、論点の規則が載る", () => {
-  const text = buildInitialPrompt({ issue });
+  const text = buildInitialPrompt({ issue, projects });
   assert.match(text, /集計を出す/);
   assert.match(text, /alice/);
   assert.match(text, /コメント本文/);
@@ -32,7 +34,7 @@ test("初回の prompt に Issue の本文とコメント、分解の規則、�
 });
 
 test("Issue 本文の {{ }} はテンプレートとして展開せずそのまま載せる", () => {
-  assert.ok(buildInitialPrompt({ issue }).includes("{{ steps.x.stdout }}"));
+  assert.ok(buildInitialPrompt({ issue, projects }).includes("{{ steps.x.stdout }}"));
 });
 
 test("調査の検証落ちには、質問と仮定だけを返す旨が添わる", () => {
@@ -42,6 +44,54 @@ test("調査の検証落ちには、質問と仮定だけを返す旨が添わ�
 
 test("質問が無かったときの文面は PFD を返させる", () => {
   assert.match(buildNoQuestionsMessage(), /kind: "pfd"/);
+});
+
+test("初回の prompt にプロジェクトの一覧と project の規則が載る", () => {
+  const text = buildInitialPrompt({
+    issue,
+    projects: [
+      { name: "api", baseBranch: "develop", repo: "o/api" },
+      { name: "web", baseBranch: "main", repo: null },
+    ],
+  });
+  assert.match(text, /## プロジェクト/);
+  assert.match(text, /api/);
+  assert.match(text, /develop/);
+  assert.match(text, /o\/api/);
+  assert.match(text, /web/);
+  assert.match(text, /"project": "<プロジェクト名>"/);
+  assert.match(text, /project.*下の「プロジェクト」の一覧のプロジェクト名を必ず書く/);
+});
+
+test("GitHub の名前が無いプロジェクトには GitHub を書かない", () => {
+  const text = buildInitialPrompt({
+    issue,
+    projects: [
+      { name: "api", baseBranch: "develop", repo: "o/api" },
+      { name: "web", baseBranch: "main", repo: null },
+    ],
+  });
+  const line = text.split("\n").find((l) => l.includes("web"))!;
+  assert.ok(!line.includes("GitHub"));
+});
+
+test("プロジェクトの一覧は分解の規則より後に載る", () => {
+  const text = buildInitialPrompt({ issue, projects });
+  assert.ok(text.indexOf("## プロジェクト") > text.indexOf("## PFD の書き方"));
+});
+
+test("buildRevisionPrompt: プロジェクトの一覧を載せる", () => {
+  const text = buildRevisionPrompt({
+    issue,
+    approved: example(),
+    frozen: { processes: [], artifacts: [] },
+    retiredProcessIds: [],
+    decisions: {},
+    feedback: "コメント",
+    projects,
+  });
+  assert.match(text, /## プロジェクト/);
+  assert.match(text, /o\/r/);
 });
 
 test("buildRevisionPrompt: 承認済みの計画・固定された部分・決定・コメントを載せる", () => {
@@ -54,6 +104,7 @@ test("buildRevisionPrompt: 承認済みの計画・固定された部分・決�
     feedback: buildFeedback(example(), [
       { target_kind: "process", target_id: "4", body: "画面を分けて" },
     ]),
+    projects,
   });
   assert.match(text, /## 承認済みの計画/);
   assert.match(text, /## 固定された部分/);
@@ -69,6 +120,25 @@ test("buildRevisionPrompt: 承認済みの計画・固定された部分・決�
   assert.match(text, /推奨は書かない/);
 });
 
+test("プロジェクトの一覧にディレクトリと git -C の呼び方が載る", () => {
+  const projectsWithDir = [{ name: "api", baseBranch: "develop", repo: "o/api" }];
+  const initial = buildInitialPrompt({ issue, projects: projectsWithDir });
+  const revision = buildRevisionPrompt({
+    issue,
+    approved: example(),
+    frozen: { processes: [], artifacts: [] },
+    retiredProcessIds: [],
+    decisions: {},
+    feedback: "コメント",
+    projects: projectsWithDir,
+  });
+  for (const text of [initial, revision]) {
+    assert.match(text, /- api（ディレクトリ: api\/、baseBranch: develop、GitHub: o\/api）/);
+    assert.match(text, /git -C <名前> log/);
+    assert.match(text, /cd してから git を呼ばない/);
+  }
+});
+
 test("buildRevisionPrompt: 固定された部分が無ければそう書く", () => {
   const text = buildRevisionPrompt({
     issue,
@@ -77,6 +147,7 @@ test("buildRevisionPrompt: 固定された部分が無ければそう書く", ()
     retiredProcessIds: [],
     decisions: {},
     feedback: "コメント",
+    projects,
   });
   assert.match(text, /固定された部分はありません/);
   assert.doesNotMatch(text, /## 使えない id/);
