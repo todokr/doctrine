@@ -8,6 +8,7 @@ import {
   intakeSection,
   issueNumber,
   taskIntakeMark,
+  workspaceOfIntake,
 } from "../intake";
 import {
   GROUPS,
@@ -127,26 +128,47 @@ export function WorkspaceFilterSelect(props: {
 
 function IntakeItem({ i }: { i: IntakeSummary }) {
   const { s, dispatch } = useStore();
-  const w = s.workspaces.find((x) => x.id === i.workspace_id);
+  return (
+    <IntakeRow
+      intake={i}
+      workspace={workspaceOfIntake(i, s.workspaces)}
+      selected={s.intakeSel === i.id}
+      now={s.now}
+      onSelect={() => dispatch({ type: "intake.select", id: i.id })}
+    />
+  );
+}
+
+export function IntakeRow(p: {
+  intake: IntakeSummary;
+  workspace: Workspace | undefined;
+  selected: boolean;
+  now: number;
+  onSelect: () => void;
+}) {
+  const i = p.intake;
   const num = issueNumber(i.issue_url);
   const progress = intakeProgress(i);
   return (
     <button
       className={`it ${toneClass(sectionTone(intakeSection(i), i))}`}
-      aria-current={s.intakeSel === i.id}
-      onClick={() => dispatch({ type: "intake.select", id: i.id })}
+      aria-current={p.selected}
+      onClick={p.onSelect}
     >
       <span className="t">
         {num !== null && <span className="num">{`#${num}`}</span>}
         {i.issue_title}
       </span>
       <span className="m">
-        <span className="pjdot" style={{ background: w?.color ?? "#666" }} />
+        <span className="pj">
+          <span className="pjdot" style={{ background: p.workspace?.color ?? "#666" }} />
+          {p.workspace?.name ?? ""}
+        </span>
         <span>{INTAKE_WORD[i.state]}</span>
         {progress && <span className="prog">{progress}</span>}
         {i.revising && <span className="tag rev">改訂中</span>}
         {i.rate_limited_until && <span>{`${hm(Date.parse(i.rate_limited_until))} 再開`}</span>}
-        <span className="tm">{ago(Date.parse(i.updated_at), s.now)}</span>
+        <span className="tm">{ago(Date.parse(i.updated_at), p.now)}</span>
       </span>
     </button>
   );

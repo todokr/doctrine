@@ -21,6 +21,7 @@ import {
   PFD_STATUSES_B,
   QUESTIONS,
   RESPONSES,
+  WORKSPACES,
 } from "./fixtures";
 import { buildPfdView, LOOK } from "./pfd";
 import {
@@ -62,6 +63,7 @@ import {
   setWholeComment,
   toggleOption,
   trackerGuidance,
+  workspaceOfIntake,
   updateAnswer,
   updateResponse,
   wholeComment,
@@ -388,6 +390,23 @@ describe("intakeOrder", () => {
     const stale = { ...INTAKES[6], state: "answering" as const, needs_human: false };
     expect(intakeSection(stale)).toBe("working");
     expect(intakeOrder([stale], "all", false)).toEqual([stale]);
+  });
+});
+
+describe("workspaceOfIntake", () => {
+  test("workspace_id の workspace を返す", () => {
+    expect(workspaceOfIntake({ workspace_id: 2 }, WORKSPACES)).toEqual(WORKSPACES[1]);
+  });
+
+  test("プロジェクトが 3 つの workspace も返す", () => {
+    const w = workspaceOfIntake({ workspace_id: 4 }, WORKSPACES);
+    expect(w?.name).toBe("work");
+    expect(w?.projects.length).toBe(3);
+  });
+
+  test("一覧に無ければ undefined", () => {
+    expect(workspaceOfIntake({ workspace_id: 99 }, WORKSPACES)).toBeUndefined();
+    expect(workspaceOfIntake({ workspace_id: 1 }, [])).toBeUndefined();
   });
 });
 

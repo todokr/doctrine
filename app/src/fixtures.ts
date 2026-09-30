@@ -22,13 +22,29 @@ export const PROJECTS: Project[] = [
   { id: "shop-api", name: "shop-api", daemonId: 2, workspaceId: 2, color: "#AA3A2C", path: "~/work/shop-api", def: "feature" },
   { id: "blog", name: "blog", daemonId: 3, workspaceId: 3, color: "#296B49", path: "~/git/blog", def: "feature" },
 ];
-export const WORKSPACES: Workspace[] = PROJECTS.map((p) => ({
-  id: p.workspaceId,
-  name: p.id,
-  path: p.path,
-  color: p.color,
-  projects: [p],
-}));
+// 1〜3 番目は PROJECTS と 1 対 1。4 番目はプロジェクトが 3 つの workspace
+export const WORKSPACES: Workspace[] = [
+  ...PROJECTS.map((p): Workspace => ({
+    id: p.workspaceId,
+    name: p.id,
+    path: p.path,
+    color: p.color,
+    tracker: { ok: true, config: { kind: "github" } },
+    projects: [p],
+  })),
+  {
+    id: 4,
+    name: "work",
+    path: "~/work",
+    color: "hsl(210 45% 38%)",
+    tracker: { ok: true, config: { kind: "github" } },
+    projects: [
+      { id: "shop", name: "shop", daemonId: 4, workspaceId: 4, color: "#7A4E9C", path: "~/work/shop", def: "feature" },
+      { id: "admin", name: "admin", daemonId: 5, workspaceId: 4, color: "#B0762A", path: "~/work/admin", def: "feature" },
+      { id: "batch", name: "batch", daemonId: 6, workspaceId: 4, color: "#2B7F86", path: "~/work/batch", def: "feature" },
+    ],
+  },
+];
 
 // 状態は doctrine の7状態。refused はフラグ。
 // worktree は seedTasks が state から決めるので、dctl gc で消した後の姿は gced で指定する

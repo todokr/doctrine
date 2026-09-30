@@ -277,6 +277,21 @@ describe("IntakeView の部品", () => {
     expect(html).toContain("レビュー待ち");
     expect(html).toContain(reviewing.issue_url);
   });
+
+  test("パンくずにプロジェクト 1 つの workspace の点と名前を出す", () => {
+    const html = renderToStaticMarkup(<IntakeHeading intake={reviewing} workspace={WORKSPACES[1]} />);
+    expect(html).toContain('<span class="pjdot" style="background:#AA3A2C"></span><span>shop-api</span>');
+  });
+
+  test("パンくずにプロジェクト 3 つの workspace の点と名前を出す", () => {
+    const html = renderToStaticMarkup(<IntakeHeading intake={reviewing} workspace={WORKSPACES[3]} />);
+    expect(html).toContain('<span class="pjdot" style="background:hsl(210 45% 38%)"></span><span>work</span>');
+  });
+
+  test("workspace が見つからなければパンくずは灰色の点", () => {
+    const html = renderToStaticMarkup(<IntakeHeading intake={reviewing} workspace={undefined} />);
+    expect(html).toContain('<span class="pjdot" style="background:#666"></span><span></span>');
+  });
 });
 
 describe("IntakeLogPanel", () => {

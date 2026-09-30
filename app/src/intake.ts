@@ -20,7 +20,7 @@ import type {
   WatchHealth,
 } from "../../shared/protocol.ts";
 import { LOOK, parsePfdKey, pfdKey } from "./pfd";
-import type { Task, WorkspaceFilter } from "./types";
+import type { Task, Workspace, WorkspaceFilter } from "./types";
 
 /** targetId は質問か仮定の id */
 export type AnswerIssue = { targetId: string; message: string };
@@ -163,6 +163,14 @@ export function intakeSection(i: IntakeSummary): IntakeSection {
 /** workspace は "all" か Workspace.id */
 export function visibleIntakes(intakes: IntakeSummary[], workspace: WorkspaceFilter): IntakeSummary[] {
   return workspace === "all" ? intakes : intakes.filter((i) => i.workspace_id === workspace);
+}
+
+/** Intake の workspace。一覧にまだ無ければ undefined */
+export function workspaceOfIntake(
+  i: Pick<IntakeSummary, "workspace_id">,
+  workspaces: Workspace[],
+): Workspace | undefined {
+  return workspaces.find((w) => w.id === i.workspace_id);
 }
 
 /** サイドバーの描画も j/k もこの順を使う */
