@@ -17,7 +17,7 @@ import {
 import {
   claimIntakeRun,
   enqueueIntakeRun,
-  INTAKE_ALLOWED_TOOLS,
+  intakeAllowedTools,
   runIntakeRun,
 } from "../../src/intake/runner.ts";
 import { pfdHash } from "../../src/intake/pfd/hash.ts";
@@ -27,6 +27,15 @@ import { decomposerJsonSchema } from "../../../shared/intake/decomposer.ts";
 import { buildFeedback } from "../../../shared/intake/feedback.ts";
 import type { Answer } from "../../../shared/intake/question.ts";
 import {
+  canonical,
+  createDetachedWorktree,
+  intakeWorktreePathFor,
+  listIntakeWorktrees,
+} from "../../src/domain/worktree.ts";
+import { READ_ONLY_TOOLS } from "../../src/workflow/scaffold.ts";
+import { makeRepo } from "../helpers/repo.ts";
+import {
+  addProject,
   createFixture,
   depsOf,
   destroyFixture,
@@ -77,7 +86,7 @@ test("(a) 調査が質問を返したら回答待ちになる", async () => {
   assert.equal(call.kind, "start");
   assert.match(call.prompt, /Issue の本文/);
   assert.match(call.prompt, /## プロジェクト/);
-  assert.match(call.prompt, /- repo（baseBranch: main、GitHub: o\/r）/);
+  assert.match(call.prompt, /- repo（ディレクトリ: repo\/、baseBranch: main、GitHub: o\/r）/);
   assert.ok(call.opts.allowedTools!.includes("Read"));
   for (const banned of ["Write", "Edit"]) assert.ok(!call.opts.allowedTools!.includes(banned));
   assert.deepEqual(call.opts.jsonSchema, decomposerJsonSchema());
@@ -86,11 +95,19 @@ test("(a) 調査が質問を返したら回答待ちになる", async () => {
   assert.equal(call.opts.permissionMode, undefined);
 });
 
-test("INTAKE_ALLOWED_TOOLS は書き込みと gh・dctl を含まない", () => {
-  for (const t of INTAKE_ALLOWED_TOOLS) {
+test("intakeAllowedTools は書き込みと gh・dctl を含まない", () => {
+  for (const t of intakeAllowedTools(["api", "web"])) {
     assert.ok(!/^(Write|Edit|NotebookEdit)/.test(t), t);
     assert.ok(!/gh|dctl/.test(t), t);
   }
+});
+
+test("intakeAllowedTools は READ_ONLY_TOOLS の git 以外をそのまま並べる", () => {
+  const tools = intakeAllowedTools(["repo"]);
+  for (const t of READ_ONLY_TOOLS) {
+    if (!t.startsWith("Bash(git ")) assert.ok(tools.includes(t), t);
+  }
+  assert.equal(tools.length, 3 + READ_ONLY_TOOLS.length);
 });
 
 test("(a) 調査が空の質問を返したら分解へ進み、同じ会話で PFD を求める", async () => {
@@ -308,7 +325,7 @@ test("リポジトリを書き換えたら出力を捨てて戻し、要確認�
   const inner = createMockAdapter({ result: questionsOut([question("q1")]) });
   const adapter: AgentAdapter = {
     start(prompt, o) {
-      Deno.writeTextFileSync(join(o.cwd, "x.txt"), "x");
+      Deno.writeTextFileSync(join(o.cwd, "repo", "x.txt"), "x");
       return inner.start(prompt, o);
     },
     resume: inner.resume,
@@ -320,9 +337,102 @@ test("リポジトリを書き換えたら出力を捨てて戻し、要確認�
   assert.equal(intake.state, "needs_attention");
   const reason = await attentionOf();
   assert.equal(reason.kind, "wrote_repository");
-  assert.deepEqual(reason.paths, ["x.txt"]);
-  await assert.rejects(Deno.stat(join(intake.worktree_path!, "x.txt")));
+  assert.deepEqual(reason.paths, ["repo/x.txt"]);
+  await assert.rejects(Deno.stat(join(intake.worktree_path!, "repo", "x.txt")));
   assert.equal((await listQuestionSets(f.db, "i1")).length, 0);
+});
+
+test("2 プロジェクトの workspace では、親ディレクトリの下にプロジェクトごとの worktree を並べて cwd にする", async () => {
+  await addProject(f, "b");
+  const adapter = createMockAdapter({ result: questionsOut([question("q1")]) });
+  await enqueueIntakeRun(f.db, "i1", "investigate", opts());
+  await drive(f.db, depsOf(f, adapter));
+
+  const intake = (await getIntake(f.db, "i1"))!;
+  const expectedParent = await canonical(join(f.root, "state", "worktrees", "intake-i1"));
+  assert.equal(intake.worktree_path, expectedParent);
+  assert.equal(adapter.calls[0].opts.cwd, intake.worktree_path);
+  await Deno.stat(join(intake.worktree_path!, "repo", "README.md"));
+  await Deno.stat(join(intake.worktree_path!, "b", "README.md"));
+  const children = await listIntakeWorktrees(intake.worktree_path!);
+  assert.deepEqual(children.map((c) => c.name), ["b", "repo"]);
+  assert.equal(intake.state, "answering");
+});
+
+test("どれか 1 つの worktree の書き換えで wrote_repository になり、書き換えのあった worktree を巻き戻す", async () => {
+  await addProject(f, "b");
+  const inner = createMockAdapter({ result: questionsOut([question("q1")]) });
+  const adapter: AgentAdapter = {
+    start(prompt, o) {
+      Deno.writeTextFileSync(join(o.cwd, "b", "x.txt"), "x");
+      Deno.writeTextFileSync(join(o.cwd, "repo", "README.md"), "changed\n");
+      return inner.start(prompt, o);
+    },
+    resume: inner.resume,
+  };
+  await enqueueIntakeRun(f.db, "i1", "investigate", opts());
+  await drive(f.db, depsOf(f, adapter));
+
+  const intake = (await getIntake(f.db, "i1"))!;
+  assert.equal(intake.state, "needs_attention");
+  const reason = await attentionOf();
+  assert.equal(reason.kind, "wrote_repository");
+  assert.deepEqual(reason.paths, ["b/x.txt", "repo/README.md"]);
+  await assert.rejects(Deno.stat(join(intake.worktree_path!, "b", "x.txt")));
+  assert.equal(
+    await Deno.readTextFile(join(intake.worktree_path!, "repo", "README.md")),
+    "x\n",
+  );
+  assert.equal((await listQuestionSets(f.db, "i1")).length, 0);
+});
+
+test("外されたプロジェクトの worktree も書き換えを見て巻き戻し、残しておく", async () => {
+  const bRepo = await makeRepo(join(f.root, "b"), { "README.md": "y\n" });
+  const parent = intakeWorktreePathFor("i1");
+  await Deno.mkdir(parent, { recursive: true });
+  await createDetachedWorktree({
+    repoPath: bRepo,
+    worktreePath: join(parent, "b"),
+    baseBranch: "main",
+  });
+  await updateIntake(f.db, "i1", { worktree_path: await canonical(parent) });
+
+  const inner = createMockAdapter({ result: questionsOut([question("q1")]) });
+  const adapter: AgentAdapter = {
+    start(prompt, o) {
+      Deno.writeTextFileSync(join(o.cwd, "b", "x.txt"), "x");
+      return inner.start(prompt, o);
+    },
+    resume: inner.resume,
+  };
+  await enqueueIntakeRun(f.db, "i1", "investigate", opts());
+  await drive(f.db, depsOf(f, adapter));
+
+  const intake = (await getIntake(f.db, "i1"))!;
+  const reason = await attentionOf();
+  assert.equal(reason.kind, "wrote_repository");
+  assert.deepEqual(reason.paths, ["b/x.txt"]);
+  await assert.rejects(Deno.stat(join(intake.worktree_path!, "b", "x.txt")));
+  await Deno.stat(join(intake.worktree_path!, "b"));
+  await Deno.stat(join(intake.worktree_path!, "repo"));
+});
+
+test("allowedTools はプロジェクトごとに git -C <名前> を並べ、素の git を含まない", async () => {
+  await addProject(f, "b");
+  const adapter = createMockAdapter({ result: questionsOut([question("q1")]) });
+  await enqueueIntakeRun(f.db, "i1", "investigate", opts());
+  await drive(f.db, depsOf(f, adapter));
+
+  const tools = adapter.calls[0].opts.allowedTools!;
+  for (const t of ["Read", "Grep", "Glob", "Bash(grep:*)"]) assert.ok(tools.includes(t), t);
+  for (const name of ["repo", "b"]) {
+    assert.ok(tools.includes(`Bash(git -C ${name} status:*)`));
+    assert.ok(tools.includes(`Bash(git -C ${name} diff:*)`));
+    assert.ok(tools.includes(`Bash(git -C ${name} log:*)`));
+    assert.ok(tools.includes(`Bash(git -C ${name} show:*)`));
+    assert.ok(tools.includes(`Bash(git -C ${name} apply --stat:*)`));
+  }
+  assert.ok(!tools.some((t) => /^Bash\(git (status|diff|log|show|apply)/.test(t)));
 });
 
 test("中止された Intake の実行は走らせない", async () => {
