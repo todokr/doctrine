@@ -76,6 +76,8 @@ test("(a) 調査が質問を返したら回答待ちになる", async () => {
   const call = adapter.calls[0];
   assert.equal(call.kind, "start");
   assert.match(call.prompt, /Issue の本文/);
+  assert.match(call.prompt, /## プロジェクト/);
+  assert.match(call.prompt, /- repo（baseBranch: main、GitHub: o\/r）/);
   assert.ok(call.opts.allowedTools!.includes("Read"));
   for (const banned of ["Write", "Edit"]) assert.ok(!call.opts.allowedTools!.includes(banned));
   assert.deepEqual(call.opts.jsonSchema, decomposerJsonSchema());

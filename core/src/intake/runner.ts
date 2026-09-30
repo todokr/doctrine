@@ -43,6 +43,7 @@ import {
   restoreWorktree,
 } from "../domain/worktree.ts";
 import type { TrackerOf } from "../tracker/tracker.ts";
+import type { WorkspaceTracker } from "../tracker/workspaceTracker.ts";
 import { READ_ONLY_TOOLS } from "../workflow/scaffold.ts";
 import {
   type AttentionReason,
@@ -56,7 +57,7 @@ import { canonicalJson } from "../../../shared/intake/pfd.ts";
 import { consecutiveInvalid, continuationMessage, MAX_INVALID_OUTPUTS } from "./conversation.ts";
 import { checkDecomposerOutput } from "./output.ts";
 import { pfdHash } from "./pfd/hash.ts";
-import { buildInitialPrompt, buildRevisionPrompt } from "./prompt.ts";
+import { buildInitialPrompt, buildRevisionPrompt, type PromptProject } from "./prompt.ts";
 import { loadRevisionConstraints } from "./revision.ts";
 
 export { MAX_INVALID_OUTPUTS } from "./conversation.ts";
@@ -243,15 +244,36 @@ async function conversationRows(
   };
 }
 
+/** プロンプトに載せるプロジェクト。GitHub なら repoOf の nameWithOwner、失敗したら repo は null。 */
+async function promptProjectsOf(
+  db: Db,
+  workspaceId: number,
+  wt: WorkspaceTracker,
+): Promise<PromptProject[]> {
+  const projects = await listProjectsOf(db, workspaceId);
+  return await Promise.all(projects.map(async (p) => {
+    let repo: string | null = null;
+    if (wt.kind === "github" && wt.tracker.repoOf) {
+      try {
+        repo = (await wt.tracker.repoOf(p.path)).nameWithOwner;
+      } catch {
+        repo = null;
+      }
+    }
+    return { name: p.name, baseBranch: p.base_branch, repo };
+  }));
+}
+
 /** 会話の最初に送る文面。revise は承認済みの計画と固定された部分を載せる。 */
 async function firstPromptOf(
   db: Db,
   intake: IntakeRow,
   run: IntakeRunRow,
-  issue: IssueDetail,
+  opening: { issue: IssueDetail; projects: PromptProject[] },
   rows: ConversationRows,
 ): Promise<string> {
-  if (run.purpose !== "revise") return buildInitialPrompt({ issue });
+  const { issue, projects } = opening;
+  if (run.purpose !== "revise") return buildInitialPrompt({ issue, projects });
   const constraints = await loadRevisionConstraints(db, intake.id);
   const approved = constraints.approved.pfd;
   const decisions = decisionTexts(await loadQuestionSets(db, intake.id));
@@ -265,6 +287,7 @@ async function firstPromptOf(
       approved,
       rows.comments.filter((c) => c.run_id === intake.revision_run_id),
     ),
+    projects,
   });
 }
 
@@ -316,14 +339,16 @@ export async function runIntakeRun(db: Db, runId: number, deps: IntakeRunnerDeps
       drafts: rows.drafts,
       comments: rows.comments,
     });
-    const issue = continuation === null || fresh
+    const opening = continuation === null || fresh
       ? await (async () => {
         const wt = await deps.trackerOf(await workspaceRefOf(db, intake.workspace_id));
         const projectPath = (await wt.projectPathFor(intake.issue_url)) ?? project.path;
-        return wt.tracker.readIssue(projectPath, intake.issue_url);
+        const issue = await wt.tracker.readIssue(projectPath, intake.issue_url);
+        const projects = await promptProjectsOf(db, intake.workspace_id, wt);
+        return { issue, projects };
       })()
       : null;
-    const firstPrompt = () => firstPromptOf(db, intake, run, issue!, rows);
+    const firstPrompt = () => firstPromptOf(db, intake, run, opening!, rows);
 
     if (fresh) {
       sessionId = crypto.randomUUID();
