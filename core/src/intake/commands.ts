@@ -350,7 +350,7 @@ export async function cancelIntake(
     probe: ProcessProbe;
     trackerOf: TrackerOf;
   },
-  o: { intakeId: string; mode: "leave" | "stop"; workspace: WorkspaceRef; projectPath: string },
+  o: { intakeId: string; mode: "leave" | "stop"; workspace: WorkspaceRef },
 ): Promise<CancelOutcome> {
   const intake = await requireIntake(db, o.intakeId);
   const revising = intake.revising === 1;
@@ -392,9 +392,15 @@ export async function cancelIntake(
   }
   try {
     const project = await soleProjectOf(db, intake.workspace_id);
-    const tracker = (await deps.trackerOf(o.workspace)).tracker;
-    const closed = await closeSubIssuesOnCancel(db, tracker, {
-      projectPath: o.projectPath,
+    const wt = await deps.trackerOf(o.workspace);
+    const projectPath = await wt.projectPathFor(intake.issue_url);
+    if (projectPath === null) {
+      throw new Error(
+        `この Issue は workspace のどのリポジトリにもありません: ${intake.issue_url}`,
+      );
+    }
+    const closed = await closeSubIssuesOnCancel(db, wt.tracker, {
+      projectPath,
       intakeId: intake.id,
       baseBranch: project.base_branch,
     });

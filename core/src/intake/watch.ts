@@ -186,11 +186,14 @@ export async function watchWorkspace(
     const intakes = watched.filter((i) => i.state === "active");
 
     // 改訂中だけの周は tracker を使わないので、解決は active があるときだけ。失敗は同期だけを飛ばす
-    // sub-issue の作成を含む同期は第 1 段ではただ 1 つのプロジェクト（sole project）のパスのまま。
+    // sub-issue はプロセスのプロジェクトに作る。検索・更新・閉じはまだ sole project のパス。
     let tracker: Tracker | null = null;
+    let projectPaths: ReadonlyMap<string, string> = new Map();
     if (intakes.length > 0) {
       try {
-        tracker = (await deps.trackerOf(await workspaceRefOf(db, workspaceId))).tracker;
+        const ref = await workspaceRefOf(db, workspaceId);
+        tracker = (await deps.trackerOf(ref)).tracker;
+        projectPaths = new Map(ref.projects.map((p) => [p.name, p.path]));
       } catch (e) {
         report.errors.push(`sub-issue の同期: ${describe(e)}`);
       }
@@ -202,6 +205,7 @@ export async function watchWorkspace(
         if (!plan) continue;
         const synced = await syncSubIssues(db, tracker!, {
           projectPath: project.path,
+          projectPaths,
           intake,
           pfd: plan.pfd,
         });

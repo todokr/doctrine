@@ -13,7 +13,10 @@ import { sha256Hex } from "./pfd/hash.ts";
 import { processProgressOf } from "./view.ts";
 
 export type SubIssueSyncInput = {
+  /** 親 Issue のプロジェクトのパス。sub-issue の検索・更新・閉じと、project の無いプロセスの作成に使う。 */
   projectPath: string;
+  /** workspace のプロジェクトの名前 → パス。プロセスの project の sub-issue を作るリポジトリを引く。 */
+  projectPaths: ReadonlyMap<string, string>;
   intake: Pick<IntakeRow, "id" | "issue_url" | "issue_node_id">;
   /** 最新の承認の案。承認されていることは呼び出し側が確かめる。 */
   pfd: Pfd;
@@ -67,6 +70,9 @@ function topologicalOrder(pfd: Pfd): Process[] {
  * 取りやめとして閉じ、完了を記録した人のプロセスを completed で閉じる。
  * 初回・やり直し・改訂のすべてをこの 1 回の呼び出しで扱う。
  *
+ * sub-issue はプロセスの project のリポジトリに作る。project の無いプロセスは親 Issue のリポジトリ。
+ * 検索・更新・閉じは親 Issue のパスで行う（nodeId で動く）。
+ *
  * 行の読み出しに失敗したときだけ投げる。gh の呼び出しと行ごとの書き込みの失敗は
  * failures に入れ、残りのプロセスを続ける。intake_processes の行の追加と retired_at は承認の作業が持つ。
  */
@@ -75,7 +81,7 @@ export async function syncSubIssues(
   tracker: Tracker,
   input: SubIssueSyncInput,
 ): Promise<SubIssueSyncResult> {
-  const { projectPath, intake, pfd } = input;
+  const { projectPath, projectPaths, intake, pfd } = input;
   const parent: IssueRef = { url: intake.issue_url, nodeId: intake.issue_node_id };
   const result: SubIssueSyncResult = {
     created: [],
@@ -196,11 +202,20 @@ export async function syncSubIssues(
   if (canCreate) {
     for (const p of targets) {
       if (links.has(p.id) || found.has(p.id)) continue;
+      let createPath = projectPath;
+      if (p.project !== undefined) {
+        const path = projectPaths.get(p.project);
+        if (path === undefined) {
+          fail(p.id, "create", `プロジェクト ${p.project} が workspace にありません`);
+          continue;
+        }
+        createPath = path;
+      }
       const body = content(p);
       const made = await attempt(
         p.id,
         "create",
-        () => tracker.createSubIssue(projectPath, parent, body),
+        () => tracker.createSubIssue(createPath, parent, body),
       );
       if (!made.ok) continue;
       const ref = made.value;
