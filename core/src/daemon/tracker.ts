@@ -6,6 +6,7 @@ import { workspaceTracker } from "../tracker/workspaceTracker.ts";
 import {
   type LinearStateNames,
   parseWorkspaceConfig,
+  type TrackerConfig,
   WORKSPACE_YAML,
 } from "../workflow/workspace.ts";
 import { WorkflowValidationError } from "../workflow/schema.ts";
@@ -21,38 +22,42 @@ export function trackerFor(o: {
   const linear = o.linear ?? linearTracker;
   // workspace.yaml を書き換えたらデーモンの再起動なしで効くよう、呼ぶたびに読む
   return async (ws) => {
-    const path = join(ws.path, WORKSPACE_YAML);
-    let text: string;
-    try {
-      text = await Deno.readTextFile(path);
-    } catch (e) {
-      if (e instanceof Deno.errors.NotFound) {
-        throw new WorkspaceConfigError(
-          "workspace_config_missing",
-          `workspace.yaml がありません: ${path}`,
-        );
-      }
-      throw e;
-    }
-    let config;
-    try {
-      config = parseWorkspaceConfig(text, basename(ws.path));
-    } catch (e) {
-      if (e instanceof WorkflowValidationError) {
-        throw new WorkspaceConfigError(
-          "workspace_config_invalid",
-          `workspace.yaml を読めません: ${path}\n${e.message}`,
-        );
-      }
-      throw e;
-    }
-    const tracker = config.tracker.kind === "linear"
+    const config = await readTrackerConfig(ws.path);
+    const tracker = config.kind === "linear"
       ? linear({
         apiKey: o.linearApiKey,
-        team: config.tracker.team,
-        ...(config.tracker.states ? { states: config.tracker.states } : {}),
+        team: config.team,
+        ...(config.states ? { states: config.states } : {}),
       })
       : github;
     return workspaceTracker(ws, tracker);
   };
+}
+
+/** <workspacePath>/.doctrine/workspace.yaml の tracker。無い・読めないときは WorkspaceConfigError を投げる。 */
+export async function readTrackerConfig(workspacePath: string): Promise<TrackerConfig> {
+  const path = join(workspacePath, WORKSPACE_YAML);
+  let text: string;
+  try {
+    text = await Deno.readTextFile(path);
+  } catch (e) {
+    if (e instanceof Deno.errors.NotFound) {
+      throw new WorkspaceConfigError(
+        "workspace_config_missing",
+        `workspace.yaml がありません: ${path}`,
+      );
+    }
+    throw e;
+  }
+  try {
+    return parseWorkspaceConfig(text, basename(workspacePath)).tracker;
+  } catch (e) {
+    if (e instanceof WorkflowValidationError) {
+      throw new WorkspaceConfigError(
+        "workspace_config_invalid",
+        `workspace.yaml を読めません: ${path}\n${e.message}`,
+      );
+    }
+    throw e;
+  }
 }

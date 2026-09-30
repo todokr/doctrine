@@ -2,7 +2,11 @@ import { describe, expect, test } from "vitest";
 import { validateAnswers, validateQuestions } from "../../shared/intake/validateQuestion.ts";
 import type { IntakeState } from "../../shared/intake/state.ts";
 import { buildFeedback } from "../../shared/intake/feedback.ts";
-import type { IntakeComment, IntakeDetail, NewComment } from "../../shared/protocol.ts";
+import type {
+  IntakeComment,
+  IntakeDetail,
+  NewComment,
+} from "../../shared/protocol.ts";
 import type { ProcessStatus } from "../../shared/intake/processStatus.ts";
 import type { IntakeProcessView } from "../../shared/protocol.ts";
 import {

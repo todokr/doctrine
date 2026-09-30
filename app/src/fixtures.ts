@@ -697,6 +697,7 @@ export const ADDED_WORKSPACE: WorkspaceSummary & { created: string[]; alreadyReg
     { id: 11, workspace_id: 7, name: "shop-api", path: "/Users/me/work/Shop_API", default_workflow: "default", max_concurrent: 1, base_branch: "main", setup: null },
     { id: 12, workspace_id: 7, name: "web", path: "/Users/me/work/web", default_workflow: "default", max_concurrent: 1, base_branch: "main", setup: null },
   ],
+  tracker: { ok: true, config: { kind: "github" } },
   created: [
     "/Users/me/work/.doctrine/workspace.yaml",
     "/Users/me/work/Shop_API/.doctrine/workflows/default.yaml",

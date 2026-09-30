@@ -327,6 +327,14 @@ export type WorkspaceSummary = {
   path: string;
   name: string;
   projects: ProjectSummary[];
+  /** <path>/.doctrine/workspace.yaml の tracker。reason は WorkspaceTrackerStatus と同じ語 */
+  tracker:
+    | { ok: true; config: TrackerConfig }
+    | {
+      ok: false;
+      reason: "workspace_config_missing" | "workspace_config_invalid";
+      message: string;
+    };
 };
 
 /** project.yaml の tracker（core/src/workflow/project.ts の TrackerConfig と同じ形）。 */

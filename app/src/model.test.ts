@@ -616,6 +616,7 @@ const wsSummary = (o: Partial<WorkspaceSummary> = {}): WorkspaceSummary => ({
   name: "doctrine",
   path: "/home/u/git/doctrine",
   projects: [summary()],
+  tracker: { ok: true, config: { kind: "github" } },
   ...o,
 });
 
