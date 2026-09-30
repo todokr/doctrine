@@ -10,29 +10,15 @@ import {
 } from "../../src/db/intakes.ts";
 import { commitStepBoundary } from "../../src/db/boundary.ts";
 import type { Db } from "../../src/db/schema.ts";
-import { getTask, insertProject, insertTask, listTasks, type NewTask } from "../../src/db/tasks.ts";
+import { getTask, insertTask, listTasks, type NewTask } from "../../src/db/tasks.ts";
 import { commitDispatch, dispatchIntake, redispatchProcess } from "../../src/intake/dispatch.ts";
-import { example, withDecision } from "./pfd/fixture.ts";
+import { example, withDecision, withProcess5 } from "./pfd/fixture.ts";
 import { question } from "./runnerHelper.ts";
-import { PARENT_URL, seedActive } from "./watchFixture.ts";
+import { addApi, PARENT_URL, seedActive } from "./watchFixture.ts";
 import { fakeWorkflowLoader } from "../helpers/watcher.ts";
 import type { WorkflowLoader } from "../../src/workflow/load.ts";
-import type { Pfd } from "../../../shared/intake/pfd.ts";
 
 const DEPS = { loadWorkflow: fakeWorkflowLoader() };
-
-/** api という名前のプロジェクトを同じ workspace に足す。 */
-async function addApi(db: Db, workspaceId: number): Promise<number> {
-  return await insertProject(db, {
-    workspace_id: workspaceId,
-    name: "api",
-    path: "/api",
-    default_workflow: "api-flow",
-    max_concurrent: 1,
-    base_branch: "develop",
-    setup: null,
-  });
-}
 
 /** (path, name) を記録し、/repo なら REPO_YAML、/api なら API_YAML を返すローダー。 */
 function recordingLoader() {
@@ -45,29 +31,6 @@ function recordingLoader() {
     return fakeWorkflowLoader(text)(path, name);
   };
   return { loadWorkflow, calls, REPO_YAML, API_YAML };
-}
-
-/** example() にプロセス 5（project: api）と成果物 extra を足す。 */
-function withProcess5(pfd: Pfd): Pfd {
-  pfd.processes.push({
-    id: "5",
-    name: "追加の API を実装する",
-    actor: "agent",
-    project: "api",
-    inputs: ["schema"],
-    outputs: ["extra"],
-    purpose: "追加のデータを外から読めるようにする",
-    steps: "GET /extra を足す",
-    done_when: "API のテストが通る",
-  });
-  pfd.artifacts.push({
-    id: "extra",
-    name: "追加 API",
-    given: false,
-    description: "追加のデータを返す GET /extra",
-    verify: "API のテストが通る",
-  });
-  return pfd;
 }
 
 const SUB = (n: number) => `https://github.com/o/r/issues/${100 + n}`;
@@ -369,6 +332,21 @@ test("見送るプロセスだけなら、ワークフローを読まない", as
   const loader = recordingLoader();
   await dispatchIntake(db, "i1", { loadWorkflow: loader.loadWorkflow });
   assert.equal(loader.calls.length, 0);
+});
+
+test("skipProjects のプロジェクトのプロセスは作らず、errors にも入れず、ワークフローも読まない", async () => {
+  const { db, workspaceId } = await seedActive(withProcess5(example()));
+  const apiId = await addApi(db, workspaceId);
+  await giveSubIssues(db, ["1", "5"]);
+  const loader = recordingLoader();
+  const report = await dispatchIntake(db, "i1", { loadWorkflow: loader.loadWorkflow }, {
+    skipProjects: new Set([apiId]),
+  });
+  assert.deepEqual(report.created.map((c) => c.processId), ["1"]);
+  assert.deepEqual(report.errors, []);
+  assert.deepEqual(loader.calls, [["/repo", "feature"]]);
+  const tasks = (await listTasks(db)).filter((t) => t.intake_process_id === "5");
+  assert.equal(tasks.length, 0);
 });
 
 test("再投入のタスクもプロセスのプロジェクトに作る", async () => {

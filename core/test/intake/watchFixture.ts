@@ -9,11 +9,25 @@ import {
 } from "../../src/db/intakes.ts";
 import { openDb } from "../../src/db/migrate.ts";
 import type { Db } from "../../src/db/schema.ts";
+import { insertProject } from "../../src/db/tasks.ts";
 import { seedProject } from "../helpers/project.ts";
 import { pfdHash } from "../../src/intake/pfd/hash.ts";
 import { example } from "./pfd/fixture.ts";
 
 export const PARENT_URL = "https://github.com/o/r/issues/1";
+
+/** api という名前のプロジェクトを同じ workspace に足す。 */
+export async function addApi(db: Db, workspaceId: number): Promise<number> {
+  return await insertProject(db, {
+    workspace_id: workspaceId,
+    name: "api",
+    path: "/api",
+    default_workflow: "api-flow",
+    max_concurrent: 1,
+    base_branch: "develop",
+    setup: null,
+  });
+}
 
 /** 承認まで済み、state が active の Intake（id は i1）を 1 つ持つ DB。 */
 export async function seedActive(

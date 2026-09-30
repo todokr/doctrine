@@ -120,6 +120,29 @@ export function withDecision(): Pfd {
   return pfd;
 }
 
+/** example() にプロセス 5（project: api）と成果物 extra を足す。渡した pfd をそのまま書き換えて返す。 */
+export function withProcess5(pfd: Pfd): Pfd {
+  pfd.processes.push({
+    id: "5",
+    name: "追加の API を実装する",
+    actor: "agent",
+    project: "api",
+    inputs: ["schema"],
+    outputs: ["extra"],
+    purpose: "追加のデータを外から読めるようにする",
+    steps: "GET /extra を足す",
+    done_when: "API のテストが通る",
+  });
+  pfd.artifacts.push({
+    id: "extra",
+    name: "追加 API",
+    given: false,
+    description: "追加のデータを返す GET /extra",
+    verify: "API のテストが通る",
+  });
+  return pfd;
+}
+
 /** agent のプロセスの project を name に置き換える。渡した pfd をそのまま書き換えて返す。 */
 export function withProject(pfd: Pfd, name: string): Pfd {
   for (const p of pfd.processes) {
