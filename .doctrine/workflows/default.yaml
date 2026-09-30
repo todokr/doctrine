@@ -175,7 +175,7 @@ steps:
   - id: implement
     type: agent
     session: implementer
-    model: claude-sonnet-5
+    model: claude-sonnet-5-5
     permissionMode: acceptEdits
     # acceptEdits では Bash がすべて拒否されるので、このリポジトリで要るものだけ許可する。
     # 許可は `&&` や `cd` でつないだ各コマンドに個別に照合されるため、`cd app && pnpm add`
@@ -394,7 +394,7 @@ steps:
   - id: sync
     type: agent
     session: implementer
-    model: claude-sonnet-5
+    model: claude-sonnet-5-5
     permissionMode: acceptEdits
     allowedTools:
       - "Bash(git fetch:*)"
