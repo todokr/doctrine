@@ -6,6 +6,9 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 
 import { rpc, saveSettings } from "./daemon/client";
 import { SettingsFields, SlotsFields, submitGlobalLimit, submitSettings } from "./components/SettingsView";
+import { WorkspaceList } from "./components/WorkspaceList";
+import { ADDED_WORKSPACE } from "./fixtures";
+import { toWorkspace } from "./model";
 import type { DaemonSlots, TaskSummary } from "../../shared/protocol.ts";
 
 beforeEach(() => {
@@ -197,6 +200,81 @@ describe("SlotsFields", () => {
     expect(html).toContain("実行枠を読めませんでした");
     expect(html).toContain("socket closed");
     expect(html).toMatch(/<button[^>]*disabled=""[^>]*>実行枠を保存<\/button>/);
+  });
+});
+
+const GITHUB_WS = toWorkspace(ADDED_WORKSPACE);
+const LINEAR_WS = toWorkspace({
+  ...ADDED_WORKSPACE,
+  id: 8,
+  name: "lin",
+  path: "/Users/me/lin",
+  projects: [{ ...ADDED_WORKSPACE.projects[0], id: 21, workspace_id: 8, name: "app", path: "/Users/me/lin/app" }],
+  tracker: { ok: true, config: { kind: "linear", team: "ENG" } },
+});
+const MISSING_WS = toWorkspace({
+  ...ADDED_WORKSPACE,
+  id: 9,
+  name: "solo",
+  path: "/Users/me/solo",
+  projects: [{ ...ADDED_WORKSPACE.projects[0], id: 31, workspace_id: 9, name: "solo", path: "/Users/me/solo" }],
+  tracker: { ok: false, reason: "workspace_config_missing", message: "" },
+});
+
+describe("WorkspaceList", () => {
+  const render = (workspaces: Parameters<typeof WorkspaceList>[0]["workspaces"]) =>
+    renderToStaticMarkup(<WorkspaceList workspaces={workspaces} />);
+
+  test("見出しと、workspace の名前・root・プロジェクトの名前とパスを出す", () => {
+    const html = render([GITHUB_WS]);
+    for (const t of ["<h2>workspace</h2>", "work", "/Users/me/work", "shop-api", "/Users/me/work/Shop_API", "web", "/Users/me/work/web"]) {
+      expect(html).toContain(t);
+    }
+  });
+
+  test("github の workspace はトラッカーを GitHub と出す", () => {
+    const html = render([GITHUB_WS]);
+    expect(html).toContain("トラッカー: GitHub");
+    expect(html).not.toContain("Linear");
+    expect(html).not.toContain("workspace.yaml");
+  });
+
+  test("linear の workspace はトラッカーを Linear と team で出す", () => {
+    const html = render([LINEAR_WS]);
+    expect(html).toContain("トラッカー: Linear");
+    expect(html).toContain("ENG");
+    expect(html).not.toContain("GitHub");
+  });
+
+  test("workspace.yaml が無い workspace はその旨と直し方を出す", () => {
+    const html = render([MISSING_WS]);
+    expect(html).toContain("workspace.yaml がありません");
+    expect(html).toContain("/Users/me/solo/.doctrine/workspace.yaml を書く");
+    expect(html).not.toContain("トラッカー:");
+  });
+
+  test("workspace.yaml を読めない workspace は直し方と出力を出す", () => {
+    const html = render([{
+      ...MISSING_WS,
+      tracker: { ok: false, reason: "workspace_config_invalid", message: "tracker.kind が不正です" },
+    }]);
+    expect(html).toContain("workspace.yaml を読めません");
+    expect(html).toContain("/Users/me/solo/.doctrine/workspace.yaml を下の出力に従って直す");
+    expect(html).toContain("tracker.kind が不正です");
+  });
+
+  test("workspace を並べて出す", () => {
+    const html = render([GITHUB_WS, LINEAR_WS, MISSING_WS]);
+    const at = ["/Users/me/work", "/Users/me/lin", "/Users/me/solo"].map((p) => html.indexOf(p));
+    expect(at[0]).toBeGreaterThanOrEqual(0);
+    expect(at[0]).toBeLessThan(at[1]);
+    expect(at[1]).toBeLessThan(at[2]);
+  });
+
+  test("workspace が無ければ、ありませんと出す", () => {
+    const html = render([]);
+    expect(html).toContain("workspace");
+    expect(html).toContain("ありません");
   });
 });
 
