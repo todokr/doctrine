@@ -52,7 +52,7 @@ describe("retryInit", () => {
     expect(init.title).toBe("daemon.warning イベントを追加する");
   });
   test("コンポーザの欄に元のタスクの中身が入る", () => {
-    expect(initialComposerForm(PROJECTS, retryInit(task("s-1105"), PROJECTS), "doctrine")).toEqual({
+    expect(initialComposerForm(PROJECTS, retryInit(task("s-1105"), PROJECTS), 1)).toEqual({
       project: "~/work/shop-api",
       workflow: "shop-api/feature",
       title: "決済 Webhook の署名検証",
@@ -65,8 +65,8 @@ describe("initialComposerForm", () => {
   test("init のプロジェクトを使う", () => {
     expect(initialComposerForm(PROJECTS, { project: "~/work/shop-api" }, "all").project).toBe("~/work/shop-api");
   });
-  test("init が無ければ絞り込み中のプロジェクト", () => {
-    expect(initialComposerForm(PROJECTS, {}, "blog").project).toBe("~/git/blog");
+  test("init が無ければ絞り込み中の workspace の先頭のプロジェクト", () => {
+    expect(initialComposerForm(PROJECTS, {}, 3).project).toBe("~/git/blog");
   });
   test("どちらも無ければ先頭", () => {
     expect(initialComposerForm(PROJECTS, {}, "all").project).toBe("~/git/doctrine");

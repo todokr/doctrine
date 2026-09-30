@@ -1,5 +1,5 @@
 // テスト用の標本。画面はこれを使わない（画面のデータはデーモンから来る）
-import type { Project, Task, TaskDiff } from "./types";
+import type { Project, Task, TaskDiff, Workspace } from "./types";
 import type {
   IntakeDetail,
   IntakeSummary,
@@ -22,6 +22,13 @@ export const PROJECTS: Project[] = [
   { id: "shop-api", daemonId: 2, workspaceId: 2, color: "#AA3A2C", path: "~/work/shop-api", def: "feature" },
   { id: "blog", daemonId: 3, workspaceId: 3, color: "#296B49", path: "~/git/blog", def: "feature" },
 ];
+export const WORKSPACES: Workspace[] = PROJECTS.map((p) => ({
+  id: p.workspaceId,
+  name: p.id,
+  path: p.path,
+  color: p.color,
+  projects: [p],
+}));
 
 // 状態は doctrine の7状態。refused はフラグ。
 // worktree は seedTasks が state から決めるので、dctl gc で消した後の姿は gced で指定する

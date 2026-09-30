@@ -15,7 +15,6 @@ import {
   PFD_SAMPLE,
   PFD_STATUSES_A,
   PFD_STATUSES_B,
-  PROJECTS,
   QUESTIONS,
   RESPONSES,
 } from "./fixtures";
@@ -55,12 +54,10 @@ import {
   normalizeReply,
   openQuestionSet,
   parseIssueInput,
-  projectOfIntake,
   rejectionText,
   setWholeComment,
   toggleOption,
   trackerGuidance,
-  workspacePathOf,
   updateAnswer,
   updateResponse,
   wholeComment,
@@ -349,7 +346,7 @@ describe("taskIntakeMark / taskIntakeLabel", () => {
 });
 
 describe("intakeOrder", () => {
-  const order = intakeOrder(INTAKES, PROJECTS, "all", false);
+  const order = intakeOrder(INTAKES, "all", false);
 
   test("対応が要るもの・調査・分解中・進行中の順に並ぶ", () => {
     expect(sections(order)).toEqual(["attention", "attention", "working", "working", "active"]);
@@ -371,36 +368,22 @@ describe("intakeOrder", () => {
   });
 
   test("すべてでは末尾に終了した Intake が新しい順で並ぶ", () => {
-    const all = intakeOrder(INTAKES, PROJECTS, "all", true);
+    const all = intakeOrder(INTAKES, "all", true);
     expect(sections(all.slice(5))).toEqual(["closed", "closed"]);
     expect(all.slice(5).map((i) => i.state)).toEqual(["canceled", "completed"]);
   });
 
-  test("プロジェクトで絞る", () => {
-    const out = intakeOrder(INTAKES, PROJECTS, "shop-api", false);
+  test("workspace で絞る", () => {
+    const out = intakeOrder(INTAKES, 2, false);
     expect(out.length).toBeGreaterThan(0);
     expect(out.every((i) => i.workspace_id === 2)).toBe(true);
+    expect(intakeOrder(INTAKES, 99, true)).toEqual([]);
   });
 
   test("状態だけ変わった行も一覧から消えない", () => {
     const stale = { ...INTAKES[6], state: "answering" as const, needs_human: false };
     expect(intakeSection(stale)).toBe("working");
-    expect(intakeOrder([stale], PROJECTS, "all", false)).toEqual([stale]);
-  });
-});
-
-describe("projectOfIntake", () => {
-  test("workspace にプロジェクトが 1 つならそれを返す", () => {
-    expect(projectOfIntake({ workspace_id: 2 }, PROJECTS)).toEqual(PROJECTS[1]);
-  });
-
-  test("workspace にプロジェクトが 2 つなら undefined", () => {
-    const extra = { ...PROJECTS[1], id: "extra", daemonId: 9, workspaceId: 1 };
-    expect(projectOfIntake({ workspace_id: 1 }, [...PROJECTS, extra])).toBeUndefined();
-  });
-
-  test("どのプロジェクトの workspace でもなければ undefined", () => {
-    expect(projectOfIntake({ workspace_id: 99 }, PROJECTS)).toBeUndefined();
+    expect(intakeOrder([stale], "all", false)).toEqual([stale]);
   });
 });
 
@@ -522,19 +505,6 @@ describe("trackerGuidance", () => {
     const g = trackerGuidance({ reason: "workspace_config_invalid", message: "" }, "/ws");
     expect(g.title).toBe("workspace.yaml を読めません");
     expect(g.fix).toContain("/ws/.doctrine/workspace.yaml");
-  });
-});
-
-describe("workspacePathOf", () => {
-  test("プロジェクトの workspace の root を返す", () => {
-    const workspaces = [{ id: 2, path: "/w2", name: "w2", projects: [] }];
-    expect(workspacePathOf(PROJECTS[1], workspaces)).toBe("/w2");
-  });
-
-  test("workspace が無い・プロジェクトが無ければ undefined", () => {
-    expect(workspacePathOf(PROJECTS[1], [])).toBeUndefined();
-    expect(workspacePathOf(undefined, [{ id: 2, path: "/w2", name: "w2", projects: [] }]))
-      .toBeUndefined();
   });
 });
 

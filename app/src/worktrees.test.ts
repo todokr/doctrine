@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { NOW } from "./fixtures";
+import { NOW, PROJECTS } from "./fixtures";
 import {
   addWarning,
   canRemoveWorktree,
@@ -7,6 +7,7 @@ import {
   isStaleWorktree,
   removeConfirmText,
   sortWarnings,
+  visibleWorktrees,
   WARNINGS_KEPT,
   worktreesNeedAttention,
 } from "./worktrees";
@@ -39,6 +40,19 @@ const intake = (id: string, state: IntakeSummary["state"]): IntakeSummary => ({
   watch: { lastSucceededAt: null, consecutiveFailures: 0, lastError: null },
   created_at: new Date(NOW - 300 * 60000).toISOString(),
   updated_at: new Date(NOW - 5 * 60000).toISOString(),
+});
+
+describe("visibleWorktrees", () => {
+  const rows = [entry({ project: "~/git/doctrine" }), entry({ project: "~/work/shop-api" })];
+  test("all なら全件", () => {
+    expect(visibleWorktrees(rows, PROJECTS, "all")).toHaveLength(2);
+  });
+  test("workspace のプロジェクトの worktree だけ", () => {
+    expect(visibleWorktrees(rows, PROJECTS, 2)).toEqual([rows[1]]);
+  });
+  test("登録に無いプロジェクトの worktree は絞り込み中には出ない", () => {
+    expect(visibleWorktrees([entry({ project: "/gone" })], PROJECTS, 1)).toEqual([]);
+  });
 });
 
 describe("isStaleWorktree", () => {

@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { IntakeLogPanel } from "./components/IntakeLog";
 import { IntakeFacePlaceholder, IntakeHeading, RevisingBand } from "./components/IntakeView";
 import { IssueChooser, IssueList, IssuePreview, TrackerUnavailable } from "./components/IssuePicker";
-import { GITHUB_ISSUES, INTAKES, LINEAR_ISSUES, PROJECTS } from "./fixtures";
+import { GITHUB_ISSUES, INTAKES, LINEAR_ISSUES, WORKSPACES } from "./fixtures";
 
 const noop = () => {};
 const URL = "https://github.com/o/r/issues/8";
@@ -212,6 +212,30 @@ describe("TrackerUnavailable", () => {
     );
     expect(html).toContain("tp: このリポジトリに GitHub の remote がありません");
   });
+
+  test("workspace.yaml が無いときは選んだ workspace の root のパスを出す", () => {
+    const html = renderToStaticMarkup(
+      <TrackerUnavailable
+        status={{ reason: "workspace_config_missing", message: "" }}
+        root="/Users/me/work"
+        onRetry={noop}
+      />,
+    );
+    expect(html).toContain("workspace.yaml がありません");
+    expect(html).toContain("/Users/me/work/.doctrine/workspace.yaml");
+  });
+
+  test("workspace.yaml が読めないときは出力を添える", () => {
+    const html = renderToStaticMarkup(
+      <TrackerUnavailable
+        status={{ reason: "workspace_config_invalid", message: "projects: 必須です" }}
+        root="/Users/me/work"
+        onRetry={noop}
+      />,
+    );
+    expect(html).toContain("workspace.yaml を読めません");
+    expect(html).toContain("projects: 必須です");
+  });
 });
 
 describe("IntakeView の部品", () => {
@@ -237,7 +261,7 @@ describe("IntakeView の部品", () => {
 
   test("見出しは終端でなければ中止を出す", () => {
     const heading = (intake: typeof reviewing, onCancel?: () => void) =>
-      renderToStaticMarkup(<IntakeHeading intake={intake} project={PROJECTS[0]} onCancel={onCancel} />);
+      renderToStaticMarkup(<IntakeHeading intake={intake} workspace={WORKSPACES[0]} onCancel={onCancel} />);
     expect(heading(reviewing, noop)).toContain("中止…");
     expect(heading({ ...reviewing, state: "completed" }, noop)).not.toContain("中止…");
     expect(heading(reviewing)).not.toContain("中止…");
@@ -245,9 +269,10 @@ describe("IntakeView の部品", () => {
 
   test("見出しに番号・タイトル・状態の語を出す", () => {
     const html = renderToStaticMarkup(
-      <IntakeHeading intake={reviewing} project={PROJECTS[0]} />,
+      <IntakeHeading intake={reviewing} workspace={WORKSPACES[0]} />,
     );
     expect(html).toContain("#1");
+    expect(html).toContain(WORKSPACES[0].name);
     expect(html).toContain(reviewing.issue_title);
     expect(html).toContain("レビュー待ち");
     expect(html).toContain(reviewing.issue_url);

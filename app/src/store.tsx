@@ -77,7 +77,7 @@ function initialState(): State {
     limits: {},
     now: Date.now(),
     view: "tasks",
-    project: "all",
+    workspace: "all",
     sel: null,
     scope: {},
     layout: {},
@@ -457,7 +457,6 @@ export function useDecide() {
  */
 export function useIntakeRpc() {
   return {
-    workspaces: (): Promise<WorkspaceSummary[]> => rpc("workspace.list", {}),
     trackerStatus: (workspacePath: string): Promise<WorkspaceTrackerStatus> =>
       rpc("tracker.status", { workspace: workspacePath }),
     issues: (

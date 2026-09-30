@@ -5,7 +5,7 @@ import { sendDecision } from "../decision";
 import { useDecide, useRefresh, useStore } from "../store";
 import type { Project, Task } from "../types";
 import { TASK_TONE } from "../tone";
-import { canRemoveWorktree, isStaleWorktree, removeConfirmText, sortWarnings } from "../worktrees";
+import { canRemoveWorktree, isStaleWorktree, removeConfirmText, sortWarnings, visibleWorktrees } from "../worktrees";
 import { StatusDot } from "./StatusDot";
 import { STATE_WORD } from "./TaskView";
 
@@ -161,9 +161,7 @@ export function RemoveWorktreeButton(p: { path: string; dirty: boolean | null })
 
 export function WorktreeView(): ReactNode {
   const { s, dispatch } = useStore();
-  const rows = s.worktrees
-    .filter((e) => s.project === "all" || (s.projects.find((p) => p.path === e.project)?.id ?? e.project) === s.project)
-    .slice()
+  const rows = visibleWorktrees(s.worktrees, s.projects, s.workspace)
     .sort((a, b) => Date.parse(a.age_basis) - Date.parse(b.age_basis));
   const staleCount = rows.filter((e) => isStaleWorktree(e, s.intakes, staleDaysOf(s), s.now)).length;
 
