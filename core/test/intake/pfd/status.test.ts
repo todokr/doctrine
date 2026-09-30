@@ -12,7 +12,7 @@ import { example } from "./fixture.ts";
 
 const base: StatusInput = {
   pfd: example(),
-  baseBranch: "main",
+  baseBranches: new Map([["1", "main"], ["2", "main"], ["4", "main"]]),
   revising: false,
   dispatchPaused: false,
   progress: new Map(),
@@ -238,4 +238,48 @@ test("goalReached: 人のプロセスの完了でも揃う", () => {
   const pfd = example();
   pfd.goal = ["metric-definition"];
   assert.equal(goalReachedOf({ ...base, pfd, progress: new Map([["3", human()]]) }), true);
+});
+
+test("computeProcessStatuses: baseBranch はプロセスごとに見る", () => {
+  const input: StatusInput = {
+    ...base,
+    baseBranches: new Map([["1", "main"], ["2", "develop"]]),
+  };
+  const progress = withProgress({
+    "1": agent("completed", pr("MERGED", "main")),
+    "2": agent("completed", pr("MERGED", "develop")),
+    "3": human(),
+  }).progress;
+  assert.equal(entry({ ...input, progress }, "1").state, "merged");
+  assert.equal(entry({ ...input, progress }, "2").state, "merged");
+});
+
+test("computeProcessStatuses: 別のプロセスの baseBranch へのマージは merged にしない", () => {
+  const input: StatusInput = {
+    ...base,
+    baseBranches: new Map([["1", "develop"], ["2", "main"]]),
+  };
+  const progress = withProgress({ "1": agent("completed", pr("MERGED", "main")) }).progress;
+  assert.deepEqual(entry({ ...input, progress }, "1"), {
+    id: "1",
+    state: "needs_attention",
+    taskId: "t1",
+    reason: "pr_closed",
+  });
+});
+
+test("computeProcessStatuses: baseBranches に無い agent のプロセスの PR は merged にしない", () => {
+  const input: StatusInput = { ...base, baseBranches: new Map() };
+  const progress = withProgress({ "1": agent("completed", pr("MERGED", "main")) }).progress;
+  assert.deepEqual(entry({ ...input, progress }, "1"), {
+    id: "1",
+    state: "needs_attention",
+    taskId: "t1",
+    reason: "pr_closed",
+  });
+  assert.deepEqual(entry({ ...input, progress }, "2"), {
+    id: "2",
+    state: "waiting",
+    missing: ["new-table", "metric-definition"],
+  });
 });
