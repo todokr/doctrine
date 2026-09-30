@@ -18,7 +18,7 @@ import { advanceParentIssue } from "./issueStateSync.ts";
 import { loadQuestionSets } from "./questionSet.ts";
 import type { Db, IntakeRow, IntakeState } from "../db/schema.ts";
 import type { TaskState } from "../db/tasks.ts";
-import { listProjectsOf, soleProjectOf } from "../db/workspaces.ts";
+import { listProjectsOf } from "../db/workspaces.ts";
 import { cancelTask } from "../domain/cancelTask.ts";
 import { assertIntakeTransition, isIntakeTerminal } from "../domain/intakeStates.ts";
 import { killStaleChild, type ProcessProbe } from "../domain/recovery.ts";
@@ -392,7 +392,10 @@ export async function cancelIntake(
     }
   }
   try {
-    const project = await soleProjectOf(db, intake.workspace_id);
+    const plan = await loadApprovedPlan(db, intake.id);
+    const baseBranches = plan
+      ? baseBranchesOf(await projectsOfProcesses(db, intake.workspace_id, plan.pfd))
+      : new Map<string, string>();
     const wt = await deps.trackerOf(o.workspace);
     const projectPath = await wt.projectPathFor(intake.issue_url);
     if (projectPath === null) {
@@ -403,7 +406,7 @@ export async function cancelIntake(
     const closed = await closeSubIssuesOnCancel(db, wt.tracker, {
       projectPath,
       intakeId: intake.id,
-      baseBranch: project.base_branch,
+      baseBranches,
     });
     for (const f of closed.failures) {
       outcome.problems.push(

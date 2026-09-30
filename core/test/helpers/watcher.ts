@@ -15,18 +15,23 @@ export function noopWatcher(): IntakeWatcher {
 /**
  * 偽の BaseSync。既定では取り込みに成功し、どのコミットも origin の baseBranch に入っている。
  * fetchError を置くと取り込みが失敗し、missing に入れたコミットはまだ入っていないことになる。
+ * fetchErrorFor はパスを指定した取り込みの失敗、fetched は取り込みを呼ばれたパス。
  */
 export function fakeBaseSync() {
   const state = {
     fetchError: null as Error | null,
+    fetchErrorFor: new Map<string, Error>(),
     missing: new Set<string>(),
     fetches: 0,
+    fetched: [] as string[],
     baseSync: undefined as unknown as BaseSync,
   };
   state.baseSync = {
-    fetch: () => {
+    fetch: (projectPath) => {
       state.fetches++;
-      return state.fetchError ? Promise.reject(state.fetchError) : Promise.resolve();
+      state.fetched.push(projectPath);
+      const error = state.fetchError ?? state.fetchErrorFor.get(projectPath) ?? null;
+      return error ? Promise.reject(error) : Promise.resolve();
     },
     contains: (_path, _base, commit) => Promise.resolve(!state.missing.has(commit)),
   };

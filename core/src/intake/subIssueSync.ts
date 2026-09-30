@@ -275,18 +275,19 @@ export type SubIssueCloseResult = {
 /**
  * baseBranch へのマージを観測したプロセスの sub-issue を completed で閉じ、sub_issue_closed = 1 を記録する。
  * PR の Closes で sub-issue が閉じないトラッカーのときだけ呼ぶ（呼び出し側が closesViaPullRequest を見る）。
+ * projectPath は親 Issue のプロジェクトのパス。baseBranches に無いプロセスはマージ済みと見なさない。
  */
 export async function closeMergedSubIssues(
   db: Db,
   tracker: Pick<Tracker, "closeIssue">,
-  o: { projectPath: string; intakeId: string; baseBranch: string },
+  o: { projectPath: string; intakeId: string; baseBranches: ReadonlyMap<string, string> },
 ): Promise<SubIssueCloseResult> {
   const out: SubIssueCloseResult = { closed: [], failures: [] };
   const progress = await processProgressOf(db, o.intakeId);
   for (const r of await listProcesses(db, o.intakeId)) {
     if (r.retired_at !== null || r.sub_issue_url === null || r.sub_issue_closed !== 0) continue;
     const pr = progress.get(r.process_id)?.pr;
-    if (pr?.state !== "MERGED" || pr.baseRef !== o.baseBranch) continue;
+    if (pr?.state !== "MERGED" || pr.baseRef !== o.baseBranches.get(r.process_id)) continue;
     try {
       await tracker.closeIssue(
         o.projectPath,
@@ -308,12 +309,13 @@ export async function closeMergedSubIssues(
 /**
  * 中止（stop）の後始末。sub_issue_closed = 0 の sub-issue を閉じる。完了を記録した人のプロセスは completed、
  * マージ済みのプロセスは PR の Closes で閉じるトラッカーのときだけ触らず（閉じないトラッカーでは completed）、
- * それ以外は not_planned。
+ * それ以外は not_planned。projectPath は親 Issue のプロジェクトのパス。
+ * baseBranches に無いプロセスはマージ済みと見なさず、not_planned で閉じる。
  */
 export async function closeSubIssuesOnCancel(
   db: Db,
   tracker: Pick<Tracker, "closeIssue" | "closesViaPullRequest">,
-  o: { projectPath: string; intakeId: string; baseBranch: string },
+  o: { projectPath: string; intakeId: string; baseBranches: ReadonlyMap<string, string> },
 ): Promise<SubIssueCloseResult> {
   const out: SubIssueCloseResult = { closed: [], failures: [] };
   const progress = await processProgressOf(db, o.intakeId);
@@ -322,7 +324,9 @@ export async function closeSubIssuesOnCancel(
     const facts = progress.get(r.process_id);
     let reason: "completed" | "not_planned";
     if (facts?.humanDone) reason = "completed";
-    else if (facts?.pr?.state === "MERGED" && facts.pr.baseRef === o.baseBranch) {
+    else if (
+      facts?.pr?.state === "MERGED" && facts.pr.baseRef === o.baseBranches.get(r.process_id)
+    ) {
       if (tracker.closesViaPullRequest) continue;
       reason = "completed";
     } else reason = "not_planned";
