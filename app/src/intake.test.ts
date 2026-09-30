@@ -2,7 +2,12 @@ import { describe, expect, test } from "vitest";
 import { validateAnswers, validateQuestions } from "../../shared/intake/validateQuestion.ts";
 import type { IntakeState } from "../../shared/intake/state.ts";
 import { buildFeedback } from "../../shared/intake/feedback.ts";
-import type { IntakeComment, IntakeDetail, NewComment } from "../../shared/protocol.ts";
+import type {
+  IntakeComment,
+  IntakeDetail,
+  NewComment,
+  WorkspaceSummary,
+} from "../../shared/protocol.ts";
 import type { ProcessStatus } from "../../shared/intake/processStatus.ts";
 import type { IntakeProcessView } from "../../shared/protocol.ts";
 import {
@@ -526,15 +531,22 @@ describe("trackerGuidance", () => {
 });
 
 describe("workspacePathOf", () => {
+  const W2: WorkspaceSummary = {
+    id: 2,
+    path: "/w2",
+    name: "w2",
+    projects: [],
+    tracker: { ok: true, config: { kind: "github" } },
+  };
+
   test("プロジェクトの workspace の root を返す", () => {
-    const workspaces = [{ id: 2, path: "/w2", name: "w2", projects: [] }];
+    const workspaces = [W2];
     expect(workspacePathOf(PROJECTS[1], workspaces)).toBe("/w2");
   });
 
   test("workspace が無い・プロジェクトが無ければ undefined", () => {
     expect(workspacePathOf(PROJECTS[1], [])).toBeUndefined();
-    expect(workspacePathOf(undefined, [{ id: 2, path: "/w2", name: "w2", projects: [] }]))
-      .toBeUndefined();
+    expect(workspacePathOf(undefined, [W2])).toBeUndefined();
   });
 });
 
