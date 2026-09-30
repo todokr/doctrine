@@ -890,8 +890,9 @@ test("workspace.yaml が無い workspace の tracker.status は workspace_config
   assert.ok(status.message?.includes("workspace.yaml"));
 });
 
-test("プロジェクトが 2 つの workspace では intake.start を断る", async () => {
-  const { call } = await setup();
+test("プロジェクトが 2 つの workspace でも intake.start が通る", async () => {
+  const tracker = fakeTracker();
+  const { call } = await setup({ tracker });
   const files = {
     "README.md": "x\n",
     ".doctrine/project.yaml": "defaultWorkflow: feature\nmaxConcurrent: 1\nbaseBranch: main\n",
@@ -910,11 +911,15 @@ test("プロジェクトが 2 つの workspace では intake.start を断る", a
   );
   await call("workspace.add", { path: ws });
 
-  await assert.rejects(
-    () => call("intake.start", { workspace: ws, issue_url: ISSUE }),
-    /プロジェクトが複数ある workspace の Intake はまだ扱えません/,
-  );
-  assert.deepEqual(await call<IntakeSummary[]>("intake.list", { include_closed: true }), []);
+  const started = await call<IntakeSummary & { alreadyActive: boolean }>("intake.start", {
+    workspace: ws,
+    issue_url: ISSUE,
+  });
+  assert.equal(started.alreadyActive, false);
+  assert.equal(started.issue_url, ISSUE);
+  const listed = await call<IntakeSummary[]>("intake.list", { workspace: ws });
+  assert.deepEqual(listed.map((i) => i.id), [started.id]);
+  assert.deepEqual(tracker.reads, [ISSUE]);
 });
 
 test("intake.list は workspace で絞る", async () => {
