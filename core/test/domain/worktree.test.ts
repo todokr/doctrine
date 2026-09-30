@@ -16,6 +16,7 @@ import {
   findOrphans,
   hasUncommittedChanges,
   intakeWorktreePathFor,
+  listIntakeWorktrees,
   listWorktrees,
   originRef,
   removeWorktree,
@@ -318,12 +319,35 @@ test("branchNameFor は記号だけのタイトルで doctrine/<id> にフォー
   assert.equal(branchNameFor("abc123", "!!! ???"), "doctrine/abc123");
 });
 
-test("intakeWorktreePathFor は worktreePathFor と同じ置き場の intake-<id> を返す", () => {
+test("intakeWorktreePathFor は worktrees 直下の intake-<id> を返す", () => {
   process.env.DOCTRINE_STATE_DIR = join(root, "state");
   assert.equal(
-    intakeWorktreePathFor(repo, "i1"),
-    join(root, "state", "worktrees", basename(repo), "intake-i1"),
+    intakeWorktreePathFor("i1"),
+    join(root, "state", "worktrees", "intake-i1"),
   );
+});
+
+test("listIntakeWorktrees は .git を持つ子だけを名前順で返す", async () => {
+  await mkdir(join(root, "parent"), { recursive: true });
+  const parent = await realpath(join(root, "parent"));
+  const z = await createDetachedWorktree({
+    repoPath: repo,
+    worktreePath: join(parent, "z"),
+    baseBranch: "main",
+  });
+  const a = await createDetachedWorktree({
+    repoPath: repo,
+    worktreePath: join(parent, "a"),
+    baseBranch: "main",
+  });
+  await mkdir(join(parent, "plain"), { recursive: true });
+  await writeFile(join(parent, "f.txt"), "x");
+
+  const result = await listIntakeWorktrees(parent);
+  assert.deepEqual(result, [
+    { name: "a", path: a },
+    { name: "z", path: z },
+  ]);
 });
 
 test("createDetachedWorktree はブランチを作らない", async () => {

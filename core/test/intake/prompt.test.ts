@@ -120,6 +120,25 @@ test("buildRevisionPrompt: 承認済みの計画・固定された部分・決�
   assert.match(text, /推奨は書かない/);
 });
 
+test("プロジェクトの一覧にディレクトリと git -C の呼び方が載る", () => {
+  const projectsWithDir = [{ name: "api", baseBranch: "develop", repo: "o/api" }];
+  const initial = buildInitialPrompt({ issue, projects: projectsWithDir });
+  const revision = buildRevisionPrompt({
+    issue,
+    approved: example(),
+    frozen: { processes: [], artifacts: [] },
+    retiredProcessIds: [],
+    decisions: {},
+    feedback: "コメント",
+    projects: projectsWithDir,
+  });
+  for (const text of [initial, revision]) {
+    assert.match(text, /- api（ディレクトリ: api\/、baseBranch: develop、GitHub: o\/api）/);
+    assert.match(text, /git -C <名前> log/);
+    assert.match(text, /cd してから git を呼ばない/);
+  }
+});
+
 test("buildRevisionPrompt: 固定された部分が無ければそう書く", () => {
   const text = buildRevisionPrompt({
     issue,

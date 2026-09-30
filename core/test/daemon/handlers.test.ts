@@ -23,6 +23,7 @@ import {
 } from "../../src/domain/worktree.ts";
 import { createHandler, type DaemonContext, tick } from "../../src/daemon/handlers.ts";
 import { createMockAdapter, type MockAdapter } from "../../src/adapter/mock.ts";
+import type { AgentAdapter } from "../../src/adapter/types.ts";
 import { createWarningLog } from "../../src/daemon/warnings.ts";
 import { parseWorkflow } from "../../src/workflow/schema.ts";
 import { loadWorkflowFromDisk, taskWorkflow } from "../../src/workflow/load.ts";
@@ -422,7 +423,7 @@ test("worktree.list はタスク・Intake・孤児の worktree を全部返す",
   await addIntake(ctx, project.workspace_id);
   const intakeWorktree = await createDetachedWorktree({
     repoPath: repo,
-    worktreePath: intakeWorktreePathFor(repo, "i1"),
+    worktreePath: join(intakeWorktreePathFor("i1"), "repo"),
     baseBranch: "main",
   });
   await updateIntake(ctx.db, "i1", { worktree_path: intakeWorktree });
@@ -1832,7 +1833,7 @@ async function intakeWithWorktree(
   await addIntake(ctx, project.workspace_id);
   const worktree = await createDetachedWorktree({
     repoPath: repo,
-    worktreePath: intakeWorktreePathFor(repo, "i1"),
+    worktreePath: join(intakeWorktreePathFor("i1"), "repo"),
     baseBranch: "main",
   });
   await updateIntake(ctx.db, "i1", { worktree_path: worktree });
@@ -2755,12 +2756,23 @@ test("Intake の実行が例外で落ちたら、行を failed・Intake を要�
   const project = (await h("workspace.add", { path: repo }, NOOP_CONN) as WorkspaceSummary)
     .projects[0];
   await addIntake(ctx, project.workspace_id);
-  // worktree が消えていて、書き換えの検出（changedPaths）が try の外で例外を投げる
+  // 実行中に作業場所が消えていて、書き換えの検出（listIntakeWorktrees）が try の外で例外を投げる
   await updateIntake(ctx.db, "i1", {
     state: "decomposing",
-    worktree_path: join(ctx.logRoot, "no-such-worktree"),
     claude_session_id: "s1",
   });
+  const inner = ctx.adapter;
+  const removingAdapter: AgentAdapter = {
+    start(prompt, o) {
+      Deno.removeSync(o.cwd, { recursive: true });
+      return inner.start(prompt, o);
+    },
+    resume(sessionId, prompt, o) {
+      Deno.removeSync(o.cwd, { recursive: true });
+      return inner.resume(sessionId, prompt, o);
+    },
+  };
+  ctx.adapter = removingAdapter;
   await enqueueIntakeRun(ctx.db, "i1", "decompose", { logRoot: ctx.logRoot, resume: false });
 
   await tick(ctx);
@@ -2781,7 +2793,7 @@ test("worktree.list は Intake の worktree を孤児にしない", async () => 
   await addIntake(ctx, project.workspace_id);
   const worktree = await createDetachedWorktree({
     repoPath: repo,
-    worktreePath: intakeWorktreePathFor(repo, "i1"),
+    worktreePath: join(intakeWorktreePathFor("i1"), "repo"),
     baseBranch: "main",
   });
 
