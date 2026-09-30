@@ -18,10 +18,9 @@ import type {
   IntakeSummary,
   NewComment,
   WatchHealth,
-  WorkspaceSummary,
 } from "../../shared/protocol.ts";
 import { LOOK, parsePfdKey, pfdKey } from "./pfd";
-import type { Project, Task, Workspace } from "./types";
+import type { Task, Workspace, WorkspaceFilter } from "./types";
 
 /** targetId は質問か仮定の id */
 export type AnswerIssue = { targetId: string; message: string };
@@ -161,15 +160,9 @@ export function intakeSection(i: IntakeSummary): IntakeSection {
   return "working";
 }
 
-/** project は表示名（Project.id）か "all" */
-export function visibleIntakes(
-  intakes: IntakeSummary[],
-  projects: Project[],
-  project: string,
-): IntakeSummary[] {
-  if (project === "all") return intakes;
-  const workspaceId = projects.find((p) => p.id === project)?.workspaceId;
-  return intakes.filter((i) => i.workspace_id === workspaceId);
+/** workspace は "all" か Workspace.id */
+export function visibleIntakes(intakes: IntakeSummary[], workspace: WorkspaceFilter): IntakeSummary[] {
+  return workspace === "all" ? intakes : intakes.filter((i) => i.workspace_id === workspace);
 }
 
 /** Intake の workspace。一覧にまだ無ければ undefined */
@@ -183,11 +176,10 @@ export function workspaceOfIntake(
 /** サイドバーの描画も j/k もこの順を使う */
 export function intakeOrder(
   intakes: IntakeSummary[],
-  projects: Project[],
-  project: string,
+  workspace: WorkspaceFilter,
   showClosed: boolean,
 ): IntakeSummary[] {
-  const rows = visibleIntakes(intakes, projects, project);
+  const rows = visibleIntakes(intakes, workspace);
   return INTAKE_SECTIONS.filter((s) => showClosed || s.key !== "closed").flatMap((s) => {
     const inSection = rows.filter((i) => intakeSection(i) === s.key);
     const sign = s.key === "attention" ? 1 : -1;
@@ -382,15 +374,6 @@ export function parseIssueInput(input: string, targets: { name: string }[]): str
     if (target) return `https://github.com/${target.name}/issues/${url[2]}`;
   }
   return null;
-}
-
-/** プロジェクトの workspace の root のパス。見つからなければ undefined。 */
-export function workspacePathOf(
-  project: Project | undefined,
-  workspaces: WorkspaceSummary[],
-): string | undefined {
-  if (!project) return undefined;
-  return workspaces.find((w) => w.id === project.workspaceId)?.path;
 }
 
 export function trackerGuidance(

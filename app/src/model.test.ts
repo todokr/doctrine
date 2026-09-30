@@ -8,6 +8,7 @@ import {
   RATELIMIT_NORMAL,
   SAMPLE_DIFF,
   seedTasks,
+  WORKSPACES,
 } from "./fixtures";
 import {
   bounceNotice,
@@ -22,6 +23,7 @@ import {
   diffOf,
   feedbackOf,
   fellBackToAll,
+  firstProjectIn,
   groupOf,
   guideOf,
   hasSince,
@@ -33,6 +35,7 @@ import {
   LOG_LINES_KEPT,
   MIN,
   omittedDenials,
+  parseWorkspaceFilter,
   queuePosition,
   rateLimitViews,
   reduce,
@@ -50,6 +53,7 @@ import {
   toRateLimitWindow,
   toTask,
   toWorkspace,
+  visibleTasks,
   type DiffView,
   type Loaded,
   type State,
@@ -78,7 +82,7 @@ const base = (overrides: Partial<State> = {}): State => ({
   limits: {},
   now: NOW,
   view: "tasks",
-  project: "all",
+  workspace: "all",
   sel: "t-2b91",
   scope: {},
   layout: {},
@@ -106,7 +110,7 @@ const base = (overrides: Partial<State> = {}): State => ({
   settings: { kind: "loading" },
   composer: null,
   wizard: null,
-  workspaces: [],
+  workspaces: WORKSPACES,
   workspacesChecked: true,
   ...overrides,
 });
@@ -287,25 +291,63 @@ describe("canPause / canResume", () => {
 
 describe("sidebarOrder", () => {
   test("区分の順に並び、レビュー待ちは古い順", () => {
-    const order = sidebarOrder(seedTasks(), "tasks", "all");
+    const order = sidebarOrder(seedTasks(), PROJECTS, "tasks", "all");
     const groups = order.map(groupOf);
     expect(groups.indexOf("check")).toBeGreaterThan(groups.lastIndexOf("review"));
     expect(groups).not.toContain("done");
     const reviews = order.filter((t) => groupOf(t) === "review");
     expect(reviews.map((t) => t.since)).toEqual([...reviews.map((t) => t.since)].sort((a, b) => a - b));
   });
-  test("プロジェクトで絞り込める", () => {
-    expect(sidebarOrder(seedTasks(), "tasks", "blog").every((t) => t.project === "blog")).toBe(true);
+  test("workspace で絞り込める", () => {
+    const projects = PROJECTS.map((p) => p.id === "blog" ? { ...p, workspaceId: 1 } : p);
+    const projectsOf = sidebarOrder(seedTasks(), projects, "tasks", 1).map((t) => t.project);
+    expect([...new Set(projectsOf)].sort()).toEqual(["blog", "doctrine"]);
+  });
+  test("プロジェクトが引けないタスクは絞り込み中には出ない", () => {
+    const orphan = [{ ...seedTasks()[0], project: "99" }];
+    expect(visibleTasks(orphan, PROJECTS, 1)).toEqual([]);
+    expect(visibleTasks(orphan, PROJECTS, "all")).toHaveLength(1);
   });
   test("終了ビューは終了したタスクだけを新しい順に並べる", () => {
-    const order = sidebarOrder(seedTasks(), "done", "all");
+    const order = sidebarOrder(seedTasks(), PROJECTS, "done", "all");
     expect(order.every((t) => groupOf(t) === "done")).toBe(true);
     expect(order.map((t) => t.since)).toEqual([...order.map((t) => t.since)].sort((a, b) => b - a));
   });
   test("gc 済みの failed はタスク一覧から消え、終了ビューに移る", () => {
     const gced = seedTasks().find((t) => t.state === "failed" && t.worktree === null)!;
-    expect(sidebarOrder(seedTasks(), "tasks", "all").map((t) => t.id)).not.toContain(gced.id);
-    expect(sidebarOrder(seedTasks(), "done", "all").map((t) => t.id)).toContain(gced.id);
+    expect(sidebarOrder(seedTasks(), PROJECTS, "tasks", "all").map((t) => t.id)).not.toContain(gced.id);
+    expect(sidebarOrder(seedTasks(), PROJECTS, "done", "all").map((t) => t.id)).toContain(gced.id);
+  });
+});
+
+describe("workspace の絞り込み", () => {
+  test("workspace action で絞り込みを変える", () => {
+    expect(reduce(base(), { type: "workspace", workspace: 2 }).workspace).toBe(2);
+  });
+  test("parseWorkspaceFilter は select の値を戻す", () => {
+    expect(parseWorkspaceFilter("all")).toBe("all");
+    expect(parseWorkspaceFilter("3")).toBe(3);
+  });
+  test("firstProjectIn は絞り込み中の workspace の先頭のプロジェクトを返す", () => {
+    expect(firstProjectIn(PROJECTS, "all")?.id).toBe("doctrine");
+    expect(firstProjectIn(PROJECTS, 2)?.id).toBe("shop-api");
+    expect(firstProjectIn(PROJECTS, 99)?.id).toBe("doctrine");
+    expect(firstProjectIn([], "all")).toBeUndefined();
+  });
+  test("絞り込み中の j/k はその workspace のタスクだけを動く", () => {
+    const s = reduce(base({ workspace: 2, sel: null }), { type: "move", delta: 1 });
+    expect(s.sel).toBe(sidebarOrder(seedTasks(), PROJECTS, "tasks", 2)[0].id);
+    expect(task(s, s.sel!).project).toBe("shop-api");
+  });
+  test("sync は新しい projects で絞って先頭を選ぶ", () => {
+    const projects = PROJECTS.map((p) => p.id === "blog" ? { ...p, workspaceId: 1 } : p);
+    const tasks = seedTasks().filter((t) => t.project === "blog");
+    const s = reduce(base({ workspace: 1, sel: null }), { type: "sync", tasks, projects, now: NOW });
+    expect(s.sel).toBe(sidebarOrder(tasks, projects, "tasks", 1)[0].id);
+  });
+  test("絞り込み中の Intake の j/k はその workspace の Intake だけを動く", () => {
+    const s = reduce(base({ intakes: INTAKES, view: "intake", intakeSel: null, workspace: 2 }), { type: "move", delta: 1 });
+    expect(INTAKES.find((i) => i.id === s.intakeSel)?.workspace_id).toBe(2);
   });
 });
 
@@ -319,7 +361,7 @@ describe("上限待ち", () => {
       { ...seedTasks()[0], id: "q", state: "queued" as const },
       t({ id: "early", resumeAt: 1000 }),
     ];
-    expect(sidebarOrder(tasks, "tasks", "all").map((x) => x.id)).toEqual(["run", "early", "late", "q"]);
+    expect(sidebarOrder(tasks, PROJECTS, "tasks", "all").map((x) => x.id)).toEqual(["run", "early", "late", "q"]);
   });
 
   test("timeLabel は再開予定時刻を出す", () => {
@@ -507,7 +549,7 @@ describe("reduce", () => {
   });
 
   test("j / k の移動はサイドバーの端で止まる", () => {
-    const order = sidebarOrder(seedTasks(), "tasks", "all");
+    const order = sidebarOrder(seedTasks(), PROJECTS, "tasks", "all");
     let s = base({ sel: order[0].id });
     s = reduce(s, { type: "move", delta: -1 });
     expect(s.sel).toBe(order[0].id);
@@ -579,6 +621,13 @@ const wsSummary = (o: Partial<WorkspaceSummary> = {}): WorkspaceSummary => ({
 });
 
 describe("toWorkspace", () => {
+  test("tracker をそのまま写す", () => {
+    const linear = { ok: true, config: { kind: "linear", team: "ENG" } } as const;
+    const missing = { ok: false, reason: "workspace_config_missing", message: "not found" } as const;
+    expect(toWorkspace(wsSummary({ tracker: linear })).tracker).toEqual(linear);
+    expect(toWorkspace(wsSummary({ tracker: missing })).tracker).toEqual(missing);
+  });
+
   test("id・名前・root のパスを写し、プロジェクトを画面の形にする", () => {
     const api = summary({ id: 1, workspace_id: 3, path: "/home/u/work/api" });
     const w = toWorkspace(wsSummary({
@@ -640,6 +689,12 @@ describe("toProject / toTask", () => {
   test("プロジェクトの表示名はパスの末尾", () => {
     expect(toProject(summary()).id).toBe("doctrine");
     expect(toProject(summary({ path: "/home/u/work/shop-api/" })).id).toBe("shop-api");
+  });
+
+  test("name は ProjectSummary の name を写す（id はパスの末尾のまま）", () => {
+    const p = toProject(summary({ name: "shop-api", path: "/home/u/work/Shop_API" }));
+    expect(p.name).toBe("shop-api");
+    expect(p.id).toBe("Shop_API");
   });
 
   test("デーモンの id を daemonId に持つ", () => {
@@ -821,9 +876,9 @@ describe("daemon イベント", () => {
     const a = t1({ id: "a", state: "running", current_step_id: "test" });
     const b = t1({ id: "b", state: "running", current_step_id: "x" });
     const s = base({ tasks: [a, b], projects: [], sel: "a" });
-    const before = sidebarOrder(s.tasks, "tasks", "all").map((t) => t.id);
+    const before = sidebarOrder(s.tasks, PROJECTS, "tasks", "all").map((t) => t.id);
     const after = reduce(s, { type: "daemon", ev: bounceEvent(), now: 999 });
-    expect(sidebarOrder(after.tasks, "tasks", "all").map((t) => t.id)).toEqual(before);
+    expect(sidebarOrder(after.tasks, PROJECTS, "tasks", "all").map((t) => t.id)).toEqual(before);
   });
 
   test("同じステップが今度は通ったら差し戻しの通知は消える", () => {
@@ -1730,7 +1785,7 @@ const detailOk = (id: string): Loaded<IntakeDetail> => ({
 const intakeEv = (ev: ServerEvent, s: State) => reduce(s, { type: "daemon", ev, now: NOW });
 
 describe("Intake のビュー", () => {
-  const order = () => intakeOrder(INTAKES, PROJECTS, "all", false);
+  const order = () => intakeOrder(INTAKES, "all", false);
 
   test("intake ビューへ移ってもタスクの選択は消えない", () => {
     const s = reduce(base({ sel: "t-0a77" }), { type: "view", view: "intake" });

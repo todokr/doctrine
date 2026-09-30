@@ -1,15 +1,14 @@
 import type { ParamsOf, StepView, WorkflowListEntry } from "../../shared/protocol.ts";
-import type { ComposerInit } from "./model";
-import type { Project, Task } from "./types";
+import { type ComposerInit, firstProjectIn } from "./model";
+import type { Project, Task, WorkspaceFilter } from "./types";
 
 /** 入力中の値。project は Project.path、workflow は WorkflowListEntry.name（未選択は ""） */
 export type ComposerForm = { project: string; workflow: string; title: string; prompt: string };
 
-/** 「＋」は絞り込み中のプロジェクトへ倒す。filter は State.project（"all" か表示名） */
-export function initialComposerForm(projects: Project[], init: ComposerInit, filter: string): ComposerForm {
+/** 「＋」は絞り込み中の workspace の先頭のプロジェクトへ倒す */
+export function initialComposerForm(projects: Project[], init: ComposerInit, workspace: WorkspaceFilter): ComposerForm {
   const project = projects.find((p) => p.path === init.project)?.path
-    ?? projects.find((p) => p.id === filter)?.path
-    ?? projects[0]?.path
+    ?? firstProjectIn(projects, workspace)?.path
     ?? "";
   return { project, workflow: init.workflow ?? "", title: init.title ?? "", prompt: init.prompt ?? "" };
 }

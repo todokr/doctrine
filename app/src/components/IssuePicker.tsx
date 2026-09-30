@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { type Dispatch, useEffect, useState } from "react";
 import type { IssueDetail, TrackerKind } from "../../../shared/intake/tracker.ts";
-import type { IntakeSummary, TrackerIssue, WorkspaceSummary } from "../../../shared/protocol.ts";
+import type { IntakeSummary, TrackerIssue } from "../../../shared/protocol.ts";
 import { type Cached, revalidate, trackerCache, trackerCacheKey } from "../trackerCache";
 import {
   issueIdentifier,
@@ -8,10 +8,10 @@ import {
   parseIssueInput,
   trackerGuidance,
   type IssueTarget,
-  workspacePathOf,
 } from "../intake";
-import { clock, type Loaded } from "../model";
+import { type Action, clock, type Loaded } from "../model";
 import { useIntakeRpc, useStore } from "../store";
+import type { Workspace } from "../types";
 import { StatusDot } from "./StatusDot";
 import { Markdown } from "./text";
 
@@ -222,20 +222,47 @@ export function IssueChooser(
 
 type Picked = { url: string; identifier: string | null; title: string };
 
+/** 選んだ id の workspace。無ければ（未選択・一覧から消えた）先頭 */
+export function pickerWorkspace(workspaces: Workspace[], chosen: number | undefined): Workspace | undefined {
+  return workspaces.find((w) => w.id === chosen) ?? workspaces[0];
+}
+
+/** intake.start を root で呼び、始まった Intake を置く。失敗はトーストに出す */
+export async function startIntake(
+  root: string,
+  issueUrl: string,
+  deps: { start: ReturnType<typeof useIntakeRpc>["start"]; dispatch: Dispatch<Action> },
+): Promise<void> {
+  try {
+    const { alreadyActive: _, ...intake } = await deps.start(root, issueUrl);
+    deps.dispatch({ type: "intake.started", intake });
+  } catch (e) {
+    deps.dispatch({ type: "toast", message: `Intake を始められませんでした（${errorMessage(e)}）` });
+  }
+}
+
+/** 見出しの workspace の select。props だけで描く */
+export function WorkspacePick(props: {
+  workspaces: Workspace[];
+  value: number | undefined;
+  onChange: (id: number) => void;
+}) {
+  return (
+    <label className="hint">
+      workspace{" "}
+      <select aria-label="workspace" value={props.value === undefined ? "" : String(props.value)} onChange={(e) => props.onChange(Number(e.target.value))}>
+        {props.workspaces.map((w) => <option key={w.id} value={String(w.id)}>{w.name}</option>)}
+      </select>
+    </label>
+  );
+}
+
 export function IssuePicker() {
   const { s, dispatch } = useStore();
   const api = useIntakeRpc();
-  const [projectId, setProjectId] = useState(() => s.project !== "all" ? s.project : s.projects[0]?.id);
-  const project = s.projects.find((p) => p.id === projectId);
-  const [workspaces, setWorkspaces] = useState<WorkspaceSummary[] | null>(null);
-  useEffect(() => {
-    api.workspaces().then(setWorkspaces).catch((e) =>
-      dispatch({ type: "toast", message: `workspace を読み込めませんでした（${errorMessage(e)}）` })
-    );
-    // 初回だけ
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-  const root = workspaces ? workspacePathOf(project, workspaces) : undefined;
+  const [chosen, setChosen] = useState<number | undefined>(() => s.workspace === "all" ? undefined : s.workspace);
+  const workspace = pickerWorkspace(s.workspaces, chosen);
+  const root = workspace?.path;
   const [statusTick, setStatusTick] = useState(0);
   const [assignee, setAssignee] = useState<"me" | "any">("me");
   const [searchText, setSearchText] = useState("");
@@ -244,7 +271,7 @@ export function IssuePicker() {
   const [direct, setDirect] = useState("");
   const [pending, setPending] = useState(false);
 
-  // 別のプロジェクトで選んでいたものを捨てる
+  // 別の workspace で選んでいたものを捨てる
   useEffect(() => {
     setPicked(null);
     setDirect("");
@@ -275,19 +302,12 @@ export function IssuePicker() {
       <div className="headrow">
         <h1>Issue を選んで Intake を始める</h1>
         <span className="spacer" />
-        <label className="hint">
-          プロジェクト{" "}
-          <select value={projectId ?? ""} onChange={(e) => setProjectId(e.target.value)}>
-            {s.projects.map((p) => <option key={p.id} value={p.id}>{p.id}</option>)}
-          </select>
-        </label>
+        <WorkspacePick workspaces={s.workspaces} value={workspace?.id} onChange={setChosen} />
       </div>
     </>
   );
 
-  if (!project) return <div className="pad">{head}<p className="hint">プロジェクトがありません</p></div>;
-  if (workspaces === null) return <div className="pad">{head}<p className="hint">読み込み中</p></div>;
-  if (!root) return <div className="pad">{head}<p className="hint">workspace が見つかりません</p></div>;
+  if (!workspace) return <div className="pad">{head}<p className="hint">workspace がありません</p></div>;
   if (status.kind === "loading") return <div className="pad">{head}<p className="hint">読み込み中</p></div>;
   if (status.kind === "error") {
     return (
@@ -304,7 +324,7 @@ export function IssuePicker() {
     return (
       <div className="pad">
         {head}
-        <TrackerUnavailable status={status.value} root={root} onRetry={() => setStatusTick((t) => t + 1)} />
+        <TrackerUnavailable status={status.value} root={workspace.path} onRetry={() => setStatusTick((t) => t + 1)} />
       </div>
     );
   }
@@ -318,7 +338,7 @@ export function IssuePicker() {
   const title = picked?.title || (detail?.kind === "ok" ? detail.value.title : "");
 
   const failedBoxes = failed.map((f) => (
-    <TrackerUnavailable key={f.project} status={f} root={root} project={f.project} onRetry={() => setStatusTick((t) => t + 1)} />
+    <TrackerUnavailable key={f.project} status={f} root={workspace.path} project={f.project} onRetry={() => setStatusTick((t) => t + 1)} />
   ));
 
   if (usable.length === 0) {
@@ -367,10 +387,7 @@ export function IssuePicker() {
             onStart={async () => {
               setPending(true);
               try {
-                const { alreadyActive: _, ...intake } = await api.start(root, picked.url);
-                dispatch({ type: "intake.started", intake });
-              } catch (e) {
-                dispatch({ type: "toast", message: `Intake を始められませんでした（${errorMessage(e)}）` });
+                await startIntake(workspace.path, picked.url, { start: api.start, dispatch });
               } finally {
                 setPending(false);
               }

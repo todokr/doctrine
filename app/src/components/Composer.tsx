@@ -138,7 +138,7 @@ export function Composer({ init }: { init: ComposerInit }): React.JSX.Element {
   const { s, dispatch } = useStore();
   const refresh = useRefresh();
   const rpc = useComposerRpc();
-  const [form, setForm] = useState(() => initialComposerForm(s.projects, init, s.project));
+  const [form, setForm] = useState(() => initialComposerForm(s.projects, init, s.workspace));
   const [workflows, setWorkflows] = useState<Loaded<WorkflowListEntry[]>>({ kind: "loading" });
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);

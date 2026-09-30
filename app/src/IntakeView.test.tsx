@@ -212,6 +212,30 @@ describe("TrackerUnavailable", () => {
     );
     expect(html).toContain("tp: このリポジトリに GitHub の remote がありません");
   });
+
+  test("workspace.yaml が無いときは選んだ workspace の root のパスを出す", () => {
+    const html = renderToStaticMarkup(
+      <TrackerUnavailable
+        status={{ reason: "workspace_config_missing", message: "" }}
+        root="/Users/me/work"
+        onRetry={noop}
+      />,
+    );
+    expect(html).toContain("workspace.yaml がありません");
+    expect(html).toContain("/Users/me/work/.doctrine/workspace.yaml");
+  });
+
+  test("workspace.yaml が読めないときは出力を添える", () => {
+    const html = renderToStaticMarkup(
+      <TrackerUnavailable
+        status={{ reason: "workspace_config_invalid", message: "projects: 必須です" }}
+        root="/Users/me/work"
+        onRetry={noop}
+      />,
+    );
+    expect(html).toContain("workspace.yaml を読めません");
+    expect(html).toContain("projects: 必須です");
+  });
 });
 
 describe("IntakeView の部品", () => {
@@ -248,6 +272,7 @@ describe("IntakeView の部品", () => {
       <IntakeHeading intake={reviewing} workspace={WORKSPACES[0]} />,
     );
     expect(html).toContain("#1");
+    expect(html).toContain(WORKSPACES[0].name);
     expect(html).toContain(reviewing.issue_title);
     expect(html).toContain("レビュー待ち");
     expect(html).toContain(reviewing.issue_url);

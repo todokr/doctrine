@@ -18,22 +18,30 @@ import examplePatch from "../../shared/guide/examples/step-artifacts.patch?raw";
 export const NOW = Date.parse("2026-09-15T15:00:00+09:00");
 export const MIN = 60000;
 export const PROJECTS: Project[] = [
-  { id: "doctrine", daemonId: 1, workspaceId: 1, color: "#2E6CA4", path: "~/git/doctrine", def: "feature" },
-  { id: "shop-api", daemonId: 2, workspaceId: 2, color: "#AA3A2C", path: "~/work/shop-api", def: "feature" },
-  { id: "blog", daemonId: 3, workspaceId: 3, color: "#296B49", path: "~/git/blog", def: "feature" },
+  { id: "doctrine", name: "doctrine", daemonId: 1, workspaceId: 1, color: "#2E6CA4", path: "~/git/doctrine", def: "feature" },
+  { id: "shop-api", name: "shop-api", daemonId: 2, workspaceId: 2, color: "#AA3A2C", path: "~/work/shop-api", def: "feature" },
+  { id: "blog", name: "blog", daemonId: 3, workspaceId: 3, color: "#296B49", path: "~/git/blog", def: "feature" },
 ];
 // 1〜3 番目は PROJECTS と 1 対 1。4 番目はプロジェクトが 3 つの workspace
 export const WORKSPACES: Workspace[] = [
-  ...PROJECTS.map((p): Workspace => ({ id: p.workspaceId, name: p.id, path: p.path, color: p.color, projects: [p] })),
+  ...PROJECTS.map((p): Workspace => ({
+    id: p.workspaceId,
+    name: p.id,
+    path: p.path,
+    color: p.color,
+    tracker: { ok: true, config: { kind: "github" } },
+    projects: [p],
+  })),
   {
     id: 4,
     name: "work",
     path: "~/work",
     color: "hsl(210 45% 38%)",
+    tracker: { ok: true, config: { kind: "github" } },
     projects: [
-      { id: "shop", daemonId: 4, workspaceId: 4, color: "#7A4E9C", path: "~/work/shop", def: "feature" },
-      { id: "admin", daemonId: 5, workspaceId: 4, color: "#B0762A", path: "~/work/admin", def: "feature" },
-      { id: "batch", daemonId: 6, workspaceId: 4, color: "#2B7F86", path: "~/work/batch", def: "feature" },
+      { id: "shop", name: "shop", daemonId: 4, workspaceId: 4, color: "#7A4E9C", path: "~/work/shop", def: "feature" },
+      { id: "admin", name: "admin", daemonId: 5, workspaceId: 4, color: "#B0762A", path: "~/work/admin", def: "feature" },
+      { id: "batch", name: "batch", daemonId: 6, workspaceId: 4, color: "#2B7F86", path: "~/work/batch", def: "feature" },
     ],
   },
 ];
