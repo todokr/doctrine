@@ -27,6 +27,7 @@ import type { WorkspaceRef, WorkspaceTracker } from "../tracker/workspaceTracker
 import type { Pfd } from "../../../shared/intake/pfd.ts";
 import { validateAnswers } from "../../../shared/intake/validateQuestion.ts";
 import { loadApprovedPlan } from "./dispatch.ts";
+import { baseBranchesOf, projectsOfProcesses } from "./processProject.ts";
 import { computeProcessStatuses } from "./pfd/status.ts";
 import { loadRevisionConstraints, processRowChanges, revisionIssues } from "./revision.ts";
 import { enqueueIntakeRun } from "./runner.ts";
@@ -350,7 +351,7 @@ export async function cancelIntake(
     probe: ProcessProbe;
     trackerOf: TrackerOf;
   },
-  o: { intakeId: string; mode: "leave" | "stop"; workspace: WorkspaceRef; projectPath: string },
+  o: { intakeId: string; mode: "leave" | "stop"; workspace: WorkspaceRef },
 ): Promise<CancelOutcome> {
   const intake = await requireIntake(db, o.intakeId);
   const revising = intake.revising === 1;
@@ -392,9 +393,15 @@ export async function cancelIntake(
   }
   try {
     const project = await soleProjectOf(db, intake.workspace_id);
-    const tracker = (await deps.trackerOf(o.workspace)).tracker;
-    const closed = await closeSubIssuesOnCancel(db, tracker, {
-      projectPath: o.projectPath,
+    const wt = await deps.trackerOf(o.workspace);
+    const projectPath = await wt.projectPathFor(intake.issue_url);
+    if (projectPath === null) {
+      throw new Error(
+        `この Issue は workspace のどのリポジトリにもありません: ${intake.issue_url}`,
+      );
+    }
+    const closed = await closeSubIssuesOnCancel(db, wt.tracker, {
+      projectPath,
       intakeId: intake.id,
       baseBranch: project.base_branch,
     });
@@ -431,10 +438,10 @@ export async function completeHumanProcess(
   if (!plan || !process || process.actor !== "human") {
     throw new Error(`人のプロセスではありません: ${o.processId}`);
   }
-  const project = await soleProjectOf(db, intake.workspace_id);
+  const baseBranches = baseBranchesOf(await projectsOfProcesses(db, intake.workspace_id, plan.pfd));
   const status = computeProcessStatuses({
     pfd: plan.pfd,
-    baseBranch: project.base_branch,
+    baseBranches,
     revising: false,
     dispatchPaused: intake.dispatch_paused === 1,
     progress: await processProgressOf(db, intake.id),

@@ -268,6 +268,7 @@ th{color:var(--ink-3);font-size:11px;font-weight:500;border-top:0;background:var
 .pfd-node rect.pfd-inner{fill:none}
 .pfd-label{font-size:10.5px;fill:var(--ink)}
 .pfd-mark{fill:var(--ink-3);font-size:9.5px;font-weight:500}
+.pfd-project{fill:var(--ink-3);font-size:9.5px;font-family:var(--mono)}
 .pfd-stage{font-family:var(--mono);font-size:10px;font-weight:500;fill:var(--ink-3)}
 .pfd-comments circle{fill:var(--accent)}
 .pfd-comments text{fill:var(--accent-ink);font-size:9px;font-weight:500}

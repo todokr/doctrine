@@ -15,7 +15,8 @@ export type ProcessProgress = {
 
 export type StatusInput = {
   pfd: Pfd;
-  baseBranch: string;
+  /** プロセス id → そのプロセスのプロジェクトの base_branch。無い agent のプロセスの PR は merged にしない。 */
+  baseBranches: ReadonlyMap<string, string>;
   revising: boolean;
   dispatchPaused: boolean;
   /** プロセスの id ごと。無いプロセスはすべて null として扱う。 */
@@ -28,7 +29,7 @@ const noProgress: ProcessProgress = { task: null, pr: null, subIssueUrl: null, h
 function settledState(
   process: Process,
   progress: ProcessProgress,
-  baseBranch: string,
+  baseBranch: string | undefined,
 ): ProcessStatusEntry | null {
   const id = process.id;
   if (process.actor === "human") {
@@ -72,7 +73,9 @@ export function computeProcessStatuses(input: StatusInput): ProcessStatusEntry[]
   const progressOf = (id: string) => input.progress.get(id) ?? noProgress;
 
   const settled = new Map<string, ProcessStatusEntry | null>(
-    pfd.processes.map((p) => [p.id, settledState(p, progressOf(p.id), input.baseBranch)]),
+    pfd.processes.map((
+      p,
+    ) => [p.id, settledState(p, progressOf(p.id), input.baseBranches.get(p.id))]),
   );
 
   const available = availableArtifacts(pfd, (id) => settled.get(id)?.state);

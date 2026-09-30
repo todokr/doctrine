@@ -10,12 +10,12 @@ import {
 import { loadQuestionSets } from "./questionSet.ts";
 import type { Db, IntakeProcessRow, IntakeRow, ProjectRow } from "../db/schema.ts";
 import { insertTask, type NewTask } from "../db/tasks.ts";
-import { soleProjectOf } from "../db/workspaces.ts";
 import { branchNameFor } from "../domain/worktree.ts";
 import { pinOf, type WorkflowLoader, type WorkflowPin } from "../workflow/load.ts";
 import { sha256Hex } from "./pfd/hash.ts";
 import { buildTaskPrompt } from "./pfd/prompt.ts";
 import { computeProcessStatuses, type ProcessProgress } from "./pfd/status.ts";
+import { baseBranchesOf, missingProjectMessage, projectsOfProcesses } from "./processProject.ts";
 import { intakeDraft, processProgressOf } from "./view.ts";
 
 export type DispatchDeps = { loadWorkflow: WorkflowLoader };
@@ -68,8 +68,9 @@ export type DispatchReport = {
 
 type DispatchSource = {
   intake: IntakeRow;
-  project: ProjectRow;
   pfd: Pfd;
+  /** プロセス id → そのプロセスのプロジェクト。引けないプロセスは入らない。 */
+  projects: Map<string, ProjectRow>;
   /** 生きた行だけ。process_id ごと。 */
   rows: Map<string, IntakeProcessRow>;
   humanNotes: Record<string, string>;
@@ -78,7 +79,7 @@ type DispatchSource = {
 
 /** タスクの prompt に載せる材料を DB から組む。dispatchIntake と redispatchProcess が使う。 */
 async function loadDispatchSource(db: Db, intake: IntakeRow, pfd: Pfd): Promise<DispatchSource> {
-  const project = await soleProjectOf(db, intake.workspace_id);
+  const projects = await projectsOfProcesses(db, intake.workspace_id, pfd);
   const rows = new Map(
     (await listProcesses(db, intake.id)).filter((r) => r.retired_at === null)
       .map((r) => [r.process_id, r]),
@@ -88,7 +89,7 @@ async function loadDispatchSource(db: Db, intake: IntakeRow, pfd: Pfd): Promise<
     if (r.human_done_at !== null) humanNotes[r.process_id] = r.human_note ?? "";
   }
   const decisions = decisionTexts(await loadQuestionSets(db, intake.id));
-  return { intake, project, pfd, rows, humanNotes, decisions };
+  return { intake, pfd, projects, rows, humanNotes, decisions };
 }
 
 /**
@@ -120,7 +121,7 @@ export async function previewTaskPrompt(
 function statusesOf(src: DispatchSource, progress: ReadonlyMap<string, ProcessProgress>) {
   return computeProcessStatuses({
     pfd: src.pfd,
-    baseBranch: src.project.base_branch,
+    baseBranches: baseBranchesOf(src.projects),
     revising: false,
     dispatchPaused: false,
     progress,
@@ -135,9 +136,10 @@ async function dispatchProcess(
   db: Db,
   src: DispatchSource,
   row: IntakeProcessRow,
+  project: ProjectRow,
   pin: WorkflowPin,
 ): Promise<string | null> {
-  const { intake, project, pfd } = src;
+  const { intake, pfd } = src;
   const process = pfd.processes.find((p) => p.id === row.process_id)!;
   const prompt = buildTaskPrompt({
     pfd,
@@ -194,15 +196,22 @@ export async function dispatchIntake(
     .filter((p) => p.actor === "agent");
   if (ready.length === 0) return report;
 
-  // どのプロセスも同じ default_workflow なので、1回の呼び出しでは1度だけ読む。
-  const pin = pinOf(
-    await deps.loadWorkflow(src.project.path, src.project.default_workflow),
-    src.project,
-  );
+  // プロジェクトごとに 1 度だけ読む（プロジェクトが違えばワークフローの pin も違う）。
+  const pins = new Map<number, WorkflowPin>();
 
   for (const process of ready) {
+    const project = src.projects.get(process.id);
+    if (!project) {
+      report.errors.push({ processId: process.id, message: missingProjectMessage(process) });
+      continue;
+    }
+    let pin = pins.get(project.id);
+    if (!pin) {
+      pin = pinOf(await deps.loadWorkflow(project.path, project.default_workflow), project);
+      pins.set(project.id, pin);
+    }
     try {
-      const taskId = await dispatchProcess(db, src, src.rows.get(process.id)!, pin);
+      const taskId = await dispatchProcess(db, src, src.rows.get(process.id)!, project, pin);
       if (taskId !== null) report.created.push({ processId: process.id, taskId });
     } catch (e) {
       report.errors.push({
@@ -239,11 +248,16 @@ export async function redispatchProcess(
       `要確認のプロセスだけを再投入できます: ${o.processId}（${status?.state ?? "案に無い"}）`,
     );
   }
+  const project = src.projects.get(o.processId);
+  if (!project) {
+    const process = plan.pfd.processes.find((p) => p.id === o.processId)!;
+    throw new Error(missingProjectMessage(process));
+  }
   const pin = pinOf(
-    await deps.loadWorkflow(src.project.path, src.project.default_workflow),
-    src.project,
+    await deps.loadWorkflow(project.path, project.default_workflow),
+    project,
   );
-  const taskId = await dispatchProcess(db, src, row, pin);
+  const taskId = await dispatchProcess(db, src, row, project, pin);
   if (taskId === null) throw new Error("ほかの操作が先にタスクを置き換えました");
   return { taskId, replacedTaskId: row.current_task_id };
 }
