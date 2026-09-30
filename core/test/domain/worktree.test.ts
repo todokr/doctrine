@@ -20,6 +20,7 @@ import {
   listWorktrees,
   originRef,
   removeWorktree,
+  repoOfWorktree,
   restoreWorktree,
   slugify,
   stateDir,
@@ -348,6 +349,22 @@ test("listIntakeWorktrees は .git を持つ子だけを名前順で返す", asy
     { name: "a", path: a },
     { name: "z", path: z },
   ]);
+});
+
+test("repoOfWorktree はリンクされた worktree の元のリポジトリを返す", async () => {
+  const wt = await createDetachedWorktree({
+    repoPath: repo,
+    worktreePath: join(root, "wt"),
+    baseBranch: "main",
+  });
+
+  await removeWorktree({
+    repoPath: await repoOfWorktree(wt),
+    worktreePath: wt,
+    force: false,
+  });
+
+  assert.deepEqual(await listWorktrees(repo), []);
 });
 
 test("createDetachedWorktree はブランチを作らない", async () => {
