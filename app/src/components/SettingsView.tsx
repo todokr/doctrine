@@ -6,6 +6,7 @@ import type { Action, Loaded } from "../model";
 import { useSettingsRpc, useSlotsRpc, useStore } from "../store";
 import { ProjectConfigSection } from "./ProjectConfigSection";
 import { WorkflowSettings } from "./WorkflowSettings";
+import { WorkspaceList } from "./WorkspaceList";
 import type { DaemonSlots } from "../../../shared/protocol.ts";
 import { RUN_PURPOSE_WORD } from "../intake";
 
@@ -298,12 +299,18 @@ function AppSettingsSection(): React.JSX.Element {
   return <SettingsEditor key={JSON.stringify(s.settings.value)} initial={s.settings.value} />;
 }
 
+function WorkspaceSection(): React.JSX.Element {
+  const { s } = useStore();
+  return <WorkspaceList workspaces={s.workspaces} />;
+}
+
 export function SettingsView(): React.JSX.Element {
   return (
     <div className="pad">
       <h1>設定</h1>
       <AppSettingsSection />
       <SlotsSection />
+      <WorkspaceSection />
       <ProjectConfigSection />
       <WorkflowSettings />
     </div>

@@ -621,6 +621,13 @@ const wsSummary = (o: Partial<WorkspaceSummary> = {}): WorkspaceSummary => ({
 });
 
 describe("toWorkspace", () => {
+  test("tracker をそのまま写す", () => {
+    const linear = { ok: true, config: { kind: "linear", team: "ENG" } } as const;
+    const missing = { ok: false, reason: "workspace_config_missing", message: "not found" } as const;
+    expect(toWorkspace(wsSummary({ tracker: linear })).tracker).toEqual(linear);
+    expect(toWorkspace(wsSummary({ tracker: missing })).tracker).toEqual(missing);
+  });
+
   test("id・名前・root のパスを写し、プロジェクトを画面の形にする", () => {
     const api = summary({ id: 1, workspace_id: 3, path: "/home/u/work/api" });
     const w = toWorkspace(wsSummary({
@@ -682,6 +689,12 @@ describe("toProject / toTask", () => {
   test("プロジェクトの表示名はパスの末尾", () => {
     expect(toProject(summary()).id).toBe("doctrine");
     expect(toProject(summary({ path: "/home/u/work/shop-api/" })).id).toBe("shop-api");
+  });
+
+  test("name は ProjectSummary の name を写す（id はパスの末尾のまま）", () => {
+    const p = toProject(summary({ name: "shop-api", path: "/home/u/work/Shop_API" }));
+    expect(p.name).toBe("shop-api");
+    expect(p.id).toBe("Shop_API");
   });
 
   test("デーモンの id を daemonId に持つ", () => {

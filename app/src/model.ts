@@ -369,6 +369,7 @@ function pathColor(path: string): string {
 export function toProject(p: ProjectSummary): Project {
   return {
     id: projectKey(p.path),
+    name: p.name,
     daemonId: p.id,
     workspaceId: p.workspace_id,
     path: p.path,
@@ -384,6 +385,7 @@ export function toWorkspace(w: WorkspaceSummary): Workspace {
     name: w.name,
     path: w.path,
     color: pathColor(w.path),
+    tracker: w.tracker,
     projects: w.projects.map(toProject),
   };
 }
