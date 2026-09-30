@@ -8,6 +8,7 @@ import type {
   TaskContext,
   TaskDiff,
   TaskGuide,
+  WorkspaceSummary,
 } from "../../shared/protocol.ts";
 import type { Diagram, Guide, GuideLocation, Risk } from "../../shared/guide/schema.ts";
 
@@ -22,6 +23,8 @@ export type TaskState = "queued" | "running" | "suspended" | "paused" | "rate_li
 
 export type Project = {
   id: string;
+  /** workspace.yaml の projects のキー（ProjectSummary.name）。id はパスの末尾なので別物になりうる */
+  name: string;
   daemonId: number;
   workspaceId: number;
   color: string;
@@ -36,6 +39,8 @@ export type Workspace = {
   /** root のパス（WorkspaceSummary.path） */
   path: string;
   color: string;
+  /** workspace.yaml の tracker。読めなければ理由 */
+  tracker: WorkspaceSummary["tracker"];
   projects: Project[];
 };
 
