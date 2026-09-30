@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { IntakeLogPanel } from "./components/IntakeLog";
 import { IntakeFacePlaceholder, IntakeHeading, RevisingBand } from "./components/IntakeView";
 import { IssueChooser, IssueList, IssuePreview, TrackerUnavailable } from "./components/IssuePicker";
-import { GITHUB_ISSUES, INTAKES, LINEAR_ISSUES, PROJECTS } from "./fixtures";
+import { GITHUB_ISSUES, INTAKES, LINEAR_ISSUES, WORKSPACES } from "./fixtures";
 
 const noop = () => {};
 const URL = "https://github.com/o/r/issues/8";
@@ -237,7 +237,7 @@ describe("IntakeView の部品", () => {
 
   test("見出しは終端でなければ中止を出す", () => {
     const heading = (intake: typeof reviewing, onCancel?: () => void) =>
-      renderToStaticMarkup(<IntakeHeading intake={intake} project={PROJECTS[0]} onCancel={onCancel} />);
+      renderToStaticMarkup(<IntakeHeading intake={intake} workspace={WORKSPACES[0]} onCancel={onCancel} />);
     expect(heading(reviewing, noop)).toContain("中止…");
     expect(heading({ ...reviewing, state: "completed" }, noop)).not.toContain("中止…");
     expect(heading(reviewing)).not.toContain("中止…");
@@ -245,12 +245,27 @@ describe("IntakeView の部品", () => {
 
   test("見出しに番号・タイトル・状態の語を出す", () => {
     const html = renderToStaticMarkup(
-      <IntakeHeading intake={reviewing} project={PROJECTS[0]} />,
+      <IntakeHeading intake={reviewing} workspace={WORKSPACES[0]} />,
     );
     expect(html).toContain("#1");
     expect(html).toContain(reviewing.issue_title);
     expect(html).toContain("レビュー待ち");
     expect(html).toContain(reviewing.issue_url);
+  });
+
+  test("パンくずにプロジェクト 1 つの workspace の点と名前を出す", () => {
+    const html = renderToStaticMarkup(<IntakeHeading intake={reviewing} workspace={WORKSPACES[1]} />);
+    expect(html).toContain('<span class="pjdot" style="background:#AA3A2C"></span><span>shop-api</span>');
+  });
+
+  test("パンくずにプロジェクト 3 つの workspace の点と名前を出す", () => {
+    const html = renderToStaticMarkup(<IntakeHeading intake={reviewing} workspace={WORKSPACES[3]} />);
+    expect(html).toContain('<span class="pjdot" style="background:hsl(210 45% 38%)"></span><span>work</span>');
+  });
+
+  test("workspace が見つからなければパンくずは灰色の点", () => {
+    const html = renderToStaticMarkup(<IntakeHeading intake={reviewing} workspace={undefined} />);
+    expect(html).toContain('<span class="pjdot" style="background:#666"></span><span></span>');
   });
 });
 

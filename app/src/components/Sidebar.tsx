@@ -7,13 +7,13 @@ import {
   intakeProgress,
   intakeSection,
   issueNumber,
-  projectOfIntake,
   taskIntakeMark,
+  workspaceOfIntake,
 } from "../intake";
 import { GROUPS, ago, countReview, groupOf, hm, sidebarOrder, staleDaysOf, timeLabel, visibleTasks } from "../model";
 import { useStore } from "../store";
 import { groupTone, sectionTone, toneClass } from "../tone";
-import type { Task } from "../types";
+import type { Task, Workspace } from "../types";
 import { isStaleWorktree, worktreesNeedAttention } from "../worktrees";
 import { RateLimit } from "./RateLimit";
 
@@ -98,26 +98,47 @@ function Item({ t }: { t: Task }) {
 
 function IntakeItem({ i }: { i: IntakeSummary }) {
   const { s, dispatch } = useStore();
-  const p = projectOfIntake(i, s.projects);
+  return (
+    <IntakeRow
+      intake={i}
+      workspace={workspaceOfIntake(i, s.workspaces)}
+      selected={s.intakeSel === i.id}
+      now={s.now}
+      onSelect={() => dispatch({ type: "intake.select", id: i.id })}
+    />
+  );
+}
+
+export function IntakeRow(p: {
+  intake: IntakeSummary;
+  workspace: Workspace | undefined;
+  selected: boolean;
+  now: number;
+  onSelect: () => void;
+}) {
+  const i = p.intake;
   const num = issueNumber(i.issue_url);
   const progress = intakeProgress(i);
   return (
     <button
       className={`it ${toneClass(sectionTone(intakeSection(i), i))}`}
-      aria-current={s.intakeSel === i.id}
-      onClick={() => dispatch({ type: "intake.select", id: i.id })}
+      aria-current={p.selected}
+      onClick={p.onSelect}
     >
       <span className="t">
         {num !== null && <span className="num">{`#${num}`}</span>}
         {i.issue_title}
       </span>
       <span className="m">
-        <span className="pjdot" style={{ background: p?.color ?? "#666" }} />
+        <span className="pj">
+          <span className="pjdot" style={{ background: p.workspace?.color ?? "#666" }} />
+          {p.workspace?.name ?? ""}
+        </span>
         <span>{INTAKE_WORD[i.state]}</span>
         {progress && <span className="prog">{progress}</span>}
         {i.revising && <span className="tag rev">改訂中</span>}
         {i.rate_limited_until && <span>{`${hm(Date.parse(i.rate_limited_until))} 再開`}</span>}
-        <span className="tm">{ago(Date.parse(i.updated_at), s.now)}</span>
+        <span className="tm">{ago(Date.parse(i.updated_at), p.now)}</span>
       </span>
     </button>
   );

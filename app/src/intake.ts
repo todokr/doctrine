@@ -21,7 +21,7 @@ import type {
   WorkspaceSummary,
 } from "../../shared/protocol.ts";
 import { LOOK, parsePfdKey, pfdKey } from "./pfd";
-import type { Project, Task } from "./types";
+import type { Project, Task, Workspace } from "./types";
 
 /** targetId は質問か仮定の id */
 export type AnswerIssue = { targetId: string; message: string };
@@ -172,13 +172,12 @@ export function visibleIntakes(
   return intakes.filter((i) => i.workspace_id === workspaceId);
 }
 
-/** Intake の workspace のただ 1 つのプロジェクト。workspace にプロジェクトが 1 つでなければ undefined。 */
-export function projectOfIntake(
+/** Intake の workspace。一覧にまだ無ければ undefined */
+export function workspaceOfIntake(
   i: Pick<IntakeSummary, "workspace_id">,
-  projects: Project[],
-): Project | undefined {
-  const matches = projects.filter((p) => p.workspaceId === i.workspace_id);
-  return matches.length === 1 ? matches[0] : undefined;
+  workspaces: Workspace[],
+): Workspace | undefined {
+  return workspaces.find((w) => w.id === i.workspace_id);
 }
 
 /** サイドバーの描画も j/k もこの順を使う */

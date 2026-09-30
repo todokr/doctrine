@@ -18,6 +18,7 @@ import {
   PROJECTS,
   QUESTIONS,
   RESPONSES,
+  WORKSPACES,
 } from "./fixtures";
 import { buildPfdView, LOOK } from "./pfd";
 import {
@@ -55,11 +56,11 @@ import {
   normalizeReply,
   openQuestionSet,
   parseIssueInput,
-  projectOfIntake,
   rejectionText,
   setWholeComment,
   toggleOption,
   trackerGuidance,
+  workspaceOfIntake,
   workspacePathOf,
   updateAnswer,
   updateResponse,
@@ -389,18 +390,20 @@ describe("intakeOrder", () => {
   });
 });
 
-describe("projectOfIntake", () => {
-  test("workspace にプロジェクトが 1 つならそれを返す", () => {
-    expect(projectOfIntake({ workspace_id: 2 }, PROJECTS)).toEqual(PROJECTS[1]);
+describe("workspaceOfIntake", () => {
+  test("workspace_id の workspace を返す", () => {
+    expect(workspaceOfIntake({ workspace_id: 2 }, WORKSPACES)).toEqual(WORKSPACES[1]);
   });
 
-  test("workspace にプロジェクトが 2 つなら undefined", () => {
-    const extra = { ...PROJECTS[1], id: "extra", daemonId: 9, workspaceId: 1 };
-    expect(projectOfIntake({ workspace_id: 1 }, [...PROJECTS, extra])).toBeUndefined();
+  test("プロジェクトが 3 つの workspace も返す", () => {
+    const w = workspaceOfIntake({ workspace_id: 4 }, WORKSPACES);
+    expect(w?.name).toBe("work");
+    expect(w?.projects.length).toBe(3);
   });
 
-  test("どのプロジェクトの workspace でもなければ undefined", () => {
-    expect(projectOfIntake({ workspace_id: 99 }, PROJECTS)).toBeUndefined();
+  test("一覧に無ければ undefined", () => {
+    expect(workspaceOfIntake({ workspace_id: 99 }, WORKSPACES)).toBeUndefined();
+    expect(workspaceOfIntake({ workspace_id: 1 }, [])).toBeUndefined();
   });
 });
 
