@@ -7,6 +7,7 @@ import {
   insertWorkspace,
   listProjectsOf,
 } from "../db/workspaces.ts";
+import { WorkspaceConfigError } from "../tracker/tracker.ts";
 import { parseProjectConfig, type ProjectConfig } from "../workflow/project.ts";
 import {
   ensureProjectScaffold,
@@ -20,6 +21,7 @@ import {
   type WorkspaceConfig,
 } from "../workflow/workspace.ts";
 import type { WorkspaceSummary } from "../../../shared/protocol.ts";
+import { readTrackerConfig } from "./tracker.ts";
 
 type ResolvedProject = { name: string; path: string };
 
@@ -122,7 +124,24 @@ export async function updateWorkspace(db: Db, rootPath: string): Promise<{ works
 export async function toWorkspaceSummary(db: Db, workspaceId: number): Promise<WorkspaceSummary> {
   const w = await getWorkspace(db, workspaceId);
   if (!w) throw new Error(`workspace がありません: ${workspaceId}`);
-  return { id: w.id, path: w.path, name: w.name, projects: await listProjectsOf(db, w.id) };
+  return {
+    id: w.id,
+    path: w.path,
+    name: w.name,
+    projects: await listProjectsOf(db, w.id),
+    tracker: await trackerConfigOf(w.path),
+  };
+}
+
+async function trackerConfigOf(workspacePath: string): Promise<WorkspaceSummary["tracker"]> {
+  try {
+    return { ok: true, config: await readTrackerConfig(workspacePath) };
+  } catch (e) {
+    if (e instanceof WorkspaceConfigError) {
+      return { ok: false, reason: e.reason, message: e.message };
+    }
+    throw e;
+  }
 }
 
 /** project.yaml から読んだ設定を projects の行へ写す。 */
