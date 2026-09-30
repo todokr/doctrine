@@ -31,7 +31,7 @@ test("implement のモデルとプロンプトを変えると、その2か所だ
   // model の書き換えは implement ステップの先頭付近にあるので、
   // 先に model を書き換えてから prompt の範囲を切り出して期待値を作る。
   const originalWithModel = original.replace(
-    "    model: claude-sonnet-5\n",
+    "    model: claude-sonnet-5-5\n",
     "    model: claude-opus-5\n",
   );
   const promptStart = originalWithModel.indexOf(
