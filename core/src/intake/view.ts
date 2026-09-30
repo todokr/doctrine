@@ -11,7 +11,7 @@ import {
 import { loadQuestionSets } from "./questionSet.ts";
 import type { Db, IntakeDraftRow, IntakeRow } from "../db/schema.ts";
 import { getTask } from "../db/tasks.ts";
-import { listProjectsOf } from "../db/workspaces.ts";
+import { baseBranchesOf, projectsOfProcesses } from "./processProject.ts";
 import type { AttentionReason, CommentReply } from "../../../shared/intake/decomposer.ts";
 import type { Pfd } from "../../../shared/intake/pfd.ts";
 import type { PrFact, ProcessStatus } from "../../../shared/intake/processStatus.ts";
@@ -73,15 +73,13 @@ export async function processProgressOf(
 async function processStatusesOf(db: Db, row: IntakeRow): Promise<ProcessFacts[]> {
   const approval = await latestApproval(db, row.id);
   if (!approval) return [];
-  const projects = await listProjectsOf(db, row.workspace_id);
-  if (projects.length !== 1) return [];
   const pfd = JSON.parse((await getDraft(db, approval.draft_id))!.pfd) as Pfd;
-  const project = projects[0];
   const progress = await processProgressOf(db, row.id);
+  const baseBranches = baseBranchesOf(await projectsOfProcesses(db, row.workspace_id, pfd));
 
   return computeProcessStatuses({
     pfd,
-    baseBranch: project.base_branch,
+    baseBranches,
     revising: row.revising === 1,
     dispatchPaused: row.dispatch_paused === 1,
     progress,

@@ -15,6 +15,7 @@ import { containsCommit, fetchBaseBranch, originRef } from "../domain/worktree.t
 import type { IntakeTransition } from "./commands.ts";
 import { dispatchIntake, loadApprovedPlan } from "./dispatch.ts";
 import { computeProcessStatuses, goalReached } from "./pfd/status.ts";
+import { baseBranchesOf, projectsOfProcesses } from "./processProject.ts";
 import { syncIssueStates } from "./issueStateSync.ts";
 import { closeMergedSubIssues, syncSubIssues } from "./subIssueSync.ts";
 import { processProgressOf } from "./view.ts";
@@ -295,9 +296,12 @@ export async function watchWorkspace(
       try {
         const plan = await loadApprovedPlan(db, intake.id);
         if (!plan) continue;
+        const baseBranches = baseBranchesOf(
+          await projectsOfProcesses(db, intake.workspace_id, plan.pfd),
+        );
         const statuses = computeProcessStatuses({
           pfd: plan.pfd,
-          baseBranch: project.base_branch,
+          baseBranches,
           revising: false,
           dispatchPaused: false,
           progress: await processProgressOf(db, intake.id),
