@@ -9,6 +9,9 @@ import type { FrozenPart } from "./pfd/validate.ts";
  * 文面を別ファイルに出さない（deno compile が別ファイルを同梱しない）。
  */
 
+/** 分解のプロンプトに載せるプロジェクト。repo は GitHub の owner/name で、GitHub でないか引けなければ null。 */
+export type PromptProject = { name: string; baseBranch: string; repo: string | null };
+
 const DECOMPOSITION_RULES = `## PFD の書き方
 
 要素は成果物とプロセスの 2 種類だけである。プロセスは成果物を入力に取り、別の成果物を出力する。
@@ -48,6 +51,7 @@ PFD は次の形の JSON で返す（\`issue\` のキーは無い）。
       "id": "1",
       "name": "マイグレーションを書く",
       "actor": "agent",
+      "project": "<プロジェクト名>",
       "inputs": ["schema"],
       "outputs": ["new-table"],
       "purpose": "なぜこの作業が要るか",
@@ -76,6 +80,9 @@ PFD は次の形の JSON で返す（\`issue\` のキーは無い）。
   プロセスを実行するエージェントは、この会話も、他のプロセスの定義も見ない
 - **実行しなければ決められない判断**（計測してみないと分からない、試作を見ないと選べない、など）は、
   エージェントに推測させず、\`actor: "human"\` のプロセスにする。仕様の選択、外部との調整、運用上の判断も同じ
+- \`actor: "agent"\` のプロセスは、\`project\` に下の「プロジェクト」の一覧のプロジェクト名を必ず書く。
+  プロジェクトが 1 つでも省かない。\`actor: "human"\` のプロセスは、リポジトリに結びつく作業のときだけ書く。
+  一覧に無い名前は書かない
 - **分解の前に人が決めた事項**（質問への回答と、仮定への応答）のうち、プロセスの前提になるものは、
   \`decision\` にその質問か仮定の id を入れた \`given: true\` の成果物として最初から揃っているものとして置く。
   決定の中身は doctrine が回答と応答から埋めるので、\`description\` に決定の中身を書かない。
@@ -131,8 +138,19 @@ ${issue.body}
 ${comments}`;
 }
 
+function formatProjects(projects: readonly PromptProject[]): string {
+  const lines = ["## プロジェクト", "", "project にはこの一覧にある名前を書きます。", ""];
+  for (const p of projects) {
+    const repo = p.repo === null ? "" : `、GitHub: ${p.repo}`;
+    lines.push(`- ${p.name}（baseBranch: ${p.baseBranch}${repo}）`);
+  }
+  return lines.join("\n");
+}
+
 /** 会話の最初に 1 回だけ送る。調査の実行として、質問だけを返させる。 */
-export function buildInitialPrompt(input: { issue: IssueDetail }): string {
+export function buildInitialPrompt(
+  input: { issue: IssueDetail; projects: readonly PromptProject[] },
+): string {
   return `あなたは、Issue を PFD（Process Flow Diagram）で分解する前に、分解の論点を洗い出して人に確かめてもらう役です。
 リポジトリは読むだけで、書き換えません。出力は最終応答の構造化出力で返し、ファイルには書きません。
 
@@ -141,6 +159,8 @@ export function buildInitialPrompt(input: { issue: IssueDetail }): string {
 ${formatIssue(input.issue)}
 
 ${DECOMPOSITION_RULES}
+
+${formatProjects(input.projects)}
 
 この規則は、あとで PFD を書くときに使います。どこが分解の論点になるかを見つけるためにも、先に読んでください。
 
@@ -177,6 +197,7 @@ export function buildRevisionPrompt(input: {
   decisions: Record<string, string>;
   /** buildFeedback(approved, 改訂の開始コメント) の結果。 */
   feedback: string;
+  projects: readonly PromptProject[];
 }): string {
   const retired = input.retiredProcessIds.length === 0 ? "" : `## 使えない id
 
@@ -197,6 +218,8 @@ ${input.retiredProcessIds.map((id) => `- ${id}`).join("\n")}
 ${formatIssue(input.issue)}
 
 ${DECOMPOSITION_RULES}
+
+${formatProjects(input.projects)}
 
 ${QUESTION_RULES}
 

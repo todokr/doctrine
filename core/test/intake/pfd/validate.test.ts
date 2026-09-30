@@ -106,7 +106,11 @@ test("validatePfd: goal に given から辿り着けない", () => {
   assert.ok(rules(pfd).includes("goal_unreachable:feature"));
 });
 
-const answered: ValidateContext = { decisionIds: new Set(["q1"]), frozen: null };
+const answered: ValidateContext = {
+  decisionIds: new Set(["q1"]),
+  frozen: null,
+  projectNames: new Set(["repo"]),
+};
 
 test("validatePfd: 答えのある質問を指す decision は通る", () => {
   assert.deepEqual(validatePfd(withDecision(), answered), []);
@@ -125,7 +129,11 @@ test("validatePfd: 答えの無い質問を指す decision", () => {
 });
 
 function revising(): ValidateContext {
-  return { decisionIds: new Set(), frozen: frozenPart(example(), new Set(["1"])) };
+  return {
+    decisionIds: new Set(),
+    frozen: frozenPart(example(), new Set(["1"])),
+    projectNames: new Set(["repo"]),
+  };
 }
 
 test("validatePfd: 改訂でも固定された部分が同じなら通る", () => {
@@ -151,6 +159,53 @@ test("validatePfd: 固定されたプロセスを消すと frozen_changed", () =
   next.processes = next.processes.filter((p) => p.id !== "1");
   next.artifacts[1].given = true;
   assert.ok(rules(next, revising()).includes("frozen_changed:1"));
+});
+
+test("validatePfd: agent のプロセスに project が無いと missing_project", () => {
+  const pfd = example();
+  delete pfd.processes[0].project;
+  assert.ok(rules(pfd).includes("missing_project:1"));
+});
+
+test("validatePfd: workspace に無い project は unknown_project", () => {
+  const pfd = example();
+  pfd.processes[0].project = "ghost";
+  const violations = validatePfd(pfd, noContext);
+  const r = violations.map((v) => `${v.rule}:${v.id}`);
+  assert.ok(r.includes("unknown_project:1"));
+  assert.ok(!r.includes("missing_project:1"));
+  assert.match(violations.find((v) => v.rule === "unknown_project")!.message, /ghost/);
+});
+
+test("validatePfd: human のプロセスは project が無くても通る", () => {
+  assert.ok(!rules(example()).includes("missing_project:3"));
+});
+
+test("validatePfd: human のプロセスでも workspace に無い project は unknown_project", () => {
+  const pfd = example();
+  pfd.processes[2].project = "ghost";
+  assert.ok(rules(pfd).includes("unknown_project:3"));
+});
+
+test("validatePfd: human のプロセスに workspace にある project を書けば通る", () => {
+  const pfd = example();
+  pfd.processes[2].project = "repo";
+  assert.deepEqual(validatePfd(pfd, noContext), []);
+});
+
+test("validatePfd: 固定されたプロセスに project が無くても例外にしない", () => {
+  const approved = example();
+  delete approved.processes[0].project;
+  const ctx: ValidateContext = {
+    decisionIds: new Set(),
+    frozen: frozenPart(approved, new Set(["1"])),
+    projectNames: new Set(["repo"]),
+  };
+  const next = example();
+  delete next.processes[0].project;
+  const r = rules(next, ctx);
+  assert.ok(r.includes("missing_project:1"));
+  assert.ok(!r.includes("frozen_changed:1"));
 });
 
 test("frozenPart: 固定されたプロセスとその入出力の成果物を集める", () => {

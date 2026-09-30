@@ -23,3 +23,32 @@ test("質問の出力を読める", () => {
   });
   assert.equal(parsed.success, true);
 });
+
+test("decomposerJsonSchema のプロセスに project がある", () => {
+  assert.match(JSON.stringify(decomposerJsonSchema()), /"project"/);
+});
+
+test("project の無い agent のプロセスも形としては読める", () => {
+  const pfd = {
+    title: "t",
+    goal: ["a"],
+    artifacts: [{ id: "a", name: "a", given: false, verify: "v" }],
+    processes: [
+      {
+        id: "1",
+        name: "p",
+        actor: "agent",
+        inputs: [],
+        outputs: ["a"],
+      },
+    ],
+  };
+  const parsed = decomposerOutputSchema.safeParse({
+    kind: "pfd",
+    questions: null,
+    assumptions: null,
+    pfd,
+    replies: [],
+  });
+  assert.equal(parsed.success, true);
+});

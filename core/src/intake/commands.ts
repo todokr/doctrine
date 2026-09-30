@@ -18,7 +18,7 @@ import { advanceParentIssue } from "./issueStateSync.ts";
 import { loadQuestionSets } from "./questionSet.ts";
 import type { Db, IntakeRow, IntakeState } from "../db/schema.ts";
 import type { TaskState } from "../db/tasks.ts";
-import { soleProjectOf } from "../db/workspaces.ts";
+import { listProjectsOf, soleProjectOf } from "../db/workspaces.ts";
 import { cancelTask } from "../domain/cancelTask.ts";
 import { assertIntakeTransition, isIntakeTerminal } from "../domain/intakeStates.ts";
 import { killStaleChild, type ProcessProbe } from "../domain/recovery.ts";
@@ -232,7 +232,14 @@ export async function approveIntake(
     if (latest.hash !== o.hash) throw new Error("表示している案の内容が保存された案と異なります");
     const pfd = JSON.parse(latest.pfd) as Pfd;
     if (intake.revising === 1) {
-      const issues = revisionIssues(pfd, await loadRevisionConstraints(trx, intake.id));
+      const projectNames = new Set(
+        (await listProjectsOf(trx, intake.workspace_id)).map((p) => p.name),
+      );
+      const issues = revisionIssues(
+        pfd,
+        await loadRevisionConstraints(trx, intake.id),
+        projectNames,
+      );
       if (issues.length > 0) throw new Error(issues.join("\n"));
     }
     await updateIntake(

@@ -32,7 +32,7 @@ import { fakePrWatcher } from "../helpers/prWatcher.ts";
 import { makeRepo, until } from "../helpers/repo.ts";
 import { constTrackerOf, fakeTracker } from "../helpers/tracker.ts";
 import { pfdOut, question, questionsOut } from "../intake/runnerHelper.ts";
-import { example, revised } from "../intake/pfd/fixture.ts";
+import { example, revised, withProject } from "../intake/pfd/fixture.ts";
 
 const ISSUE = "https://github.com/o/r/issues/1";
 const NOOP_CONN = { follow() {}, unfollow() {}, isFollowing: () => false };
@@ -1277,7 +1277,7 @@ test("実行中の出力は intake.logLine として、その Intake を追従�
 const LINEAR_ISSUE = "https://linear.app/acme/issue/ENG-1/x";
 
 /** repo（宣言なし = GitHub）と linearRepo（tracker: linear）の 2 プロジェクトを登録する。 */
-async function twoProjects(o: { github: Tracker; linear: Tracker }) {
+async function twoProjects(o: { github: Tracker; linear: Tracker; adapter?: AgentAdapter }) {
   const linearRepo = await makeRepo(join(root, "linear"), {
     "README.md": "y\n",
     ".doctrine/project.yaml": "defaultWorkflow: feature\nmaxConcurrent: 1\nbaseBranch: main\n",
@@ -1287,6 +1287,7 @@ async function twoProjects(o: { github: Tracker; linear: Tracker }) {
   });
   const s = await setup({
     trackerOf: trackerFor({ linearApiKey: "lin_x", github: o.github, linear: () => o.linear }),
+    adapter: o.adapter,
   });
   await s.call("workspace.add", { path: linearRepo });
   return { ...s, linearRepo };
@@ -1394,6 +1395,10 @@ test("Linear のプロジェクトの見張りと中止は Linear に sub-issue 
   const { ctx, call, linearRepo } = await twoProjects({
     github: ghFt.tracker,
     linear: linFt.tracker,
+    adapter: createMockAdapter({
+      result: {},
+      sequence: [questionsOut([question("q1")]), pfdOut(withProject(example(), "linear"))],
+    }),
   });
 
   const reviewing = await toReviewing(ctx, call, linearRepo, LINEAR_ISSUE);
