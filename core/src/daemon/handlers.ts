@@ -27,7 +27,6 @@ import {
   getWorkspaceByPath,
   listProjectsOf,
   listWorkspaces,
-  soleProjectOf,
   workspaceRefOf,
 } from "../db/workspaces.ts";
 import {
@@ -839,9 +838,6 @@ export function createHandler(ctx: DaemonContext): Handler {
 
       case "intake.start": {
         const ws = await reqWorkspace(ctx, params);
-        // プロジェクトが複数ある workspace はここで断る（soleProjectOf がまだプロジェクトを
-        // 1 つに絞れない）。何も書き込まずに reject する。
-        await soleProjectOf(ctx.db, ws.id);
         const wt = await ctx.trackerOf(await workspaceRefOf(ctx.db, ws.id));
         const { intake, alreadyActive, problems } = await startIntake(ctx.db, wt, {
           workspaceId: ws.id,

@@ -30,18 +30,6 @@ export function listProjectsOf(db: Db, workspaceId: number): Promise<ProjectRow[
     .where("workspace_id", "=", workspaceId).orderBy("id").execute();
 }
 
-/** 第 1 段の Intake が使うプロジェクト。workspace のプロジェクトがちょうど 1 つでなければ投げる（第 2 段で消す）。 */
-export async function soleProjectOf(db: Db, workspaceId: number): Promise<ProjectRow> {
-  const projects = await listProjectsOf(db, workspaceId);
-  if (projects.length > 1) {
-    throw new Error("プロジェクトが複数ある workspace の Intake はまだ扱えません");
-  }
-  if (projects.length === 0) {
-    throw new Error(`workspace ${workspaceId} にプロジェクトがありません`);
-  }
-  return projects[0];
-}
-
 /** WorkspaceRef を DB の行から作る。projects は id 順で、名前と実パス。 */
 export async function workspaceRefOf(db: Db, workspaceId: number): Promise<WorkspaceRef> {
   const workspace = await getWorkspace(db, workspaceId);
