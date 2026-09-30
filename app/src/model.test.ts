@@ -49,6 +49,7 @@ import {
   toProject,
   toRateLimitWindow,
   toTask,
+  toWorkspace,
   type DiffView,
   type Loaded,
   type State,
@@ -65,6 +66,7 @@ import type {
   StepRun,
   TaskDetail,
   TaskSummary,
+  WorkspaceSummary,
   WorktreeEntry,
 } from "../../shared/protocol.ts";
 
@@ -104,6 +106,7 @@ const base = (overrides: Partial<State> = {}): State => ({
   settings: { kind: "loading" },
   composer: null,
   wizard: null,
+  workspaces: [],
   workspacesChecked: true,
   ...overrides,
 });
@@ -564,6 +567,63 @@ const summary = (o: Partial<ProjectSummary> = {}): ProjectSummary => ({
   base_branch: "main",
   setup: null,
   ...o,
+});
+
+const wsSummary = (o: Partial<WorkspaceSummary> = {}): WorkspaceSummary => ({
+  id: 1,
+  name: "doctrine",
+  path: "/home/u/git/doctrine",
+  projects: [summary()],
+  ...o,
+});
+
+describe("toWorkspace", () => {
+  test("id・名前・root のパスを写し、プロジェクトを画面の形にする", () => {
+    const api = summary({ id: 1, workspace_id: 3, path: "/home/u/work/api" });
+    const w = toWorkspace(wsSummary({
+      id: 3,
+      name: "work",
+      path: "/home/u/work",
+      projects: [api, summary({ id: 2, workspace_id: 3, path: "/home/u/work/web" })],
+    }));
+    expect(w.id).toBe(3);
+    expect(w.name).toBe("work");
+    expect(w.path).toBe("/home/u/work");
+    expect(w.projects.map((p) => p.id)).toEqual(["api", "web"]);
+    expect(w.projects[0]).toEqual(toProject(api));
+  });
+
+  test("色は root のパスだけで決まる", () => {
+    const a = toWorkspace(wsSummary({ path: "/home/u/work" }));
+    const b = toWorkspace(wsSummary({ id: 9, name: "other", path: "/home/u/work", projects: [] }));
+    const c = toWorkspace(wsSummary({ path: "/x/y" }));
+    expect(a.color).toBe(b.color);
+    expect(a.color).not.toBe(c.color);
+  });
+
+  test("プロジェクト 1 つの workspace はそのプロジェクトと同じ色になる", () => {
+    expect(toWorkspace(wsSummary()).color).toBe(toProject(summary()).color);
+  });
+
+  test("色は toProject と同じ hsl の形", () => {
+    expect(toWorkspace(wsSummary()).color).toMatch(/^hsl\(\d+ 45% 38%\)$/);
+  });
+});
+
+describe("workspace の一覧の取り直し", () => {
+  test("workspaces.sync で一覧を置き換える", () => {
+    const s = reduce(
+      base({ workspaces: [toWorkspace(wsSummary({ id: 1 }))] }),
+      { type: "workspaces.sync", workspaces: [toWorkspace(wsSummary({ id: 2, path: "/home/u/work" }))] },
+    );
+    expect(s.workspaces.map((w) => w.id)).toEqual([2]);
+  });
+
+  test("workspaces.sync は初回ウィザードの判定に触らない", () => {
+    const s = reduce(base({ workspacesChecked: false }), { type: "workspaces.sync", workspaces: [] });
+    expect(s.workspacesChecked).toBe(false);
+    expect(s.wizard).toBeNull();
+  });
 });
 
 const PJ = [summary()];

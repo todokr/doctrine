@@ -29,6 +29,16 @@ export type Project = {
   def: string;
 };
 
+/** workspace.list の 1 件の画面の形。color は root のパスから作る */
+export type Workspace = {
+  id: number;
+  name: string;
+  /** root のパス（WorkspaceSummary.path） */
+  path: string;
+  color: string;
+  projects: Project[];
+};
+
 export type DiffHunk = {
   /** ガイドが指す hunk の id（shared/guide/hunkId.ts の listHunks と同じ値） */
   id: string;
