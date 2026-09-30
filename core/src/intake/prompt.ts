@@ -142,8 +142,13 @@ function formatProjects(projects: readonly PromptProject[]): string {
   const lines = ["## プロジェクト", "", "project にはこの一覧にある名前を書きます。", ""];
   for (const p of projects) {
     const repo = p.repo === null ? "" : `、GitHub: ${p.repo}`;
-    lines.push(`- ${p.name}（baseBranch: ${p.baseBranch}${repo}）`);
+    lines.push(`- ${p.name}（ディレクトリ: ${p.name}/、baseBranch: ${p.baseBranch}${repo}）`);
   }
+  lines.push(
+    "",
+    "各プロジェクトは作業ディレクトリ直下の `<名前>/` にあります。作業ディレクトリ自体は git リポジトリではありません。",
+    "git は `git -C <名前> log` のように -C でプロジェクトのディレクトリを指して呼びます。cd してから git を呼ばないでください（許可されていません）。",
+  );
   return lines.join("\n");
 }
 

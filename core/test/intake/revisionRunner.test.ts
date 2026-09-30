@@ -19,7 +19,11 @@ import {
   updateIntake,
   updateProcess,
 } from "../../src/db/intakes.ts";
-import { createDetachedWorktree, intakeWorktreePathFor } from "../../src/domain/worktree.ts";
+import {
+  canonical,
+  createDetachedWorktree,
+  intakeWorktreePathFor,
+} from "../../src/domain/worktree.ts";
 import {
   abandonRevision,
   answerIntake,
@@ -57,9 +61,11 @@ const NEVER_ALIVE = { startTimeOf: () => Promise.resolve(null), kill: () => {} }
 
 /** 承認済みで active、プロセス 1 が投入済みの Intake にする。worktree と会話（old）も持つ。 */
 async function seedApproved(): Promise<string> {
+  const parent = intakeWorktreePathFor("i1");
+  await Deno.mkdir(parent, { recursive: true });
   const worktree = await createDetachedWorktree({
     repoPath: f.repo,
-    worktreePath: intakeWorktreePathFor(f.repo, "i1"),
+    worktreePath: join(parent, "repo"),
     baseBranch: "main",
   });
   const runId = await insertIntakeRun(f.db, {
@@ -87,7 +93,7 @@ async function seedApproved(): Promise<string> {
   }
   await updateIntake(f.db, "i1", {
     state: "active",
-    worktree_path: worktree,
+    worktree_path: await canonical(parent),
     claude_session_id: "old",
   });
   const report = await dispatchIntake(f.db, "i1", { loadWorkflow: fakeWorkflowLoader() });

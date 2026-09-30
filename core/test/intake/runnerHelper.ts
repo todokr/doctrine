@@ -4,6 +4,7 @@ import { join } from "node:path";
 import type { AgentAdapter } from "../../src/adapter/types.ts";
 import { insertIntake } from "../../src/db/intakes.ts";
 import { openDb } from "../../src/db/migrate.ts";
+import { insertProject } from "../../src/db/tasks.ts";
 import type { Db } from "../../src/db/schema.ts";
 import { seedProject } from "../helpers/project.ts";
 import { claimIntakeRun, type IntakeRunnerDeps, runIntakeRun } from "../../src/intake/runner.ts";
@@ -40,6 +41,25 @@ export async function createFixture(): Promise<Fixture> {
     issue_title: "T",
   });
   return { root, repo, db, projectId, workspaceId, logRoot: join(root, "logs"), originalStateDir };
+}
+
+/** f の workspace に、f.root/<name>/repo のリポジトリを持つプロジェクト <name>（baseBranch main）を足す。リポジトリのパスを返す。 */
+export async function addProject(
+  f: Fixture,
+  name: string,
+  files?: Record<string, string>,
+): Promise<string> {
+  const path = await makeRepo(join(f.root, name), files ?? { "README.md": "y\n" });
+  await insertProject(f.db, {
+    workspace_id: f.workspaceId,
+    name,
+    path,
+    default_workflow: "f",
+    max_concurrent: 1,
+    base_branch: "main",
+    setup: null,
+  });
+  return path;
 }
 
 export async function destroyFixture(f: Fixture): Promise<void> {
