@@ -32,8 +32,8 @@ import type { TrackerOf } from "../../src/tracker/tracker.ts";
 import { workspaceTracker } from "../../src/tracker/workspaceTracker.ts";
 import { fakePrWatcher } from "../helpers/prWatcher.ts";
 import { until } from "../helpers/repo.ts";
-import { example } from "./pfd/fixture.ts";
-import { PARENT_URL, seedActive } from "./watchFixture.ts";
+import { example, withProcess5 } from "./pfd/fixture.ts";
+import { addApi, PARENT_URL, seedActive } from "./watchFixture.ts";
 
 function pr(number: number, state: PrFact["state"], baseRef = "main"): PrFact {
   return {
@@ -307,6 +307,95 @@ test("上流のマージのコミットが origin の baseBranch に入るまで
   assert.ok(base.fetches >= 3, "周ごとに取り込む");
 });
 
+async function taskOf(db: Db, processId: string) {
+  return (await getTask(db, (await currentTask(db, processId))!))!;
+}
+
+test("2 プロジェクトの workspace では、PR をプロジェクトごとの pullRequests で引く", async () => {
+  const s = await setup(withProcess5(example()));
+  const apiId = await addApi(s.db, s.workspaceId);
+  await s.watcher.request(s.workspaceId);
+  const task1 = await taskOf(s.db, "1");
+  const task5 = await taskOf(s.db, "5");
+  assert.equal(task1.project_id, s.projectId);
+  assert.equal(task5.project_id, apiId);
+
+  s.pw.calls.length = 0;
+  s.pw.paths.length = 0;
+  await s.watcher.request(s.workspaceId);
+  assert.deepEqual(s.pw.paths, ["/repo", "/api"]);
+  assert.deepEqual(s.pw.calls, [[task1.branch], [task5.branch]]);
+});
+
+test("片方のプロジェクトの PR の観測に失敗しても、もう片方は観測する", async () => {
+  const s = await setup(withProcess5(example()));
+  await addApi(s.db, s.workspaceId);
+  await s.watcher.request(s.workspaceId);
+  const task5 = await taskOf(s.db, "5");
+  s.pw.prs.set(task5.branch, [pr(7, "OPEN", "develop")]);
+  s.pw.failingPaths.add("/repo");
+  await s.watcher.request(s.workspaceId);
+  assert.equal((await getPrObservation(s.db, task5.id))?.state, "OPEN");
+  assert.equal(s.watcher.health(s.workspaceId).consecutiveFailures, 1);
+  assert.match(s.watcher.health(s.workspaceId).lastError!, /PR の観測（repo）/);
+});
+
+test("片方のプロジェクトの origin を取り込めなくても、もう片方のプロセスは投入する", async () => {
+  const s = await setup(withProcess5(example()));
+  const apiId = await addApi(s.db, s.workspaceId);
+  s.base.fetchErrorFor.set("/api", new Error("Could not resolve host: api.example"));
+  await s.watcher.request(s.workspaceId);
+  const tasks = await listTasks(s.db);
+  assert.deepEqual(tasks.map((t) => t.intake_process_id), ["1"]);
+  assert.deepEqual(s.base.fetched, ["/repo", "/api"]);
+  assert.equal(s.watcher.health(s.workspaceId).consecutiveFailures, 1);
+  assert.match(s.watcher.health(s.workspaceId).lastError!, /origin の develop の取り込み（api）/);
+
+  s.base.fetchErrorFor.clear();
+  await s.watcher.request(s.workspaceId);
+  const task5 = (await listTasks(s.db)).filter((t) => t.intake_process_id === "5");
+  assert.equal(task5.length, 1);
+  assert.equal(task5[0].project_id, apiId);
+  assert.equal(s.watcher.health(s.workspaceId).consecutiveFailures, 0);
+});
+
+function withApiProcess2(): Pfd {
+  const pfd = example();
+  pfd.processes.find((p) => p.id === "2")!.project = "api";
+  return pfd;
+}
+
+test("上流のマージで、別のプロジェクトの下流を投入する", async () => {
+  const s = await setup(withApiProcess2());
+  const apiId = await addApi(s.db, s.workspaceId);
+  await s.watcher.request(s.workspaceId);
+  await finishHuman3(s.db);
+  await mergeOf(s.pw, s.db, "1");
+  await s.watcher.request(s.workspaceId);
+  const task2 = (await listTasks(s.db)).filter((t) => t.intake_process_id === "2");
+  assert.equal(task2.length, 1);
+  assert.equal(task2[0].project_id, apiId);
+  assert.equal(task2[0].workflow_name, "api-flow");
+});
+
+test("上流のマージが自分の origin に届いていなくても、別のプロジェクトの下流は投入する", async () => {
+  const s = await setup(withApiProcess2());
+  const apiId = await addApi(s.db, s.workspaceId);
+  await s.watcher.request(s.workspaceId);
+  await finishHuman3(s.db);
+  await mergeOf(s.pw, s.db, "1");
+  s.base.missing.add("c11");
+  await s.watcher.request(s.workspaceId);
+  const task2 = (await listTasks(s.db)).filter((t) => t.intake_process_id === "2");
+  assert.equal(task2.length, 1);
+  assert.equal(task2[0].project_id, apiId);
+  assert.equal(
+    s.watcher.health(s.workspaceId).consecutiveFailures,
+    0,
+    "取り込みの遅れは失敗ではない",
+  );
+});
+
 test("マージされても、人のプロセスが終わっていなければ下流は投入しない", async () => {
   const { db, workspaceId, pw, watcher } = await setup();
   await watcher.request(workspaceId);
@@ -513,7 +602,11 @@ async function observeMerge1(s: Awaited<ReturnType<typeof setup>>): Promise<void
   await observePullRequests(s.db, s.pw.prWatcher, (await getProject(s.db, s.projectId))!);
 }
 
-const CANCEL = { projectPath: "/repo", intakeId: "i1", baseBranch: "main" };
+const CANCEL = {
+  projectPath: "/repo",
+  intakeId: "i1",
+  baseBranches: new Map([["1", "main"], ["2", "main"], ["4", "main"]]),
+};
 
 test("中止: PR の Closes で閉じないトラッカーでは、マージ済みのプロセスの sub-issue も completed で閉じる", async () => {
   const s = await setup(example(), "linear");

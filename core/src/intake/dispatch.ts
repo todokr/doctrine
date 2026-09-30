@@ -172,14 +172,21 @@ async function dispatchProcess(
   return committed ? taskId : null;
 }
 
+export type DispatchOptions = {
+  /** このプロジェクト id のプロセスは今回作らない。created にも errors にも入れない。 */
+  skipProjects?: ReadonlySet<number>;
+};
+
 /**
  * active・revising 0・dispatch_paused 0 の Intake について、ready で blockedBy が null の
  * エージェントのプロセスをタスクにする。ワークフローは deps から読み、gh は呼ばない。
+ * skipProjects のプロジェクトのプロセスは見送る（取り込めなかった・マージが届いていないプロジェクト）。
  */
 export async function dispatchIntake(
   db: Db,
   intakeId: string,
   deps: DispatchDeps,
+  o: DispatchOptions = {},
 ): Promise<DispatchReport> {
   const report: DispatchReport = { created: [], errors: [] };
   const intake = await getIntake(db, intakeId);
@@ -205,6 +212,7 @@ export async function dispatchIntake(
       report.errors.push({ processId: process.id, message: missingProjectMessage(process) });
       continue;
     }
+    if (o.skipProjects?.has(project.id)) continue;
     let pin = pins.get(project.id);
     if (!pin) {
       pin = pinOf(await deps.loadWorkflow(project.path, project.default_workflow), project);
