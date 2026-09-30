@@ -11,6 +11,7 @@ import type {
   TaskDiff,
   TaskState,
   Workspace,
+  WorkspaceFilter,
 } from "./types";
 import type {
   IntakeDetail,
@@ -121,12 +122,25 @@ export function taskViewFor(t: Task): "tasks" | "done" {
   return groupOf(t) === "done" ? "done" : "tasks";
 }
 
-export const visibleTasks = (tasks: Task[], project: string) =>
-  tasks.filter((t) => project === "all" || t.project === project);
+/** プロジェクトが一覧に無いタスクは、絞り込み中には出さない */
+export const visibleTasks = (tasks: Task[], projects: Project[], workspace: WorkspaceFilter) =>
+  tasks.filter((t) =>
+    workspace === "all" || projects.find((p) => p.id === t.project)?.workspaceId === workspace
+  );
+
+/** select の value（文字列）を絞り込みに戻す */
+export function parseWorkspaceFilter(value: string): WorkspaceFilter {
+  return value === "all" ? "all" : Number(value);
+}
+
+/** 絞り込み中の workspace の先頭のプロジェクト。"all" か、その workspace のプロジェクトが無ければ全体の先頭 */
+export function firstProjectIn(projects: Project[], workspace: WorkspaceFilter): Project | undefined {
+  return projects.find((p) => p.workspaceId === workspace) ?? projects[0];
+}
 
 /** サイドバーに並ぶ順。j / k の移動と、判断の後に次を選ぶときに使う */
-export function sidebarOrder(tasks: Task[], view: View, project: string): Task[] {
-  const ts = visibleTasks(tasks, project);
+export function sidebarOrder(tasks: Task[], projects: Project[], view: View, workspace: WorkspaceFilter): Task[] {
+  const ts = visibleTasks(tasks, projects, workspace);
   if (view === "done") return ts.filter((t) => groupOf(t) === "done").sort((a, b) => b.since - a.since);
   return GROUPS.flatMap((g) => ts.filter((t) => groupOf(t) === g.key).sort(g.sort));
 }
@@ -550,7 +564,7 @@ export type State = {
   limits: Record<string, RateLimitWindow>;
   now: number;
   view: View;
-  project: string;
+  workspace: WorkspaceFilter;
   sel: string | null;
   scope: Record<string, Scope>;
   /** タスクごと・範囲ごとの diff。範囲を切り替えるたびに取り直す */
@@ -654,7 +668,7 @@ export function layoutOf(s: State, id: string): Layout {
 
 export type Action =
   | { type: "view"; view: View }
-  | { type: "project"; project: string }
+  | { type: "workspace"; workspace: WorkspaceFilter }
   | { type: "select"; id: string }
   | { type: "move"; delta: 1 | -1 }
   | { type: "scope"; scope: Scope }
@@ -798,7 +812,7 @@ const SENT_TOAST = {
 
 /** 判断の後は、次のレビュー待ちを選んだ状態にする（spec 6章） */
 function selectNextReview(s: State, except: string): string | null {
-  const next = sidebarOrder(s.tasks, s.view, s.project).find((x) => groupOf(x) === "review" && x.id !== except);
+  const next = sidebarOrder(s.tasks, s.projects, s.view, s.workspace).find((x) => groupOf(x) === "review" && x.id !== except);
   return next ? next.id : s.sel;
 }
 
@@ -812,11 +826,11 @@ export function reduce(s: State, a: Action): State {
       if (a.view === "settings") return { ...s, view: "settings", editing: null, composer: null };
       const next = { ...s, view: a.view, composer: null };
       const leaving = a.view === "done" || (t !== null && groupOf(t) === "done");
-      const first = sidebarOrder(s.tasks, a.view, s.project)[0];
+      const first = sidebarOrder(s.tasks, s.projects, a.view, s.workspace)[0];
       return leaving && first ? { ...next, sel: first.id, editing: null } : next;
     }
-    case "project":
-      return { ...s, project: a.project };
+    case "workspace":
+      return { ...s, workspace: a.workspace };
     case "select": {
       if (s.view === "settings") {
         const target = s.tasks.find((x) => x.id === a.id);
@@ -867,13 +881,13 @@ export function reduce(s: State, a: Action): State {
       if (s.composer !== null) return s;
       if (s.view === "worktrees" || s.view === "settings") return s;
       if (s.view === "intake") {
-        const rows = intakeOrder(s.intakes, s.projects, s.project, s.showClosedIntakes);
+        const rows = intakeOrder(s.intakes, s.workspace, s.showClosedIntakes);
         if (!rows.length) return s;
         const i = rows.findIndex((x) => x.id === s.intakeSel);
         const n = i < 0 ? rows[0] : rows[Math.max(0, Math.min(rows.length - 1, i + a.delta))];
         return { ...s, intakeSel: n.id };
       }
-      const order = sidebarOrder(s.tasks, s.view, s.project);
+      const order = sidebarOrder(s.tasks, s.projects, s.view, s.workspace);
       if (!order.length) return s;
       const i = order.findIndex((x) => x.id === s.sel);
       const n = order[Math.max(0, Math.min(order.length - 1, i + a.delta))];
@@ -1093,7 +1107,7 @@ export function reduce(s: State, a: Action): State {
         gen: keep(s.gen),
       };
       if (s.sel !== null && ids.has(s.sel)) return next;
-      const first = sidebarOrder(a.tasks, s.view, s.project)[0];
+      const first = sidebarOrder(a.tasks, a.projects, s.view, s.workspace)[0];
       return { ...next, sel: first ? first.id : null, editing: null };
     }
     case "limits.recent": {

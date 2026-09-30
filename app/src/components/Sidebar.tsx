@@ -7,13 +7,23 @@ import {
   intakeProgress,
   intakeSection,
   issueNumber,
-  projectOfIntake,
   taskIntakeMark,
 } from "../intake";
-import { GROUPS, ago, countReview, groupOf, hm, sidebarOrder, staleDaysOf, timeLabel, visibleTasks } from "../model";
+import {
+  GROUPS,
+  ago,
+  countReview,
+  groupOf,
+  hm,
+  parseWorkspaceFilter,
+  sidebarOrder,
+  staleDaysOf,
+  timeLabel,
+  visibleTasks,
+} from "../model";
 import { useStore } from "../store";
 import { groupTone, sectionTone, toneClass } from "../tone";
-import type { Task } from "../types";
+import type { Task, Workspace, WorkspaceFilter } from "../types";
 import { isStaleWorktree, worktreesNeedAttention } from "../worktrees";
 import { RateLimit } from "./RateLimit";
 
@@ -96,9 +106,28 @@ function Item({ t }: { t: Task }) {
   );
 }
 
+/** 3 つのサイドバーが共有する workspace の絞り込み */
+export function WorkspaceFilterSelect(props: {
+  workspaces: Workspace[];
+  value: WorkspaceFilter;
+  allLabel: string;
+  onChange: (workspace: WorkspaceFilter) => void;
+}) {
+  return (
+    <select
+      aria-label="workspace で絞り込む"
+      value={String(props.value)}
+      onChange={(e) => props.onChange(parseWorkspaceFilter(e.target.value))}
+    >
+      <option value="all">{props.allLabel}</option>
+      {props.workspaces.map((w) => <option key={w.id} value={String(w.id)}>{w.name}</option>)}
+    </select>
+  );
+}
+
 function IntakeItem({ i }: { i: IntakeSummary }) {
   const { s, dispatch } = useStore();
-  const p = projectOfIntake(i, s.projects);
+  const w = s.workspaces.find((x) => x.id === i.workspace_id);
   const num = issueNumber(i.issue_url);
   const progress = intakeProgress(i);
   return (
@@ -112,7 +141,7 @@ function IntakeItem({ i }: { i: IntakeSummary }) {
         {i.issue_title}
       </span>
       <span className="m">
-        <span className="pjdot" style={{ background: p?.color ?? "#666" }} />
+        <span className="pjdot" style={{ background: w?.color ?? "#666" }} />
         <span>{INTAKE_WORD[i.state]}</span>
         {progress && <span className="prog">{progress}</span>}
         {i.revising && <span className="tag rev">改訂中</span>}
@@ -125,14 +154,16 @@ function IntakeItem({ i }: { i: IntakeSummary }) {
 
 function IntakeSidebar() {
   const { s, dispatch } = useStore();
-  const rows = intakeOrder(s.intakes, s.projects, s.project, s.showClosedIntakes);
+  const rows = intakeOrder(s.intakes, s.workspace, s.showClosedIntakes);
   return (
     <aside className="side">
       <div className="side-head">
-        <select aria-label="プロジェクトで絞り込む" value={s.project} onChange={(e) => dispatch({ type: "project", project: e.target.value })}>
-          <option value="all">すべてのプロジェクト</option>
-          {s.projects.map((p) => <option key={p.id} value={p.id}>{p.id}</option>)}
-        </select>
+        <WorkspaceFilterSelect
+          workspaces={s.workspaces}
+          value={s.workspace}
+          allLabel="すべての workspace"
+          onChange={(workspace) => dispatch({ type: "workspace", workspace })}
+        />
         <span className="count">{rows.length}</span>
         <span className="grow" />
         <button className="plus" title="Issue を選んで Intake を始める" aria-label="Issue を選んで Intake を始める" aria-pressed={s.intakeSel === "new"} onClick={() => dispatch({ type: "intake.select", id: "new" })}>＋</button>
@@ -167,10 +198,12 @@ function WorktreeSidebar() {
   return (
     <aside className="side">
       <div className="side-head">
-        <select aria-label="プロジェクトで絞り込む" value={s.project} onChange={(e) => dispatch({ type: "project", project: e.target.value })}>
-          <option value="all">すべてのプロジェクト</option>
-          {s.projects.map((p) => <option key={p.id} value={p.id}>{p.id}</option>)}
-        </select>
+        <WorkspaceFilterSelect
+          workspaces={s.workspaces}
+          value={s.workspace}
+          allLabel="すべての workspace"
+          onChange={(workspace) => dispatch({ type: "workspace", workspace })}
+        />
       </div>
       <div className="side-scroll">
         <p className="hint" style={{ padding: 8 }}>古い worktree {staleCount} 件・警告 {s.warnings.length} 件</p>
@@ -194,24 +227,26 @@ export function Sidebar() {
   if (s.view === "worktrees") return <WorktreeSidebar />;
   if (s.view === "intake") return <IntakeSidebar />;
   if (s.view === "settings") return <SettingsSidebar />;
-  const ts = visibleTasks(s.tasks, s.project);
+  const ts = visibleTasks(s.tasks, s.projects, s.workspace);
   const isDone = s.view === "done";
   const count = ts.filter((t) => (groupOf(t) === "done") === isDone).length;
 
   return (
     <aside className="side">
       <div className="side-head">
-        <select aria-label="プロジェクトで絞り込む" value={s.project} onChange={(e) => dispatch({ type: "project", project: e.target.value })}>
-          <option value="all">{isDone ? "終了したタスク" : "全タスク"}</option>
-          {s.projects.map((p) => <option key={p.id} value={p.id}>{p.id}</option>)}
-        </select>
+        <WorkspaceFilterSelect
+          workspaces={s.workspaces}
+          value={s.workspace}
+          allLabel={isDone ? "終了したタスク" : "全タスク"}
+          onChange={(workspace) => dispatch({ type: "workspace", workspace })}
+        />
         <span className="count">{count}</span>
         <span className="grow" />
         <button className="plus" title="新しいタスク" aria-label="新しいタスク" aria-pressed={s.composer !== null} onClick={() => dispatch({ type: "composer.open", init: {} })}>＋</button>
       </div>
       <div className="side-scroll">
         {isDone ? (
-          sidebarOrder(s.tasks, "done", s.project).map((t) => <Item key={t.id} t={t} />)
+          sidebarOrder(s.tasks, s.projects, "done", s.workspace).map((t) => <Item key={t.id} t={t} />)
         ) : (
           GROUPS.map((g) => {
             const list = ts.filter((t) => groupOf(t) === g.key).sort(g.sort);

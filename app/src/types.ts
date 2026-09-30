@@ -39,6 +39,9 @@ export type Workspace = {
   projects: Project[];
 };
 
+/** サイドバーの絞り込み。"all" か Workspace.id */
+export type WorkspaceFilter = "all" | number;
+
 export type DiffHunk = {
   /** ガイドが指す hunk の id（shared/guide/hunkId.ts の listHunks と同じ値） */
   id: string;

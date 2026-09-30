@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { ProjectConfig, ProjectSummary, WorkflowListEntry } from "../../../shared/protocol.ts";
-import type { Loaded } from "../model";
+import { firstProjectIn, type Loaded } from "../model";
 import {
   assignSaveError,
   checkProjectConfigForm,
@@ -214,7 +214,7 @@ function ProjectConfigEditor({ path }: { path: string }): React.JSX.Element {
 
 export function ProjectConfigSection(): React.JSX.Element {
   const { s } = useStore();
-  const [projectId, setProjectId] = useState(() => s.project !== "all" ? s.project : s.projects[0]?.id);
+  const [projectId, setProjectId] = useState(() => firstProjectIn(s.projects, s.workspace)?.id);
   const selected = s.projects.some((p) => p.id === projectId) ? projectId : s.projects[0]?.id;
   const path = s.projects.find((p) => p.id === selected)?.path;
   return (

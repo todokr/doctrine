@@ -1,11 +1,11 @@
 import { useState } from "react";
 import type { IntakeSummary } from "../../../shared/protocol.ts";
 import { sendDecision } from "../decision";
-import { INTAKE_WORD, intakeFace, isClosedIntake, issueNumber, projectOfIntake } from "../intake";
+import { INTAKE_WORD, intakeFace, isClosedIntake, issueNumber } from "../intake";
 import { intakeDetailOf, selectedIntake } from "../model";
 import { useIntakeRpc, useStore } from "../store";
 import { INTAKE_TONE } from "../tone";
-import type { Project } from "../types";
+import type { Workspace } from "../types";
 import { AnswerFace } from "./AnswerFace";
 import { IntakeLog } from "./IntakeLog";
 import { IntakeProgress, CancelDialog } from "./IntakeProgress";
@@ -26,7 +26,7 @@ export function RevisingBand(p: { intake: IntakeSummary; pending: boolean; onAba
 }
 
 export function IntakeHeading(
-  { intake, project, onCancel }: { intake: IntakeSummary; project: Project | undefined; onCancel?: () => void },
+  { intake, workspace, onCancel }: { intake: IntakeSummary; workspace: Workspace | undefined; onCancel?: () => void },
 ) {
   const num = issueNumber(intake.issue_url);
   return (
@@ -34,8 +34,8 @@ export function IntakeHeading(
       <div className="crumbs">
         <span className="lbl">Intake</span>
         <span>/</span>
-        <span className="pjdot" style={{ background: project?.color ?? "#666" }} />
-        <span>{project?.id ?? ""}</span>
+        <span className="pjdot" style={{ background: workspace?.color ?? "#666" }} />
+        <span>{workspace?.name ?? ""}</span>
       </div>
       <div className="headrow">
         <h1>
@@ -77,7 +77,7 @@ export function IntakeView() {
       </div>
     );
   }
-  const project = projectOfIntake(intake, s.projects);
+  const workspace = s.workspaces.find((w) => w.id === intake.workspace_id);
   const detail = intakeDetailOf(s, intake.id);
   const abandon = async () => {
     setAbandoning(true);
@@ -98,7 +98,7 @@ export function IntakeView() {
       <>
         {band}
         <div className="pad">
-          <IntakeHeading intake={intake} project={project} />
+          <IntakeHeading intake={intake} workspace={workspace} />
           <p className="hint">{detail?.kind === "error" ? detail.message : "読み込み中"}</p>
         </div>
       </>
@@ -107,7 +107,7 @@ export function IntakeView() {
   const heading = (
     <IntakeHeading
       intake={intake}
-      project={project}
+      workspace={workspace}
       onCancel={() => dispatch({ type: "intake.preview", modal: "intake-cancel" })}
     />
   );

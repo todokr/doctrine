@@ -2,6 +2,7 @@
 // model.ts を import しない（reducer がここを import するので、逆向きに import すると循環になる）
 import type { IntakeSummary, TaskState, Warning, WorktreeEntry } from "../../shared/protocol.ts";
 import { isClosedIntake } from "./intake";
+import type { Project, WorkspaceFilter } from "./types";
 
 export const DAY = 24 * 60 * 60 * 1000;
 /** デーモンの daemon.warnings と同じ上限 */
@@ -17,6 +18,16 @@ export function ownerActive(e: WorktreeEntry, intakes: readonly IntakeSummary[])
     return i !== undefined && !isClosedIntake(i.state);
   }
   return false;
+}
+
+/** 絞り込み中の workspace のプロジェクトの worktree。並びは変えない */
+export function visibleWorktrees(
+  entries: readonly WorktreeEntry[],
+  projects: readonly Project[],
+  workspace: WorkspaceFilter,
+): WorktreeEntry[] {
+  if (workspace === "all") return [...entries];
+  return entries.filter((e) => projects.find((p) => p.path === e.project)?.workspaceId === workspace);
 }
 
 /** 古いか（spec 8章「終端状態になってから」staleDays 日）。staleDays が null なら常に false */

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { WorkflowDetail, WorkflowListEntry, WorkflowStepChange, WorkflowStepDetail } from "../../../shared/protocol.ts";
 import { rpc } from "../daemon/client";
-import type { Loaded } from "../model";
+import { firstProjectIn, type Loaded } from "../model";
 import { useStore, useWorkflowRpc, type WorkflowRpc } from "../store";
 import {
   assignSaveIssues,
@@ -399,10 +399,10 @@ export function WorkflowDefinitionView(props: {
 export function WorkflowSettings() {
   const { s } = useStore();
   const [chosenPath, setChosenPath] = useState<string | null>(null);
-  // 選んだ path がまだ projects に無ければ（未選択、または切り替え直後）、s.project に合わせて選び直す。
+  // 選んだ path がまだ projects に無ければ（未選択、または切り替え直後）、絞り込み中の workspace の先頭に合わせて選び直す。
   const path = chosenPath && s.projects.some((p) => p.path === chosenPath)
     ? chosenPath
-    : (s.projects.find((p) => p.id === s.project) ?? s.projects[0])?.path ?? null;
+    : firstProjectIn(s.projects, s.workspace)?.path ?? null;
   const [list, setList] = useState<Loaded<WorkflowListEntry[]>>({ kind: "loading" });
   const [name, setName] = useState<string | null>(null);
   const [detail, setDetail] = useState<Loaded<WorkflowDetail>>({ kind: "loading" });
