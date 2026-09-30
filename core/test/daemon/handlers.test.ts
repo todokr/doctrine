@@ -8,11 +8,12 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { openDb, openDbOn } from "../../src/db/migrate.ts";
-import { getTask, insertTask, listTasks } from "../../src/db/tasks.ts";
+import { getTask, insertProject, insertTask, listTasks } from "../../src/db/tasks.ts";
 import { getWorkspace } from "../../src/db/workspaces.ts";
 import { listStepRuns } from "../../src/db/stepRuns.ts";
 import { captureTree, reviewRefName } from "../../src/domain/reviewTree.ts";
 import {
+  canonical,
   createDetachedWorktree,
   createWorktree,
   ensureDoctrineOutExcluded,
@@ -426,7 +427,9 @@ test("worktree.list はタスク・Intake・孤児の worktree を全部返す",
     worktreePath: join(intakeWorktreePathFor("i1"), "repo"),
     baseBranch: "main",
   });
-  await updateIntake(ctx.db, "i1", { worktree_path: intakeWorktree });
+  await updateIntake(ctx.db, "i1", {
+    worktree_path: await canonical(intakeWorktreePathFor("i1")),
+  });
   const intake = (await getIntake(ctx.db, "i1"))!;
 
   const orphan = await createWorktree({
@@ -1823,46 +1826,235 @@ test("worktree.remove は終わっていないタスクの worktree を force �
   assert.equal((await getTask(ctx.db, id))?.worktree_path, worktree);
 });
 
-/** Intake i1 に detached worktree を持たせる。state は investigating のまま。 */
+/** Intake i1 に、親ディレクトリの下の detached worktree 1 つを持たせる。state は investigating のまま。 */
 async function intakeWithWorktree(
   ctx: DaemonContext,
   h: ReturnType<typeof createHandler>,
-): Promise<string> {
+): Promise<{ parent: string; child: string }> {
   const project = (await h("workspace.add", { path: repo }, NOOP_CONN) as WorkspaceSummary)
     .projects[0];
   await addIntake(ctx, project.workspace_id);
-  const worktree = await createDetachedWorktree({
+  const parent = await canonical(intakeWorktreePathFor("i1"));
+  const child = await createDetachedWorktree({
     repoPath: repo,
-    worktreePath: join(intakeWorktreePathFor("i1"), "repo"),
+    worktreePath: join(parent, "repo"),
     baseBranch: "main",
   });
-  await updateIntake(ctx.db, "i1", { worktree_path: worktree });
-  return worktree;
+  await updateIntake(ctx.db, "i1", { worktree_path: parent });
+  return { parent, child };
+}
+
+/**
+ * Intake i1 に、repo と other の 2 プロジェクトの detached worktree を親ディレクトリの下に
+ * 持たせる。state は investigating のまま。
+ */
+async function intakeWithTwoWorktrees(
+  ctx: DaemonContext,
+  h: ReturnType<typeof createHandler>,
+): Promise<
+  {
+    parent: string;
+    repoChild: string;
+    otherChild: string;
+    otherRepo: string;
+    otherProjectId: number;
+  }
+> {
+  const project = (await h("workspace.add", { path: repo }, NOOP_CONN) as WorkspaceSummary)
+    .projects[0];
+  const otherRepo = await makeRepo(join(root, "other"), { "README.md": "y\n" });
+  const otherProjectId = await insertProject(ctx.db, {
+    workspace_id: project.workspace_id,
+    name: "other",
+    path: otherRepo,
+    default_workflow: "feature",
+    max_concurrent: 1,
+    base_branch: "main",
+    setup: null,
+  });
+  await addIntake(ctx, project.workspace_id);
+  const parent = await canonical(intakeWorktreePathFor("i1"));
+  const repoChild = await createDetachedWorktree({
+    repoPath: repo,
+    worktreePath: join(parent, "repo"),
+    baseBranch: "main",
+  });
+  const otherChild = await createDetachedWorktree({
+    repoPath: otherRepo,
+    worktreePath: join(parent, "other"),
+    baseBranch: "main",
+  });
+  await updateIntake(ctx.db, "i1", { worktree_path: parent });
+  return { parent, repoChild, otherChild, otherRepo, otherProjectId };
 }
 
 test("worktree.remove は終わっていない Intake の worktree を force でも拒否する", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
-  const worktree = await intakeWithWorktree(ctx, h);
+  const { parent, child } = await intakeWithWorktree(ctx, h);
 
   await assert.rejects(
-    () => h("worktree.remove", { path: worktree, force: true }, NOOP_CONN),
+    () => h("worktree.remove", { path: child, force: true }, NOOP_CONN),
     /終わっていない Intake（investigating）/,
   );
-  assert.equal(existsSync(worktree), true);
-  assert.equal((await getIntake(ctx.db, "i1"))?.worktree_path, worktree);
+  assert.equal(existsSync(child), true);
+  assert.equal((await getIntake(ctx.db, "i1"))?.worktree_path, parent);
 });
 
 test("worktree.remove は終わった Intake の worktree を消して worktree_path を null にする", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
-  const worktree = await intakeWithWorktree(ctx, h);
+  const { parent, child } = await intakeWithWorktree(ctx, h);
   await updateIntake(ctx.db, "i1", { state: "canceled" });
 
-  await h("worktree.remove", { path: worktree }, NOOP_CONN);
+  await h("worktree.remove", { path: child }, NOOP_CONN);
 
   assert.equal((await getIntake(ctx.db, "i1"))?.worktree_path, null);
-  assert.equal(existsSync(worktree), false);
+  assert.equal(existsSync(child), false);
+  assert.equal(existsSync(parent), false);
+});
+
+test("worktree.list は 2 プロジェクトの Intake の子 worktree を Intake に対応づける", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  const { repoChild, otherChild, otherRepo } = await intakeWithTwoWorktrees(ctx, h);
+
+  const res = await h("worktree.list", {}, NOOP_CONN) as WorktreeEntry[];
+
+  const pick = (e: WorktreeEntry) => ({
+    project: e.project,
+    task_id: e.task_id,
+    intake_id: e.intake_id,
+  });
+  assert.equal(res.length, 2);
+  assert.deepEqual(pick(res.find((e) => e.path === repoChild)!), {
+    project: repo,
+    task_id: null,
+    intake_id: "i1",
+  });
+  assert.deepEqual(pick(res.find((e) => e.path === otherChild)!), {
+    project: otherRepo,
+    task_id: null,
+    intake_id: "i1",
+  });
+});
+
+/** 全部の子と親が消え、git の登録も残らず、worktree_path が null になっていることを確かめる。 */
+async function assertIntakeWorktreesGone(
+  ctx: DaemonContext,
+  f: { parent: string; repoChild: string; otherChild: string; otherRepo: string },
+): Promise<void> {
+  assert.equal(existsSync(f.repoChild), false);
+  assert.equal(existsSync(f.otherChild), false);
+  assert.equal(existsSync(f.parent), false);
+  assert.deepEqual(await listWorktrees(repo), []);
+  assert.deepEqual(await listWorktrees(f.otherRepo), []);
+  assert.equal((await getIntake(ctx.db, "i1"))?.worktree_path, null);
+}
+
+/** 何も消えておらず、worktree_path が親のままであることを確かめる。 */
+async function assertIntakeWorktreesKept(
+  ctx: DaemonContext,
+  f: { parent: string; repoChild: string; otherChild: string },
+): Promise<void> {
+  assert.equal(existsSync(f.repoChild), true);
+  assert.equal(existsSync(f.otherChild), true);
+  assert.equal(existsSync(f.parent), true);
+  assert.equal((await getIntake(ctx.db, "i1"))?.worktree_path, f.parent);
+}
+
+test("worktree.remove は Intake の子 1 つを指すと全部の子と親を消す", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  const f = await intakeWithTwoWorktrees(ctx, h);
+  await updateIntake(ctx.db, "i1", { state: "canceled" });
+
+  const res = await h("worktree.remove", { path: f.repoChild }, NOOP_CONN);
+
+  assert.deepEqual(res, { removed: f.parent });
+  await assertIntakeWorktreesGone(ctx, f);
+});
+
+test("worktree.remove は Intake の親ディレクトリを指しても全部の子と親を消す", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  const f = await intakeWithTwoWorktrees(ctx, h);
+  await updateIntake(ctx.db, "i1", { state: "canceled" });
+
+  const res = await h("worktree.remove", { path: f.parent }, NOOP_CONN);
+
+  assert.deepEqual(res, { removed: f.parent });
+  await assertIntakeWorktreesGone(ctx, f);
+});
+
+test("worktree.remove は終わっていない Intake の子も親も force でも拒否する", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  const f = await intakeWithTwoWorktrees(ctx, h);
+
+  for (const path of [f.otherChild, f.parent]) {
+    await assert.rejects(
+      () => h("worktree.remove", { path, force: true }, NOOP_CONN),
+      /終わっていない Intake（investigating）/,
+    );
+  }
+
+  await assertIntakeWorktreesKept(ctx, f);
+});
+
+test("worktree.remove は Intake の子に未コミットの変更があると force なしでは何も消さない", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  const f = await intakeWithTwoWorktrees(ctx, h);
+  await updateIntake(ctx.db, "i1", { state: "canceled" });
+  await writeFile(join(f.otherChild, "dirty.txt"), "x\n");
+
+  await assert.rejects(
+    () => h("worktree.remove", { path: f.repoChild }, NOOP_CONN),
+    /未コミットの変更/,
+  );
+  await assertIntakeWorktreesKept(ctx, f);
+
+  await h("worktree.remove", { path: f.repoChild, force: true }, NOOP_CONN);
+  await assertIntakeWorktreesGone(ctx, f);
+});
+
+test("worktree.remove は登録を外されたプロジェクトの Intake の子も消す", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  const f = await intakeWithTwoWorktrees(ctx, h);
+  await ctx.db.deleteFrom("projects").where("id", "=", f.otherProjectId).execute();
+  await updateIntake(ctx.db, "i1", { state: "canceled" });
+
+  await h("worktree.remove", { path: f.repoChild }, NOOP_CONN);
+
+  await assertIntakeWorktreesGone(ctx, f);
+});
+
+test("worktree.remove は登録を外されたプロジェクトの Intake の子を直接指しても全部消す", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  const f = await intakeWithTwoWorktrees(ctx, h);
+  await ctx.db.deleteFrom("projects").where("id", "=", f.otherProjectId).execute();
+  await updateIntake(ctx.db, "i1", { state: "canceled" });
+
+  await h("worktree.remove", { path: f.otherChild }, NOOP_CONN);
+
+  await assertIntakeWorktreesGone(ctx, f);
+});
+
+test("worktree.remove は Intake の親の下の子でないパスを拒否する", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  const f = await intakeWithTwoWorktrees(ctx, h);
+  await updateIntake(ctx.db, "i1", { state: "canceled" });
+
+  await assert.rejects(
+    () => h("worktree.remove", { path: join(f.parent, "typo"), force: true }, NOOP_CONN),
+    /git worktree list に出ない/,
+  );
+
+  await assertIntakeWorktreesKept(ctx, f);
 });
 
 // --- suspended から出る3つの経路が、開いている awaiting 行を必ず閉じる -------
@@ -2803,7 +2995,9 @@ test("worktree.list は Intake の worktree を孤児にしない", async () => 
   const before = await h("worktree.list", {}, NOOP_CONN) as WorktreeEntry[];
   assert.deepEqual(pick(before), [{ path: worktree, task_id: null, intake_id: null }]);
 
-  await updateIntake(ctx.db, "i1", { worktree_path: worktree });
+  await updateIntake(ctx.db, "i1", {
+    worktree_path: await canonical(intakeWorktreePathFor("i1")),
+  });
   const after = await h("worktree.list", {}, NOOP_CONN) as WorktreeEntry[];
   assert.deepEqual(pick(after), [{ path: worktree, task_id: null, intake_id: "i1" }]);
 });
