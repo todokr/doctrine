@@ -230,6 +230,18 @@ export async function removeWorktree(o: {
   await runCommand("git", args);
 }
 
+/** リンクされた worktree の元のリポジトリの git ディレクトリ（git rev-parse --git-common-dir）。 */
+export async function repoOfWorktree(worktreePath: string): Promise<string> {
+  const { stdout } = await runCommand("git", [
+    "-C",
+    worktreePath,
+    "rev-parse",
+    "--git-common-dir",
+  ]);
+  const raw = stdout.trim();
+  return isAbsolute(raw) ? raw : join(worktreePath, raw);
+}
+
 /**
  * resolve は字句的な正規化のみでシンボリックリンクを解決しない
  * （例: macOS の /tmp は /private/tmp への symlink）。git はシンボリックリンク解決後の
