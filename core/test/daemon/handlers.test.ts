@@ -127,6 +127,7 @@ test("workspace.add でプロジェクトを登録し、設定を読む", async 
   assert.equal(p.name, "repo");
   assert.equal(ws.path, repo);
   assert.equal(ws.name, "repo");
+  assert.deepEqual(ws.tracker, { ok: true, config: { kind: "github" } });
   const w = await getWorkspace(ctx.db, p.workspace_id);
   assert.equal(w?.path, repo);
   assert.equal(w?.name, "repo");
@@ -1536,6 +1537,50 @@ test("workspace.list は workspace ごとにプロジェクトを返す", async 
   assert.equal(list.length, 2);
   assert.deepEqual(list.map((w) => w.projects.length), [1, 1]);
   assert.deepEqual(list.map((w) => w.projects[0].path), [repo, repo2]);
+});
+
+test("workspace.list は各 workspace の workspace.yaml の tracker の設定か、読めない理由を返す", async () => {
+  const files = {
+    "README.md": "x\n",
+    ".doctrine/project.yaml": "defaultWorkflow: feature\nmaxConcurrent: 1\nbaseBranch: main\n",
+    ".doctrine/workflows/feature.yaml":
+      "name: feature\nsteps:\n  - id: review\n    type: approval\n    title: 見て\n",
+  };
+  const lin = await makeRepo(join(root, "lin"), files);
+  const missing = await makeRepo(join(root, "missing"), files);
+  const broken = await makeRepo(join(root, "broken"), files);
+  const h = createHandler(await context());
+  await h("workspace.add", { path: repo }, NOOP_CONN);
+  const added = await h("workspace.add", { path: lin }, NOOP_CONN) as WorkspaceSummary;
+  assert.deepEqual(added.tracker, { ok: true, config: { kind: "github" } });
+  await h("workspace.add", { path: missing }, NOOP_CONN);
+  await h("workspace.add", { path: broken }, NOOP_CONN);
+
+  await writeFile(
+    join(lin, ".doctrine", "workspace.yaml"),
+    "projects:\n  repo: .\ntracker:\n  kind: linear\n  team: ENG\n  states:\n    inReview: レビュー中\n",
+  );
+  await rm(join(missing, ".doctrine", "workspace.yaml"));
+  await writeFile(
+    join(broken, ".doctrine", "workspace.yaml"),
+    "projects:\n  repo: .\ntracker:\n  kind: jira\n",
+  );
+
+  const list = await h("workspace.list", {}, NOOP_CONN) as WorkspaceSummary[];
+  assert.equal(list.length, 4);
+  assert.deepEqual(list[0].tracker, { ok: true, config: { kind: "github" } });
+  assert.deepEqual(list[1].tracker, {
+    ok: true,
+    config: { kind: "linear", team: "ENG", states: { inReview: "レビュー中" } },
+  });
+  const m = list[2].tracker;
+  if (m.ok) assert.fail("workspace.yaml が無いのに ok");
+  assert.equal(m.reason, "workspace_config_missing");
+  assert.ok(m.message.includes(join(missing, ".doctrine", "workspace.yaml")));
+  const b = list[3].tracker;
+  if (b.ok) assert.fail("workspace.yaml が壊れているのに ok");
+  assert.equal(b.reason, "workspace_config_invalid");
+  assert.ok(b.message.includes("workspace.yaml を読めません"));
 });
 
 test("project.add は未知のメソッドになった", async () => {
