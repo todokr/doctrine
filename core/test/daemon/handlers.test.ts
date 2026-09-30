@@ -3231,7 +3231,7 @@ test("workflow.get: default.yaml の 13 ステップの設定と分岐を返す"
   const implement = byId("implement");
   assert.ok(implement.type === "agent");
   if (implement.type === "agent") {
-    assert.equal(implement.model, "claude-sonnet-5");
+    assert.equal(implement.model, "claude-sonnet-5-5");
     assert.equal(implement.session, "implementer");
   }
 
