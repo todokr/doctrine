@@ -216,6 +216,19 @@ describe("buildPfdView", () => {
     expect(view.removed).toEqual([]);
   });
 
+  test("プロセスの project を持ち、持たないプロセスと成果物は null", () => {
+    const view = buildPfdView(PFD_SAMPLE);
+    expect(node(view, "p:design").project).toBe("api");
+    expect(node(view, "p:build-ui").project).toBe("web");
+    expect(node(view, "p:approve").project).toBeNull();
+    expect(node(view, "a:schema").project).toBeNull();
+  });
+
+  test("project を書かないプロセスは null", () => {
+    const view = buildPfdView(serial());
+    expect(node(view, "p:p1").project).toBeNull();
+  });
+
   test("入出力に存在しない成果物があっても例外を投げず、その辺を描かない", () => {
     const view = buildPfdView(pfd(["a0", "a1"], [["p1", ["a0", "ghost"], ["a1"]]], ["a1"]));
     expect(view.edges).toHaveLength(2);

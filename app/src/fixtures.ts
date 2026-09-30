@@ -207,7 +207,7 @@ index 0000000..fa49b07
   truncated: false,
 };
 
-/** PFD の図の標本。成果物 7・プロセス 5。given・goal・決定・人のプロセス・並列の段を含む */
+/** PFD の図の標本。成果物 7・プロセス 5。given・goal・決定・人のプロセス・並列の段・プロセスの project（2 つのプロジェクト）を含む */
 export const PFD_SAMPLE: Pfd = {
   title: "注文の CSV 出力",
   goal: ["release"],
@@ -221,11 +221,11 @@ export const PFD_SAMPLE: Pfd = {
     { id: "release", name: "リリース", given: false, verify: "本番で CSV が落ちる" },
   ],
   processes: [
-    { id: "design", name: "スキーマを設計する", actor: "agent", inputs: ["issue", "policy"], outputs: ["schema"], purpose: "CSV の列を決める" },
-    { id: "build-api", name: "API を作る", actor: "agent", inputs: ["schema"], outputs: ["api"], purpose: "CSV を返す API を作る" },
-    { id: "build-ui", name: "ボタンを作る", actor: "agent", inputs: ["schema"], outputs: ["ui"], purpose: "画面にボタンを置く" },
+    { id: "design", name: "スキーマを設計する", actor: "agent", project: "api", inputs: ["issue", "policy"], outputs: ["schema"], purpose: "CSV の列を決める" },
+    { id: "build-api", name: "API を作る", actor: "agent", project: "api", inputs: ["schema"], outputs: ["api"], purpose: "CSV を返す API を作る" },
+    { id: "build-ui", name: "ボタンを作る", actor: "agent", project: "web", inputs: ["schema"], outputs: ["ui"], purpose: "画面にボタンを置く" },
     { id: "approve", name: "受け入れる", actor: "human", inputs: ["api", "ui"], outputs: ["review"] },
-    { id: "ship", name: "リリースする", actor: "agent", inputs: ["review"], outputs: ["release"], purpose: "本番に出す" },
+    { id: "ship", name: "リリースする", actor: "agent", project: "api", inputs: ["review"], outputs: ["release"], purpose: "本番に出す" },
   ],
 };
 
@@ -246,11 +246,11 @@ export const PFD_LONG_LABELS: Pfd = {
     { id: "settings-ui", name: "設定の画面", given: false, verify: "画面のテストが通る" },
   ],
   processes: [
-    { id: "1", name: "worktree.list を全件を返す形に変える", actor: "agent", inputs: ["rpc"], outputs: ["list"], purpose: "p" },
-    { id: "2", name: "dctl logs --follow をストリーミング表示にする", actor: "agent", inputs: ["cli", "rpc"], outputs: ["follow"], purpose: "p" },
-    { id: "3", name: "設定の読み書きと外部コマンド起動の Tauri コマンドを足す", actor: "agent", inputs: ["app", "d-launch"], outputs: ["tauri"], purpose: "p" },
-    { id: "4", name: "worktree と警告のビューを作る", actor: "agent", inputs: ["list", "app", "d-resume"], outputs: ["view"], purpose: "p" },
-    { id: "5", name: "設定の画面を作る", actor: "agent", inputs: ["tauri"], outputs: ["settings-ui"], purpose: "p" },
+    { id: "1", name: "worktree.list を全件を返す形に変える", actor: "agent", project: "core", inputs: ["rpc"], outputs: ["list"], purpose: "p" },
+    { id: "2", name: "dctl logs --follow をストリーミング表示にする", actor: "agent", project: "core", inputs: ["cli", "rpc"], outputs: ["follow"], purpose: "p" },
+    { id: "3", name: "設定の読み書きと外部コマンド起動の Tauri コマンドを足す", actor: "agent", project: "app", inputs: ["app", "d-launch"], outputs: ["tauri"], purpose: "p" },
+    { id: "4", name: "worktree と警告のビューを作る", actor: "agent", project: "app", inputs: ["list", "app", "d-resume"], outputs: ["view"], purpose: "p" },
+    { id: "5", name: "設定の画面を作る", actor: "agent", project: "app", inputs: ["tauri"], outputs: ["settings-ui"], purpose: "p" },
   ],
 };
 

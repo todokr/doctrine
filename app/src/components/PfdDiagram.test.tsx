@@ -119,6 +119,29 @@ describe("PfdDiagram", () => {
     expect(html.match(/🔒/g)).toHaveLength(1);
   });
 
+  test("project を持つプロセスにプロジェクト名を出す", () => {
+    const html = render(buildPfdView(PFD_SAMPLE));
+    const api = block(html, "プロセス", "API を作る");
+    expect(api).toContain('class="pfd-project"');
+    expect(api).toMatch(/class="pfd-project"[^>]*>api<\/text>/);
+    const web = block(html, "プロセス", "ボタンを作る");
+    expect(web).toMatch(/class="pfd-project"[^>]*>web<\/text>/);
+    expect(openTag(api)).toContain("プロジェクト api");
+    expect(html.match(/class="pfd-project"/g)).toHaveLength(PFD_SAMPLE.processes.filter((p) => p.project).length);
+  });
+
+  test("project を持たないプロセスと成果物には出さず、人の見た目は残す", () => {
+    const html = render(buildPfdView(PFD_SAMPLE));
+    const approve = block(html, "プロセス", "受け入れる");
+    expect(approve).not.toContain("pfd-project");
+    expect(openTag(approve)).not.toContain("プロジェクト");
+    expect(approve).toContain("pfd-inner");
+    expect(approve).toContain("人");
+    expect(openTag(approve)).toContain("human");
+    const schema = block(html, "成果物", "CSV スキーマ");
+    expect(schema).not.toContain("pfd-project");
+  });
+
   test("プロセスの段の数字", () => {
     const html = render(buildPfdView(PFD_SAMPLE));
     const stages = [...html.matchAll(/<text[^>]*class="pfd-stage"[^>]*>(\d+)<\/text>/g)].map((m) => m[1]);

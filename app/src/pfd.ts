@@ -20,6 +20,8 @@ export type PfdNode = {
   h: number;
   /** actor: human のプロセス */
   human: boolean;
+  /** プロセスの project（投入先のプロジェクトの名前）。持たないプロセスと成果物は null */
+  project: string | null;
   /** 最初から揃っている成果物 */
   given: boolean;
   /** 末端の成果物（Pfd.goal） */
@@ -197,8 +199,8 @@ export function buildPfdView(
   }
 
   const sources = [
-    ...pfd.artifacts.map((a) => ({ kind: "artifact" as const, id: a.id, name: a.name, human: false, given: a.given, goal: goal.has(a.id), decision: a.decision !== undefined })),
-    ...pfd.processes.map((p) => ({ kind: "process" as const, id: p.id, name: p.name, human: p.actor === "human", given: false, goal: false, decision: false })),
+    ...pfd.artifacts.map((a) => ({ kind: "artifact" as const, id: a.id, name: a.name, human: false, project: null, given: a.given, goal: goal.has(a.id), decision: a.decision !== undefined })),
+    ...pfd.processes.map((p) => ({ kind: "process" as const, id: p.id, name: p.name, human: p.actor === "human", project: p.project ?? null, given: false, goal: false, decision: false })),
   ];
   const keys = sources.map((s) => pfdKey(s.kind, s.id));
   const edges = pfd.processes.flatMap((p) => [
@@ -300,6 +302,7 @@ export function buildPfdView(
       w,
       h,
       human: s.human,
+      project: s.project,
       given: s.given,
       goal: s.goal,
       decision: s.decision,
