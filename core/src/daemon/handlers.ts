@@ -942,7 +942,6 @@ export function createHandler(ctx: DaemonContext): Handler {
         }
         const intake = await getIntake(ctx.db, intakeId);
         if (!intake) throw new Error("Intake がありません");
-        const project = await soleProjectOf(ctx.db, intake.workspace_id);
         const outcome = await cancelIntake(
           ctx.db,
           { probe: defaultProbe(), trackerOf: ctx.trackerOf },
@@ -950,7 +949,6 @@ export function createHandler(ctx: DaemonContext): Handler {
             intakeId,
             mode: params.mode,
             workspace: await workspaceRefOf(ctx.db, intake.workspace_id),
-            projectPath: project.path,
           },
         );
         for (const t of outcome.stoppedTasks) {
@@ -1006,10 +1004,14 @@ export function createHandler(ctx: DaemonContext): Handler {
       case "intake.closeIssue": {
         const intake = await getIntake(ctx.db, req(params, "intake_id"));
         if (!intake) throw new Error("Intake がありません");
-        const project = await soleProjectOf(ctx.db, intake.workspace_id);
         const ref = await workspaceRefOf(ctx.db, intake.workspace_id);
         const wt = await ctx.trackerOf(ref);
-        const projectPath = (await wt.projectPathFor(intake.issue_url)) ?? project.path;
+        const projectPath = await wt.projectPathFor(intake.issue_url);
+        if (projectPath === null) {
+          throw new Error(
+            `この Issue は workspace のどのリポジトリにもありません: ${intake.issue_url}`,
+          );
+        }
         const row = await closeParentIssue(ctx.db, wt.tracker, {
           intakeId: intake.id,
           projectPath,
