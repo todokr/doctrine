@@ -19,7 +19,11 @@ import {
   updateIntake,
   updateProcess,
 } from "../../src/db/intakes.ts";
-import { canonical, createDetachedWorktree, intakeWorktreePathFor } from "../../src/domain/worktree.ts";
+import {
+  canonical,
+  createDetachedWorktree,
+  intakeWorktreePathFor,
+} from "../../src/domain/worktree.ts";
 import {
   abandonRevision,
   answerIntake,

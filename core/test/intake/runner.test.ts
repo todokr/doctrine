@@ -415,6 +415,10 @@ test("外されたプロジェクトの worktree も書き換えを見て巻き�
   await assert.rejects(Deno.stat(join(intake.worktree_path!, "b", "x.txt")));
   await Deno.stat(join(intake.worktree_path!, "b"));
   await Deno.stat(join(intake.worktree_path!, "repo"));
+
+  const tools = inner.calls[0].opts.allowedTools!;
+  assert.ok(tools.includes("Bash(git -C repo log:*)"));
+  assert.ok(!tools.includes("Bash(git -C b log:*)"));
 });
 
 test("allowedTools はプロジェクトごとに git -C <名前> を並べ、素の git を含まない", async () => {
