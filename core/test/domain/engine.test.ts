@@ -10,7 +10,7 @@ import type { AgentEvent, AgentResult } from "../../src/adapter/types.ts";
 import { parseWorkflow } from "../../src/workflow/schema.ts";
 import { DatabaseSync } from "node:sqlite";
 import { openDb, openDbOn } from "../../src/db/migrate.ts";
-import { getTask, insertTask } from "../../src/db/tasks.ts";
+import { getTask, insertTask, withoutAttempt } from "../../src/db/tasks.ts";
 import { seedProject } from "../helpers/project.ts";
 import { getStepOutputs, getStepRun, listStepRuns } from "../../src/db/stepRuns.ts";
 import { createMockAdapter } from "../../src/adapter/mock.ts";
@@ -1978,4 +1978,121 @@ test("上限到達の却下は failed で終える", async () => {
   await applyApproval(db, "t1", { approved: false, comment: "手で直す" }, workflow);
   assert.equal((await getTask(db, "t1"))?.state, "failed");
   assert.equal((await listStepRuns(db, "t1")).at(-1)?.status, "failed");
+});
+
+// --- task.rerun のあとの runTask -----------------------------------------
+
+/**
+ * task.rerun が failed を queued に戻し、tick が running にしたのと同じ状態にする。
+ * 回数を消すのは current_step_id のステップだけ。
+ */
+async function rerunToRunning(db: Db, taskId: string): Promise<void> {
+  const task = (await getTask(db, taskId))!;
+  assert.equal(task.state, "failed");
+  assert.notEqual(task.current_step_id, null);
+  await db.updateTable("tasks")
+    .set({ state: "running", attempt_counts: withoutAttempt(task, task.current_step_id!) })
+    .where("id", "=", taskId)
+    .execute();
+}
+
+const RERUN_WF = `
+name: f
+steps:
+  - id: prepare
+    type: command
+    run: "true"
+  - id: check
+    type: command
+    run: "test -f {{ worktree.path }}/ok"
+    onFailure: { goto: check, maxAttempts: 2 }
+`;
+
+test("やり直すと失敗したステップから始まり、前のステップは実行しない", async () => {
+  const { db, root, workflow } = await taskFixture(RERUN_WF);
+  const deps = {
+    db,
+    adapter: createMockAdapter({ result: {} }),
+    logRoot: join(root, "logs"),
+    globalLimit: 4,
+  };
+  await runTask(db, "t1", workflow, deps);
+  const summary = async () =>
+    (await listStepRuns(db, "t1")).map((r) => [r.step_id, r.status, r.attempt]);
+  assert.deepEqual(await summary(), [
+    ["prepare", "success", 1],
+    ["check", "bounced", 1],
+    ["check", "failed", 2],
+  ]);
+  const failed = (await getTask(db, "t1"))!;
+  assert.equal(failed.state, "failed");
+  assert.equal(failed.current_step_id, "check");
+
+  await rerunToRunning(db, "t1");
+  await runTask(db, "t1", workflow, deps);
+
+  assert.deepEqual(await summary(), [
+    ["prepare", "success", 1],
+    ["check", "bounced", 1],
+    ["check", "failed", 2],
+    ["check", "bounced", 1],
+    ["check", "failed", 2],
+  ]);
+  assert.equal((await getTask(db, "t1"))?.state, "failed");
+});
+
+test("やり直しで失敗が直っていれば、その先のステップへ進んで completed になる", async () => {
+  const { db, root, workflow } = await taskFixture(
+    RERUN_WF + `  - id: after\n    type: command\n    run: "true"\n`,
+  );
+  const deps = {
+    db,
+    adapter: createMockAdapter({ result: {} }),
+    logRoot: join(root, "logs"),
+    globalLimit: 4,
+  };
+  await runTask(db, "t1", workflow, deps);
+  assert.equal((await getTask(db, "t1"))?.state, "failed");
+
+  writeFileSync(join(root, "ok"), "");
+  await rerunToRunning(db, "t1");
+  await runTask(db, "t1", workflow, deps);
+
+  assert.equal((await getTask(db, "t1"))?.state, "completed");
+  const runs = await listStepRuns(db, "t1");
+  assert.deepEqual(runs.slice(-2).map((r) => [r.step_id, r.status]), [
+    ["check", "success"],
+    ["after", "success"],
+  ]);
+  assert.equal(runs.filter((r) => r.step_id === "prepare").length, 1);
+});
+
+test("やり直した agent ステップは既存の会話を resume し、feed ではなく step.prompt で始まる", async () => {
+  const { db, root, workflow } = await taskFixture(AGENT_WITH_RETRY);
+  const adapter = createMockAdapter({ result: HIT });
+  const deps = { db, adapter, logRoot: join(root, "logs"), globalLimit: 4 };
+  await runTask(db, "t1", workflow, deps);
+  assert.equal((await getTask(db, "t1"))?.state, "failed");
+  assert.equal(adapter.calls.length, 3);
+
+  await rerunToRunning(db, "t1");
+  await runTask(db, "t1", workflow, deps);
+
+  assert.equal(adapter.calls.length, 6);
+  assert.equal(adapter.calls[0].kind, "start");
+  assert.equal(adapter.calls[3].kind, "resume");
+  assert.equal(adapter.calls[3].sessionId, adapter.calls[0].sessionId);
+  assert.equal(adapter.calls[3].prompt, "直して");
+  assert.equal(adapter.calls[4].prompt, "もう一度");
+  const runs = (await listStepRuns(db, "t1")).filter((r) => r.step_id === "implement");
+  assert.deepEqual(runs.map((r) => r.attempt), [1, 2, 3, 1, 2, 3]);
+  assert.deepEqual(runs.map((r) => r.status), [
+    "bounced",
+    "bounced",
+    "failed",
+    "bounced",
+    "bounced",
+    "failed",
+  ]);
+  assert.equal((await getTask(db, "t1"))?.state, "failed");
 });

@@ -69,7 +69,7 @@
 | `task.context` | レビュー画面の経緯（[5 章](05-review-guide.md)） |
 | `task.diff` / `task.guide` | diff と Review Guide（[5 章](05-review-guide.md)） |
 | `task.approve` / `task.reject` | `applyApproval`。reject は `comment` 必須 |
-| `task.pause` / `task.resume` / `task.cancel` | [3.11](03-workflow-engine.md) |
+| `task.pause` / `task.resume` / `task.cancel` / `task.rerun` | [3.11](03-workflow-engine.md) |
 | `task.logs` | 最後（または指定）の実行のログ末尾。`follow` で追従を切り替える |
 
 ### worktree・デーモン・利用上限
@@ -92,7 +92,7 @@
 
 | event | 配信先 | 出すところ |
 | --- | --- | --- |
-| `task.stateChanged` | 全員 | tick、エンジン、承認・却下・pause・resume・cancel、Intake の中止 |
+| `task.stateChanged` | 全員 | tick、エンジン、承認・却下・pause・resume・cancel・やり直し（rerun）、Intake の中止 |
 | `stepRun.started` / `stepRun.finished` | 全員 | エンジン |
 | `log.line` | そのタスクを追従している接続 | エンジン |
 | `task.cleanedUp` | 全員 | 完了後の worktree の後始末（`removed` / `refused`） |
@@ -253,6 +253,7 @@
 | `ls [--project] [--state]` / `get <id>` | `task.list` / `task.get` |
 | `approve <id>` / `reject <id> --comment` | `task.approve` / `task.reject` |
 | `pause` / `resume` / `cancel <id>` | `task.pause` / `task.resume` / `task.cancel` |
+| `rerun <id>` | `task.rerun` |
 | `logs <id> [--tail] [--step_run_id] [--follow]` | `task.logs` |
 | `diff <id> [--since last_review]` | `task.diff` |
 | `projects` / `workspaces` / `workspace-add --path` / `workspace-update --path` | `project.list` / `workspace.list` / `workspace.add` / `workspace.update` |

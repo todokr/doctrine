@@ -22,6 +22,7 @@ import {
   type ProjectRow,
   type TaskRow,
   type TaskState,
+  withoutAttempt,
 } from "../db/tasks.ts";
 import {
   getWorkspaceByPath,
@@ -96,7 +97,7 @@ import {
   worktreePathFor,
 } from "../domain/worktree.ts";
 import { cancelTask, closeAwaitingStepRun } from "../domain/cancelTask.ts";
-import { defaultProbe, killStaleChild } from "../domain/recovery.ts";
+import { closeDanglingStepRun, defaultProbe, killStaleChild } from "../domain/recovery.ts";
 import { buildTaskContext } from "../domain/taskContext.ts";
 import { readGuideFile } from "../domain/guideFile.ts";
 import { captureTree, releaseTrees } from "../domain/reviewTree.ts";
@@ -621,6 +622,65 @@ export function createHandler(ctx: DaemonContext): Handler {
           event: "task.stateChanged",
           task_id: taskId,
           from: task.state,
+          to: "queued",
+        });
+        return await getTask(ctx.db, taskId);
+      }
+      case "task.rerun": {
+        const taskId = req(params, "task_id");
+        const task = await getTask(ctx.db, taskId);
+        if (!task) throw new Error("タスクがありません");
+        if (task.state !== "failed") {
+          throw new Error(`やり直せる状態ではありません: ${task.state}`);
+        }
+        if (task.worktree_path === null) throw new Error("worktree が無いのでやり直せません");
+        try {
+          await Deno.stat(task.worktree_path);
+        } catch (e) {
+          if (e instanceof Deno.errors.NotFound) {
+            throw new Error(`worktree がディスクにありません: ${task.worktree_path}`);
+          }
+          throw e;
+        }
+        const stepId = task.current_step_id;
+        if (stepId === null) throw new Error("失敗したステップが記録されていないのでやり直せません");
+        const project = (await getProject(ctx.db, task.project_id))!;
+        let workflow;
+        try {
+          workflow = await ctx.workflowOf(task, project);
+        } catch (e) {
+          throw new Error(
+            `ワークフローを読めないのでやり直せません: ${e instanceof Error ? e.message : e}`,
+          );
+        }
+        const step = workflow.steps.find((s) => s.id === stepId);
+        if (!step) throw new Error(`失敗したステップがワークフローにありません: ${stepId}`);
+        // approval の却下で落ちたタスクは、やり直しても同じ承認待ちに入り直すだけ。
+        if (step.type === "approval") {
+          throw new Error(`approval のステップで却下されたタスクはやり直せません: ${stepId}`);
+        }
+        assertTransition(task.state, "queued");
+        // 例外で落ちた実行の子が生き残っていれば、child_pid を消す前に止める。
+        await killStaleChild(task, defaultProbe(), "SIGKILL");
+        // 回数を消すのは失敗したステップのぶんだけ。試行番号は 1 から振り直され、
+        // ログのファイル名が以前の実行と重なる（applyEscalation と同じ）。
+        // runTask が例外で落ちたタスクには running のままの step_run が残っている。
+        await commitStepBoundary(ctx.db, {
+          taskId,
+          requireState: "failed",
+          taskPatch: {
+            state: "queued",
+            resumed: 1,
+            attempt_counts: withoutAttempt(task, stepId),
+            child_pid: null,
+            child_started_at: null,
+          },
+          ...await closeDanglingStepRun(ctx.db, taskId),
+        });
+        ctx.broadcast({
+          event: "task.stateChanged",
+          task_id: taskId,
+          from: "failed",
           to: "queued",
         });
         return await getTask(ctx.db, taskId);

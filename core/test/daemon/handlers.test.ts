@@ -28,6 +28,7 @@ import type { AgentAdapter } from "../../src/adapter/types.ts";
 import { createWarningLog } from "../../src/daemon/warnings.ts";
 import { parseWorkflow } from "../../src/workflow/schema.ts";
 import { loadWorkflowFromDisk, taskWorkflow } from "../../src/workflow/load.ts";
+import { SETUP_WORKFLOW_NAME, setupWorkflowYaml } from "../../src/workflow/setupWorkflow.ts";
 import type {
   DaemonSlots,
   ProjectSummary,
@@ -2815,6 +2816,309 @@ test("task.resume は上限待ちのタスクを待たずに queued へ戻す", 
   };
   assert.equal(after.state, "queued");
   assert.equal(after.rate_limited_until, null, "消さないと次の tick がもう一度解放しにくる");
+});
+
+// --- task.rerun ---------------------------------------------------------------
+
+type Handle = ReturnType<typeof createHandler>;
+
+const BOOM_YAML = 'name: boom\nsteps:\n  - id: a\n    type: command\n    run: "exit 1"\n';
+
+/** command が 1 回失敗して failed になったタスク（current_step_id は a、attempt_counts は {"a":1}）。 */
+async function failedTask(ctx: DaemonContext, h: Handle): Promise<string> {
+  await h("workspace.add", { path: repo }, NOOP_CONN);
+  await writeFile(join(repo, ".doctrine", "workflows", "boom.yaml"), BOOM_YAML);
+  const t = await h(
+    "task.create",
+    { project: repo, title: "T", prompt: "p", workflow: "boom" },
+    NOOP_CONN,
+  ) as { id: string };
+  await tick(ctx);
+  await until(async () => (await getTask(ctx.db, t.id))?.state === "failed");
+  await until(() => ctx.running.size === 0);
+  return t.id;
+}
+
+/** tick を通さずに failed の行を作る。o で列を差し替える。 */
+async function failedRow(
+  ctx: DaemonContext,
+  h: Handle,
+  o: Record<string, unknown>,
+  extra: { intake_id?: string; intake_process_id?: string } = {},
+): Promise<string> {
+  await h("workspace.add", { path: repo }, NOOP_CONN);
+  const [project] = await h("project.list", {}, NOOP_CONN) as ProjectSummary[];
+  if (extra.intake_id) {
+    await insertIntake(ctx.db, {
+      id: extra.intake_id,
+      workspace_id: project.workspace_id,
+      issue_url: "https://github.com/o/r/issues/1",
+      issue_node_id: "I_1",
+      issue_title: "親",
+    });
+  }
+  const id = randomUUID();
+  await insertTask(ctx.db, {
+    id,
+    project_id: project.id,
+    title: "T",
+    prompt: "p",
+    workflow_name: "boom",
+    branch: `b-${id}`,
+    priority: 2,
+    workflow_yaml: BOOM_YAML,
+    ...extra,
+  });
+  await ctx.db.updateTable("tasks")
+    .set({ state: "failed", ...o })
+    .where("id", "=", id)
+    .execute();
+  return id;
+}
+
+async function stateOf(ctx: DaemonContext, id: string): Promise<string | undefined> {
+  return (await getTask(ctx.db, id))?.state;
+}
+
+test("task.rerun は failed のタスクを queued に戻し、失敗したステップの回数だけを消す", async () => {
+  const events: ServerEvent[] = [];
+  const ctx = await context(events);
+  const h = createHandler(ctx);
+  const id = await failedTask(ctx, h);
+  await ctx.db.updateTable("tasks")
+    .set({ attempt_counts: JSON.stringify({ a: 2, other: 1 }) })
+    .where("id", "=", id).execute();
+  const before = (await getTask(ctx.db, id))!;
+
+  const after = await h("task.rerun", { task_id: id }, NOOP_CONN) as { state: string };
+
+  assert.equal(after.state, "queued");
+  const row = (await getTask(ctx.db, id))!;
+  assert.equal(row.state, "queued");
+  assert.equal(row.resumed, 1);
+  assert.equal(row.current_step_id, "a");
+  assert.equal(row.worktree_path, before.worktree_path);
+  assert.deepEqual(JSON.parse(row.attempt_counts), { other: 1 });
+  assert.equal(row.pending_feed, null);
+  assert.equal(row.child_pid, null);
+  assert.deepEqual((await listStepRuns(ctx.db, id)).map((r) => r.status), ["failed"]);
+  assert.ok(
+    events.some((e) =>
+      e.event === "task.stateChanged" && e.task_id === id && e.from === "failed" &&
+      e.to === "queued"
+    ),
+  );
+});
+
+test("task.rerun のあと tick すると、同じ worktree で失敗したステップから走る", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  const id = await failedTask(ctx, h);
+  const worktree = (await getTask(ctx.db, id))!.worktree_path;
+
+  await h("task.rerun", { task_id: id }, NOOP_CONN);
+  await tickWhenIdle(ctx);
+  await until(async () => (await listStepRuns(ctx.db, id)).length === 2);
+  await until(async () => (await stateOf(ctx, id)) === "failed");
+  await until(() => ctx.running.size === 0);
+
+  const runs = await listStepRuns(ctx.db, id);
+  assert.deepEqual(runs.map((r) => [r.step_id, r.attempt]), [["a", 1], ["a", 1]]);
+  assert.equal((await getTask(ctx.db, id))?.worktree_path, worktree);
+});
+
+test("task.rerun は running のまま残った step_run を interrupted で閉じる", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
+  await writeFile(
+    join(repo, ".doctrine", "workflows", "brokenvar.yaml"),
+    'name: brokenvar\nsteps:\n  - id: a\n    type: command\n    run: "echo {{ steps.nope.last_stdout }}"\n',
+  );
+  const t = await h(
+    "task.create",
+    { project: repo, title: "T", prompt: "p", workflow: "brokenvar" },
+    NOOP_CONN,
+  ) as { id: string };
+  await tick(ctx);
+  await until(async () => (await stateOf(ctx, t.id)) === "failed");
+  await until(() => ctx.running.size === 0);
+  assert.deepEqual((await listStepRuns(ctx.db, t.id)).map((r) => r.status), ["running"]);
+
+  await h("task.rerun", { task_id: t.id }, NOOP_CONN);
+
+  const runs = await listStepRuns(ctx.db, t.id);
+  assert.equal(runs[0].status, "interrupted");
+  assert.notEqual(runs[0].ended_at, null);
+  assert.equal(await stateOf(ctx, t.id), "queued");
+});
+
+test("task.rerun は failed でないタスクを拒否する", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
+  const t = await h("task.create", { project: repo, title: "T", prompt: "p" }, NOOP_CONN) as {
+    id: string;
+  };
+  await assert.rejects(
+    () => h("task.rerun", { task_id: t.id }, NOOP_CONN),
+    /やり直せる状態ではありません: queued/,
+  );
+  assert.equal(await stateOf(ctx, t.id), "queued");
+});
+
+test("task.rerun は worktree_path が NULL のタスクを拒否する", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  const id = await failedRow(ctx, h, { worktree_path: null, current_step_id: "a" });
+  await assert.rejects(() => h("task.rerun", { task_id: id }, NOOP_CONN), /worktree が無い/);
+  assert.equal(await stateOf(ctx, id), "failed");
+});
+
+test("task.rerun は worktree のディレクトリが無いタスクを拒否する", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  const id = await failedTask(ctx, h);
+  await rm((await getTask(ctx.db, id))!.worktree_path!, { recursive: true, force: true });
+  await assert.rejects(
+    () => h("task.rerun", { task_id: id }, NOOP_CONN),
+    /worktree がディスクにありません/,
+  );
+  assert.equal(await stateOf(ctx, id), "failed");
+});
+
+test("task.rerun は current_step_id が NULL のタスクを拒否する", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  const id = await failedRow(ctx, h, { worktree_path: repo, current_step_id: null });
+  await assert.rejects(
+    () => h("task.rerun", { task_id: id }, NOOP_CONN),
+    /失敗したステップが記録されていない/,
+  );
+  assert.equal(await stateOf(ctx, id), "failed");
+});
+
+test("task.rerun は approval の却下で落ちたタスクを拒否する", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  const id = await suspendedTask(ctx, h);
+  await h("task.reject", { task_id: id, comment: "だめ" }, NOOP_CONN);
+  assert.equal(await stateOf(ctx, id), "failed");
+  await assert.rejects(() => h("task.rerun", { task_id: id }, NOOP_CONN), /approval/);
+  assert.equal(await stateOf(ctx, id), "failed");
+});
+
+test("task.rerun は current_step_id のステップがワークフローに無いタスクを拒否する", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  const id = await failedRow(ctx, h, { worktree_path: repo, current_step_id: "ghost" });
+  await assert.rejects(
+    () => h("task.rerun", { task_id: id }, NOOP_CONN),
+    /ワークフローにありません: ghost/,
+  );
+  assert.equal(await stateOf(ctx, id), "failed");
+});
+
+test("task.rerun はワークフローを読めないタスクを拒否する", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  const id = await failedTask(ctx, h);
+  await unpin(ctx, id);
+  await writeFile(join(repo, ".doctrine", "workflows", "boom.yaml"), "not: [valid");
+  await assert.rejects(
+    () => h("task.rerun", { task_id: id }, NOOP_CONN),
+    /ワークフローを読めない/,
+  );
+  assert.equal(await stateOf(ctx, id), "failed");
+});
+
+test("task.rerun は無いタスクを名指しで断る", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  await assert.rejects(() => h("task.rerun", { task_id: "nope" }, NOOP_CONN), /タスクがありません/);
+});
+
+test("task.rerun は Intake 由来のタスクを Intake の状態を見ずに受ける", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  const id = await failedRow(
+    ctx,
+    h,
+    { worktree_path: repo, current_step_id: "a" },
+    { intake_id: "i1", intake_process_id: "p1" },
+  );
+  const after = await h("task.rerun", { task_id: id }, NOOP_CONN) as { state: string };
+  assert.equal(after.state, "queued");
+});
+
+test("task.rerun は setup のタスクを受ける", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  const id = await failedRow(ctx, h, {
+    workflow_name: SETUP_WORKFLOW_NAME,
+    workflow_yaml: setupWorkflowYaml(),
+    workflow_setup: null,
+    worktree_path: repo,
+    current_step_id: "draft",
+  });
+  const after = await h("task.rerun", { task_id: id }, NOOP_CONN) as { state: string };
+  assert.equal(after.state, "queued");
+});
+
+test("task.rerun は利用上限の諦めで落ちたタスクを受ける", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
+  await writeFile(
+    join(repo, ".doctrine", "workflows", "agent.yaml"),
+    "name: agent\nsteps:\n  - id: impl\n    type: agent\n    prompt: \"{{ task.prompt }}\"\n" +
+      "    onFailure: { goto: impl, maxAttempts: 3 }\n",
+  );
+  ctx.adapter = createMockAdapter({
+    eventsSequence: [[{
+      kind: "rateLimit",
+      window: "five_hour",
+      utilization: 1,
+      resetsAt: new Date(Date.now() + 7 * 60 * 60_000).toISOString(),
+    }]],
+    result: {},
+    sequence: [{ ok: false, exitCode: 1, text: "", stderrTail: "" }],
+  });
+  const t = await h(
+    "task.create",
+    { project: repo, title: "T", prompt: "p", workflow: "agent" },
+    NOOP_CONN,
+  ) as { id: string };
+  await tick(ctx);
+  await until(async () => (await stateOf(ctx, t.id)) === "failed");
+  await until(() => ctx.running.size === 0);
+
+  const after = await h("task.rerun", { task_id: t.id }, NOOP_CONN) as { state: string };
+  assert.equal(after.state, "queued");
+});
+
+test("task.rerun は上限到達の承認待ちを却下されたタスクを受ける", async () => {
+  const ctx = await context();
+  const h = createHandler(ctx);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
+  await writeFile(
+    join(repo, ".doctrine", "workflows", "esc.yaml"),
+    'name: esc\nsteps:\n  - id: check\n    type: command\n    run: "exit 1"\n' +
+      "    onFailure: { goto: check, maxAttempts: 2, onExhausted: suspend }\n",
+  );
+  const t = await h(
+    "task.create",
+    { project: repo, title: "T", prompt: "p", workflow: "esc" },
+    NOOP_CONN,
+  ) as { id: string };
+  await tick(ctx);
+  await until(async () => (await stateOf(ctx, t.id)) === "suspended");
+  await until(() => ctx.running.size === 0);
+  await h("task.reject", { task_id: t.id, comment: "手で直す" }, NOOP_CONN);
+  assert.equal(await stateOf(ctx, t.id), "failed");
+
+  const after = await h("task.rerun", { task_id: t.id }, NOOP_CONN) as { state: string };
+  assert.equal(after.state, "queued");
 });
 
 const GUIDE_WORKFLOW =

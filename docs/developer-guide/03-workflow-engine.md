@@ -82,6 +82,8 @@
 | `waiting` | poll が「まだ」と答え、次に確かめる時刻を待っている（`waiting_until`） | × | ○ |
 | `completed` / `failed` / `canceled` | 終端 | × | × |
 
+`failed` は終端（`isTerminal`）のままだが、`task.rerun` だけが `queued` へ戻せる（3.11）。
+
 `suspended` などが全体枠は返しつつプロジェクト枠を握るので、`maxConcurrent: 1` のプロジェクトでは承認待ちのタスクが後続を止める。
 
 ```mermaid
@@ -110,9 +112,10 @@ stateDiagram-v2
   suspended --> canceled
   paused --> queued: resume
   paused --> canceled
+  failed --> queued: task.rerun
 ```
 
-遷移は書き込みの前に `states.ts:assertTransition` で確かめる。遷移表には `queued → failed` の辺もあるが、今のコードでこの辺を書く箇所は無い
+遷移は書き込みの前に `states.ts:assertTransition` で確かめる。`failed → queued` の辺を書くのは `task.rerun` だけである。遷移表には `queued → failed` の辺もあるが、今のコードでこの辺を書く箇所は無い
 （tick が遅い処理の前に `running` を書くので、ワークフローが読めないなどの失敗は `running → failed` を通る）。
 
 ### ステップ実行（`step_runs`）の状態
@@ -124,7 +127,7 @@ stateDiagram-v2
 | `success` | 成功。権限で拒否された操作があっても成功は成功 |
 | `failed` | 分岐しない失敗（分岐なし・回数切れ・上限の諦め）、または却下で終わった |
 | `bounced` | 失敗・却下したが goto が効いて前へ戻った。`goto_step_id` が入る（DB の CHECK で `bounced` のときだけ非 NULL） |
-| `interrupted` | 外から閉じられた（pause / cancel と競合した、poll が 2 を返した、suspended から cancel / resume した、起動時の復帰） |
+| `interrupted` | 外から閉じられた（pause / cancel と競合した、poll が 2 を返した、suspended から cancel / resume した、起動時の復帰、`task.rerun` が閉じた例外で落ちた実行の行） |
 | `rate_limited` | 利用上限で打ち切られた。同じ attempt で再開される |
 | `waiting` | poll の「まだ」。再開時に同じ行を `running` に戻して使い直す |
 
@@ -284,12 +287,13 @@ poll ステップは `sh -c` で `run` を実行し、終了コードで次を�
 `waiting` の期限が来ると `releaseDueWaiting` が `queued` に戻し、`runTask` は**同じ行**を `running` に戻して使う（1 回の待ちの周に 1 行）。
 doctrine 自身のワークフローの `wait-merge` はこれで PR のマージを待ち、conflict なら 1 を返して `sync` へ戻す。
 
-## 3.11 中止・一時停止・再開
+## 3.11 中止・一時停止・再開・やり直し
 
 | 操作 | 受ける状態 | すること |
 | --- | --- | --- |
 | `task.pause` | queued / running / rate_limited / waiting | 子プロセスを SIGTERM し `paused` |
 | `task.resume` | paused / suspended / rate_limited / waiting | `queued`（`resumed: 1`）。期限の列を消し、開いている `awaiting` 行を `interrupted` で閉じる |
+| `task.rerun` | failed（worktree があり、`current_step_id` があり、そのステップが approval でないもの） | `queued`（`resumed: 1`）。`current_step_id` のステップの回数だけを消し、`running` のまま残った行を `interrupted` で閉じる。worktree・会話・`current_step_id` はそのまま |
 | `task.cancel` | 終端以外 | SIGTERM し `canceled`。`awaiting` 行を閉じる。worktree は残す |
 
 走っている `runTask` を止める手段は無く、止めるのは DB の状態である。`runTask` は毎周の頭で状態を読み直し、
@@ -297,6 +301,20 @@ doctrine 自身のワークフローの `wait-merge` はこれで PR のマー�
 SIGTERM で殺された実行が失敗として返ってきても、`bounced` や `failed` とは記録しない。
 
 pause から resume すると `current_step_id` は進んでいないので、同じステップを頭からやり直す（agent なら同じ会話を resume）。
+
+`task.rerun` は `failed` のタスクを、同じ worktree のまま `current_step_id` のステップから走らせ直す。次のものは理由を付けて拒否する。
+
+- `failed` でない
+- `worktree_path` が NULL か、そのパスがディスクに無い
+- `current_step_id` が NULL
+- ワークフローを読めない、またはそのステップがワークフローに無い
+- そのステップが approval（approval の却下で落ちたタスク）
+
+失敗の原因は見分けない。回数切れ、上限到達（escalate）の却下、利用上限の諦め、実行中の例外、Intake 由来のタスク、setup のタスクも受ける。Intake の状態は見ない。
+`current_step_id` と `task_sessions` と `pending_feed` は書かない。やり直しは feed を付けず、ステップ自身の定義で始まる（agent は同じ会話を `--resume` し、プロンプトは `step.prompt`）。
+
+消す回数は `current_step_id` のステップのぶんだけで、他のステップの回数は触らない。試行番号は 1 から振り直されるので、step_run の `attempt` とログのファイル名（`<step>.<attempt>.log`）が以前の実行と重なり、ログは追記される。これは上限到達の承認（3.7）と同じ挙動である。
+`failed` はプロジェクト枠を持たないので、同じプロジェクトで別のタスクが枠を使っていれば、空くまで `queued` で待つ。
 
 ## 3.12 クラッシュ復帰（`recovery.ts:recoverOnStartup`）
 
@@ -370,7 +388,7 @@ resume: claude -p --resume <sessionId> <prompt> --output-format stream-json --ve
 | --- | --- |
 | ワークフローの YAML が不正 | `task.create` が拒否する |
 | worktree を作れない | `running → failed`（再試行しない） |
-| テンプレート変数が不正 | `TemplateError` が `runTask` から伝わり `failed`。**その step_run 行は `running` のまま残る**（[10 章](10-known-gaps.md)） |
+| テンプレート変数が不正 | `TemplateError` が `runTask` から伝わり `failed`。**その step_run 行は `running` のまま残る**（[10 章](10-known-gaps.md)。`task.rerun` でやり直すと `interrupted` で閉じる） |
 | command が非 0 | `onFailure` があれば goto、回数切れで `failed` か escalate |
 | claude が result 行を出さずに終わる | 失敗扱い。stderr の末尾が `last_stderr` になる |
 | guide の出力が検証に落ちる | 既定の分岐で自分に戻り、理由を feed。3 回で `failed` |

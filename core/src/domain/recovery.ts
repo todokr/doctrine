@@ -170,7 +170,7 @@ export type RecoveryResult =
  *
  * running の行が無ければ何もしない（呼び出し側はこれをエラー扱いしない）。
  */
-async function closeDanglingStepRun(
+export async function closeDanglingStepRun(
   db: Db,
   taskId: string,
 ): Promise<Pick<StepBoundary, "stepRunUpdate">> {

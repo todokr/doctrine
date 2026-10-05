@@ -109,6 +109,13 @@ test("dctl approve / reject", () => {
   );
 });
 
+test("dctl rerun", () => {
+  assert.deepEqual(parseArgv(["rerun", "t1"]), {
+    method: "task.rerun",
+    params: { task_id: "t1" },
+  });
+});
+
 test("dctl slots", () => {
   assert.deepEqual(parseArgv(["slots"]), { method: "daemon.slots", params: {} });
 });

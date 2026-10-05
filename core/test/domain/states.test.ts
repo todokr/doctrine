@@ -22,11 +22,35 @@ test("正常系の遷移を許す", () => {
 });
 
 test("終端状態からは動かない", () => {
-  for (const from of ["completed", "failed", "canceled"] as const) {
+  for (const from of ["completed", "canceled"] as const) {
     for (const to of ["queued", "running", "suspended", "paused"] as const) {
       assert.equal(canTransition(from, to), false, `${from} -> ${to}`);
     }
   }
+  for (const to of ["running", "suspended", "paused"] as const) {
+    assert.equal(canTransition("failed", to), false, `failed -> ${to}`);
+  }
+});
+
+test("failed から行けるのは queued だけ（task.rerun）", () => {
+  assert.ok(canTransition("failed", "queued"));
+  assert.doesNotThrow(() => assertTransition("failed", "queued"));
+  for (
+    const to of [
+      "running",
+      "suspended",
+      "paused",
+      "rate_limited",
+      "waiting",
+      "completed",
+      "failed",
+      "canceled",
+    ] as const
+  ) {
+    assert.equal(canTransition("failed", to), false, `failed -> ${to}`);
+  }
+  assert.ok(isTerminal("failed"));
+  assert.equal(holdsProjectSlot("failed"), false);
 });
 
 test("queued から直接 suspended にはならない", () => {
