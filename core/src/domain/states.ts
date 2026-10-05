@@ -23,7 +23,8 @@ const TRANSITIONS: Record<TaskState, readonly TaskState[]> = {
   suspended: ["queued", "canceled", "failed", "completed"],
   paused: ["queued", "canceled"],
   completed: [],
-  failed: [],
+  /** queued へ戻すのは task.rerun だけ。 */
+  failed: ["queued"],
   canceled: [],
 };
 

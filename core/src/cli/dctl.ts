@@ -58,6 +58,7 @@ export const USAGE = `使い方: dctl <コマンド> [引数]
   approve <task-id>
   reject <task-id> --comment <text>
   pause | resume | cancel <task-id>
+  rerun <task-id>                 失敗したタスクを、失敗したステップからやり直す
   logs <task-id> [--tail <n>] [--step_run_id <n>] [--follow]
   diff <task-id> [--since last_review]
 
@@ -104,6 +105,8 @@ export function parseArgv(argv: string[]): { method: string; params: Record<stri
       return { method: "task.pause", params: { task_id: positional[0] } };
     case "resume":
       return { method: "task.resume", params: { task_id: positional[0] } };
+    case "rerun":
+      return { method: "task.rerun", params: { task_id: positional[0] } };
     case "cancel":
       return { method: "task.cancel", params: { task_id: positional[0] } };
     case "logs":
