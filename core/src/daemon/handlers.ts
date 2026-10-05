@@ -643,7 +643,9 @@ export function createHandler(ctx: DaemonContext): Handler {
           throw e;
         }
         const stepId = task.current_step_id;
-        if (stepId === null) throw new Error("失敗したステップが記録されていないのでやり直せません");
+        if (stepId === null) {
+          throw new Error("失敗したステップが記録されていないのでやり直せません");
+        }
         const project = (await getProject(ctx.db, task.project_id))!;
         let workflow;
         try {

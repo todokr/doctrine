@@ -3071,7 +3071,7 @@ test("task.rerun は利用上限の諦めで落ちたタスクを受ける", asy
   await h("workspace.add", { path: repo }, NOOP_CONN);
   await writeFile(
     join(repo, ".doctrine", "workflows", "agent.yaml"),
-    "name: agent\nsteps:\n  - id: impl\n    type: agent\n    prompt: \"{{ task.prompt }}\"\n" +
+    'name: agent\nsteps:\n  - id: impl\n    type: agent\n    prompt: "{{ task.prompt }}"\n' +
       "    onFailure: { goto: impl, maxAttempts: 3 }\n",
   );
   ctx.adapter = createMockAdapter({
