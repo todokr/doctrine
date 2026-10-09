@@ -24,12 +24,11 @@ export function worktreePathFor(projectPath: string, taskId: string): string {
 export function slugify(title: string): string {
   const collapsed = title
     .normalize("NFKC")
-    .replace(/[^\p{L}\p{N}]+/gu, "-")
-    .toLowerCase();
-  // コードポイント単位で切る（UTF-16 コード単位で切ると絵文字などのサロゲート
-  // ペアを分断してしまう）。トリムは切り詰めた「後」に行う — そうしないと
-  // 切り詰め境界にちょうどハイフンが来たとき末尾にハイフンが残ってしまう。
-  const truncated = Array.from(collapsed).slice(0, 40).join("");
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-");
+  // トリムは切り詰めた「後」に行う — そうしないと切り詰め境界にちょうど
+  // ハイフンが来たとき末尾にハイフンが残ってしまう。
+  const truncated = collapsed.slice(0, 40);
   return truncated.replace(/^-+|-+$/g, "");
 }
 

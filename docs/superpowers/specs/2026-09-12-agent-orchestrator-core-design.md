@@ -331,7 +331,9 @@ pid単独での判定は誤って無関係のプロセスを殺し得る）。
 - 置き場所: `~/.local/state/doctrine/worktrees/<project>/<task-id>`
 — **リポジトリの外**。中に置くと ripgrep・ファイル監視・IDEインデックスが
 全部舐めに行き、エージェント自身も混乱する
-- ブランチ: `doctrine/<task-id>-<slug>`、`project.baseBranch` から生やす
+- ブランチ: `doctrine/<task-id>-<slug>`、`project.baseBranch` から生やす。
+slug はタイトルから ASCII の英数字だけを残したもので、残る文字が無ければ
+`doctrine/<task-id>` になる
 - 作成は自前の `git worktree add`（Claude Code の `-w` は使わない。
 ライフサイクルの権威を1箇所に保つため）
 

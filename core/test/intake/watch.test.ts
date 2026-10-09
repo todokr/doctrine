@@ -173,7 +173,7 @@ test("投入したタスクはプロセス名・既定のワークフロー・�
   assert.equal(task.workflow_name, "feature");
   assert.equal(task.priority, 2);
   assert.equal(task.state, "queued");
-  assert.ok(task.branch.startsWith(`doctrine/${task.id}-`));
+  assert.equal(task.branch, `doctrine/${task.id}`);
   assert.equal(task.intake_id, "i1");
   assert.equal(task.issue_url, subIssueUrl);
   assert.equal(task.parent_issue_url, PARENT_URL);
