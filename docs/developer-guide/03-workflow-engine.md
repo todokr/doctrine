@@ -315,7 +315,7 @@ pause から resume すると `current_step_id` は進んでいないので、�
 ## 3.13 worktree
 
 - **置き場**: `<stateRoot>/worktrees/<basename(projectPath)>/<taskId>`（`worktreePathFor`）。リポジトリの外に置く
-- **ブランチ**: `doctrine/<taskId>-<slug>`（`branchNameFor`）。slug はタイトルを NFKC 正規化して英数字以外を `-` にし、40 コードポイントで切ったもの
+- **ブランチ**: `doctrine/<taskId>-<slug>`（`branchNameFor`）。slug はタイトルを NFKC 正規化し、ASCII の英数字以外を `-` にして小文字にし、40 文字で切ったもの。ASCII の英数字が 1 つも無いタイトルでは slug が空になり、ブランチは `doctrine/<taskId>` になる
 - **作成**: 枠を取ったときに `git worktree add -b <branch> <path> <base>`。続けて `ensureDoctrineOutExcluded` が `.doctrine-out/` を `.git/info/exclude` に追記する。これで中間成果物が `git status`（削除拒否の判定）にも diff にも混ざらない
 - **削除**: `completed` のときだけ `cleanupAfterRun` が `force: false` で消す。未コミットの変更があれば拒否し、警告と `task.cleanedUp { outcome: "refused" }` を出す。ブランチは残す
 - `failed` / `canceled` は残す。`worktree.remove`（`dctl gc`）で手で消し、そのときレビュー参照も一緒に消す。終わっていないタスクの worktree は `force` でも消せない
