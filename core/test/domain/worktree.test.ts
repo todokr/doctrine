@@ -52,10 +52,13 @@ afterEach(async () => {
 });
 
 test("ブランチ名を作る", () => {
-  assert.equal(branchNameFor("abc123", "ログイン画面を直す"), "doctrine/abc123-ログイン画面を直す");
+  assert.equal(
+    branchNameFor("abc123", "Fix the login screen!"),
+    "doctrine/abc123-fix-the-login-screen",
+  );
   assert.equal(slugify("Fix the login screen!"), "fix-the-login-screen");
   assert.equal(slugify("  a///b  "), "a-b");
-  assert.ok(slugify("x".repeat(100)).length <= 40);
+  assert.equal(slugify("x".repeat(100)), "x".repeat(40));
 });
 
 test("baseBranch から worktree とブランチを生やす", async () => {
@@ -298,26 +301,38 @@ test("slugify は切り詰めた後にトリムする（境界にハイフンが
   assert.equal(slug, "a".repeat(39));
 });
 
-test("slugify はコードポイント単位で切り詰め、サロゲートペアを分断しない", () => {
-  // U+20000（CJK統合漢字拡張B、\p{Lo} = 文字なので除去されない）はUTF-16では
-  // サロゲートペア（2コード単位）。先頭に1文字のBMP文字を置いて位置をずらすと、
-  // UTF-16コード単位で40切り詰める旧実装ではペアの片方だけが残ってしまう。
-  const astral = String.fromCodePoint(0x20000);
-  const title = "a" + astral.repeat(60);
-  const slug = slugify(title);
-  assert.ok(Array.from(slug).length <= 40);
-  // 孤立サロゲートは UTF-8 往復で失われる／壊れるため、往復一致は分断されていない証拠になる。
-  assert.equal(slug, Buffer.from(slug, "utf8").toString("utf8"));
+test("slugify は日本語だけのタイトルで空文字を返す", () => {
+  assert.equal(slugify("ログイン画面を直す"), "");
+  assert.equal(slugify("あ".repeat(50)), "");
 });
 
-test("slugify は40文字を超えるBMP日本語タイトルをちょうど40コードポイントに切り詰める", () => {
-  const title = "あ".repeat(50);
-  const slug = slugify(title);
-  assert.equal(Array.from(slug).length, 40);
+test("slugify は日本語と英数字が混ざったタイトルから ASCII の英数字だけを残す", () => {
+  assert.equal(
+    slugify("/healthz を clamd への PING で応答するように変える"),
+    "healthz-clamd-ping",
+  );
+  assert.equal(slugify("ログイン画面の v2 を直す"), "v2");
+  assert.equal(slugify("café を追加"), "caf");
+  // 日本語は連続が "-" 1 つに畳まれるので 40 文字の上限に数えない。
+  assert.equal(slugify("あ".repeat(50) + "abc"), "abc");
 });
 
-test("branchNameFor は記号だけのタイトルで doctrine/<id> にフォールバックする", () => {
+test("slugify は全角の英数字を半角にして残す", () => {
+  assert.equal(slugify("ＡＢＣ１２３ を直す"), "abc123");
+});
+
+test("branchNameFor は ASCII の英数字が無いタイトルで doctrine/<id> にフォールバックする", () => {
   assert.equal(branchNameFor("abc123", "!!! ???"), "doctrine/abc123");
+  assert.equal(branchNameFor("abc123", "ログイン画面を直す"), "doctrine/abc123");
+});
+
+test("branchNameFor は日本語が混ざったタイトルでも ASCII のブランチ名を作る", () => {
+  const branch = branchNameFor(
+    "4aa840a9-4686-4e92-bf6c-ee0152101834",
+    "/healthz を clamd への PING で応答するように変える",
+  );
+  assert.equal(branch, "doctrine/4aa840a9-4686-4e92-bf6c-ee0152101834-healthz-clamd-ping");
+  assert.match(branch, /^doctrine\/[a-z0-9-]+$/);
 });
 
 test("intakeWorktreePathFor は worktrees 直下の intake-<id> を返す", () => {
