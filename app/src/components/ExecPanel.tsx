@@ -22,8 +22,6 @@ export function ExecPanel(p: {
           role="separator"
           aria-orientation="horizontal"
           aria-label="パネルの高さ"
-          tabIndex={0}
-          aria-valuenow={p.height}
           onPointerDown={(e) => {
             e.currentTarget.setPointerCapture(e.pointerId);
             drag.current = { y: e.clientY, h: p.height };
