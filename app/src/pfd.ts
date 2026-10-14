@@ -178,8 +178,9 @@ export function statusLine(status: ProcessStatus, rail: readonly RailNode[] | nu
 }
 
 // 箱の寸法。幅は種類ごとに固定し、長いラベルは行を増やして収める
-const BOX_W = { artifact: 168, process: 188 } as const;
-const BOX_PAD_X = 8;
+const BOX_W = { artifact: 168, process: 204 } as const;
+/** ラベルの左右の余白。プロセスは両端が半円なので、丸みの分を広く取る */
+const BOX_PAD_X = { artifact: 8, process: 20 } as const;
 const BOX_PAD_Y = 7;
 /** 成果物の上下の余白。印は札にして箱の外へ出すので、印の行を取らない */
 const ARTIFACT_PAD_Y = 9;
@@ -208,7 +209,7 @@ const STATUS_DESCENT = 3;
 export const RAIL_BAR_H = 6;
 const RAIL_GAP = 2;
 /** 状態の文言を収める幅。両端の丸みの分を左右から引く */
-const STATUS_INSET = 12;
+const STATUS_INSET = 20;
 
 /** ラベルの描画幅の見積もり（px）。10.5px の文字で、ASCII は 6、それ以外は 10.5 */
 export function textWidth(s: string): number {
@@ -353,7 +354,7 @@ export function buildPfdView(
   const sized = new Map(keys.map((k): [string, { w: number; h: number; lines: string[]; marks: string[]; labelDy: number; statusDy: number | null }] => {
     const s = byKey.get(k)!;
     const w = BOX_W[s.kind];
-    const lines = wrap(s.name, w - BOX_PAD_X * 2);
+    const lines = wrap(s.name, w - BOX_PAD_X[s.kind] * 2);
     const marks = marksOf(s);
     if (exec && s.kind === "process") {
       const labelDy = EXEC_PAD_Y + LABEL_ASCENT;
