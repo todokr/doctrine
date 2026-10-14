@@ -138,7 +138,7 @@ plan は承認された案、direct は `pfd.ts:directPfd` で組み立てた Is
 | Intake のログ | `components/IntakeLog.tsx` | `intake.logs` |
 | 設定 | `components/SettingsView.tsx`、`ProjectConfigSection.tsx`、`WorkflowSettings.tsx` | `load_settings` / `save_settings`、`daemon.slots`、`daemon.setGlobalLimit`、`project.config.*`、`workflow.*` |
 
-`shared/protocol.ts` の `Methods` にある RPC は `task.create` を除いてどこかの画面が使っている（`task.create` はどの画面も使わない）。
+`shared/protocol.ts` の `Methods` にある RPC のうち、`task.create`、`worktree.list`、`daemon.warnings`、`workspace.update` はどの画面も使わない。ほかはどこかの画面が使っている。
 
 キー操作（`App.tsx:useKeys`）: `j` / `k` で一覧を移動、`n` / `p` でファイル（ガイドの順では hunk）、`[` / `]` でガイドのグループ、`Esc` でモーダルを閉じる。
 **承認と差し戻しにはキーを割り当てない。**
