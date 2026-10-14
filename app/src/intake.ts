@@ -20,7 +20,7 @@ import type {
   NewComment,
   WatchHealth,
 } from "../../shared/protocol.ts";
-import { LOOK, parsePfdKey, pfdKey } from "./pfd";
+import { LOOK, parsePfdKey, pfdKey, statusNote } from "./pfd";
 import type { Task, Workspace, WorkspaceFilter } from "./types";
 
 /** targetId は質問か仮定の id */
@@ -461,25 +461,6 @@ export function issueTarget(url: string, intakes: IntakeSummary[]): IssueTarget 
 /** buildPfdView の statuses に渡す形。キーはプロセスの id */
 export function processStatuses(processes: readonly IntakeProcessView[]): Record<string, ProcessStatus> {
   return Object.fromEntries(processes.map((p) => [p.id, p]));
-}
-
-export const BLOCKED_BY = {
-  revising: "改訂中",
-  paused: "一時停止中",
-  no_sub_issue: "sub-issue 待ち",
-} as const;
-
-export const ATTENTION_REASON = {
-  task_stopped: "タスクが止まった",
-  no_pr: "PR が無い",
-  pr_closed: "PR が閉じられた",
-} as const;
-
-/** LOOK の語に添える語（spec 6.6）。ready の blockedBy と needs_attention の reason だけ。ほかは null */
-export function statusNote(status: ProcessStatus): string | null {
-  if (status.state === "ready") return status.blockedBy === null ? null : BLOCKED_BY[status.blockedBy];
-  if (status.state === "needs_attention") return ATTENTION_REASON[status.reason];
-  return null;
 }
 
 /** 状態の語と添える語をまとめた 1 行（「着手可能（一時停止中）」） */

@@ -129,7 +129,7 @@ describe("attentionProcessIds", () => {
 
 describe("firstAttentionKey", () => {
   test("図のノードの順で最初の人の番", () => {
-    const view = buildPfdView(PFD_SAMPLE, { attention: new Set(["approve", "design"]) });
+    const view = buildPfdView(PFD_SAMPLE, { exec: { rails: {}, attention: new Set(["approve", "design"]) } });
     expect(firstAttentionKey(view)).toBe("p:design");
     expect(firstAttentionKey(buildPfdView(PFD_SAMPLE))).toBeNull();
   });

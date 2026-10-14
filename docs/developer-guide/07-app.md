@@ -118,7 +118,7 @@ Intake に属するタスクの `task.stateChanged` / `stepRun.*` は `intakeSta
 
 骨格は `app/src/App.tsx`。左端のアイコン列（`Rail`）、サイドバー、本体、モーダル、トーストからなる。
 本体は `view`（`intake` / `execution` / `settings`）で振り分ける。Execution の本体（`ExecutionView`）は選んだ Intake の図を出す。
-plan は承認された案、direct は `pfd.ts:directPfd` で組み立てた Issue → タスク → PR の図で、プロセスのノードにはいまのタスクのステップの帯が入る。
+plan は承認された案、direct は `pfd.ts:directPfd` で組み立てた Issue → タスク → PR の図で、プロセスのノードにはラベル・状態の文言（`pfd.ts:statusLine`）・いまのタスクのステップの帯だけを描き、人の番のノードは地を塗る。
 ノードを選ぶと画面の下のパネル（`ExecDetail`、枠は `ExecPanel`）に、要素の欄・人の操作・タスク画面・レビュー画面のどれかを出す（`execution.ts:panelContentOf`）。
 パネルのタスクは `s.sel` が決め、ノードを選ぶと `task.open` で合わせる。
 
@@ -151,7 +151,7 @@ React も Tauri も持ち込まず、同名の `*.test.ts` で単体テストす
 | --- | --- |
 | `intake.ts` | Intake 画面の導出（回答の正規化と検証、Intake の一覧の絞り込みと区分、どの面を出すか、コメントの操作、進行中の面の操作の出し分け） |
 | `execution.ts` | Execution の導出（一覧に並ぶか・区切り・並び、一覧の行とプロセスごとの人の番、下のパネルに出すもの `panelContentOf`、パネルの高さの記憶） |
-| `pfd.ts` | PFD の図の配置。列は `diagram.ts:layoutGraph` の最長路に任せ、列の中の順は重心法で交差を減らす。Execution の図のステップの区画（`railSegments`）と direct の図（`directPfd`）もここ |
+| `pfd.ts` | PFD の図の配置。列は `diagram.ts:layoutGraph` の最長路に任せ、列の中の順は重心法で交差を減らす。`buildPfdView` に `exec` を渡すと Execution の図（`PfdView.mode`）。そのステップの区画（`railSegments`）・状態の文言（`statusLine`）と direct の図（`directPfd`）もここ |
 | `rail.ts` | 設定画面のワークフローの定義図。タスク画面の帯の組み立て（`buildRail`）は `shared/rail.ts` にあり、デーモンの `intake.get` も使う |
 | `workflowEdit.ts` / `projectConfig.ts` / `settings.ts` | 設定フォームの変換・検証・差分・エラーの欄への振り分け。`workflowEdit.ts:TEMPLATE_VARIABLES` は `core/src/workflow/template.ts` と一致することをテストで固定している |
 | `trackerCache.ts` | トラッカーの応答の stale-while-revalidate |

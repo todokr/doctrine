@@ -550,10 +550,14 @@ tr.wt-stale{background:var(--accent-soft)}
 .pfd-bar.dashed{stroke-dasharray:5 3;stroke-linecap:butt}
 /* Execution の図のステップの区画。.pfd-node rect の塗りと枠、選択の枠を区画には当てない */
 .pfd-node rect.pfd-step,.pfd-node.selected rect.pfd-step,.pfd-node:focus-visible rect.pfd-step{fill:var(--tone);stroke:none}
-.pfd-node rect.pfd-step.now{stroke:var(--ink);stroke-width:1}
-.pfd-railword{font-size:9.5px;fill:var(--human-text)}
-.pfd-node.attention rect.pfd-box{stroke:var(--human-text);stroke-width:3}
-.pfd-node.attention.selected rect.pfd-box,.pfd-node.attention:focus-visible rect.pfd-box{stroke:var(--accent)}
+/* いまのステップはタスク画面の帯（.wf-step.now .bar）と同じ薄い縁取り。区画の名前は状態の文言にある */
+.pfd-node rect.pfd-step.now,.pfd-node.selected rect.pfd-step.now,.pfd-node:focus-visible rect.pfd-step.now{stroke:var(--tone-soft);stroke-width:3;paint-order:stroke}
+/* Execution の図の状態の文言。状態の色は言葉の文字だけに使う */
+.pfd-status{font-size:10px}
+.pfd-status-word{fill:var(--tone-text);font-weight:500}
+.pfd-status-detail{fill:var(--ink-2)}
+/* 人の番は地の塗りだけで示す（spec 6.3）。枠は選択の枠のまま */
+.pfd-node.attention rect.pfd-box{fill:var(--accent-soft)}
 /* Intake の状態ごとの件数（spec 3.5）。.count はサイドバーの既存の件数表示と名前が被るので .counts 配下だけに絞る */
 .counts{display:flex;gap:18px;flex-wrap:wrap}
 .counts .count{display:grid;gap:3px;min-width:88px}

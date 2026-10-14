@@ -54,7 +54,7 @@ function GraphBody(p: { detail: IntakeDetail; pfd: Pfd; heading: ReactNode; hist
   }, [follow]);
   const attention = useMemo(() => attentionProcessIds(p.detail.processes, s.tasks), [p.detail.processes, s.tasks]);
   const view = useMemo(
-    () => buildPfdView(p.pfd, { statuses: processStatuses(p.detail.processes), rails: railsOf(p.detail.processes), attention }),
+    () => buildPfdView(p.pfd, { statuses: processStatuses(p.detail.processes), exec: { rails: railsOf(p.detail.processes), attention } }),
     [p.pfd, p.detail.processes, attention],
   );
   return (

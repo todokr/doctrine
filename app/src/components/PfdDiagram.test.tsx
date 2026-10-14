@@ -153,12 +153,13 @@ describe("PfdDiagram", () => {
 const step = (id: string, status: RailNode["status"], current = false): RailNode =>
   ({ id, type: "agent", status, current, unknown: false });
 
-describe("PfdDiagram の帯と人の番", () => {
+describe("PfdDiagram の Execution の図", () => {
   const rails = { "build-api": [step("impl", "success"), step("test", "running", true)] };
+  const exec = (o: { attention?: ReadonlySet<string> } = {}) =>
+    render(buildPfdView(PFD_SAMPLE, { statuses: PFD_STATUSES_B, exec: { rails, attention: o.attention } }));
 
   test("区画をステップの数だけ、状態の色で描き、今のステップに now を付ける", () => {
-    const html = render(buildPfdView(PFD_SAMPLE, { rails }));
-    const b = block(html, "プロセス", "API を作る");
+    const b = block(exec(), "プロセス", "API を作る");
     const steps = b.match(/<rect class="pfd-step[^"]*"/g)!;
     expect(steps).toHaveLength(2);
     expect(steps[0]).toContain(toneClass(RUN_TONE.success));
@@ -166,28 +167,53 @@ describe("PfdDiagram の帯と人の番", () => {
     expect(steps[1]).toContain(" now");
   });
 
-  test("タスクの無いプロセスは区画 1 本、人のプロセスは区画を描かず状態の文言を出す", () => {
-    const view = buildPfdView(PFD_SAMPLE, { rails, statuses: PFD_STATUSES_B });
-    const html = render(view);
-    expect(block(html, "プロセス", "スキーマを設計する").match(/class="pfd-step/g)).toHaveLength(1);
-    const human = block(html, "プロセス", "受け入れる");
-    expect(human).not.toContain("pfd-step");
-    expect(human).toContain('class="pfd-railword"');
-    expect(human).toContain(LOOK.your_turn.word);
+  test("タスクの無いプロセスは区画 1 本、人のプロセスは区画を描かない", () => {
+    const html = exec();
+    expect(block(html, "プロセス", "ボタンを作る").match(/class="pfd-step/g)).toHaveLength(1);
+    expect(block(html, "プロセス", "受け入れる")).not.toContain("pfd-step");
   });
 
-  test("rails を渡さない図は区画も文言も描かない", () => {
+  test("状態の文言を 1 行、状態の色で描く。補足は言葉と分けて描く", () => {
+    const html = exec();
+    for (const p of PFD_SAMPLE.processes) {
+      const state = PFD_STATUSES_B[p.id].state;
+      const b = block(html, "プロセス", p.name);
+      expect(b.match(/class="pfd-status"/g)).toHaveLength(1);
+      expect(b).toContain(`<tspan class="pfd-status-word ${toneClass(PROCESS_TONE[state].tone)}">${LOOK[state].word}</tspan>`);
+    }
+    expect(block(html, "プロセス", "スキーマを設計する")).toMatch(/class="pfd-status-detail"[^>]*> · タスクが止まった<\/tspan>/);
+    expect(block(html, "プロセス", "受け入れる")).not.toContain("pfd-status-detail");
+  });
+
+  test("状態の線・段の数字・プロジェクト名・人の印を描かず、成果物の種類の印は描く", () => {
+    const html = exec();
+    for (const c of ["pfd-bar", "pfd-stage", "pfd-project", "pfd-inner"]) expect(html).not.toContain(c);
+    const human = block(html, "プロセス", "受け入れる");
+    expect(human).not.toMatch(/class="pfd-mark"[^>]*>[^<]*人/);
+    expect(block(html, "成果物", "Issue")).toMatch(/class="pfd-mark"[^>]*>既存<\/text>/);
+    expect(block(html, "成果物", "出力方針")).toMatch(/class="pfd-mark"[^>]*>決定<\/text>/);
+    expect(block(html, "成果物", "リリース")).toMatch(/class="pfd-mark"[^>]*>◎<\/text>/);
+  });
+
+  test("計画の図は状態の線・段の数字・プロジェクト名・人の印を描き、状態の文言と区画は描かない", () => {
     const html = render(buildPfdView(PFD_SAMPLE, { statuses: PFD_STATUSES_B }));
+    for (const c of ["pfd-bar", "pfd-stage", "pfd-project", "pfd-inner"]) expect(html).toContain(c);
+    expect(html).not.toContain("pfd-status");
     expect(html).not.toContain("pfd-step");
-    expect(html).not.toContain("pfd-railword");
   });
 
   test("人の番のノードに attention を付け、読み上げにも入れる", () => {
-    const html = render(buildPfdView(PFD_SAMPLE, { attention: new Set(["approve"]) }));
+    const html = exec({ attention: new Set(["approve"]) });
     const human = block(html, "プロセス", "受け入れる");
     expect(openTag(human)).toContain("attention");
     expect(openTag(human)).toContain("人の番");
     expect(openTag(block(html, "プロセス", "API を作る"))).not.toContain("attention");
+  });
+
+  test("読み上げは状態の文言をそのまま使い、プロジェクト名は入れない", () => {
+    const html = exec();
+    expect(openTag(block(html, "プロセス", "スキーマを設計する"))).toContain("要確認 · タスクが止まった");
+    expect(openTag(block(html, "プロセス", "API を作る"))).not.toContain("プロジェクト");
   });
 
   test("箱の rect は pfd-box を持つ", () => {

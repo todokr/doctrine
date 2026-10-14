@@ -43,18 +43,22 @@ export type PfdNode = {
   frozen: boolean;
   /** 箱の中に描くラベルの行。幅に収まるよう折り返し、3 行を超える分は … で切る */
   lines: string[];
-  /** 種類の印（◎・既存・決定・人・🔒）。ラベルの上の小さな行に描く */
+  /** ラベルの最初の行のベースライン。行は LINE_H ずつ下げる */
+  labelY: number;
+  /** 種類の印（◎・既存・決定・人・🔒）。ラベルの上の小さな行に描く。Execution の図のプロセスは持たない */
   marks: string[];
   /** Execution の図のエージェントのプロセスだけが持つ、いまのタスクの帯。タスクが無ければ []。それ以外は null */
   rail: RailNode[] | null;
-  /** 帯の行の高さを取った（Execution の図のプロセス） */
-  railRow: boolean;
+  /** Execution の図のプロセスの状態の文言と、そのベースライン。状態が無ければ null */
+  status: (StatusLine & { y: number }) | null;
   /** 人の番（spec 6.3）。Execution の図だけが立てる */
   attention: boolean;
 };
 /** from / to は PfdNode.key */
 export type PfdEdge = { from: string; to: string; d: string };
 export type PfdView = {
+  /** exec は Execution の図（spec 6.2）。plan は計画レビューと改訂の図 */
+  mode: "plan" | "exec";
   width: number;
   height: number;
   nodes: PfdNode[];
@@ -126,6 +130,43 @@ export const LOOK: Record<PfdLook, { word: string }> = {
   needs_attention: { word: "要確認" },
 };
 
+export const BLOCKED_BY = {
+  revising: "改訂中",
+  paused: "一時停止中",
+  no_sub_issue: "sub-issue 待ち",
+} as const;
+
+export const ATTENTION_REASON = {
+  task_stopped: "タスクが止まった",
+  no_pr: "PR が無い",
+  pr_closed: "PR が閉じられた",
+} as const;
+
+/** LOOK の語に添える語（spec 6.6）。ready の blockedBy と needs_attention の reason だけ。ほかは null */
+export function statusNote(status: ProcessStatus): string | null {
+  if (status.state === "ready") return status.blockedBy === null ? null : BLOCKED_BY[status.blockedBy];
+  if (status.state === "needs_attention") return ATTENTION_REASON[status.reason];
+  return null;
+}
+
+/** Execution の図のプロセスの状態の文言。「word · detail」と 1 行に描く */
+export type StatusLine = { word: string; detail: string | null };
+
+/**
+ * 状態の言葉と、添える語（spec 6.2）。実行中はいまのステップの名前、要確認と着手可能は statusNote。
+ * 1 行が max に収まらなければ添える語を … で切る
+ */
+export function statusLine(status: ProcessStatus, rail: readonly RailNode[] | null, max: number): StatusLine {
+  const word = LOOK[status.state].word;
+  const detail = status.state === "running" ? rail?.find((r) => r.current)?.id ?? null : statusNote(status);
+  if (detail === null) return { word, detail };
+  const fits = (d: string) => textWidth(`${word} · ${d}`) <= max;
+  if (fits(detail)) return { word, detail };
+  let cut = [...detail];
+  while (cut.length > 0 && !fits(`${cut.join("")}…`)) cut = cut.slice(0, -1);
+  return { word, detail: `${cut.join("")}…` };
+}
+
 // 箱の寸法。幅は種類ごとに固定し、長いラベルは行を増やして収める
 const BOX_W = { artifact: 168, process: 188 } as const;
 const BOX_PAD_X = 8;
@@ -136,12 +177,20 @@ const MAX_LINES = 3;
 const COL_GAP = 44;
 const ROW_GAP = 14;
 const PAD = 12;
-/** 段の数字（プロセスの上に出す）の分の上の余白 */
+/** 段の数字（プロセスの上に出す）の分の上の余白。Execution の図は段を描かないので PAD */
 const PAD_TOP = 22;
-/** 帯の行の高さ。区画の太さと、ラベルとの間 */
-const RAIL_ROW_H = 12;
+/** ラベルの最初の行の、行の上端からベースラインまで */
+const LABEL_ASCENT = 12;
+/** Execution の図のプロセスの縦の並び。上下の余白、ラベルの最後の行から状態の文言のベースライン、そこから帯の上端 */
+const EXEC_PAD_Y = 9;
+const STATUS_GAP = 16;
+const RAIL_TOP = 7;
+/** 状態の文言のベースラインから下の、文字の下がりの分 */
+const STATUS_DESCENT = 3;
 export const RAIL_BAR_H = 6;
 const RAIL_GAP = 2;
+/** 状態の文言を収める幅。両端の丸みの分を左右から引く */
+const STATUS_INSET = 12;
 
 /** ラベルの描画幅の見積もり（px）。10.5px の文字で、ASCII は 6、それ以外は 10.5 */
 export function textWidth(s: string): number {
@@ -193,15 +242,18 @@ export function buildPfdView(
     comments?: Record<string, number>;
     /** キーは PfdNode.key */
     frozen?: ReadonlySet<string>;
-    /** Execution の図だけ渡す。キーはプロセスの id。null はタスクがあるが帯が読めない */
-    rails?: Record<string, RailNode[] | null>;
-    /** 人の番のプロセスの id */
-    attention?: ReadonlySet<string>;
+    /** Execution の図だけ渡す */
+    exec?: {
+      /** キーはプロセスの id。null はタスクがあるが帯が読めない */
+      rails: Record<string, RailNode[] | null>;
+      /** 人の番のプロセスの id */
+      attention?: ReadonlySet<string>;
+    };
   } = {},
 ): PfdView {
   const goal = new Set(pfd.goal);
   const stage = stageOf(pfd);
-  const { statuses } = o;
+  const { statuses, exec } = o;
 
   // 状態が揃えたことになるのは、マージ済みのプロセスと、人が完了したプロセスの出力
   const available = new Set<string>();
@@ -269,7 +321,7 @@ export function buildPfdView(
   }
 
   const marksOf = (s: (typeof sources)[number]): string[] =>
-    [
+    exec && s.kind === "process" ? [] : [
       o.frozen?.has(pfdKey(s.kind, s.id)) && "🔒",
       s.goal && "◎",
       s.given && !s.decision && "既存",
@@ -278,24 +330,31 @@ export function buildPfdView(
     ].filter((m): m is string => typeof m === "string");
 
   const byKey = new Map(sources.map((s, i) => [keys[i], s]));
-  const sized = new Map(keys.map((k) => {
+  const sized = new Map(keys.map((k): [string, { w: number; h: number; lines: string[]; marks: string[]; labelDy: number; statusDy: number | null }] => {
     const s = byKey.get(k)!;
     const w = BOX_W[s.kind];
     const lines = wrap(s.name, w - BOX_PAD_X * 2);
     const marks = marksOf(s);
+    if (exec && s.kind === "process") {
+      const labelDy = EXEC_PAD_Y + LABEL_ASCENT;
+      const statusDy = labelDy + (lines.length - 1) * LINE_H + STATUS_GAP;
+      // 人のプロセスは帯を描かない
+      const bottom = s.human ? statusDy + STATUS_DESCENT : statusDy + RAIL_TOP + RAIL_BAR_H;
+      return [k, { w, h: bottom + EXEC_PAD_Y, lines, marks, labelDy, statusDy }];
+    }
     // 印の行は、印が無くても取る。状態の印（承認）や 🔒（改訂）が付いたときに箱の高さが変わらないように
-    const railRow = o.rails !== undefined && s.kind === "process";
-    const h = BOX_PAD_Y * 2 + MARK_H + lines.length * LINE_H + (railRow ? RAIL_ROW_H : 0);
-    return [k, { w, h, lines, marks, railRow }];
+    const h = BOX_PAD_Y * 2 + MARK_H + lines.length * LINE_H;
+    return [k, { w, h, lines, marks, labelDy: BOX_PAD_Y + MARK_H + LABEL_ASCENT, statusDy: null }];
   }));
 
   const colW = columns.map((col) => Math.max(0, ...col.map((k) => sized.get(k)!.w)));
   const colH = columns.map((col) => col.reduce((m, k) => m + sized.get(k)!.h, 0) + Math.max(0, col.length - 1) * ROW_GAP);
   const innerH = Math.max(0, ...colH);
+  const top = exec ? PAD : PAD_TOP;
   const xy = new Map<string, { x: number; y: number }>();
   let cx = PAD;
   columns.forEach((col, l) => {
-    let cy = PAD_TOP + (innerH - colH[l]) / 2;
+    let cy = top + (innerH - colH[l]) / 2;
     for (const k of col) {
       const { w, h } = sized.get(k)!;
       xy.set(k, { x: cx + (colW[l] - w) / 2, y: cy });
@@ -307,7 +366,9 @@ export function buildPfdView(
   const nodes: PfdNode[] = sources.map((s, i) => {
     const key = keys[i];
     const { x, y } = xy.get(key)!;
-    const { w, h, lines, marks, railRow } = sized.get(key)!;
+    const { w, h, lines, marks, labelDy, statusDy } = sized.get(key)!;
+    const status = statusDy !== null ? statuses?.[s.id] : undefined;
+    const rail = exec && s.kind === "process" && !s.human ? exec.rails[s.id] ?? [] : null;
     return {
       key,
       id: s.id,
@@ -329,17 +390,19 @@ export function buildPfdView(
       change: null,
       frozen: o.frozen?.has(key) ?? false,
       lines,
+      labelY: y + labelDy,
       marks,
-      rail: railRow && !s.human ? o.rails?.[s.id] ?? [] : null,
-      railRow,
-      attention: s.kind === "process" && (o.attention?.has(s.id) ?? false),
+      rail,
+      status: status === undefined ? null : { ...statusLine(status, rail, w - STATUS_INSET * 2), y: y + statusDy! },
+      attention: s.kind === "process" && (exec?.attention?.has(s.id) ?? false),
     };
   });
 
   const box = new Map(nodes.map((n) => [n.key, n]));
   return {
+    mode: exec ? "exec" : "plan",
     width: Math.max(PAD * 2, cx - COL_GAP + PAD),
-    height: PAD_TOP + innerH + PAD,
+    height: top + innerH + PAD,
     nodes,
     edges: edges.filter((e) => box.has(e.from) && box.has(e.to)).map((e) => {
       const a = box.get(e.from)!;
@@ -358,15 +421,17 @@ export function buildPfdView(
 export type RailSegment = { x: number; y: number; w: number; status: RailStatus; current: boolean };
 
 /**
- * ノードの帯の区画。プロセスの両端は丸い（rx = 高さの半分）ので、左右に rx を空けて丸みの内側に収める。
+ * ノードの帯の区画。プロセスの両端は丸い（rx = 高さの半分）ので、帯の下端の高さでの丸みの内側に、さらに RAIL_GAP * 2 を空けて収める。
  * 空の帯はタスクが無い（か帯が読めない）ので灰色の 1 本にする
  */
 export function railSegments(n: PfdNode): RailSegment[] {
   if (n.rail === null) return [];
-  const inset = n.h / 2;
+  const r = n.h / 2;
+  const y = n.y + n.h - EXEC_PAD_Y - RAIL_BAR_H;
+  const dy = y + RAIL_BAR_H - (n.y + r);
+  const inset = r - Math.sqrt(r * r - dy * dy) + RAIL_GAP * 2;
   const x0 = n.x + inset;
   const width = n.w - inset * 2;
-  const y = n.y + n.h - BOX_PAD_Y - RAIL_BAR_H;
   if (n.rail.length === 0) return [{ x: x0, y, w: width, status: "pending", current: false }];
   const count = n.rail.length;
   // ステップが多いと隙間だけで幅を食い尽くすので、隙間も区画の半分までに詰める

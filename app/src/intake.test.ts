@@ -23,7 +23,7 @@ import {
   RESPONSES,
   WORKSPACES,
 } from "./fixtures";
-import { buildPfdView, LOOK } from "./pfd";
+import { buildPfdView, LOOK, statusNote } from "./pfd";
 import {
   actionNeeded,
   answerIssues,
@@ -32,7 +32,6 @@ import {
   processStatuses,
   processTrail,
   progressOps,
-  statusNote,
   statusText,
   summaryOf,
   taskIntakeLabel,

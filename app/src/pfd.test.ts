@@ -5,7 +5,7 @@ import type { RailNode } from "../../shared/rail.ts";
 import type { ProcessStatus } from "../../shared/intake/processStatus.ts";
 import type { IntakeProcessView } from "../../shared/protocol.ts";
 import { INTAKE_ACTIVE, INTAKE_REVIEWING, PFD_LONG_LABELS, PFD_SAMPLE, PFD_STATUSES_A, PFD_STATUSES_B } from "./fixtures";
-import { buildPfdView, directPfd, frozenIds, LOOK, RAIL_BAR_H, railSegments, statusCounts, textWidth, parsePfdKey, pfdElement, pfdKey, processStages, type PfdView } from "./pfd";
+import { buildPfdView, directPfd, frozenIds, LOOK, RAIL_BAR_H, railSegments, statusCounts, statusLine, textWidth, parsePfdKey, pfdElement, pfdKey, processStages, type PfdView } from "./pfd";
 
 /** 成果物 id の配列と、[id, 入力, 出力] の配列から PFD を作る。given は goal に無く、どのプロセスの出力でもない成果物 */
 const pfd = (artifacts: string[], processes: [string, string[], string[]][], goal: string[]): Pfd => {
@@ -387,35 +387,35 @@ const step = (id: string, status: RailNode["status"], current = false): RailNode
 describe("buildPfdView の帯", () => {
   const rails = { "build-api": [step("impl", "success"), step("test", "running", true), step("review", "pending")] };
 
-  test("rails を渡さない図は帯の行を取らず、高さも変わらない", () => {
+  test("exec を渡さない図は計画の図で、帯の行を取らない", () => {
     const plain = buildPfdView(PFD_SAMPLE);
-    const withRails = buildPfdView(PFD_SAMPLE, { rails });
+    const exec = buildPfdView(PFD_SAMPLE, { exec: { rails } });
+    expect(plain.mode).toBe("plan");
+    expect(exec.mode).toBe("exec");
     const p = node(plain, "p:build-api");
     expect(p.rail).toBeNull();
-    expect(p.railRow).toBe(false);
-    expect(node(withRails, "p:build-api").h).toBeGreaterThan(p.h);
+    expect(node(exec, "p:build-api").h).toBeGreaterThan(p.h);
     // 成果物の高さは変えない
-    expect(node(withRails, "a:api").h).toBe(node(plain, "a:api").h);
+    expect(node(exec, "a:api").h).toBe(node(plain, "a:api").h);
   });
 
   test("rails のキーに無いエージェントのプロセスは空の帯、人のプロセスは null", () => {
-    const view = buildPfdView(PFD_SAMPLE, { rails });
+    const view = buildPfdView(PFD_SAMPLE, { exec: { rails } });
     expect(node(view, "p:build-api").rail).toHaveLength(3);
     expect(node(view, "p:design").rail).toEqual([]);
     expect(node(view, "p:approve").rail).toBeNull();
-    expect(node(view, "p:approve").railRow).toBe(true);
     expect(node(view, "a:api").rail).toBeNull();
   });
 
   test("rail が null のエージェントのプロセスは灰色の帯 1 本", () => {
-    const view = buildPfdView(PFD_SAMPLE, { rails: { "build-api": null } });
+    const view = buildPfdView(PFD_SAMPLE, { exec: { rails: { "build-api": null } } });
     const segs = railSegments(node(view, "p:build-api"));
     expect(segs).toHaveLength(1);
     expect(segs[0].status).toBe("pending");
   });
 
   test("区画はステップの数だけ等分し、今のステップに印を付ける", () => {
-    const n = node(buildPfdView(PFD_SAMPLE, { rails }), "p:build-api");
+    const n = node(buildPfdView(PFD_SAMPLE, { exec: { rails } }), "p:build-api");
     const segs = railSegments(n);
     expect(segs.map((x) => x.status)).toEqual(["success", "running", "pending"]);
     expect(segs.map((x) => x.current)).toEqual([false, true, false]);
@@ -425,7 +425,7 @@ describe("buildPfdView の帯", () => {
 
   test("100 ステップでも枠内に収まる", () => {
     const many = Array.from({ length: 100 }, (_, i) => step(`s${i}`, "pending"));
-    const n = node(buildPfdView(PFD_SAMPLE, { rails: { "build-api": many } }), "p:build-api");
+    const n = node(buildPfdView(PFD_SAMPLE, { exec: { rails: { "build-api": many } } }), "p:build-api");
     const segs = railSegments(n);
     expect(segs).toHaveLength(100);
     for (const s of segs) {
@@ -436,24 +436,89 @@ describe("buildPfdView の帯", () => {
     }
   });
 
-  test("区画はラベルの行より下にある", () => {
-    const n = node(buildPfdView(PFD_SAMPLE, { rails }), "p:build-api");
-    // ラベルの最後の行のベースライン（PfdDiagram は y + 31 から 13 ずつ下げる）
-    const lastBaseline = n.y + 31 + (n.lines.length - 1) * 13;
-    expect(railSegments(n)[0].y).toBeGreaterThan(lastBaseline);
+  test("ラベル・状態の文言・区画の順に上から並び、箱に収まる", () => {
+    for (const p of [PFD_SAMPLE, PFD_LONG_LABELS]) {
+      const view = buildPfdView(p, { statuses: Object.fromEntries(p.processes.map((x) => [x.id, { state: "running", taskId: "t" }])), exec: { rails: {} } });
+      for (const n of view.nodes.filter((x) => x.kind === "process")) {
+        const lastBaseline = n.labelY + (n.lines.length - 1) * 13;
+        expect(n.labelY).toBeGreaterThan(n.y);
+        expect(n.status!.y).toBeGreaterThan(lastBaseline);
+        const segs = railSegments(n);
+        if (segs.length > 0) expect(segs[0].y).toBeGreaterThan(n.status!.y);
+        expect(n.status!.y).toBeLessThan(n.y + n.h);
+      }
+    }
+  });
+
+  test("Execution の図のプロセスは種類の印の行を取らない。成果物は取る", () => {
+    const plain = buildPfdView(PFD_SAMPLE);
+    const exec = buildPfdView(PFD_SAMPLE, { statuses: PFD_STATUSES_B, exec: { rails } });
+    expect(node(exec, "p:approve").marks).toEqual([]);
+    expect(node(exec, "p:build-api").labelY).toBeLessThan(node(exec, "p:build-api").y + (node(plain, "p:build-api").labelY - node(plain, "p:build-api").y));
+    expect(node(exec, "a:issue").marks).toEqual(node(plain, "a:issue").marks);
+    expect(node(exec, "a:issue").labelY - node(exec, "a:issue").y).toBe(node(plain, "a:issue").labelY - node(plain, "a:issue").y);
+  });
+
+  test("人のプロセスは帯の分だけ低い", () => {
+    const view = buildPfdView(PFD_SAMPLE, { statuses: PFD_STATUSES_B, exec: { rails } });
+    // 受け入れる / API を作る はどちらもラベル 1 行
+    expect(node(view, "p:approve").lines).toHaveLength(1);
+    expect(node(view, "p:build-api").lines).toHaveLength(1);
+    expect(node(view, "p:approve").h).toBeLessThan(node(view, "p:build-api").h);
   });
 
   test("人のプロセスと成果物は区画を持たない", () => {
-    const view = buildPfdView(PFD_SAMPLE, { rails });
+    const view = buildPfdView(PFD_SAMPLE, { exec: { rails } });
     expect(railSegments(node(view, "p:approve"))).toEqual([]);
     expect(railSegments(node(view, "a:api"))).toEqual([]);
   });
 
   test("attention のプロセスだけ印が立つ", () => {
-    const view = buildPfdView(PFD_SAMPLE, { attention: new Set(["approve"]) });
+    const view = buildPfdView(PFD_SAMPLE, { exec: { rails: {}, attention: new Set(["approve"]) } });
     expect(node(view, "p:approve").attention).toBe(true);
     expect(node(view, "p:design").attention).toBe(false);
     expect(node(view, "a:api").attention).toBe(false);
+  });
+
+  test("状態の文言は Execution の図のプロセスだけが持つ", () => {
+    const exec = buildPfdView(PFD_SAMPLE, { statuses: PFD_STATUSES_B, exec: { rails } });
+    expect(node(exec, "p:design").status).toMatchObject({ word: "要確認", detail: "タスクが止まった" });
+    expect(node(exec, "p:approve").status).toMatchObject({ word: "あなたの番", detail: null });
+    expect(node(exec, "a:api").status).toBeNull();
+    for (const n of buildPfdView(PFD_SAMPLE, { statuses: PFD_STATUSES_B }).nodes) expect(n.status).toBeNull();
+  });
+});
+
+describe("statusLine", () => {
+  const rail = [step("plan", "success"), step("implement", "running", true), step("review", "pending")];
+  const pr = { number: 41, url: "u", state: "OPEN" as const, baseRef: "develop", mergedAt: null, mergeCommit: null };
+
+  test("実行中はいまのステップの名前を添える", () => {
+    expect(statusLine({ state: "running", taskId: "t" }, rail, 200)).toEqual({ word: "実行中", detail: "implement" });
+    expect(statusLine({ state: "running", taskId: "t" }, [step("plan", "success")], 200)).toEqual({ word: "実行中", detail: null });
+    expect(statusLine({ state: "running", taskId: "t" }, null, 200)).toEqual({ word: "実行中", detail: null });
+  });
+
+  test("要確認は理由、着手可能は止めている理由を添える", () => {
+    expect(statusLine({ state: "needs_attention", taskId: "t", reason: "pr_closed" }, rail, 200)).toEqual({ word: "要確認", detail: "PR が閉じられた" });
+    expect(statusLine({ state: "ready", blockedBy: "paused" }, null, 200)).toEqual({ word: "着手可能", detail: "一時停止中" });
+    expect(statusLine({ state: "ready", blockedBy: null }, null, 200)).toEqual({ word: "着手可能", detail: null });
+  });
+
+  test("ステップの無い状態は状態の言葉だけ", () => {
+    expect(statusLine({ state: "waiting", missing: ["x"] }, null, 200)).toEqual({ word: "入力待ち", detail: null });
+    expect(statusLine({ state: "your_turn" }, null, 200)).toEqual({ word: "あなたの番", detail: null });
+    expect(statusLine({ state: "done", note: "n", at: "a" }, null, 200)).toEqual({ word: "完了（人）", detail: null });
+    // PR の段では帯は終わっているので、いまのステップがあっても添えない
+    expect(statusLine({ state: "pr_open", taskId: "t", pr }, rail, 200)).toEqual({ word: "PR レビュー中", detail: null });
+    expect(statusLine({ state: "merged", taskId: "t", pr: { ...pr, state: "MERGED" } }, rail, 200)).toEqual({ word: "マージ済み", detail: null });
+  });
+
+  test("幅に収まらない補足は … で切る", () => {
+    const long = [step("a-very-long-step-name-that-does-not-fit-anywhere", "running", true)];
+    const line = statusLine({ state: "running", taskId: "t" }, long, 120);
+    expect(line.detail!.endsWith("…")).toBe(true);
+    expect(textWidth(`${line.word} · ${line.detail}`)).toBeLessThanOrEqual(120);
   });
 });
 
