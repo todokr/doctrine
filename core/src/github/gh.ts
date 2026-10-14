@@ -1,4 +1,4 @@
-import { z } from "zod";
+import type { z } from "zod";
 import { runCommand } from "../util/exec.ts";
 
 /**

@@ -717,7 +717,7 @@ test("未知の status と、もう使わない degraded は CHECK 制約で落�
           task_id: "t1",
           step_id: "review",
           attempt: 1,
-          // deno-lint-ignore no-explicit-any
+          // biome-ignore lint/suspicious/noExplicitAny: CHECK 制約を確かめるため、型に無い値を書き込む
           status: status as any,
           exit_code: null,
           started_at: "2026-09-18T00:00:00.000Z",
@@ -1004,7 +1004,7 @@ test("0005: tasks.state は rate_limited を受け付け、未知の値は CHECK
 
   await assert.rejects(() =>
     d.updateTable("tasks")
-      // deno-lint-ignore no-explicit-any
+      // biome-ignore lint/suspicious/noExplicitAny: CHECK 制約を確かめるため、型に無い値を書き込む
       .set({ state: "bogus" as any }).where("id", "=", "t1").execute()
   );
 });
@@ -1195,7 +1195,7 @@ test("0009: intakes.state は 8 値だけを受け付ける", async () => {
   await assert.rejects(
     () =>
       d.updateTable("intakes")
-        // deno-lint-ignore no-explicit-any
+        // biome-ignore lint/suspicious/noExplicitAny: CHECK 制約を確かめるため、型に無い値を書き込む
         .set({ state: "bogus" as any }).where("id", "=", "i1").execute(),
     /CHECK/,
   );
@@ -1211,14 +1211,14 @@ test("0009: intake_runs の purpose と status は CHECK で固められてい�
   await assert.rejects(
     () =>
       d.insertInto("intake_runs")
-        // deno-lint-ignore no-explicit-any
+        // biome-ignore lint/suspicious/noExplicitAny: CHECK 制約を確かめるため、型に無い値を書き込む
         .values({ ...run, purpose: "bogus" as any, status: "queued" }).execute(),
     /CHECK/,
   );
   await assert.rejects(
     () =>
       d.insertInto("intake_runs")
-        // deno-lint-ignore no-explicit-any
+        // biome-ignore lint/suspicious/noExplicitAny: CHECK 制約を確かめるため、型に無い値を書き込む
         .values({ ...run, purpose: "decompose", status: "bogus" as any }).execute(),
     /CHECK/,
   );

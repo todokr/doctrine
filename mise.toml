@@ -38,6 +38,14 @@ description = "dctld の単一バイナリを作る"
 dir = "core"
 run = "pnpm run build"
 
+[tasks.fmt]
+description = "core と shared を整形する"
+run = "pnpm run fmt"
+
+[tasks."style:check"]
+description = "core と shared の整形と lint（CI と同じ）"
+run = "pnpm run check:style"
+
 [tasks."app:deps"]
 description = "アプリの依存を取る"
 dir = "app"

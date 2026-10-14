@@ -22,13 +22,13 @@ import { type Kysely, type Migration, type MigrationProvider, Migrator, sql } fr
  * 列の定義を書き写さないので、前のマイグレーションで ALTER が足した列や CHECK を落とさない。
  * 呼ぶ前に外部キーの検査を止めておくこと（0005 と同じ理由）。
  */
-// deno-lint-ignore no-explicit-any
+// biome-ignore lint/suspicious/noExplicitAny: マイグレーションは今の schema.ts ではなく当時のスキーマを相手にする
 async function rebuildWithCheck(db: Kysely<any>, table: string, from: string, to: string) {
   const { rows } = await sql<{ sql: string }>`
     SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ${table}
   `.execute(db);
   const ddl = rows[0]?.sql;
-  if (!ddl || !ddl.includes(from)) {
+  if (!ddl?.includes(from)) {
     throw new Error(`${table} の CHECK が想定と違います: ${ddl}`);
   }
   const indexes = (await sql<{ sql: string }>`
@@ -57,7 +57,7 @@ const migrations: Record<string, Migration> = {
    * 列を足さない）。ここで足して、全DBをこの形に揃える。
    */
   "0001_baseline": {
-    // deno-lint-ignore no-explicit-any
+    // biome-ignore lint/suspicious/noExplicitAny: マイグレーションは今の schema.ts ではなく当時のスキーマを相手にする
     async up(db: Kysely<any>) {
       await db.schema.createTable("projects").ifNotExists()
         .addColumn("id", "integer", (c) => c.primaryKey().autoIncrement())
@@ -140,7 +140,7 @@ const migrations: Record<string, Migration> = {
     },
   },
   "0002_task_sessions": {
-    // deno-lint-ignore no-explicit-any
+    // biome-ignore lint/suspicious/noExplicitAny: マイグレーションは今の schema.ts ではなく当時のスキーマを相手にする
     async up(db: Kysely<any>) {
       await db.schema.createTable("task_sessions").ifNotExists()
         .addColumn("task_id", "text", (c) => c.notNull().references("tasks.id"))
@@ -166,7 +166,7 @@ const migrations: Record<string, Migration> = {
    * ない（切ろうにもマイグレーションはトランザクションの中なので切れない）。
    */
   "0003_review_records": {
-    // deno-lint-ignore no-explicit-any
+    // biome-ignore lint/suspicious/noExplicitAny: マイグレーションは今の schema.ts ではなく当時のスキーマを相手にする
     async up(db: Kysely<any>) {
       // --- 1. step_runs の再構築（awaiting / interrupted と review_tree） ---
       await db.schema.createTable("step_runs_new")
@@ -270,7 +270,7 @@ const migrations: Record<string, Migration> = {
    * 制約に関わらない列なので、テーブル再構築は要らない。
    */
   "0004_step_outputs_last_names": {
-    // deno-lint-ignore no-explicit-any
+    // biome-ignore lint/suspicious/noExplicitAny: マイグレーションは今の schema.ts ではなく当時のスキーマを相手にする
     async up(db: Kysely<any>) {
       await db.schema.alterTable("step_outputs")
         .renameColumn("stdout", "last_stdout").execute();
@@ -295,7 +295,7 @@ const migrations: Record<string, Migration> = {
    * そのときは defer_foreign_keys の方が効く。
    */
   "0005_rate_limited": {
-    // deno-lint-ignore no-explicit-any
+    // biome-ignore lint/suspicious/noExplicitAny: マイグレーションは今の schema.ts ではなく当時のスキーマを相手にする
     async up(db: Kysely<any>) {
       await sql`PRAGMA foreign_keys = OFF`.execute(db);
       await sql`PRAGMA defer_foreign_keys = ON`.execute(db);
@@ -399,7 +399,7 @@ const migrations: Record<string, Migration> = {
    * ワークフロー定義が無いと決まらないので、goto_step_id は NULL のままにする。
    */
   "0006_step_run_bounced": {
-    // deno-lint-ignore no-explicit-any
+    // biome-ignore lint/suspicious/noExplicitAny: マイグレーションは今の schema.ts ではなく当時のスキーマを相手にする
     async up(db: Kysely<any>) {
       // --- 1. step_outputs を外部キーの無い一時テーブルへ退避する ---
       // CREATE TABLE ... AS SELECT は制約を引き継がないので、step_runs を
@@ -473,7 +473,7 @@ const migrations: Record<string, Migration> = {
    * テーブル再構築は要らない。
    */
   "0007_step_run_permission_denials": {
-    // deno-lint-ignore no-explicit-any
+    // biome-ignore lint/suspicious/noExplicitAny: マイグレーションは今の schema.ts ではなく当時のスキーマを相手にする
     async up(db: Kysely<any>) {
       await db.schema.alterTable("step_runs").addColumn("permission_denials", "text").execute();
     },
@@ -487,7 +487,7 @@ const migrations: Record<string, Migration> = {
    * 0006 と同じ理由で step_outputs を退避してから step_runs を作り直す。
    */
   "0008_step_run_drop_degraded": {
-    // deno-lint-ignore no-explicit-any
+    // biome-ignore lint/suspicious/noExplicitAny: マイグレーションは今の schema.ts ではなく当時のスキーマを相手にする
     async up(db: Kysely<any>) {
       await sql`UPDATE step_runs SET status = 'success' WHERE status = 'degraded'`.execute(db);
 
@@ -573,7 +573,7 @@ const migrations: Record<string, Migration> = {
    * 固定しているため。
    */
   "0009_intake": {
-    // deno-lint-ignore no-explicit-any
+    // biome-ignore lint/suspicious/noExplicitAny: マイグレーションは今の schema.ts ではなく当時のスキーマを相手にする
     async up(db: Kysely<any>) {
       await db.schema.createTable("intakes")
         .addColumn("id", "text", (c) => c.primaryKey())
@@ -726,7 +726,7 @@ const migrations: Record<string, Migration> = {
    * 0009 と同じく ADD COLUMN で REFERENCES を付けられる。
    */
   "0010_intake_revision": {
-    // deno-lint-ignore no-explicit-any
+    // biome-ignore lint/suspicious/noExplicitAny: マイグレーションは今の schema.ts ではなく当時のスキーマを相手にする
     async up(db: Kysely<any>) {
       await db.schema.alterTable("intakes")
         .addColumn("revision_run_id", "integer", (c) => c.references("intake_runs.id"))
@@ -745,7 +745,7 @@ const migrations: Record<string, Migration> = {
    * 従来どおりディスクの YAML を読む。制約の無い列なので再構築は要らない。
    */
   "0011_task_workflow_pin": {
-    // deno-lint-ignore no-explicit-any
+    // biome-ignore lint/suspicious/noExplicitAny: マイグレーションは今の schema.ts ではなく当時のスキーマを相手にする
     async up(db: Kysely<any>) {
       await db.schema.alterTable("tasks").addColumn("workflow_yaml", "text").execute();
       await db.schema.alterTable("tasks").addColumn("workflow_setup", "text").execute();
@@ -758,7 +758,7 @@ const migrations: Record<string, Migration> = {
    * 「answers が非 null なら assumption_responses も非 null」を保つ。
    */
   "0012_intake_assumptions": {
-    // deno-lint-ignore no-explicit-any
+    // biome-ignore lint/suspicious/noExplicitAny: マイグレーションは今の schema.ts ではなく当時のスキーマを相手にする
     async up(db: Kysely<any>) {
       await db.schema.alterTable("intake_question_sets")
         .addColumn("assumptions", "text", (c) => c.notNull().defaultTo("[]"))
@@ -777,7 +777,7 @@ const migrations: Record<string, Migration> = {
    * 外部キーの止め方と確かめ方は 0005 と同じ。
    */
   "0013_waiting": {
-    // deno-lint-ignore no-explicit-any
+    // biome-ignore lint/suspicious/noExplicitAny: マイグレーションは今の schema.ts ではなく当時のスキーマを相手にする
     async up(db: Kysely<any>) {
       await sql`PRAGMA foreign_keys = OFF`.execute(db);
       await sql`PRAGMA defer_foreign_keys = ON`.execute(db);
@@ -811,7 +811,7 @@ const migrations: Record<string, Migration> = {
    * intakes は親 Issue、intake_processes は sub-issue の分。
    */
   "0014_issue_phase": {
-    // deno-lint-ignore no-explicit-any
+    // biome-ignore lint/suspicious/noExplicitAny: マイグレーションは今の schema.ts ではなく当時のスキーマを相手にする
     async up(db: Kysely<any>) {
       await db.schema.alterTable("intakes").addColumn("issue_phase", "text").execute();
       await db.schema.alterTable("intake_processes").addColumn("sub_issue_phase", "text").execute();
@@ -827,7 +827,7 @@ const migrations: Record<string, Migration> = {
    * 確かめ方は 0005 と同じ。
    */
   "0015_workspace": {
-    // deno-lint-ignore no-explicit-any
+    // biome-ignore lint/suspicious/noExplicitAny: マイグレーションは今の schema.ts ではなく当時のスキーマを相手にする
     async up(db: Kysely<any>) {
       await db.schema.createTable("workspaces")
         .addColumn("id", "integer", (c) => c.primaryKey().autoIncrement())
@@ -889,7 +889,7 @@ const migrations: Record<string, Migration> = {
    * intakes を DROP すると intake_* と tasks.intake_id が参照を失うので、外部キーの止め方と確かめ方は 0015 と同じ。
    */
   "0016_intake_workspace": {
-    // deno-lint-ignore no-explicit-any
+    // biome-ignore lint/suspicious/noExplicitAny: マイグレーションは今の schema.ts ではなく当時のスキーマを相手にする
     async up(db: Kysely<any>) {
       await sql`PRAGMA foreign_keys = OFF`.execute(db);
       await sql`PRAGMA defer_foreign_keys = ON`.execute(db);
@@ -966,13 +966,13 @@ const provider: MigrationProvider = {
  * （Migrator は結果を返すだけで投げないので、ここで投げ直す）。
  * SQLite の DDL はトランザクションに入るので、失敗したらその回の分は丸ごと巻き戻る。
  */
-// deno-lint-ignore no-explicit-any
+// biome-ignore lint/suspicious/noExplicitAny: マイグレーションは今の schema.ts ではなく当時のスキーマを相手にする
 export async function migrateToLatest(db: Kysely<any>): Promise<void> {
   throwIfFailed(await new Migrator({ db, provider }).migrateToLatest());
 }
 
 /** name まで（name を含む）流す。テストが古い番号の形の DB を作るのに使う。失敗の投げ方は migrateToLatest と同じ。 */
-// deno-lint-ignore no-explicit-any
+// biome-ignore lint/suspicious/noExplicitAny: マイグレーションは今の schema.ts ではなく当時のスキーマを相手にする
 export async function migrateTo(db: Kysely<any>, name: string): Promise<void> {
   throwIfFailed(await new Migrator({ db, provider }).migrateTo(name));
 }

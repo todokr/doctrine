@@ -191,7 +191,7 @@ export async function dispatchIntake(
   const report: DispatchReport = { created: [], errors: [] };
   const intake = await getIntake(db, intakeId);
   if (
-    !intake || intake.state !== "active" || intake.revising === 1 || intake.dispatch_paused === 1
+    intake?.state !== "active" || intake.revising === 1 || intake.dispatch_paused === 1
   ) return report;
   const plan = await loadApprovedPlan(db, intakeId);
   if (!plan) return report;

@@ -1309,7 +1309,7 @@ async function removeIntakeWorktrees(
  */
 export async function cleanupAfterRun(ctx: DaemonContext, taskId: string): Promise<void> {
   const task = await getTask(ctx.db, taskId);
-  if (!task || task.state !== "completed" || !task.worktree_path) return;
+  if (task?.state !== "completed" || !task.worktree_path) return;
   await removeTaskWorktree(
     ctx,
     task,

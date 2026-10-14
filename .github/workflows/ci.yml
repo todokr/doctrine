@@ -96,7 +96,7 @@ jobs:
   # 整形・lint・型検査・バイナリのビルド。テストと違って OS・TZ に依存しないので
   # 1 回だけ流す。
   core-check:
-    name: コア（型・ビルド）
+    name: コア（整形・型・ビルド）
     needs: changes
     if: needs.changes.outputs.core == 'true'
     runs-on: ubuntu-latest
@@ -126,6 +126,10 @@ jobs:
       # --frozen-lockfile は pnpm-lock.yaml と package.json の食い違いをここで落とす
       # （lock の更新を忘れた PR が develop に入らないようにするため）。
       - run: pnpm install --frozen-lockfile
+        working-directory: .
+
+      # 整形と lint。biome.json はリポジトリ直下にある。
+      - run: pnpm run check:style
         working-directory: .
 
       - run: pnpm run check

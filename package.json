@@ -3,5 +3,15 @@
   "private": true,
   "type": "module",
   "packageManager": "pnpm@11.15.1",
-  "engines": { "node": ">=26.8.1" }
+  "engines": {
+    "node": ">=26.8.1"
+  },
+  "scripts": {
+    "fmt": "biome format --write",
+    "lint": "biome lint",
+    "check:style": "biome check"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.15"
+  }
 }

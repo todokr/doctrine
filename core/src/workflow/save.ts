@@ -21,7 +21,7 @@ function setOrDelete(map: YAMLMap, key: string, value: string | null | undefined
  * （引用符などの見た目を保つ）、新しい要素は既存の先頭要素と同じ type の Scalar にする。
  * キーが無ければ新しく作る。
  */
-// deno-lint-ignore no-explicit-any
+// biome-ignore lint/suspicious/noExplicitAny: 読み込んだワークフロー YAML の Document は中身の型を持たない
 function setStringSeq(doc: Document<any>, parent: YAMLMap, key: string, values: string[]): void {
   const existing = parent.get(key, true);
   if (isSeq(existing)) {
@@ -48,7 +48,7 @@ function setStringSeq(doc: Document<any>, parent: YAMLMap, key: string, values: 
  * guide で分岐が無いとき（既定の分岐）に変更が来たら、既定値を明示的に書いてから当てる。
  */
 function applyBranchChange(
-  // deno-lint-ignore no-explicit-any
+  // biome-ignore lint/suspicious/noExplicitAny: 読み込んだワークフロー YAML の Document は中身の型を持たない
   doc: Document<any>,
   stepMap: YAMLMap,
   stepType: string,
@@ -83,7 +83,7 @@ function applyBranchChange(
 }
 
 function applyStepChange(
-  // deno-lint-ignore no-explicit-any
+  // biome-ignore lint/suspicious/noExplicitAny: 読み込んだワークフロー YAML の Document は中身の型を持たない
   doc: Document<any>,
   stepMap: YAMLMap,
   stepType: string,
