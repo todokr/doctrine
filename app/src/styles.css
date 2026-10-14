@@ -506,8 +506,6 @@ tr.wt-stale{background:var(--accent-soft)}
 .wz-choices label{display:flex;gap:6px;align-items:center}
 .wz-q{border:1px solid var(--line);border-radius:9px;padding:8px 12px 10px;margin:0;display:grid;gap:6px}
 .wz-q legend{padding:0 4px;font-weight:500}
-.wz-models{display:grid;grid-template-columns:1fr 1fr;gap:8px}
-.wz-models label{display:grid;gap:3px}
 
 /* ワークフローのステップ編集欄 */
 .wf-edit{display:grid;gap:10px}
