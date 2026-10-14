@@ -3,8 +3,14 @@ import assert from "node:assert/strict";
 import { getIntake, listProcesses, upsertPrObservation } from "../../src/db/intakes.ts";
 import { getTask, listTasks } from "../../src/db/tasks.ts";
 import { openDb } from "../../src/db/migrate.ts";
-import { type IntakeTransition, startIntake } from "../../src/intake/commands.ts";
-import { insertDirectIntake } from "../../src/intake/dispatch.ts";
+import {
+  completeHumanProcess,
+  type IntakeTransition,
+  reviseIntake,
+  setDispatchPaused,
+  startIntake,
+} from "../../src/intake/commands.ts";
+import { insertDirectIntake, redispatchProcess } from "../../src/intake/dispatch.ts";
 import { toIntakeDetail } from "../../src/intake/view.ts";
 import { createIntakeWatcher, INITIAL_WATCH_HEALTH } from "../../src/intake/watch.ts";
 import { seedProject } from "../helpers/project.ts";
@@ -219,4 +225,54 @@ test("見張り: direct の PR が base_branch 以外へマージされても完
   await s.watcher.request(s.workspaceId);
   assert.equal((await getIntake(s.db, "d1"))!.state, "active");
   assert.deepEqual(s.transitions, []);
+});
+
+const DEPS = { loadWorkflow: fakeWorkflowLoader(DIRECT_WORKFLOW) };
+
+test("direct: 止まったタスクを再投入すると、同じプロセス main に新しいタスクができ、古いタスクは残る", async () => {
+  const { db, taskId } = await seedDirect();
+  await db.updateTable("tasks").set({ state: "failed" }).where("id", "=", taskId).execute();
+  const { taskId: next, replacedTaskId } = await redispatchProcess(
+    db,
+    { intakeId: "d1", processId: "main" },
+    DEPS,
+  );
+  assert.equal(replacedTaskId, taskId);
+  assert.notEqual(next, taskId);
+  const task = (await getTask(db, next))!;
+  assert.equal(task.title, "直す");
+  assert.equal(task.prompt, `# 直す\n\n${PARENT_URL}\n\n本文`);
+  assert.equal(task.issue_url, PARENT_URL);
+  assert.equal(task.parent_issue_url, null);
+  assert.equal(task.intake_process_id, "main");
+  assert.equal((await listProcesses(db, "d1"))[0].current_task_id, next);
+  assert.equal((await getTask(db, taskId))!.intake_process_id, "main");
+});
+
+test("direct: 走っているタスクは再投入できない", async () => {
+  const { db } = await seedDirect();
+  await assert.rejects(
+    () => redispatchProcess(db, { intakeId: "d1", processId: "main" }, DEPS),
+    /要確認のプロセスだけを再投入できます: main（running）/,
+  );
+});
+
+test("direct: 改訂・自動投入の一時停止・人の完了は拒まれ、状態は変わらない", async () => {
+  const { db } = await seedDirect();
+  await assert.rejects(
+    () => reviseIntake(db, { intakeId: "d1", comments: [], logRoot: "/tmp/x" }),
+    /direct の Intake は改訂できません/,
+  );
+  await assert.rejects(
+    () => setDispatchPaused(db, { intakeId: "d1", paused: true }),
+    /direct の Intake には自動投入がありません/,
+  );
+  await assert.rejects(
+    () => completeHumanProcess(db, { intakeId: "d1", processId: "main", note: "x" }),
+    /人のプロセスではありません/,
+  );
+  const row = (await getIntake(db, "d1"))!;
+  assert.equal(row.state, "active");
+  assert.equal(row.revising, 0);
+  assert.equal(row.dispatch_paused, 0);
 });

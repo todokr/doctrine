@@ -285,6 +285,7 @@ export async function reviseIntake(
   o: { intakeId: string; comments: unknown; logRoot: string },
 ): Promise<IntakeTransition> {
   const intake = await requireIntake(db, o.intakeId);
+  if (intake.mode === "direct") throw new Error("direct の Intake は改訂できません");
   if (intake.state !== "active") {
     throw new Error(`改訂に入れる状態ではありません: ${intake.state}`);
   }
@@ -508,6 +509,7 @@ export async function setDispatchPaused(
   o: { intakeId: string; paused: boolean },
 ): Promise<IntakeRow> {
   const intake = await requireIntake(db, o.intakeId);
+  if (intake.mode === "direct") throw new Error("direct の Intake には自動投入がありません");
   const revising = intake.revising === 1 && !isIntakeTerminal(intake.state);
   if (intake.state !== "active" && !revising) {
     throw new Error(`自動 dispatch を切り替えられる状態ではありません: ${intake.state}`);

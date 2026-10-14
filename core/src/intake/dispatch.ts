@@ -14,14 +14,14 @@ import {
 } from "../db/intakes.ts";
 import { loadQuestionSets } from "./questionSet.ts";
 import type { Db, IntakeProcessRow, IntakeRow, ProjectRow } from "../db/schema.ts";
-import { insertTask, type NewTask } from "../db/tasks.ts";
+import { getProject, getTask, insertTask, type NewTask } from "../db/tasks.ts";
 import { branchNameFor } from "../domain/worktree.ts";
 import { pinOf, type WorkflowLoader, type WorkflowPin } from "../workflow/load.ts";
 import { sha256Hex } from "./pfd/hash.ts";
 import { buildTaskPrompt } from "./pfd/prompt.ts";
 import { computeProcessStatuses, type ProcessProgress } from "./pfd/status.ts";
 import { baseBranchesOf, missingProjectMessage, projectsOfProcesses } from "./processProject.ts";
-import { intakeDraft, processProgressOf } from "./view.ts";
+import { directStatusOf, intakeDraft, processProgressOf } from "./view.ts";
 
 export type DispatchDeps = { loadWorkflow: WorkflowLoader };
 
@@ -238,6 +238,42 @@ export async function dispatchIntake(
 }
 
 /**
+ * direct の再投入。sub-issue は無く、題と prompt は置き換えるタスクから写す（Issue を読み直さない）。
+ * プロジェクトも置き換えるタスクのもの。
+ */
+async function redispatchDirect(
+  db: Db,
+  intake: IntakeRow,
+  processId: string,
+  deps: DispatchDeps,
+): Promise<{ taskId: string; replacedTaskId: string | null }> {
+  const status = await directStatusOf(db, intake.id);
+  if (processId !== DIRECT_PROCESS_ID || status.state !== "needs_attention") {
+    const state = processId === DIRECT_PROCESS_ID ? status.state : "案に無い";
+    throw new Error(`要確認のプロセスだけを再投入できます: ${processId}（${state}）`);
+  }
+  const previous = (await getTask(db, status.taskId))!;
+  const project = (await getProject(db, previous.project_id))!;
+  const pin = pinOf(await deps.loadWorkflow(project.path, project.default_workflow), project);
+  const task = directTask({
+    intakeId: intake.id,
+    issueUrl: intake.issue_url,
+    project,
+    title: previous.title,
+    prompt: previous.prompt,
+    pin,
+  });
+  const committed = await commitDispatch(db, {
+    intakeId: intake.id,
+    processId: DIRECT_PROCESS_ID,
+    expectedTaskId: previous.id,
+    task,
+  });
+  if (!committed) throw new Error("ほかの操作が先にタスクを置き換えました");
+  return { taskId: task.id, replacedTaskId: previous.id };
+}
+
+/**
  * 要確認のプロセスに新しいタスクを作る（C-6）。新しいタスクは同じプロセス・同じ sub-issue に紐づき、
  * 古いタスクは intake_process_id を持ったまま残る。自動 dispatch の一時停止は見ない（人の明示の操作のため）。
  */
@@ -251,6 +287,7 @@ export async function redispatchProcess(
   if (intake.state !== "active") {
     throw new Error(`再投入できる状態ではありません: ${intake.state}`);
   }
+  if (intake.mode === "direct") return await redispatchDirect(db, intake, o.processId, deps);
   const plan = await loadApprovedPlan(db, o.intakeId);
   if (!plan) throw new Error("承認された計画がありません");
   const src = await loadDispatchSource(db, intake, plan.pfd);
