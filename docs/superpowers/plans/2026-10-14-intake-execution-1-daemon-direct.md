@@ -7,17 +7,20 @@
 **Architecture:** `intakes.mode`（`plan` / `direct`）を足す。direct で開始すると、Intake の行（`active`）・プロセス `main` の行・タスク 1 本を 1 トランザクションで作る。PFD・承認・sub-issue は持たない。
 プロセスの状態は PFD を使わずタスクと PR だけから求め、見張りは PR の観測と完了の判定だけを行う。帯の組み立て（`buildRail`）はアプリから `shared/rail.ts` へ移し、デーモンの `view.ts` も使う。
 
-**Tech Stack:** Deno（core）、Kysely + SQLite、React + Vite（app）、`@std/testing/bdd` と `node:assert/strict`（core）、vitest（app）
+**Tech Stack:** Node 26（型ストリップ）+ pnpm workspace（core、shared）、Kysely + SQLite、React + Vite（app）、`node:test` と `node:assert/strict`（core）、vitest（app）
 
 **Spec:** `docs/superpowers/specs/2026-10-14-intake-execution-design.md`（5 章、7.1、7.3、10 章、11 章）
 
 ## 前提
 
-- 作業ディレクトリはリポジトリの根。core のテストは `cd core && deno test --allow-all <file>`、型検査は `mise run core:check`、全体は `mise run core:test`。
-  app は `cd app && pnpm exec vitest run <file>`、型検査は `cd app && pnpm exec tsc`、全体は `mise run app:test`。
-- 各 Task の終わりで `mise run core:check && mise run core:test && mise run app:test && (cd app && pnpm exec tsc)` が通ること。
+- 作業ディレクトリはリポジトリの根（`/Users/shunsuke.tadokoro/orca/workspaces/doctrine/app_ux`）。シェルの `cd` が置き換えられている環境があるので、ディレクトリを移るときは `builtin cd <絶対パス>` と書く。
+  core のテスト 1 ファイルは `builtin cd /Users/shunsuke.tadokoro/orca/workspaces/doctrine/app_ux/core && node --test <file>`（複数ファイルも並べて渡せる。権限フラグは無い）、全体は `mise run core:test`、型検査は `mise run core:check`。
+  app は `builtin cd /Users/shunsuke.tadokoro/orca/workspaces/doctrine/app_ux/app && pnpm exec vitest run <file>`、型検査は `builtin cd /Users/shunsuke.tadokoro/orca/workspaces/doctrine/app_ux/app && pnpm exec tsc`、全体は `mise run app:test`。
+- 各 Task の終わりで `mise run core:check && mise run core:test && mise run app:test && (builtin cd /Users/shunsuke.tadokoro/orca/workspaces/doctrine/app_ux/app && pnpm exec tsc) && pnpm check:style` が通ること。
   protocol の形を変えた Task は、app の型検査が通るところまで追従させる。
-- 書式は `cd core && deno fmt <file>`（core と shared）。
+- 書式はリポジトリの根で `pnpm exec biome format --write <file...>`（core と shared。app は対象外）。検査は `pnpm check:style`（lint を含む。ファイル指定は `pnpm exec biome check <file...>`）。幅 100、trailing comma all。
+- core の TypeScript は Node の型ストリップで動くので、`enum`・`namespace`・パラメータプロパティは使えない（`erasableSyntaxOnly`）。型だけの import は `import type`（`verbatimModuleSyntax`）。相対 import は `.ts` 拡張子つき、Node 標準は `node:` 接頭辞。
+- テストは `import { test } from "node:test";` と `import assert from "node:assert/strict";` で、`describe` を使わずトップレベルの `test("…", async () => {…})` を並べる。
 
 ## Global Constraints
 
@@ -27,7 +30,7 @@
   - `shared/rail.ts` が `RailStatus` / `RailNode` / `buildRail` を export する（名前と意味はいまの `app/src/rail.ts` のまま）
   - `IntakeProcessView` に `rail: RailNode[] | null`（プロセスのいまのタスクの帯。タスクが無いプロセスは null）
   - アプリの `useIntakeRpc().start(workspacePath: string, issueUrl: string, mode: IntakeMode)`
-- `workspace.setup` と初回ウィザードには触らない（段階 2）。`task.create` / `dctl` には触らない（別の作業）。
+- `workspace.setup` と初回ウィザードには触らない（段階 2）。`task.create` には触らない（別の作業）。
 - 後方互換の仕掛けを作らない。
 - コードのコメントにはそのコード固有の事実だけを書き、一般論は spec に書く。既存のコメントの密度に合わせる。
 - direct の Intake は sub-issue を作らず、`intake_processes.sub_issue_url` は常に NULL。タスクの `issue_url` は親 Issue そのもの、`parent_issue_url` は NULL。
@@ -100,7 +103,11 @@ test("insertIntake: mode を省くと plan・investigating、direct なら activ
   const db = await openDb(":memory:");
   const p = await seedProject(db, { path: "/repo" });
   const base = { workspace_id: p.workspace_id, issue_node_id: "I", issue_title: "T" };
-  const plan = await insertIntake(db, { ...base, id: "a", issue_url: "https://github.com/o/r/issues/1" });
+  const plan = await insertIntake(db, {
+    ...base,
+    id: "a",
+    issue_url: "https://github.com/o/r/issues/1",
+  });
   assert.equal(plan.mode, "plan");
   assert.equal(plan.state, "investigating");
   const direct = await insertIntake(db, {
@@ -131,7 +138,10 @@ test("0017: 既存の Intake は plan になり、mode には plan と direct �
               '2026-10-14', '2026-10-14');
   `);
   await migrateToLatest(d);
-  const i1 = await d.selectFrom("intakes").select("mode").where("id", "=", "i1")
+  const i1 = await d
+    .selectFrom("intakes")
+    .select("mode")
+    .where("id", "=", "i1")
     .executeTakeFirstOrThrow();
   assert.equal(i1.mode, "plan");
   assert.throws(() => sqlite.exec(`UPDATE intakes SET mode = 'other' WHERE id = 'i1'`), /CHECK/);
@@ -140,7 +150,7 @@ test("0017: 既存の Intake は plan になり、mode には plan と direct �
 
 - [ ] **Step 2: 失敗を確かめる**
 
-Run: `cd core && deno test --allow-all test/domain/intakeStates.test.ts test/db/intakes.test.ts test/db/migrate.test.ts`
+Run: `builtin cd /Users/shunsuke.tadokoro/orca/workspaces/doctrine/app_ux/core && node --test test/domain/intakeStates.test.ts test/db/intakes.test.ts test/db/migrate.test.ts`
 Expected: FAIL（`initialIntakeState` が無い、`mode` 列が無い）
 
 - [ ] **Step 3: 実装する**
@@ -179,13 +189,12 @@ export const DIRECT_PROCESS_ID = "main";
 ```ts
   /** Intake の取り込みの種類（spec 2026-10-14-intake-execution-design.md 5.1）。既存の行は plan。 */
   "0017_intake_mode": {
-    // deno-lint-ignore no-explicit-any
+    // biome-ignore lint/suspicious/noExplicitAny: マイグレーションは今の schema.ts ではなく当時のスキーマを相手にする
     async up(db: Kysely<any>) {
-      await db.schema.alterTable("intakes")
-        .addColumn(
-          "mode",
-          "text",
-          (c) => c.notNull().defaultTo("plan").check(sql`mode IN ('plan', 'direct')`),
+      await db.schema
+        .alterTable("intakes")
+        .addColumn("mode", "text", (c) =>
+          c.notNull().defaultTo("plan").check(sql`mode IN ('plan', 'direct')`),
         )
         .execute();
     },
@@ -214,7 +223,8 @@ export function initialIntakeState(mode: IntakeMode): "investigating" | "active"
 export async function insertIntake(db: Db, i: NewIntake): Promise<IntakeRow> {
   const now = new Date().toISOString();
   const mode = i.mode ?? "plan";
-  await db.insertInto("intakes")
+  await db
+    .insertInto("intakes")
     .values({ ...i, mode, state: initialIntakeState(mode), created_at: now, updated_at: now })
     .execute();
   return (await getIntake(db, i.id))!;
@@ -232,7 +242,7 @@ app の追従:
 
 - [ ] **Step 4: 通ることを確かめる**
 
-Run: `cd core && deno test --allow-all test/domain/intakeStates.test.ts test/db/intakes.test.ts test/db/migrate.test.ts && cd .. && mise run core:check && (cd app && pnpm exec tsc)`
+Run: `(builtin cd /Users/shunsuke.tadokoro/orca/workspaces/doctrine/app_ux/core && node --test test/domain/intakeStates.test.ts test/db/intakes.test.ts test/db/migrate.test.ts) && mise run core:check && (builtin cd /Users/shunsuke.tadokoro/orca/workspaces/doctrine/app_ux/app && pnpm exec tsc)`
 Expected: PASS。`intake.start` の params の型が変わったので、app の `store.tsx` の `rpc("intake.start", …)` が型エラーになる。Task 1 では `store.tsx:477` を `rpc("intake.start", { workspace: workspacePath, issue_url: issueUrl, mode: "plan" })` にしておき、Task 4 で引数にする。
 
 - [ ] **Step 5: コミット**
@@ -272,22 +282,29 @@ const RAIL_YAML =
 
 test("プロセスのいまのタスクの帯を、pin されたワークフローと step_runs から組む", async () => {
   const { db, projectId } = await seedActive();
-  await insertTask(db, { ...newTaskFor("t1", projectId, "1"), workflow_yaml: RAIL_YAML, workflow_setup: null });
+  await insertTask(db, {
+    ...newTaskFor("t1", projectId, "1"),
+    workflow_yaml: RAIL_YAML,
+    workflow_setup: null,
+  });
   await replaceCurrentTask(db, "i1", "1", null, "t1");
   await db.updateTable("tasks").set({ current_step_id: "review" }).where("id", "=", "t1").execute();
   for (const step_id of ["a", "gone"]) {
-    await db.insertInto("step_runs").values({
-      task_id: "t1",
-      step_id,
-      attempt: 1,
-      status: "success",
-      exit_code: 0,
-      started_at: "2026-10-14T00:00:00.000Z",
-      ended_at: "2026-10-14T00:01:00.000Z",
-      log_path: "",
-      review_tree: null,
-      goto_step_id: null,
-    }).execute();
+    await db
+      .insertInto("step_runs")
+      .values({
+        task_id: "t1",
+        step_id,
+        attempt: 1,
+        status: "success",
+        exit_code: 0,
+        started_at: "2026-10-14T00:00:00.000Z",
+        ended_at: "2026-10-14T00:01:00.000Z",
+        log_path: "",
+        review_tree: null,
+        goto_step_id: null,
+      })
+      .execute();
   }
 
   const detail = await toIntakeDetail(
@@ -299,7 +316,11 @@ test("プロセスのいまのタスクの帯を、pin されたワークフロ�
   const rail = detail.processes.find((p) => p.id === "1")!.rail!;
   assert.deepEqual(
     rail.map((n) => [n.id, n.status, n.current, n.unknown]),
-    [["a", "success", false, false], ["review", "pending", true, false], ["gone", "success", false, true]],
+    [
+      ["a", "success", false, false],
+      ["review", "pending", true, false],
+      ["gone", "success", false, true],
+    ],
   );
   assert.equal(detail.processes.find((p) => p.id === "2")!.rail, null);
 });
@@ -308,11 +329,8 @@ test("ワークフローを読めないタスクの帯は null で、intake.get 
   const { db, projectId } = await seedActive();
   await insertTask(db, newTaskFor("t1", projectId, "1"));
   await replaceCurrentTask(db, "i1", "1", null, "t1");
-  const detail = await toIntakeDetail(
-    db,
-    (await getIntake(db, "i1"))!,
-    INITIAL_WATCH_HEALTH,
-    () => Promise.reject(new Error("読めない")),
+  const detail = await toIntakeDetail(db, (await getIntake(db, "i1"))!, INITIAL_WATCH_HEALTH, () =>
+    Promise.reject(new Error("読めない")),
   );
   assert.equal(detail.processes.find((p) => p.id === "1")!.rail, null);
 });
@@ -320,7 +338,7 @@ test("ワークフローを読めないタスクの帯は null で、intake.get 
 
 - [ ] **Step 2: 失敗を確かめる**
 
-Run: `cd core && deno test --allow-all test/intake/view.test.ts`
+Run: `builtin cd /Users/shunsuke.tadokoro/orca/workspaces/doctrine/app_ux/core && node --test test/intake/view.test.ts`
 Expected: FAIL（`toIntakeDetail` が 4 引数を取らない、`rail` が無い）
 
 - [ ] **Step 3: 実装する**
@@ -405,10 +423,11 @@ app の import の書き換え:
 `shared/protocol.ts` に `import type { RailNode } from "./rail.ts";` を足し、`IntakeProcessView` を:
 
 ```ts
-export type IntakeProcessView =
-  & { id: string }
-  & ProcessStatus
-  & { sub_issue_url: string | null; task_ids: string[]; rail: RailNode[] | null };
+export type IntakeProcessView = { id: string } & ProcessStatus & {
+    sub_issue_url: string | null;
+    task_ids: string[];
+    rail: RailNode[] | null;
+  };
 ```
 
 `app/src/fixtures.ts` の `INTAKE_ACTIVE.processes` の map に `rail: null,` を足す。
@@ -457,7 +476,7 @@ async function railsOf(
 
 - [ ] **Step 4: 通ることを確かめる**
 
-Run: `cd core && deno test --allow-all test/intake/view.test.ts test/intake/watch.test.ts && cd .. && mise run core:check && (cd app && pnpm exec tsc && pnpm exec vitest run src/rail.test.ts src/WorkflowRail.test.tsx)`
+Run: `(builtin cd /Users/shunsuke.tadokoro/orca/workspaces/doctrine/app_ux/core && node --test test/intake/view.test.ts test/intake/watch.test.ts) && mise run core:check && (builtin cd /Users/shunsuke.tadokoro/orca/workspaces/doctrine/app_ux/app && pnpm exec tsc && pnpm exec vitest run src/rail.test.ts src/WorkflowRail.test.tsx)`
 Expected: PASS
 
 - [ ] **Step 5: コミット**
@@ -472,9 +491,9 @@ git commit -m "ワークフローの帯を shared に移し、intake.get のプ�
 ### Task 3: direct のプロセスの状態
 
 **Files:**
-- Modify: `core/src/intake/pfd/status.ts:30-60`
+- Modify: `core/src/intake/pfd/status.ts`（`settledState` の周り）
 - Modify: `core/src/intake/processProject.ts`
-- Modify: `core/src/intake/view.ts:75-93`（`processStatusesOf`）
+- Modify: `core/src/intake/view.ts`（`processStatusesOf`）
 - Modify: `core/src/intake/dispatch.ts`（`directTask` / `directTaskPrompt` / `insertDirectIntake` を足す）
 - Modify: `core/test/intake/watchFixture.ts`（`seedDirect` を足す）
 - Test: `core/test/intake/pfd/status.test.ts`、`core/test/intake/direct.test.ts`（新規）
@@ -504,7 +523,8 @@ const directProgress = (o: Partial<ProcessProgress> = {}): ProcessProgress => ({
 });
 
 test("direct: タスクと PR だけから running / pr_open / merged / needs_attention を求める", () => {
-  const state = (o: Partial<ProcessProgress>) => directProcessStatus(directProgress(o), "main").state;
+  const state = (o: Partial<ProcessProgress>) =>
+    directProcessStatus(directProgress(o), "main").state;
   assert.equal(state({}), "running");
   assert.equal(state({ pr: pr("OPEN") }), "pr_open");
   assert.equal(state({ pr: pr("MERGED") }), "merged");
@@ -516,7 +536,10 @@ test("direct: タスクと PR だけから running / pr_open / merged / needs_at
 });
 
 test("direct: タスクが無ければ投げる", () => {
-  assert.throws(() => directProcessStatus(directProgress({ task: null }), "main"), /タスクがありません/);
+  assert.throws(
+    () => directProcessStatus(directProgress({ task: null }), "main"),
+    /タスクがありません/,
+  );
 });
 ```
 
@@ -527,9 +550,12 @@ export const DIRECT_WORKFLOW =
   'name: feature\nsteps:\n  - id: a\n    type: command\n    run: "true"\n  - id: review\n    type: approval\n    title: 見て\n';
 
 /** direct で開始した Intake（id は d1、親 Issue は PARENT_URL）を 1 つ持つ DB。 */
-export async function seedDirect(): Promise<
-  { db: Db; projectId: number; workspaceId: number; taskId: string }
-> {
+export async function seedDirect(): Promise<{
+  db: Db;
+  projectId: number;
+  workspaceId: number;
+  taskId: string;
+}> {
   const db = await openDb(":memory:");
   const project = await seedProject(db, { path: "/repo", default_workflow: "feature" });
   const loaded = await fakeWorkflowLoader(DIRECT_WORKFLOW)("/repo", "feature");
@@ -553,7 +579,7 @@ export async function seedDirect(): Promise<
 `core/test/intake/direct.test.ts` を作る:
 
 ```ts
-import { test } from "@std/testing/bdd";
+import { test } from "node:test";
 import assert from "node:assert/strict";
 import { getIntake, listProcesses, upsertPrObservation } from "../../src/db/intakes.ts";
 import { getTask } from "../../src/db/tasks.ts";
@@ -569,7 +595,10 @@ test("direct: Intake は active で、プロセス main とタスク 1 本を持
   assert.equal(intake.mode, "direct");
   assert.equal(intake.state, "active");
   const rows = await listProcesses(db, "d1");
-  assert.deepEqual(rows.map((r) => [r.process_id, r.sub_issue_url]), [["main", null]]);
+  assert.deepEqual(
+    rows.map((r) => [r.process_id, r.sub_issue_url]),
+    [["main", null]],
+  );
   const task = (await getTask(db, taskId))!;
   assert.equal(task.project_id, projectId);
   assert.equal(task.title, "直す");
@@ -584,7 +613,10 @@ test("direct: Intake は active で、プロセス main とタスク 1 本を持
 
 test("direct: タスクを入れられなければ、Intake もプロセスも残らない", async () => {
   const { db } = await seedDirect();
-  const project = { ...(await db.selectFrom("projects").selectAll().executeTakeFirstOrThrow()), id: 9999 };
+  const project = {
+    ...(await db.selectFrom("projects").selectAll().executeTakeFirstOrThrow()),
+    id: 9999,
+  };
   const loaded = await fakeWorkflowLoader(DIRECT_WORKFLOW)("/repo", "feature");
   await assert.rejects(() =>
     insertDirectIntake(db, {
@@ -598,7 +630,7 @@ test("direct: タスクを入れられなければ、Intake もプロセスも�
       project,
       issue: { url: "https://github.com/o/r/issues/2", title: "別", body: "" },
       pin: { workflow_yaml: loaded.text, workflow_setup: null },
-    })
+    }),
   );
   assert.equal(await getIntake(db, "d2"), undefined);
   assert.deepEqual(await listProcesses(db, "d2"), []);
@@ -607,7 +639,12 @@ test("direct: タスクを入れられなければ、Intake もプロセスも�
 test("direct: intake.get はプロセス main 1 つと帯を返し、PR のマージで merged になる", async () => {
   const { db, taskId } = await seedDirect();
   const loader = fakeWorkflowLoader(DIRECT_WORKFLOW);
-  const before = await toIntakeDetail(db, (await getIntake(db, "d1"))!, INITIAL_WATCH_HEALTH, loader);
+  const before = await toIntakeDetail(
+    db,
+    (await getIntake(db, "d1"))!,
+    INITIAL_WATCH_HEALTH,
+    loader,
+  );
   assert.equal(before.mode, "direct");
   assert.equal(before.approval, null);
   assert.deepEqual(before.progress, { done: 0, total: 1 });
@@ -618,7 +655,10 @@ test("direct: intake.get はプロセス main 1 つと帯を返し、PR のマ�
   assert.equal(main.state, "running");
   assert.equal(main.sub_issue_url, null);
   assert.deepEqual(main.task_ids, [taskId]);
-  assert.deepEqual(main.rail!.map((n) => n.id), ["a", "review"]);
+  assert.deepEqual(
+    main.rail!.map((n) => n.id),
+    ["a", "review"],
+  );
 
   await upsertPrObservation(db, {
     task_id: taskId,
@@ -629,7 +669,12 @@ test("direct: intake.get はプロセス main 1 つと帯を返し、PR のマ�
     merged_at: "2026-10-14T00:00:00.000Z",
     merge_commit: "c7",
   });
-  const after = await toIntakeDetail(db, (await getIntake(db, "d1"))!, INITIAL_WATCH_HEALTH, loader);
+  const after = await toIntakeDetail(
+    db,
+    (await getIntake(db, "d1"))!,
+    INITIAL_WATCH_HEALTH,
+    loader,
+  );
   assert.equal(after.processes[0].state, "merged");
   assert.deepEqual(after.progress, { done: 1, total: 1 });
 });
@@ -652,7 +697,7 @@ test("direct: タスクが止まると要確認になり、needs_human が立つ
 
 - [ ] **Step 2: 失敗を確かめる**
 
-Run: `cd core && deno test --allow-all test/intake/pfd/status.test.ts test/intake/direct.test.ts`
+Run: `builtin cd /Users/shunsuke.tadokoro/orca/workspaces/doctrine/app_ux/core && node --test test/intake/pfd/status.test.ts test/intake/direct.test.ts`
 Expected: FAIL（`directProcessStatus` / `insertDirectIntake` が無い）
 
 - [ ] **Step 3: 実装する**
@@ -716,7 +761,8 @@ export function directProcessStatus(
 ```ts
 /** direct の Intake の、いまのタスクのプロジェクトの base_branch。 */
 export async function directBaseBranch(db: Db, intakeId: string): Promise<string> {
-  const row = await db.selectFrom("intake_processes as p")
+  const row = await db
+    .selectFrom("intake_processes as p")
     .innerJoin("tasks as t", "t.id", "p.current_task_id")
     .innerJoin("projects as pr", "pr.id", "t.project_id")
     .select("pr.base_branch as base_branch")
@@ -809,7 +855,7 @@ export async function insertDirectIntake(
       pin: o.pin,
     });
     await insertTask(trx, task);
-    if (!await replaceCurrentTask(trx, row.id, DIRECT_PROCESS_ID, null, task.id)) {
+    if (!(await replaceCurrentTask(trx, row.id, DIRECT_PROCESS_ID, null, task.id))) {
       throw new Error("direct のタスクを紐づけられませんでした");
     }
     return row;
@@ -819,7 +865,7 @@ export async function insertDirectIntake(
 
 - [ ] **Step 4: 通ることを確かめる**
 
-Run: `cd core && deno test --allow-all test/intake/pfd/status.test.ts test/intake/direct.test.ts test/intake/view.test.ts && cd .. && mise run core:check`
+Run: `(builtin cd /Users/shunsuke.tadokoro/orca/workspaces/doctrine/app_ux/core && node --test test/intake/pfd/status.test.ts test/intake/direct.test.ts test/intake/view.test.ts) && mise run core:check`
 Expected: PASS
 
 - [ ] **Step 5: コミット**
@@ -834,10 +880,10 @@ git commit -m "direct の Intake のプロセスの状態を、PFD を使わず�
 ### Task 4: `intake.start` で direct を開始する
 
 **Files:**
-- Modify: `core/src/intake/commands.ts:1-106`（`startIntake`）
-- Modify: `core/src/daemon/handlers.ts:839-854`
-- Modify: `core/test/daemon/intakeHandlers.test.ts`（既存の `intake.start` の 24 か所に `mode: "plan"`）
-- Modify: `app/src/store.tsx:473-477`、`app/src/components/IssuePicker.tsx:230-242,390`、`app/src/IssuePicker.test.tsx:37,48-51,59`
+- Modify: `core/src/intake/commands.ts`（import と `startIntake`）
+- Modify: `core/src/daemon/handlers.ts`（`case "intake.start"`）
+- Modify: `core/test/daemon/intakeHandlers.test.ts`（既存の `intake.start` の呼び出しすべてに `mode: "plan"`）
+- Modify: `app/src/store.tsx`（`start`）、`app/src/components/IssuePicker.tsx`（`startIntake` と呼び出し）、`app/src/IssuePicker.test.tsx`（`describe("startIntake")` の `deps.start` と 2 つの呼び出し）
 - Test: `core/test/intake/direct.test.ts`、`core/test/daemon/intakeHandlers.test.ts`
 
 **Interfaces:**
@@ -859,12 +905,17 @@ async function startDirect(loadWorkflow = fakeWorkflowLoader(DIRECT_WORKFLOW)) {
     projectPathFor: () => Promise.resolve("/repo"),
   };
   const started = () =>
-    startIntake(db, wt, {
-      workspaceId: project.workspace_id,
-      issueUrl: PARENT_URL,
-      logRoot: "/tmp/doctrine-test-logs",
-      mode: "direct",
-    }, { loadWorkflow });
+    startIntake(
+      db,
+      wt,
+      {
+        workspaceId: project.workspace_id,
+        issueUrl: PARENT_URL,
+        logRoot: "/tmp/doctrine-test-logs",
+        mode: "direct",
+      },
+      { loadWorkflow },
+    );
   return { db, started };
 }
 
@@ -899,7 +950,7 @@ test("startIntake: 同じ Issue の direct がまだ終わっていなければ�
 
 ```bash
 perl -0pi -e 's/("intake\.start",\s*\{)/$1 mode: "plan",/g' core/test/daemon/intakeHandlers.test.ts
-(cd core && deno fmt test/daemon/intakeHandlers.test.ts)
+pnpm exec biome format --write core/test/daemon/intakeHandlers.test.ts
 ```
 
 （import に `listProcesses` は既にある。`getTask` も既にある）その後、末尾近くに:
@@ -917,13 +968,19 @@ test("direct で開始すると、調査を立てずに active になり、プ�
   assert.deepEqual(started.progress, { done: 0, total: 1 });
   assert.deepEqual(await listIntakeRuns(ctx.db, started.id), []);
   const rows = await listProcesses(ctx.db, started.id);
-  assert.deepEqual(rows.map((r) => [r.process_id, r.sub_issue_url]), [["main", null]]);
+  assert.deepEqual(
+    rows.map((r) => [r.process_id, r.sub_issue_url]),
+    [["main", null]],
+  );
   const task = (await getTask(ctx.db, rows[0].current_task_id!))!;
   assert.equal(task.workflow_name, "feature");
   assert.equal(task.issue_url, ISSUE);
   assert.equal(task.parent_issue_url, null);
   const detail = await call<IntakeDetail>("intake.get", { intake_id: started.id });
-  assert.deepEqual(detail.processes[0].rail!.map((n) => n.id), ["review"]);
+  assert.deepEqual(
+    detail.processes[0].rail!.map((n) => n.id),
+    ["review"],
+  );
 });
 
 test("mode が plan でも direct でもない intake.start は拒まれる", async () => {
@@ -944,7 +1001,7 @@ test("mode が plan でも direct でもない intake.start は拒まれる", as
 
 - [ ] **Step 2: 失敗を確かめる**
 
-Run: `cd core && deno test --allow-all test/intake/direct.test.ts test/daemon/intakeHandlers.test.ts; cd ../app && pnpm exec vitest run src/IssuePicker.test.tsx`
+Run: `(builtin cd /Users/shunsuke.tadokoro/orca/workspaces/doctrine/app_ux/core && node --test test/intake/direct.test.ts test/daemon/intakeHandlers.test.ts); (builtin cd /Users/shunsuke.tadokoro/orca/workspaces/doctrine/app_ux/app && pnpm exec vitest run src/IssuePicker.test.tsx)`
 Expected: FAIL（`startIntake` が mode を見ない、`mode` の検査が無い、`startIntake` の引数が違う）
 
 - [ ] **Step 3: 実装する**
@@ -1064,7 +1121,7 @@ export async function startIntake(
 
 - [ ] **Step 4: 通ることを確かめる**
 
-Run: `cd core && deno test --allow-all test/intake/direct.test.ts test/daemon/intakeHandlers.test.ts && cd .. && mise run core:check && (cd app && pnpm exec tsc && pnpm exec vitest run src/IssuePicker.test.tsx)`
+Run: `(builtin cd /Users/shunsuke.tadokoro/orca/workspaces/doctrine/app_ux/core && node --test test/intake/direct.test.ts test/daemon/intakeHandlers.test.ts) && mise run core:check && (builtin cd /Users/shunsuke.tadokoro/orca/workspaces/doctrine/app_ux/app && pnpm exec tsc && pnpm exec vitest run src/IssuePicker.test.tsx)`
 Expected: PASS
 
 - [ ] **Step 5: コミット**
@@ -1079,7 +1136,7 @@ git commit -m "intake.start で direct を開始できるようにする"
 ### Task 5: 見張りが direct の Intake をマージで完了にする
 
 **Files:**
-- Modify: `core/src/intake/watch.ts:388-404`（完了の判定の周）
+- Modify: `core/src/intake/watch.ts`（`watchWorkspace` の最後の、完了の判定の周）
 - Test: `core/test/intake/direct.test.ts`
 
 **Interfaces:**
@@ -1129,7 +1186,10 @@ test("見張り: direct は sub-issue を作らず、PR のマージで complete
   const row = (await getIntake(s.db, "d1"))!;
   assert.equal(row.state, "completed");
   assert.notEqual(row.ended_at, null);
-  assert.deepEqual(s.transitions.map((t) => [t.from, t.to]), [["active", "completed"]]);
+  assert.deepEqual(
+    s.transitions.map((t) => [t.from, t.to]),
+    [["active", "completed"]],
+  );
   assert.equal((await listTasks(s.db)).length, 1);
 });
 
@@ -1147,7 +1207,7 @@ test("見張り: direct の PR が base_branch 以外へマージされても完
 
 - [ ] **Step 2: 失敗を確かめる**
 
-Run: `cd core && deno test --allow-all test/intake/direct.test.ts`
+Run: `builtin cd /Users/shunsuke.tadokoro/orca/workspaces/doctrine/app_ux/core && node --test test/intake/direct.test.ts`
 Expected: FAIL（マージしても `active` のまま）
 
 - [ ] **Step 3: 実装する**
@@ -1175,7 +1235,7 @@ async function reachedGoal(db: Db, intake: IntakeRow): Promise<boolean> {
 ```ts
     for (const intake of intakes) {
       try {
-        if (!await reachedGoal(db, intake)) continue;
+        if (!(await reachedGoal(db, intake))) continue;
         const transition = await completeIntake(db, intake.id);
         if (transition) report.transitions.push(transition);
       } catch (e) {
@@ -1184,13 +1244,13 @@ async function reachedGoal(db: Db, intake: IntakeRow): Promise<boolean> {
     }
 ```
 
-direct の Intake は承認を持たないので、sub-issue の同期（`loadApprovedPlan` が null）・投入（`dispatchIntake` が null で戻る）・マージでの sub-issue の閉じ（`approvedPlanOf` が null）は何もしない。PR の観測（`observePullRequests`）はプロセス main のタスクを他と同じく拾う。
+direct の Intake は承認を持たないので、sub-issue の同期（`loadApprovedPlan` が null）・投入（`dispatchIntake` が承認の無い Intake には空の報告で戻る）・マージでの sub-issue の閉じ（`approvedPlanOf` が null）は何もしない。PR の観測（`observePullRequests`）はプロセス main のタスクを他と同じく拾う。
 この 3 か所の `continue` / 早い return が direct を通すことを、`watchWorkspace` の冒頭のコメント（「改訂中の Intake は PR の観測だけ続ける」の段落）に 1 文で書き足す:
 `direct の Intake は承認を持たないので、PR の観測と完了の判定だけが働く。`
 
 - [ ] **Step 4: 通ることを確かめる**
 
-Run: `cd core && deno test --allow-all test/intake/direct.test.ts test/intake/watch.test.ts && cd .. && mise run core:check`
+Run: `(builtin cd /Users/shunsuke.tadokoro/orca/workspaces/doctrine/app_ux/core && node --test test/intake/direct.test.ts test/intake/watch.test.ts) && mise run core:check`
 Expected: PASS
 
 - [ ] **Step 5: コミット**
@@ -1205,8 +1265,8 @@ git commit -m "見張りが direct の Intake をマージで完了にする"
 ### Task 6: direct への操作（再投入・改訂と一時停止の拒否）
 
 **Files:**
-- Modify: `core/src/intake/dispatch.ts:255-292`（`redispatchProcess`）
-- Modify: `core/src/intake/commands.ts:265-276`（`reviseIntake`）、`471-485`（`setDispatchPaused`）
+- Modify: `core/src/intake/dispatch.ts`（`redispatchProcess`）
+- Modify: `core/src/intake/commands.ts`（`reviseIntake`、`setDispatchPaused`）
 - Test: `core/test/intake/direct.test.ts`
 
 **Interfaces:**
@@ -1271,7 +1331,7 @@ test("direct: 改訂・自動投入の一時停止・人の完了は拒まれ、
 
 - [ ] **Step 2: 失敗を確かめる**
 
-Run: `cd core && deno test --allow-all test/intake/direct.test.ts`
+Run: `builtin cd /Users/shunsuke.tadokoro/orca/workspaces/doctrine/app_ux/core && node --test test/intake/direct.test.ts`
 Expected: FAIL（再投入が「承認された計画がありません」で落ちる、改訂・一時停止の文言が違う）
 
 - [ ] **Step 3: 実装する**
@@ -1338,7 +1398,7 @@ async function redispatchDirect(
 
 - [ ] **Step 4: 通ることを確かめる**
 
-Run: `cd core && deno test --allow-all test/intake/direct.test.ts test/intake/dispatch.test.ts && cd .. && mise run core:check && mise run core:test`
+Run: `(builtin cd /Users/shunsuke.tadokoro/orca/workspaces/doctrine/app_ux/core && node --test test/intake/direct.test.ts test/intake/dispatch.test.ts) && mise run core:check && mise run core:test`
 Expected: PASS
 
 - [ ] **Step 5: コミット**
@@ -1397,8 +1457,8 @@ direct の Intake は承認を持たないので、2・6 の sub-issue の処理
 
 - [ ] **Step 2: 07-app.md を直す**
 
-7.5 の表の `rail.ts` の行を
-`| rail.ts | 設定画面のワークフローの定義図。タスク画面の帯の組み立て（buildRail）は shared/rail.ts にあり、デーモンの intake.get も使う |` にする。
+7.5 の表の `rail.ts` の行（いまは「ワークフローの帯（タスク画面の実行状態付きと、設定画面の定義図）」）を
+`| `rail.ts` | 設定画面のワークフローの定義図。タスク画面の帯の組み立て（`buildRail`）は `shared/rail.ts` にあり、デーモンの `intake.get` も使う |` にする。
 
 - [ ] **Step 3: コミット**
 

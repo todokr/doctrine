@@ -6,19 +6,19 @@
 
 **Architecture:** 一覧の並びと「人の番」の判定は純関数（`app/src/execution.ts`、`app/src/intake.ts`）に置き、`model.ts` の reducer が view と選択（`execSel` / `execClosed`）を持つ。Execution の本体（`components/ExecutionView.tsx`）は今の Intake の進行中の面（`IntakeProgress`）の中身を移したもので、図の下の `exec-panel-slot` に選んだ要素の欄と開いたタスクの画面を出す。段階 3 はこのスロットを下のパネルに置き換える。
 
-**Tech Stack:** React 19 / TypeScript 6 / vitest 5（app）、Deno 2 / kysely（core）
+**Tech Stack:** React 19 / TypeScript 6 / vitest 5（app）、Node 26 + pnpm workspace / kysely / `node:test`（core）
 
 **Spec:** `docs/superpowers/specs/2026-10-14-intake-execution-design.md`（3 章・4 章・6.1・6.4・8.1・8.2・10・11 章のうち画面の部分）
 
 ## Global Constraints
 
-- 段階 1（デーモンの direct）がマージ済みであること。使うもの: `shared/protocol.ts` の `IntakeMode = "plan" | "direct"`、`IntakeSummary.mode`、`intake.start` の params の `mode: IntakeMode`（必須）、`shared/intake/` の `DIRECT_PROCESS_ID = "main"`、`IntakeProcessView.rail`。段階 1 の時点で `cd app && pnpm exec tsc` が通っている（`fixtures.ts` の `intake()` と `INTAKE_*` に `mode` / `rail` が入っている）ことを着手前に確かめる
+- 段階 1（デーモンの direct）がマージ済みであること。使うもの: `shared/protocol.ts` の `IntakeMode = "plan" | "direct"`、`IntakeSummary.mode`、`intake.start` の params の `mode: IntakeMode`（必須）、`shared/intake/` の `DIRECT_PROCESS_ID = "main"`、`IntakeProcessView.rail`。段階 1 の時点で `builtin cd /Users/shunsuke.tadokoro/orca/workspaces/doctrine/app_ux/app && pnpm exec tsc` が通っている（`fixtures.ts` の `intake()` と `INTAKE_*` に `mode` / `rail` が入っている）ことを着手前に確かめる
 - `view` は `"intake" | "execution" | "settings"` の 3 つだけ。`"tasks"` / `"done"` / `"worktrees"` は参照ごと消す。互換の仕掛けは作らない
 - 取り込みの種類の文言: plan は「計画して進める」・補足「複数の PR に分ける」、direct は「すぐ実行する」・補足「1 本の PR で済ませる」。既定の選択は置かない
 - 人の番 = タスクの承認待ち（`suspended`）・プロセスの要確認（`needs_attention`）・人のプロセスの番（`your_turn`）。PR のマージ待ち（`pr_open`）は入れない
-- `task.create` の RPC、`shared/protocol.ts` のその定義、`dctl` には触らない（別の作業で消す）
+- `task.create` の RPC と `shared/protocol.ts` のその定義には触らない（別の作業で消す。dctl はすでに無く、アプリからの呼び出しもこの段階で無くなる）
 - コードのコメントは、そのコード固有の事実だけを書く。一般論は書かない。既存のコメントの密度に合わせる
-- コマンド: app のテスト `cd app && pnpm test`、型 `cd app && pnpm exec tsc`、core のテスト `mise run core:test`、core の型 `mise run core:check`
+- コマンド: app のテスト `builtin cd /Users/shunsuke.tadokoro/orca/workspaces/doctrine/app_ux/app && pnpm test`、型 `builtin cd /Users/shunsuke.tadokoro/orca/workspaces/doctrine/app_ux/app && pnpm exec tsc`、core のテスト `mise run core:test`（1 ファイルは `builtin cd /Users/shunsuke.tadokoro/orca/workspaces/doctrine/app_ux/core && node --test <file>`）、core の型 `mise run core:check`、書式と lint は `pnpm check:style`（リポジトリの根。整形は `pnpm exec biome format --write <file...>`。対象は core と shared で、app は対象外）。core の変更は Node の型ストリップで動くので、`enum`・`namespace`・パラメータプロパティは使えず、型だけの import は `import type`
 
 ## Review Focus
 
@@ -172,7 +172,7 @@ describe("executionOrder", () => {
 
 - [ ] **Step 2: 失敗を確かめる**
 
-Run: `cd app && pnpm test execution.test.ts`
+Run: `builtin cd /Users/shunsuke.tadokoro/orca/workspaces/doctrine/app_ux/app && pnpm test execution.test.ts`
 Expected: FAIL（`./execution` が無い）
 
 - [ ] **Step 3: execution.ts を書く**
@@ -229,7 +229,7 @@ export function executionOrder(
 
 - [ ] **Step 4: 通ることを確かめる**
 
-Run: `cd app && pnpm test execution.test.ts`
+Run: `builtin cd /Users/shunsuke.tadokoro/orca/workspaces/doctrine/app_ux/app && pnpm test execution.test.ts`
 Expected: PASS
 
 - [ ] **Step 5: intake.ts と tone.ts のテストを書き換える**
@@ -311,7 +311,7 @@ describe("intakeOrder", () => {
 
 - [ ] **Step 6: 失敗を確かめる**
 
-Run: `cd app && pnpm test intake.test.ts tone.test.ts IntakeProgress.test.tsx`
+Run: `builtin cd /Users/shunsuke.tadokoro/orca/workspaces/doctrine/app_ux/app && pnpm test intake.test.ts tone.test.ts IntakeProgress.test.tsx`
 Expected: FAIL（`inIntakeList` / `executionTone` が無い、`intakeOrder` の並びが違う、文言が違う）
 
 - [ ] **Step 7: intake.ts と tone.ts と IntakeProgress.tsx の文言を直す**
@@ -409,7 +409,7 @@ export function executionTone(i: IntakeSummary, attention: boolean): Tone {
 
 - [ ] **Step 8: 通ることを確かめる**
 
-Run: `cd app && pnpm test && pnpm exec tsc`
+Run: `builtin cd /Users/shunsuke.tadokoro/orca/workspaces/doctrine/app_ux/app && pnpm test && pnpm exec tsc`
 Expected: PASS。`model.test.ts` の「Intake のビュー」の j/k のテストが並びの変化で落ちたら、期待値を Step 5 の `intakeOrder` の並び（`["i1", "i3", "i4", "i5"]`）に合わせて直す
 
 - [ ] **Step 9: コミット**
@@ -447,7 +447,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 - [ ] **Step 2: 失敗を確かめる**
 
-Run: `cd app && pnpm exec tsc`
+Run: `builtin cd /Users/shunsuke.tadokoro/orca/workspaces/doctrine/app_ux/app && pnpm exec tsc`
 Expected: FAIL はまだ出ない（テストを消しただけ）。`pnpm test` は PASS のまま。ここでは削除の前の基準を取る
 
 - [ ] **Step 3: 消す**
@@ -502,7 +502,7 @@ git rm app/src/composer.ts app/src/composer.test.ts app/src/components/Composer.
 
 - [ ] **Step 4: 通ることを確かめる**
 
-Run: `cd app && pnpm exec tsc && pnpm test`
+Run: `builtin cd /Users/shunsuke.tadokoro/orca/workspaces/doctrine/app_ux/app && pnpm exec tsc && pnpm test`
 Expected: PASS。`rg -n "composer|Composer|RetryButton|canRetry|retryInit" app/src` が何も出さない（`firstProjectIn` は設定画面が使うので残る）
 
 - [ ] **Step 5: コミット**
@@ -583,7 +583,7 @@ describe("worktree の削除", () => {
 
 - [ ] **Step 2: 失敗を確かめる**
 
-Run: `cd app && pnpm test RemoveWorktree.test.tsx model.test.ts`
+Run: `builtin cd /Users/shunsuke.tadokoro/orca/workspaces/doctrine/app_ux/app && pnpm test RemoveWorktree.test.tsx model.test.ts`
 Expected: FAIL（`./components/RemoveWorktree` が無い、`remove.ask` の形が違う）
 
 - [ ] **Step 3: RemoveWorktree.tsx を作り、画面と状態を消す**
@@ -723,7 +723,7 @@ git rm app/src/components/WorktreeView.tsx app/src/WorktreeView.test.tsx app/src
 
 - [ ] **Step 4: 通ることを確かめる**
 
-Run: `cd app && pnpm exec tsc && pnpm test`
+Run: `builtin cd /Users/shunsuke.tadokoro/orca/workspaces/doctrine/app_ux/app && pnpm exec tsc && pnpm test`
 Expected: PASS。`rg -n "worktrees\"|WorktreeView|staleDaysOf|warnings" app/src` が `settings.ts` / `SettingsView` の `staleDays` 以外を出さない
 
 - [ ] **Step 5: コミット**
@@ -741,7 +741,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 **Files:**
 - Delete: `core/src/workflow/setupWorkflow.ts`、`core/test/workflow/setupWorkflow.test.ts`、`core/test/daemon/workspaceSetup.test.ts`、`core/test/integration/setupTask.test.ts`
-- Modify: `core/src/daemon/handlers.ts`（14 行の import、111 行の `SetupPolicy`、`case "workspace.setup"`）、`shared/protocol.ts`（`SetupPolicy`、`"workspace.setup"`）
+- Modify: `core/src/daemon/handlers.ts`（`setupWorkflow.ts` の import、type import の `SetupPolicy`、`case "workspace.setup"`、それだけが使っていた import）、`shared/protocol.ts`（`SetupPolicy`、`"workspace.setup"`）
 - Modify: `app/src/wizard.ts`、`app/src/components/SetupWizard.tsx`、`app/src/model.ts`（`wizard.done`）、`app/src/components/TaskView.tsx`（`SetupDoneNotice` / `SetupRetryHint`）
 - Test: `app/src/wizard.test.ts`、`app/src/SetupWizard.test.tsx`、`app/src/model.test.ts`、`app/src/TaskView.test.tsx`
 
@@ -815,7 +815,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 - [ ] **Step 2: 失敗を確かめる**
 
-Run: `cd app && pnpm test wizard.test.ts SetupWizard.test.tsx model.test.ts`
+Run: `builtin cd /Users/shunsuke.tadokoro/orca/workspaces/doctrine/app_ux/app && pnpm test wizard.test.ts SetupWizard.test.tsx model.test.ts`
 Expected: FAIL（`next` が `"policy"` を返す、`wizard.done` の形が違う、確認の画面に setup の文言がある）
 
 - [ ] **Step 3: core と protocol から setup のタスクを消す**
@@ -825,17 +825,18 @@ git rm core/src/workflow/setupWorkflow.ts core/test/workflow/setupWorkflow.test.
 ```
 
 `core/src/daemon/handlers.ts`:
-- 14 行 `import { SETUP_WORKFLOW_NAME, setupPrompt, setupWorkflowYaml } from "../workflow/setupWorkflow.ts";` を消す
-- import の `SetupPolicy,`（111 行）を消す
-- `case "workspace.setup": { ... }`（469〜503 行）を丸ごと消す
+- `import { SETUP_WORKFLOW_NAME, setupPrompt, setupWorkflowYaml } from "../workflow/setupWorkflow.ts";` を消す
+- type import の `SetupPolicy,` を消す
+- `case "workspace.setup": { ... }` を丸ごと消す
+- `listProjectsOf`（`../db/workspaces.ts` からの import）はこの case だけが使っていたので、import から外す（`pnpm exec biome check core/src/daemon/handlers.ts` が未使用の import を教える）
 - `createTaskRow` の呼び出しが `task.create` だけになるので、`createTaskRow` 自体は残す（`task.create` は触らない）
 
 `shared/protocol.ts`:
-- `export type SetupPolicy = { ... };`（314 行〜）を消す
-- `Methods` の `"workspace.setup": { ... };`（602〜605 行）を消す
+- `export type SetupPolicy = { ... };`（直前の doc コメントごと）を消す
+- `Methods` の `"workspace.setup": { ... };`（直前の doc コメントごと）を消す
 
 Run: `mise run core:check && mise run core:test`
-Expected: PASS。落ちたら `rg -n "workspace.setup|SetupPolicy|setupWorkflow" core shared` で残りを消す
+Expected: PASS。落ちたら `rg -n "workspace.setup|SetupPolicy|setupWorkflow" core shared` で残りを消す。続けて `pnpm check:style` が通ること
 
 - [ ] **Step 4: ウィザードを縮める**
 
@@ -914,7 +915,7 @@ function Welcome() {
 
 - [ ] **Step 5: 通ることを確かめる**
 
-Run: `cd app && pnpm exec tsc && pnpm test`
+Run: `builtin cd /Users/shunsuke.tadokoro/orca/workspaces/doctrine/app_ux/app && pnpm exec tsc && pnpm test`
 Expected: PASS。`rg -n "setup のタスク|workspace\.setup|SetupPolicy|policy" app/src` がプロジェクトの `setup` コマンド（`project.yaml` の `setup`）以外を出さない
 
 - [ ] **Step 6: コミット**
@@ -1092,7 +1093,7 @@ describe("CancelDialog", () => {
 
 - [ ] **Step 2: 失敗を確かめる**
 
-Run: `cd app && pnpm test ExecutionView.test.tsx Sidebar.test.tsx IntakeView.test.tsx IntakeProgress.test.tsx`
+Run: `builtin cd /Users/shunsuke.tadokoro/orca/workspaces/doctrine/app_ux/app && pnpm test ExecutionView.test.tsx Sidebar.test.tsx IntakeView.test.tsx IntakeProgress.test.tsx`
 Expected: FAIL（`ExecutionSidebar` / `ExecutionView` が無い、`label` / `scope` / `showSubIssue` が無い）
 
 - [ ] **Step 3: 部品を書く**
@@ -1329,7 +1330,7 @@ export function MovedToExecution({ onOpen }: { onOpen: () => void }) {
 
 - [ ] **Step 4: 通ることを確かめる**
 
-Run: `cd app && pnpm exec tsc && pnpm test`
+Run: `builtin cd /Users/shunsuke.tadokoro/orca/workspaces/doctrine/app_ux/app && pnpm exec tsc && pnpm test`
 Expected: PASS
 
 - [ ] **Step 5: コミット**
@@ -1504,7 +1505,7 @@ describe("IntakeRetryHint", () => {
 
 - [ ] **Step 2: 失敗を確かめる**
 
-Run: `cd app && pnpm test model.test.ts TaskView.test.tsx`
+Run: `builtin cd /Users/shunsuke.tadokoro/orca/workspaces/doctrine/app_ux/app && pnpm test model.test.ts TaskView.test.tsx`
 Expected: FAIL（`execSel` / `execution.select` / `execution.closed` が無い、`intake.started` が direct を見ない、など）
 
 - [ ] **Step 3: model.ts を書き換える**
@@ -2233,7 +2234,7 @@ export function IntakeRetryHint() {
 
 - [ ] **Step 8: 通ることを確かめる**
 
-Run: `cd app && pnpm exec tsc && pnpm test`
+Run: `builtin cd /Users/shunsuke.tadokoro/orca/workspaces/doctrine/app_ux/app && pnpm exec tsc && pnpm test`
 Expected: PASS。`rg -n '"tasks"|"done"|"worktrees"|showClosedIntakes|intake.showClosed|IntakeProgress\b' app/src` が `IntakeProgress.tsx` / `IntakeProgress.test.tsx` のファイル名以外を出さない（`TaskState` の `"done"` ではなく view の値を探す。`groupOf` の `"done"` は残ってよい）
 
 - [ ] **Step 9: 画面を目で確かめる**
@@ -2306,7 +2307,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 - [ ] **Step 2: 失敗を確かめる**
 
-Run: `cd app && pnpm test IssuePicker.test.tsx IntakeView.test.tsx`
+Run: `builtin cd /Users/shunsuke.tadokoro/orca/workspaces/doctrine/app_ux/app && pnpm test IssuePicker.test.tsx IntakeView.test.tsx`
 Expected: FAIL（`mode` を送っていない、ボタンが「Intake を開始」のまま）
 
 - [ ] **Step 3: 書く**
@@ -2380,7 +2381,7 @@ export async function startIntake(
 
 - [ ] **Step 4: 通ることを確かめる**
 
-Run: `cd app && pnpm exec tsc && pnpm test`
+Run: `builtin cd /Users/shunsuke.tadokoro/orca/workspaces/doctrine/app_ux/app && pnpm exec tsc && pnpm test`
 Expected: PASS
 
 - [ ] **Step 5: コミット**
@@ -2418,7 +2419,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - 「改訂に入る」の行を足す: ファイル `components/ReviseFace.tsx`、RPC `intake.revise`
 - 「worktree と警告」の行を消す
 - タスク画面の行のファイルに `RemoveWorktree.tsx` を足し、RPC に `worktree.remove` を足す
-- 表の下の「`task.create` を除いてどこかの画面が使っている（コンポーザは後続）」を「`task.create` を除いてどこかの画面が使っている（`task.create` は dctl だけが使う）」にする
+- 表の下の「`task.create` を除いてどこかの画面が使っている（コンポーザは後続）」を「`task.create` を除いてどこかの画面が使っている（`task.create` はどの画面も使わない）」にする
 
 7.5 の表:
 - `intake.ts` の役割の「サイドバーの区分」を「Intake の一覧の絞り込みと区分」にする

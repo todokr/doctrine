@@ -6,13 +6,13 @@
 
 **Architecture:** 図の見た目は `app/src/pfd.ts:buildPfdView` に `rails` と `attention` の入力を足して純関数で決め、`PfdDiagram` はそれを描くだけにする。パネルに何を出すかは `app/src/execution.ts:panelContentOf` という純関数で決め、パネルの枠（高さ・最大化・閉じる）は props だけで描く `ExecPanel`、中身の組み立ては store を使う `ExecDetail` に分ける。plan と direct の本体（段階 2 の `PlanBody` / `DirectBody`）は、図とパネルを持つ共通の `GraphBody` に寄せ、direct は `directPfd` で組み立てた図を渡す。パネルのタスクは `s.sel` が決め、帯を新しく保つため、Intake に属するタスクのイベントで詳細を「消さずに」取り直す。
 
-**Tech Stack:** React 19 / TypeScript 6 / vitest 5（`app/`）。テスト `cd app && pnpm test`、型 `cd app && pnpm exec tsc`。
+**Tech Stack:** React 19 / TypeScript 6 / vitest 5（`app/`）。テスト `builtin cd /Users/shunsuke.tadokoro/orca/workspaces/doctrine/app_ux/app && pnpm test`、型 `builtin cd /Users/shunsuke.tadokoro/orca/workspaces/doctrine/app_ux/app && pnpm exec tsc`。
 
 **Spec:** `docs/superpowers/specs/2026-10-14-intake-execution-design.md`（6.2 / 6.3 / 6.5 / 7.2 / 10 / 11 章）
 
 ## Global Constraints
 
-- 段階 1（`docs/superpowers/plans/2026-10-14-intake-execution-1-daemon-direct.md`）と段階 2（`...-2-app-skeleton.md`）がマージ済みであること。着手前に `cd app && pnpm exec tsc && pnpm test` が通ることを確かめる
+- 段階 1（`docs/superpowers/plans/2026-10-14-intake-execution-1-daemon-direct.md`）と段階 2（`...-2-app-skeleton.md`）がマージ済みであること。着手前に `builtin cd /Users/shunsuke.tadokoro/orca/workspaces/doctrine/app_ux/app && pnpm exec tsc && pnpm test` が通ることを確かめる
 - 状態の色は `app/src/tone.ts` からだけ引く（ステップの区画は `RUN_TONE`、プロセスは `PROCESS_TONE`）。`tone.ts` の `executionTone` と `groupTone`（段階 2 が `groupOf` / `Group` ごと残したもの）はこの段階では触らない
 - 人の番は「タスクの承認待ち（いまのタスクが `suspended`）・プロセスの `needs_attention`・プロセスの `your_turn`」の 3 つだけ。`pr_open` は入れない（spec 6.3）
 - 図の上の件数のボタンの文言は「要対応 N 件」。既存の凡例の `LOOK.your_turn`（「あなたの番」、人のプロセスだけを数える）と区別する
@@ -23,7 +23,7 @@
 - 承認と差し戻しにキーを割り当てない（`App.tsx:useKeys` の既存の約束）
 - 後方互換の仕掛けを作らない。消すものは参照ごと消す
 - コードのコメントはそのコード固有の事実だけ。一般論は書かない。既存のコメントの密度に合わせる
-- `task.create`・`shared/protocol.ts` の `task.create`・`dctl` には触らない（spec 8.3）
+- `task.create`・`shared/protocol.ts` の `task.create` には触らない（spec 8.3。dctl はすでに無い）
 
 ## Review Focus
 
@@ -178,7 +178,7 @@ describe("directPfd", () => {
 
 - [ ] **Step 2: 失敗を確かめる**
 
-Run: `cd app && pnpm vitest run src/pfd.test.ts`
+Run: `builtin cd /Users/shunsuke.tadokoro/orca/workspaces/doctrine/app_ux/app && pnpm vitest run src/pfd.test.ts`
 Expected: FAIL（`railSegments` / `directPfd` / `RAIL_BAR_H` が export されていない、`rail` プロパティが無い）
 
 - [ ] **Step 3: 実装する**
@@ -279,7 +279,7 @@ export function directPfd(issueTitle: string): Pfd {
 
 - [ ] **Step 4: 通ることを確かめる**
 
-Run: `cd app && pnpm vitest run src/pfd.test.ts`
+Run: `builtin cd /Users/shunsuke.tadokoro/orca/workspaces/doctrine/app_ux/app && pnpm vitest run src/pfd.test.ts`
 Expected: PASS。既存の `buildPfdView` のテスト（配置・重なり・折り返し）も通ること
 
 - [ ] **Step 5: コミット**
@@ -363,7 +363,7 @@ describe("PfdDiagram の帯と人の番", () => {
 
 - [ ] **Step 2: 失敗を確かめる**
 
-Run: `cd app && pnpm vitest run src/components/PfdDiagram.test.tsx`
+Run: `builtin cd /Users/shunsuke.tadokoro/orca/workspaces/doctrine/app_ux/app && pnpm vitest run src/components/PfdDiagram.test.tsx`
 Expected: FAIL（`pfd-step` / `pfd-railword` / `attention` / `pfd-box` が出ない）
 
 - [ ] **Step 3: 実装する**
@@ -423,7 +423,7 @@ import { PROCESS_TONE, RUN_TONE, toneClass } from "../tone";
 
 - [ ] **Step 4: 通ることを確かめる**
 
-Run: `cd app && pnpm vitest run src/components/PfdDiagram.test.tsx src/pfd.test.ts`
+Run: `builtin cd /Users/shunsuke.tadokoro/orca/workspaces/doctrine/app_ux/app && pnpm vitest run src/components/PfdDiagram.test.tsx src/pfd.test.ts`
 Expected: PASS
 
 - [ ] **Step 5: コミット**
@@ -528,7 +528,7 @@ describe("StatusCounts", () => {
 
 - [ ] **Step 2: 失敗を確かめる**
 
-Run: `cd app && pnpm vitest run src/execution.test.ts src/StatusCounts.test.tsx`
+Run: `builtin cd /Users/shunsuke.tadokoro/orca/workspaces/doctrine/app_ux/app && pnpm vitest run src/execution.test.ts src/StatusCounts.test.tsx`
 Expected: FAIL（関数が無い、`attn-jump` が出ない）
 
 - [ ] **Step 3: 実装する**
@@ -584,7 +584,7 @@ export function StatusCounts({ view, attention }: { view: PfdView; attention?: {
 
 - [ ] **Step 4: 通ることを確かめる**
 
-Run: `cd app && pnpm vitest run src/execution.test.ts src/StatusCounts.test.tsx`
+Run: `builtin cd /Users/shunsuke.tadokoro/orca/workspaces/doctrine/app_ux/app && pnpm vitest run src/execution.test.ts src/StatusCounts.test.tsx`
 Expected: PASS
 
 - [ ] **Step 5: コミット**
@@ -694,7 +694,7 @@ describe("panelContentOf", () => {
 
 - [ ] **Step 2: 失敗を確かめる**
 
-Run: `cd app && pnpm vitest run src/execution.test.ts`
+Run: `builtin cd /Users/shunsuke.tadokoro/orca/workspaces/doctrine/app_ux/app && pnpm vitest run src/execution.test.ts`
 Expected: FAIL（`panelContentOf` が無い）
 
 - [ ] **Step 3: 実装する**
@@ -730,7 +730,7 @@ export function panelContentOf(o: {
 
 - [ ] **Step 4: 通ることを確かめる**
 
-Run: `cd app && pnpm vitest run src/execution.test.ts`
+Run: `builtin cd /Users/shunsuke.tadokoro/orca/workspaces/doctrine/app_ux/app && pnpm vitest run src/execution.test.ts`
 Expected: PASS
 
 - [ ] **Step 5: コミット**
@@ -833,7 +833,7 @@ describe("ExecPanel", () => {
 
 - [ ] **Step 2: 失敗を確かめる**
 
-Run: `cd app && pnpm vitest run src/execution.test.ts src/ExecPanel.test.tsx`
+Run: `builtin cd /Users/shunsuke.tadokoro/orca/workspaces/doctrine/app_ux/app && pnpm vitest run src/execution.test.ts src/ExecPanel.test.tsx`
 Expected: FAIL
 
 - [ ] **Step 3: 実装する**
@@ -952,7 +952,7 @@ export function ExecPanel(p: {
 
 - [ ] **Step 4: 通ることを確かめる**
 
-Run: `cd app && pnpm vitest run src/execution.test.ts src/ExecPanel.test.tsx`
+Run: `builtin cd /Users/shunsuke.tadokoro/orca/workspaces/doctrine/app_ux/app && pnpm vitest run src/execution.test.ts src/ExecPanel.test.tsx`
 Expected: PASS
 
 - [ ] **Step 5: コミット**
@@ -1015,7 +1015,7 @@ describe("processKeyOfTask", () => {
 
 - [ ] **Step 2: 失敗を確かめる**
 
-Run: `cd app && pnpm vitest run src/execution.test.ts`
+Run: `builtin cd /Users/shunsuke.tadokoro/orca/workspaces/doctrine/app_ux/app && pnpm vitest run src/execution.test.ts`
 Expected: FAIL（`processKeyOfTask` が無い）
 
 - [ ] **Step 3: processKeyOfTask と useCall**
@@ -1316,7 +1316,7 @@ function moveBy(selector: string, delta: 1 | -1) {
 
 - [ ] **Step 7: 型と全体のテストを確かめる**
 
-Run: `cd app && pnpm exec tsc && pnpm test`
+Run: `builtin cd /Users/shunsuke.tadokoro/orca/workspaces/doctrine/app_ux/app && pnpm exec tsc && pnpm test`
 Expected: tsc が通り、テストがすべて PASS
 
 - [ ] **Step 8: 画面で確かめる**
@@ -1390,7 +1390,7 @@ describe("Intake に属するタスクのイベントで帯を取り直す", () 
 
 - [ ] **Step 2: 失敗を確かめる**
 
-Run: `cd app && pnpm vitest run src/model.test.ts`
+Run: `builtin cd /Users/shunsuke.tadokoro/orca/workspaces/doctrine/app_ux/app && pnpm vitest run src/model.test.ts`
 Expected: FAIL（`intakeStale` が無い）
 
 - [ ] **Step 3: 実装する**
@@ -1455,7 +1455,7 @@ function touchIntakeOfTask(s: State, taskId: string): Partial<Pick<State, "intak
 
 - [ ] **Step 4: 通ることを確かめる**
 
-Run: `cd app && pnpm vitest run src/model.test.ts && pnpm exec tsc`
+Run: `builtin cd /Users/shunsuke.tadokoro/orca/workspaces/doctrine/app_ux/app && pnpm vitest run src/model.test.ts && pnpm exec tsc`
 Expected: PASS、tsc が通る
 
 - [ ] **Step 5: コミット**
