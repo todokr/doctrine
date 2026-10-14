@@ -213,7 +213,7 @@ test("3 リポジトリの workspace で、1 つの Intake が各リポジトリ
   const lap = async () => {
     await watcher.request(workspaceId);
     const health = watcher.health(workspaceId);
-    assert.equal(health.consecutiveFailures, 0, health.lastError ?? undefined);
+    assert.equal(health.consecutiveFailures, 0, health.lastError ?? "");
   };
   const subOf = async (id: string) =>
     (await listProcesses(db, "i1")).find((p) => p.process_id === id)!;
