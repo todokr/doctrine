@@ -70,6 +70,7 @@ async function context() {
   const ctx: DaemonContext = {
     db,
     adapter: createMockAdapter({ result: { ok: true, text: "やりました" } }),
+    branchNamer: async () => null,
     logRoot: join(root, "logs"),
     globalLimit: 4,
     configPath: join(root, "config.json"),

@@ -74,6 +74,7 @@ async function context(adapter = createMockAdapter({ result: { ok: true, text: "
   const ctx: DaemonContext = {
     db,
     adapter,
+    branchNamer: async () => null,
     logRoot: join(root, "logs"),
     globalLimit: 4,
     configPath: join(root, "config.json"),

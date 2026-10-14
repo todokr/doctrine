@@ -171,6 +171,7 @@ test("スケジューリングの1周が失敗してもデーモンは落ちず�
   const ctx: DaemonContext = {
     db,
     adapter: createMockAdapter({ result: { ok: true, text: "done" } }),
+    branchNamer: async () => null,
     logRoot: join(root, "logs"),
     globalLimit: 4,
     configPath: join(root, "config.json"),
