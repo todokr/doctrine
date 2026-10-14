@@ -35,9 +35,11 @@ import {
   EMPTY_INTAKE_DRAFT,
   type IntakeDraft,
   intakeOrder,
+  isClosedIntake,
   setWholeComment,
   summaryOf,
 } from "./intake";
+import { executionOrder } from "./execution";
 
 export const MIN = 60000;
 
@@ -102,28 +104,7 @@ export function groupOf(t: Task): Group {
   return "done";
 }
 
-export const GROUPS: { key: Exclude<Group, "done">; name: string; sort: (a: Task, b: Task) => number }[] = [
-  { key: "review", name: "レビュー待ち", sort: (a, b) => a.since - b.since },
-  { key: "check", name: "要確認", sort: (a, b) => b.since - a.since },
-  { key: "running", name: "実行中", sort: (a, b) => a.since - b.since },
-  { key: "limited", name: "上限待ち", sort: (a, b) => (a.resumeAt ?? Infinity) - (b.resumeAt ?? Infinity) },
-  { key: "waiting", name: "マージ待ち", sort: (a, b) => a.since - b.since },
-  { key: "queued", name: "待ち", sort: (a, b) => a.prio - b.prio || a.since - b.since },
-  { key: "paused", name: "一時停止", sort: (a, b) => b.since - a.since },
-];
-
-export type View = "tasks" | "done" | "intake" | "settings";
-
-/** そのタスクが並ぶビュー。終了したタスクは「終了したタスク」にしか並ばない */
-export function taskViewFor(t: Task): "tasks" | "done" {
-  return groupOf(t) === "done" ? "done" : "tasks";
-}
-
-/** プロジェクトが一覧に無いタスクは、絞り込み中には出さない */
-export const visibleTasks = (tasks: Task[], projects: Project[], workspace: WorkspaceFilter) =>
-  tasks.filter((t) =>
-    workspace === "all" || projects.find((p) => p.id === t.project)?.workspaceId === workspace
-  );
+export type View = "intake" | "execution" | "settings";
 
 /** select の value（文字列）を絞り込みに戻す */
 export function parseWorkspaceFilter(value: string): WorkspaceFilter {
@@ -133,27 +114,6 @@ export function parseWorkspaceFilter(value: string): WorkspaceFilter {
 /** 絞り込み中の workspace の先頭のプロジェクト。"all" か、その workspace のプロジェクトが無ければ全体の先頭 */
 export function firstProjectIn(projects: Project[], workspace: WorkspaceFilter): Project | undefined {
   return projects.find((p) => p.workspaceId === workspace) ?? projects[0];
-}
-
-/** サイドバーに並ぶ順。j / k の移動と、判断の後に次を選ぶときに使う */
-export function sidebarOrder(tasks: Task[], projects: Project[], view: View, workspace: WorkspaceFilter): Task[] {
-  const ts = visibleTasks(tasks, projects, workspace);
-  if (view === "done") return ts.filter((t) => groupOf(t) === "done").sort((a, b) => b.since - a.since);
-  return GROUPS.flatMap((g) => ts.filter((t) => groupOf(t) === g.key).sort(g.sort));
-}
-
-/** アイコン列の点。絞り込みに関係なく全プロジェクトを数える（見逃さないため） */
-export const countReview = (tasks: Task[]) => tasks.filter((t) => groupOf(t) === "review").length;
-
-export function timeLabel(t: Task, now: number): string {
-  const g = groupOf(t);
-  if (g === "review") return clock(t.since);
-  if (g === "running") return elapsed(t.since, now);
-  // task.stateChanged は期限を運ばないので、取り直しが来るまでは分からない
-  if (g === "limited") return t.resumeAt ? `${hm(t.resumeAt)} 再開` : "再開時刻は取得中";
-  if (g === "waiting") return t.checkAt ? `${hm(t.checkAt)} に確認` : "マージ待ち";
-  if (g === "queued") return `P${t.prio} · ${ago(t.since, now)}`;
-  return ago(t.since, now);
 }
 
 // ---------------------------------------------------------------- diff
@@ -574,7 +534,10 @@ export type State = {
   intakes: IntakeSummary[];
   /** "new" は Issue の選択の面 */
   intakeSel: string | "new" | null;
-  showClosedIntakes: boolean;
+  /** Execution で選んでいる Intake の id */
+  execSel: string | null;
+  /** Execution の一覧で「終了」を見ているか */
+  execClosed: boolean;
   /** intake.get の結果。選んだ Intake ぶんだけ持つ */
   intakeDetails: Record<string, Loaded<IntakeDetail>>;
   intakeLogs: Record<string, IntakeLogView>;
@@ -619,12 +582,15 @@ export const intakeDetailOf = (s: State, id: string): Loaded<IntakeDetail> | und
   s.intakeDetails[id];
 
 /** 一覧の行。一覧から消えていれば、取ってある詳細を代わりに返す */
-export function selectedIntake(s: State): IntakeSummary | null {
-  if (s.intakeSel === null || s.intakeSel === "new") return null;
-  const row = s.intakes.find((i) => i.id === s.intakeSel);
+export function intakeRowOf(s: State, id: string): IntakeSummary | null {
+  const row = s.intakes.find((i) => i.id === id);
   if (row) return row;
-  const d = intakeDetailOf(s, s.intakeSel);
+  const d = intakeDetailOf(s, id);
   return d?.kind === "ok" ? d.value : null;
+}
+
+export function selectedIntake(s: State): IntakeSummary | null {
+  return s.intakeSel === null || s.intakeSel === "new" ? null : intakeRowOf(s, s.intakeSel);
 }
 
 /**
@@ -652,7 +618,6 @@ export function layoutOf(s: State, id: string): Layout {
 export type Action =
   | { type: "view"; view: View }
   | { type: "workspace"; workspace: WorkspaceFilter }
-  | { type: "select"; id: string }
   | { type: "move"; delta: 1 | -1 }
   | { type: "scope"; scope: Scope }
   | { type: "layout"; layout: Layout }
@@ -680,9 +645,9 @@ export type Action =
   /** 「改訂に入る…」と「やめる」。leave は下書きのコメントを残す */
   | { type: "intake.revise.enter"; id: string }
   | { type: "intake.revise.leave" }
-  /** Intake のプロセスから、そのタスクを開く */
+  /** タスクを、その Intake の Execution で開く */
   | { type: "task.open"; id: string }
-  /** タスクから、その Intake を開く */
+  /** Intake を Execution で開く */
   | { type: "intake.open"; id: string }
   /** 承認などが失敗したとき、詳細を取り直させる */
   | { type: "intake.reload"; id: string }
@@ -690,7 +655,8 @@ export type Action =
   | { type: "context"; id: string; gen: number; loaded: Loaded<TaskContext> }
   | { type: "guide"; id: string; gen: number; loaded: Loaded<GuideView> }
   | { type: "intake.select"; id: string | "new" }
-  | { type: "intake.showClosed"; show: boolean }
+  | { type: "execution.select"; id: string }
+  | { type: "execution.closed"; closed: boolean }
   | { type: "intakes.sync"; intakes: IntakeSummary[] }
   | { type: "intake.started"; intake: IntakeSummary }
   | { type: "intake.detail"; id: string; gen: number; loaded: Loaded<IntakeDetail> }
@@ -787,36 +753,21 @@ const SENT_TOAST = {
   complete: "完了を記録しました",
 } as const;
 
-/** 判断の後は、次のレビュー待ちを選んだ状態にする（spec 6章） */
-function selectNextReview(s: State, except: string): string | null {
-  const next = sidebarOrder(s.tasks, s.projects, s.view, s.workspace).find((x) => groupOf(x) === "review" && x.id !== except);
+/** 判断の後は、同じ Intake の次のレビュー待ちを選ぶ。無ければ選んだまま */
+function selectNextReview(s: State, done: Task): string | null {
+  const intakeId = done.intake?.id;
+  if (intakeId === undefined) return s.sel;
+  const next = s.tasks.find((x) => x.state === "suspended" && x.id !== done.id && x.intake?.id === intakeId);
   return next ? next.id : s.sel;
 }
 
 export function reduce(s: State, a: Action): State {
   const t = selectedTask(s);
   switch (a.type) {
-    case "view": {
-      if (a.view === "intake") {
-        return { ...s, view: a.view, editing: null };
-      }
-      if (a.view === "settings") return { ...s, view: "settings", editing: null };
-      const next = { ...s, view: a.view };
-      const leaving = a.view === "done" || (t !== null && groupOf(t) === "done");
-      const first = sidebarOrder(s.tasks, s.projects, a.view, s.workspace)[0];
-      return leaving && first ? { ...next, sel: first.id, editing: null } : next;
-    }
+    case "view":
+      return { ...s, view: a.view, editing: null };
     case "workspace":
       return { ...s, workspace: a.workspace };
-    case "select": {
-      if (s.view === "settings") {
-        const target = s.tasks.find((x) => x.id === a.id);
-        return target
-          ? { ...s, view: taskViewFor(target), sel: a.id, editing: null }
-          : { ...s, sel: a.id };
-      }
-      return { ...s, sel: a.id, editing: null };
-    }
     case "workspaces.sync":
       return { ...s, workspaces: a.workspaces };
     case "workspaces.checked":
@@ -828,7 +779,7 @@ export function reduce(s: State, a: Action): State {
     case "wizard.close":
       return s.wizard?.closable ? { ...s, wizard: null } : s;
     case "wizard.done":
-      return { ...s, wizard: null, editing: null, toast: a.toast };
+      return { ...s, wizard: null, view: "intake", intakeSel: "new", editing: null, toast: a.toast };
     case "move": {
       if (s.view === "settings") return s;
       if (s.view === "intake") {
@@ -838,11 +789,11 @@ export function reduce(s: State, a: Action): State {
         const n = i < 0 ? rows[0] : rows[Math.max(0, Math.min(rows.length - 1, i + a.delta))];
         return { ...s, intakeSel: n.id };
       }
-      const order = sidebarOrder(s.tasks, s.projects, s.view, s.workspace);
-      if (!order.length) return s;
-      const i = order.findIndex((x) => x.id === s.sel);
-      const n = order[Math.max(0, Math.min(order.length - 1, i + a.delta))];
-      return { ...s, sel: n.id, editing: null };
+      const rows = executionOrder(s.intakes, s.tasks, s.workspace, s.execClosed);
+      if (!rows.length) return s;
+      const i = rows.findIndex((x) => x.id === s.execSel);
+      const n = i < 0 ? rows[0] : rows[Math.max(0, Math.min(rows.length - 1, i + a.delta))];
+      return { ...s, execSel: n.id };
     }
     case "scope":
       return t ? { ...s, scope: { ...s.scope, [t.id]: a.scope } } : s;
@@ -917,6 +868,8 @@ export function reduce(s: State, a: Action): State {
         modal: null,
         ...invalidateIntake(s, a.id),
         toast: SENT_TOAST[a.what],
+        // 承認した Intake は Intake の一覧から外れるので、Execution で開き直す
+        ...(a.what === "approve" ? { view: "execution" as const, execSel: a.id, execClosed: false } : {}),
       };
     }
     case "intake.note":
@@ -940,16 +893,25 @@ export function reduce(s: State, a: Action): State {
         toast: a.toast,
       };
     case "intake.revise.enter":
-      return { ...s, intakeRevise: a.id };
+      return { ...s, intakeRevise: a.id, view: "intake", intakeSel: a.id, editing: null };
     case "intake.revise.leave":
-      return { ...s, intakeRevise: null };
+      return { ...s, intakeRevise: null, view: "execution", execSel: s.intakeRevise ?? s.execSel };
     case "task.open": {
       const target = s.tasks.find((x) => x.id === a.id);
       if (!target) return { ...s, toast: "タスクが一覧にありません" };
-      return { ...s, view: taskViewFor(target), sel: a.id, editing: null };
+      if (!target.intake) return { ...s, toast: "Intake に属さないタスクです" };
+      const row = s.intakes.find((i) => i.id === target.intake!.id);
+      return {
+        ...s,
+        view: "execution",
+        execSel: target.intake.id,
+        execClosed: row ? isClosedIntake(row.state) : s.execClosed,
+        sel: a.id,
+        editing: null,
+      };
     }
     case "intake.open":
-      return { ...s, view: "intake", intakeSel: a.id, editing: null };
+      return { ...s, view: "execution", execSel: a.id, editing: null };
     case "intake.reload":
       return { ...s, ...invalidateIntake(s, a.id) };
     case "diff":
@@ -963,19 +925,19 @@ export function reduce(s: State, a: Action): State {
       return { ...s, guides: { ...s.guides, [a.id]: a.loaded } };
     case "intake.select":
       return { ...s, intakeSel: a.id };
-    case "intake.showClosed":
-      return { ...s, showClosedIntakes: a.show };
+    case "execution.select":
+      return { ...s, execSel: a.id };
+    case "execution.closed":
+      return { ...s, execClosed: a.closed };
     case "intakes.sync": {
       // 選んでいる Intake は、完了・中止で一覧から消えても外さない。面は取ってある詳細で描く
       const ids = new Set(a.intakes.map((i) => i.id));
-      const keep = <T,>(r: Record<string, T>) =>
-        Object.fromEntries(
-          Object.entries(r).filter(([id]) => ids.has(id) || id === s.intakeSel),
-        );
+      const kept = (id: string) => ids.has(id) || id === s.intakeSel || id === s.execSel;
+      const keep = <T,>(r: Record<string, T>) => Object.fromEntries(Object.entries(r).filter(([id]) => kept(id)));
       return {
         ...s,
         intakes: a.intakes,
-        intakeRevise: s.intakeRevise !== null && (ids.has(s.intakeRevise) || s.intakeRevise === s.intakeSel) ? s.intakeRevise : null,
+        intakeRevise: s.intakeRevise !== null && kept(s.intakeRevise) ? s.intakeRevise : null,
         intakeDetails: keep(s.intakeDetails),
         intakeLogs: keep(s.intakeLogs),
         intakeGen: keep(s.intakeGen),
@@ -987,7 +949,10 @@ export function reduce(s: State, a: Action): State {
       const intakes = has
         ? s.intakes.map((i) => (i.id === a.intake.id ? a.intake : i))
         : [a.intake, ...s.intakes];
-      return { ...s, intakes, intakeSel: a.intake.id };
+      // direct は開始と同時に active になり、Intake の一覧には並ばない
+      return a.intake.mode === "direct"
+        ? { ...s, intakes, view: "execution", execSel: a.intake.id, execClosed: false }
+        : { ...s, intakes, intakeSel: a.intake.id };
     }
     case "intake.detail":
       if (a.gen !== intakeGenOf(s, a.id)) return s;
@@ -1004,7 +969,7 @@ export function reduce(s: State, a: Action): State {
       // （判定するとイベントが先着した場合に後片付けが素通りし、下書きが古いまま残る）
       if (!t) return s;
       const next = { ...s, drafts: withoutDraft(s, t.id), editing: null, ...invalidate(s, t.id) };
-      return { ...next, sel: selectNextReview(next, t.id), toast: `承認しました: ${t.title}` };
+      return { ...next, sel: selectNextReview(next, t), toast: `承認しました: ${t.title}` };
     }
     case "reject.preview":
       return t && canReject(draftOf(s, t.id)) ? { ...s, modal: "reject-preview" } : s;
@@ -1019,7 +984,7 @@ export function reduce(s: State, a: Action): State {
         modal: null,
         ...invalidate(s, t.id),
       };
-      return { ...next, sel: selectNextReview(next, t.id), toast: `差し戻しました: ${t.title}` };
+      return { ...next, sel: selectNextReview(next, t), toast: `差し戻しました: ${t.title}` };
     }
     case "modal.close":
       return { ...s, modal: null };
@@ -1058,8 +1023,7 @@ export function reduce(s: State, a: Action): State {
         gen: keep(s.gen),
       };
       if (s.sel !== null && ids.has(s.sel)) return next;
-      const first = sidebarOrder(a.tasks, a.projects, s.view, s.workspace)[0];
-      return { ...next, sel: first ? first.id : null, editing: null };
+      return { ...next, sel: null, editing: null };
     }
     case "limits.recent": {
       // DB の行はイベントで届いた値より古いことがあるので、代入せず新しいほうを残す

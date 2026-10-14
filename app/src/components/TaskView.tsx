@@ -120,12 +120,11 @@ export function TaskActions(props: {
   );
 }
 
-/** Intake 由来のタスクのやり直し方の案内。Intake の画面を開くボタンを添える */
-export function IntakeRetryHint(props: { intakeId: string; onOpenIntake: (id: string) => void }) {
+/** Intake 由来のタスクのやり直し方の案内 */
+export function IntakeRetryHint() {
   return (
     <p className="hint">
-      Intake から投入したタスクです。やり直すには、Intake の画面の「操作が必要」から「再投入する」を押してください。
-      <button className="el-link" onClick={() => props.onOpenIntake(props.intakeId)}>Intake を開く</button>
+      Intake から投入したタスクです。やり直すには、Execution の「操作が必要」かプロセスの欄から「再投入する」を押してください。
     </p>
   );
 }
@@ -163,8 +162,6 @@ export function TaskView({ t }: { t: Task }) {
       setPending(null);
     }
   }
-
-  const openIntake = (id: string) => dispatch({ type: "intake.open", id });
 
   const detail = s.detail[t.id];
   const history = stepRunHistory(detail);
@@ -214,7 +211,7 @@ export function TaskView({ t }: { t: Task }) {
                     worktree は残っていないので、中を見ることはできません。記録だけが残っています。
                   </p>
                 )}
-              {t.intake && <IntakeRetryHint intakeId={t.intake.id} onOpenIntake={openIntake} />}
+              {t.intake && <IntakeRetryHint />}
               {t.worktree && (
                 <div className="actions">
                   <RemoveWorktreeButton taskId={t.id} path={t.worktree} dirty={removeDirty} />
@@ -241,7 +238,7 @@ export function TaskView({ t }: { t: Task }) {
       {t.state === "canceled" && (
         <section className="box quiet">
           <p>{t.worktree ? "中止しました。worktree は残しています。" : "中止しました。worktree は残っていません。"}</p>
-          {t.intake && <IntakeRetryHint intakeId={t.intake.id} onOpenIntake={openIntake} />}
+          {t.intake && <IntakeRetryHint />}
         </section>
       )}
       {t.state === "rate_limited" && (

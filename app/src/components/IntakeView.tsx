@@ -1,16 +1,26 @@
 import { useState } from "react";
 import type { IntakeSummary } from "../../../shared/protocol.ts";
 import { sendDecision } from "../decision";
-import { INTAKE_WORD, MODE_WORD, intakeFace, isClosedIntake, issueNumber, workspaceOfIntake } from "../intake";
+import {
+  INTAKE_WORD,
+  MODE_WORD,
+  inIntakeList,
+  intakeFace,
+  intakeOrder,
+  isClosedIntake,
+  issueNumber,
+  workspaceOfIntake,
+} from "../intake";
 import { intakeDetailOf, selectedIntake } from "../model";
 import { useIntakeRpc, useStore } from "../store";
 import { INTAKE_TONE } from "../tone";
 import type { Workspace } from "../types";
 import { AnswerFace } from "./AnswerFace";
 import { IntakeLog } from "./IntakeLog";
-import { IntakeProgress, CancelDialog } from "./IntakeProgress";
+import { CancelDialog } from "./IntakeProgress";
 import { IssuePicker } from "./IssuePicker";
 import { PlanReview } from "./PlanReview";
+import { ReviseFace } from "./ReviseFace";
 import { StatusDot } from "./StatusDot";
 
 /** 改訂中の帯。面の中身に関係なく、どの面の上にも出す */
@@ -82,7 +92,8 @@ export function IntakeView() {
   const api = useIntakeRpc();
   const [abandoning, setAbandoning] = useState(false);
   const [canceling, setCanceling] = useState(false);
-  if (s.intakeSel === "new") return <IssuePicker />;
+  const empty = intakeOrder(s.intakes, s.workspace, s.intakeRevise).length === 0;
+  if (s.intakeSel === "new" || (s.intakeSel === null && empty)) return <IssuePicker />;
   if (s.intakeSel === null) {
     return <div className="pad"><p className="hint">左から Intake を選んでください</p></div>;
   }
@@ -150,23 +161,30 @@ export function IntakeView() {
       onClose={() => dispatch({ type: "modal.close" })}
     />
   );
+  if (s.intakeRevise === intake.id && detail.value.state === "active" && !detail.value.revising) {
+    return (
+      <>
+        <ReviseFace key={detail.value.approval?.draft_id} detail={detail.value} heading={heading} />
+        {dialog}
+      </>
+    );
+  }
+  if (!inIntakeList(intake, s.intakeRevise)) {
+    return (
+      <div className="pad">
+        {heading}
+        <MovedToExecution onOpen={() => dispatch({ type: "intake.open", id: intake.id })} />
+      </div>
+    );
+  }
   const face = intakeFace(detail.value.state);
-  // 判断の欄は面の外（main の下端）に置くので、レビュー待ちと進行中の面は自分で .pad を持つ。
+  // 判断の欄は面の外（main の下端）に置くので、レビュー待ちの面は自分で .pad を持つ。
   // 案が変わったら、選択と prompt のローカルな状態を捨てる
   if (face === "review") {
     return (
       <>
         {band}
         <PlanReview key={detail.value.latest_draft?.id} detail={detail.value} heading={heading} />
-        {dialog}
-      </>
-    );
-  }
-  if (face === "progress") {
-    return (
-      <>
-        {band}
-        <IntakeProgress key={detail.value.approval?.draft_id} detail={detail.value} heading={heading} />
         {dialog}
       </>
     );

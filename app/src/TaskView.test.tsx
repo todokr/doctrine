@@ -67,11 +67,9 @@ describe("TaskActions", () => {
 });
 
 describe("IntakeRetryHint", () => {
-  test("Intake の再投入を案内し、投入し直すボタンは出さない", () => {
-    const h = renderToStaticMarkup(<IntakeRetryHint intakeId="i1" onOpenIntake={noop} />);
+  test("Execution の再投入を案内する", () => {
+    const h = renderToStaticMarkup(<IntakeRetryHint />);
     expect(h).toContain("再投入する");
-    expect(h).toContain("Intake を開く");
-    expect(h).not.toContain("同じ内容で投入し直す");
-    expect(h).not.toContain("pfd.yaml");
+    expect(h).not.toContain("Intake を開く");
   });
 });

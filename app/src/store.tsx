@@ -73,7 +73,7 @@ function initialState(): State {
     logs: {},
     limits: {},
     now: Date.now(),
-    view: "tasks",
+    view: "execution",
     workspace: "all",
     sel: null,
     scope: {},
@@ -84,7 +84,8 @@ function initialState(): State {
     gen: {},
     intakes: [],
     intakeSel: null,
-    showClosedIntakes: false,
+    execSel: null,
+    execClosed: false,
     intakeDetails: {},
     intakeLogs: {},
     intakeGen: {},
@@ -134,10 +135,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           // ratelimit.sample は agent ステップが走っている間しか飛ばない。開いた直後に
           // 空欄にしないために DB の直近の行で埋める。これが落ちても一覧は出す
           rpc("ratelimit.recent", {}).catch(() => []),
-          // 「すべて」で出した終了分を取り直しで消さないよう、今の切り替えを渡す。
+          // 「終了」で出した分を取り直しで消さないよう、今の切り替えを渡す。
           // これが落ちてもタスクの一覧は出す。落ちたときは null にして、前の一覧と
           // Intake の下書きを残す（空の一覧で sync すると下書きが全部消える）
-          rpc("intake.list", { include_closed: latest.current.showClosedIntakes }).catch(
+          rpc("intake.list", { include_closed: latest.current.execClosed }).catch(
             (): IntakeSummary[] | null => null,
           ),
           // これが落ちても一覧は出す。落ちたときは null にして、前の workspace の一覧を残す
@@ -355,13 +356,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       );
   }, [reviewing, needGuide, gen]);
 
-  // 「すべて」の切り替えは、次の 15 秒を待たずに取り直す
+  // 「終了」の切り替えは、次の 15 秒を待たずに取り直す
   useEffect(() => {
     void refreshRef.current?.();
-  }, [s.showClosedIntakes]);
+  }, [s.execClosed]);
 
   // 開いている Intake の詳細。選ばれていて、まだ取っていないものだけ
-  const intakeId = s.view === "intake" && s.intakeSel !== "new" ? s.intakeSel : null;
+  const intakeId = s.view === "intake"
+    ? (s.intakeSel === "new" ? null : s.intakeSel)
+    : s.view === "execution"
+    ? s.execSel
+    : null;
   const needIntake = intakeId !== null && intakeDetailOf(s, intakeId) === undefined;
   const intakeGen = intakeId ? intakeGenOf(s, intakeId) : 0;
 

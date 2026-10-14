@@ -17,7 +17,6 @@ import {
   canReject,
   canResume,
   composeRejection,
-  countReview,
   denialLines,
   diffLines,
   diffOf,
@@ -44,16 +43,12 @@ import {
   reviewRound,
   RUN_WORD,
   selectedIntake,
-  sidebarOrder,
   stepRunHistory,
   stopReasons,
-  taskViewFor,
-  timeLabel,
   toProject,
   toRateLimitWindow,
   toTask,
   toWorkspace,
-  visibleTasks,
   type DiffView,
   type Loaded,
   type State,
@@ -62,7 +57,7 @@ import { RUN_TONE } from "./tone";
 import type { GuideView } from "./guide";
 import { EMPTY_INTAKE_DRAFT, type IntakeDraft, intakeOrder } from "./intake";
 import { buildDiff } from "./patch";
-import type { Guide, RateLimitWindow, ReviewEntry, Task, TaskContext } from "./types";
+import type { Guide, RateLimitWindow, ReviewEntry, Task, TaskContext, TaskState } from "./types";
 import type {
   IntakeDetail,
   ProjectSummary,
@@ -80,7 +75,7 @@ const base = (overrides: Partial<State> = {}): State => ({
   logs: {},
   limits: {},
   now: NOW,
-  view: "tasks",
+  view: "execution",
   workspace: "all",
   sel: "t-2b91",
   scope: {},
@@ -91,7 +86,8 @@ const base = (overrides: Partial<State> = {}): State => ({
   gen: {},
   intakes: [],
   intakeSel: null,
-  showClosedIntakes: false,
+  execSel: null,
+  execClosed: false,
   intakeDetails: {},
   intakeLogs: {},
   intakeGen: {},
@@ -146,6 +142,8 @@ describe("初回ウィザード", () => {
     const s = reduce(base({ wizard: { closable: true } }), { type: "wizard.done", toast: "workspace を登録しました" });
     expect(s.wizard).toBeNull();
     expect(s.toast).toBe("workspace を登録しました");
+    expect(s.view).toBe("intake");
+    expect(s.intakeSel).toBe("new");
   });
 });
 
@@ -212,37 +210,6 @@ describe("canPause / canResume", () => {
   });
 });
 
-describe("sidebarOrder", () => {
-  test("区分の順に並び、レビュー待ちは古い順", () => {
-    const order = sidebarOrder(seedTasks(), PROJECTS, "tasks", "all");
-    const groups = order.map(groupOf);
-    expect(groups.indexOf("check")).toBeGreaterThan(groups.lastIndexOf("review"));
-    expect(groups).not.toContain("done");
-    const reviews = order.filter((t) => groupOf(t) === "review");
-    expect(reviews.map((t) => t.since)).toEqual([...reviews.map((t) => t.since)].sort((a, b) => a - b));
-  });
-  test("workspace で絞り込める", () => {
-    const projects = PROJECTS.map((p) => p.id === "blog" ? { ...p, workspaceId: 1 } : p);
-    const projectsOf = sidebarOrder(seedTasks(), projects, "tasks", 1).map((t) => t.project);
-    expect([...new Set(projectsOf)].sort()).toEqual(["blog", "doctrine"]);
-  });
-  test("プロジェクトが引けないタスクは絞り込み中には出ない", () => {
-    const orphan = [{ ...seedTasks()[0], project: "99" }];
-    expect(visibleTasks(orphan, PROJECTS, 1)).toEqual([]);
-    expect(visibleTasks(orphan, PROJECTS, "all")).toHaveLength(1);
-  });
-  test("終了ビューは終了したタスクだけを新しい順に並べる", () => {
-    const order = sidebarOrder(seedTasks(), PROJECTS, "done", "all");
-    expect(order.every((t) => groupOf(t) === "done")).toBe(true);
-    expect(order.map((t) => t.since)).toEqual([...order.map((t) => t.since)].sort((a, b) => b - a));
-  });
-  test("gc 済みの failed はタスク一覧から消え、終了ビューに移る", () => {
-    const gced = seedTasks().find((t) => t.state === "failed" && t.worktree === null)!;
-    expect(sidebarOrder(seedTasks(), PROJECTS, "tasks", "all").map((t) => t.id)).not.toContain(gced.id);
-    expect(sidebarOrder(seedTasks(), PROJECTS, "done", "all").map((t) => t.id)).toContain(gced.id);
-  });
-});
-
 describe("workspace の絞り込み", () => {
   test("workspace action で絞り込みを変える", () => {
     expect(reduce(base(), { type: "workspace", workspace: 2 }).workspace).toBe(2);
@@ -257,17 +224,6 @@ describe("workspace の絞り込み", () => {
     expect(firstProjectIn(PROJECTS, 99)?.id).toBe("doctrine");
     expect(firstProjectIn([], "all")).toBeUndefined();
   });
-  test("絞り込み中の j/k はその workspace のタスクだけを動く", () => {
-    const s = reduce(base({ workspace: 2, sel: null }), { type: "move", delta: 1 });
-    expect(s.sel).toBe(sidebarOrder(seedTasks(), PROJECTS, "tasks", 2)[0].id);
-    expect(task(s, s.sel!).project).toBe("shop-api");
-  });
-  test("sync は新しい projects で絞って先頭を選ぶ", () => {
-    const projects = PROJECTS.map((p) => p.id === "blog" ? { ...p, workspaceId: 1 } : p);
-    const tasks = seedTasks().filter((t) => t.project === "blog");
-    const s = reduce(base({ workspace: 1, sel: null }), { type: "sync", tasks, projects, now: NOW });
-    expect(s.sel).toBe(sidebarOrder(tasks, projects, "tasks", 1)[0].id);
-  });
   test("絞り込み中の Intake の j/k はその workspace の Intake だけを動く", () => {
     const s = reduce(base({ intakes: INTAKES, view: "intake", intakeSel: null, workspace: 2 }), { type: "move", delta: 1 });
     expect(INTAKES.find((i) => i.id === s.intakeSel)?.workspace_id).toBe(2);
@@ -275,28 +231,6 @@ describe("workspace の絞り込み", () => {
 });
 
 describe("上限待ち", () => {
-  const t = (patch: Partial<Task>): Task => ({ ...seedTasks()[0], state: "rate_limited", ...patch });
-
-  test("サイドバーでは実行中と待ちの間に、再開の早い順で並ぶ", () => {
-    const tasks = [
-      t({ id: "late", resumeAt: 2000 }),
-      { ...seedTasks()[0], id: "run", state: "running" as const },
-      { ...seedTasks()[0], id: "q", state: "queued" as const },
-      t({ id: "early", resumeAt: 1000 }),
-    ];
-    expect(sidebarOrder(tasks, PROJECTS, "tasks", "all").map((x) => x.id)).toEqual(["run", "early", "late", "q"]);
-  });
-
-  test("timeLabel は再開予定時刻を出す", () => {
-    const at = new Date(2026, 8, 19, 12, 20).getTime();
-    expect(timeLabel(t({ resumeAt: at }), at - MIN)).toBe("12:20 再開");
-  });
-
-  test("再開予定時刻が無くても Invalid Date にならない", () => {
-    // task.stateChanged は期限を運ばない。取り直しが来るまでは分からない
-    expect(timeLabel(t({ resumeAt: null }), 0)).toBe("再開時刻は取得中");
-  });
-
   test("toTask は rate_limited_until を resumeAt に写し、読めない値は落とす", () => {
     expect(t1({ rate_limited_until: "2026-09-19T03:20:00.000Z" }).resumeAt)
       .toBe(Date.parse("2026-09-19T03:20:00.000Z"));
@@ -314,10 +248,6 @@ describe("上限待ち", () => {
     });
     expect(task(next, id).state).toBe("rate_limited");
   });
-});
-
-test("countReview は絞り込みに関係なく全プロジェクトを数える", () => {
-  expect(countReview(seedTasks())).toBe(5);
 });
 
 describe("diff", () => {
@@ -395,7 +325,7 @@ describe("reduce", () => {
     s = reduce(s, { type: "approve" });
     expect(task(s, "t-2b91")).toMatchObject({ state: "suspended", step: "review" });
     expect(s.drafts["t-2b91"]).toBeUndefined();
-    expect(s.sel).toBe("b-204");
+    expect(s.sel).toBe("t-2b91");
     expect(s.toast).toBe("承認しました: worktree.list をディスク上の全件にする");
   });
 
@@ -423,7 +353,7 @@ describe("reduce", () => {
     expect(t).toMatchObject({ state: "suspended", step: "review" });
     expect(s.modal).toBeNull();
     expect(s.drafts["t-2b91"]).toBeUndefined();
-    expect(s.sel).toBe("b-204");
+    expect(s.sel).toBe("t-2b91");
     expect(s.toast).toBe("差し戻しました: worktree.list をディスク上の全件にする");
   });
 
@@ -469,20 +399,6 @@ describe("reduce", () => {
     const s = base({ tasks: changed });
     const after = reduce(s, { type: "cancel" });
     expect(after.toast).toBe("中止しました。worktree は残します");
-  });
-
-  test("j / k の移動はサイドバーの端で止まる", () => {
-    const order = sidebarOrder(seedTasks(), PROJECTS, "tasks", "all");
-    let s = base({ sel: order[0].id });
-    s = reduce(s, { type: "move", delta: -1 });
-    expect(s.sel).toBe(order[0].id);
-    s = reduce(s, { type: "move", delta: 1 });
-    expect(s.sel).toBe(order[1].id);
-  });
-
-  test("終了ビューに切り替えると終了したタスクを選ぶ", () => {
-    const s = reduce(base(), { type: "view", view: "done" });
-    expect(groupOf(task(s, s.sel!))).toBe("done");
   });
 
   test("並べ方はガイドを読めないタスクでは切り替わらない", () => {
@@ -714,24 +630,13 @@ describe("sync", () => {
     expect(two.tasks.map((t) => t.id)).toEqual(["a"]);
   });
 
-  test("選択中のタスクが消えたら先頭を選び直す", () => {
-    const a = t1({ id: "a", state: "suspended" });
-    const b = t1({ id: "b", state: "suspended" });
-    const s = reduce(base({ tasks: [], projects: [], sel: null }), {
-      type: "sync", tasks: [a, b], projects: [], now: 1,
-    });
-    const picked = reduce(s, { type: "select", id: "b" });
-    const after = reduce(picked, { type: "sync", tasks: [a], projects: [], now: 2 });
-    expect(after.sel).toBe("a");
-  });
-
   test("選択中のタスクが残っていれば選択は動かない", () => {
     const a = t1({ id: "a", state: "suspended" });
     const b = t1({ id: "b", state: "suspended" });
     const s = reduce(base({ tasks: [], projects: [], sel: null }), {
       type: "sync", tasks: [a, b], projects: [], now: 1,
     });
-    const picked = reduce(s, { type: "select", id: "b" });
+    const picked = { ...s, sel: "b" };
     expect(reduce(picked, { type: "sync", tasks: [a, b], projects: [], now: 2 }).sel).toBe("b");
   });
 
@@ -793,15 +698,6 @@ describe("daemon イベント", () => {
       now: 999,
     });
     expect(after.tasks[0].bounce).toBeUndefined();
-  });
-
-  test("差し戻してもサイドバーの並びは変わらない", () => {
-    const a = t1({ id: "a", state: "running", current_step_id: "test" });
-    const b = t1({ id: "b", state: "running", current_step_id: "x" });
-    const s = base({ tasks: [a, b], projects: [], sel: "a" });
-    const before = sidebarOrder(s.tasks, PROJECTS, "tasks", "all").map((t) => t.id);
-    const after = reduce(s, { type: "daemon", ev: bounceEvent(), now: 999 });
-    expect(sidebarOrder(after.tasks, PROJECTS, "tasks", "all").map((t) => t.id)).toEqual(before);
   });
 
   test("同じステップが今度は通ったら差し戻しの通知は消える", () => {
@@ -1305,35 +1201,6 @@ describe("進行中の面", () => {
     expect(after.modal).toBeNull();
     expect(after.toast).toBe("中止しました");
   });
-
-  test("task.open は終了したタスクなら終了ビューで開く", () => {
-    const s = base({ view: "intake", sel: "t-2b91" });
-    const done = reduce(s, { type: "task.open", id: "t-0a77" });
-    expect(done.view).toBe("done");
-    expect(done.sel).toBe("t-0a77");
-    const running = reduce(s, { type: "task.open", id: "t-7f3a" });
-    expect(running.view).toBe("tasks");
-    expect(running.sel).toBe("t-7f3a");
-    const unknown = reduce(s, { type: "task.open", id: "nope" });
-    expect(unknown.view).toBe("intake");
-    expect(unknown.sel).toBe("t-2b91");
-    expect(unknown.toast).toBe("タスクが一覧にありません");
-  });
-
-  test("intake.open はタスクの選択を残して Intake を開く", () => {
-    const s = reduce(base({ sel: "t-7f3a" }), { type: "intake.open", id: "i2" });
-    expect(s.view).toBe("intake");
-    expect(s.intakeSel).toBe("i2");
-    expect(s.sel).toBe("t-7f3a");
-  });
-
-  test("taskViewFor", () => {
-    const seed = (o: Partial<Task>): Task => ({ ...seedTasks()[0], ...o });
-    for (const state of ["completed", "canceled"] as const) expect(taskViewFor(seed({ state }))).toBe("done");
-    expect(taskViewFor(seed({ state: "failed", worktree: null }))).toBe("done");
-    expect(taskViewFor(seed({ state: "failed", worktree: "/w" }))).toBe("tasks");
-    for (const state of ["suspended", "running"] as const) expect(taskViewFor(seed({ state }))).toBe("tasks");
-  });
 });
 
 describe("bounceNotice", () => {
@@ -1689,6 +1556,117 @@ describe("Intake のビュー", () => {
   });
 });
 
+describe("Execution のビュー", () => {
+  const withIntake = (id: string, state: TaskState, intakeId: string | null): Task => ({
+    ...seedTasks()[0],
+    id,
+    state,
+    intake: intakeId === null ? null : { id: intakeId, processId: "p1", issueUrl: null, parentIssueUrl: null },
+  });
+
+  test("view を移っても選択は消えない", () => {
+    const s = reduce(base({ execSel: "i2", sel: "t-2b91" }), { type: "view", view: "intake" });
+    expect(s.view).toBe("intake");
+    expect(s.execSel).toBe("i2");
+    expect(s.sel).toBe("t-2b91");
+  });
+
+  test("execution.select と execution.closed は値を書く", () => {
+    expect(reduce(base(), { type: "execution.select", id: "i2" }).execSel).toBe("i2");
+    expect(reduce(base(), { type: "execution.closed", closed: true }).execClosed).toBe(true);
+  });
+
+  test("execution ビューで j/k は Execution の一覧を動く", () => {
+    let s = base({ intakes: INTAKES, execSel: null });
+    s = reduce(s, { type: "move", delta: 1 });
+    expect(s.execSel).toBe("i2");
+    s = reduce(s, { type: "move", delta: 1 });
+    expect(s.execSel).toBe("i5");
+    s = reduce(s, { type: "move", delta: 1 });
+    expect(s.execSel).toBe("i5");
+  });
+
+  test("intake.started は plan なら Intake で選び、direct なら Execution に移って選ぶ", () => {
+    const plan = reduce(base({ view: "intake" }), { type: "intake.started", intake: { ...INTAKES[6], id: "n1", mode: "plan" } });
+    expect(plan.view).toBe("intake");
+    expect(plan.intakeSel).toBe("n1");
+    const direct = reduce(base({ view: "intake", execClosed: true }), {
+      type: "intake.started",
+      intake: { ...INTAKES[6], id: "n2", state: "active", mode: "direct" },
+    });
+    expect(direct.view).toBe("execution");
+    expect(direct.execSel).toBe("n2");
+    expect(direct.execClosed).toBe(false);
+  });
+
+  test("承認の後片付けは Execution に移ってその Intake を選ぶ", () => {
+    const s = reduce(base({ view: "intake", intakes: INTAKES }), { type: "intake.sent", id: "i1", what: "approve" });
+    expect(s.view).toBe("execution");
+    expect(s.execSel).toBe("i1");
+  });
+
+  test("改訂に入ると Intake に移ってその Intake を選び、やめると Execution に戻る", () => {
+    let s = reduce(base({ intakes: INTAKES, execSel: "i2" }), { type: "intake.revise.enter", id: "i2" });
+    expect(s.view).toBe("intake");
+    expect(s.intakeSel).toBe("i2");
+    expect(s.intakeRevise).toBe("i2");
+    s = reduce(s, { type: "intake.revise.leave" });
+    expect(s.view).toBe("execution");
+    expect(s.execSel).toBe("i2");
+    expect(s.intakeRevise).toBeNull();
+  });
+
+  test("task.open はタスクの Intake を Execution で選び、タスクを選ぶ。終了した Intake なら終了を見る", () => {
+    const tasks = [withIntake("t9", "suspended", "i7")];
+    const s = reduce(base({ view: "intake", tasks, intakes: INTAKES }), { type: "task.open", id: "t9" });
+    expect(s.view).toBe("execution");
+    expect(s.execSel).toBe("i7");
+    expect(s.execClosed).toBe(true);
+    expect(s.sel).toBe("t9");
+  });
+
+  test("Intake に属さないタスクの task.open はトーストだけ", () => {
+    const tasks = [withIntake("t9", "failed", null)];
+    const before = base({ tasks, sel: null, execSel: "i2" });
+    const s = reduce(before, { type: "task.open", id: "t9" });
+    expect(s.sel).toBeNull();
+    expect(s.execSel).toBe("i2");
+    expect(s.toast).toBe("Intake に属さないタスクです");
+  });
+
+  test("intake.open は Execution でその Intake を選ぶ", () => {
+    const s = reduce(base({ view: "intake" }), { type: "intake.open", id: "i2" });
+    expect(s.view).toBe("execution");
+    expect(s.execSel).toBe("i2");
+  });
+
+  test("承認・差し戻しの後は同じ Intake の次の承認待ちを選び、別の Intake には飛ばない", () => {
+    const tasks = [
+      withIntake("a1", "suspended", "i2"),
+      withIntake("b1", "suspended", "i5"),
+      withIntake("a2", "suspended", "i2"),
+    ];
+    const approved = reduce(base({ tasks, sel: "a1" }), { type: "approve" });
+    expect(approved.sel).toBe("a2");
+    const rejected = reduce(base({ tasks: tasks.filter((t) => t.id !== "a2"), sel: "a1" }), { type: "reject.confirm" });
+    expect(rejected.sel).toBe("a1");
+  });
+
+  test("選んでいるタスクが消えたら選択を外す", () => {
+    const s = reduce(base({ sel: "gone" }), { type: "sync", tasks: seedTasks(), projects: PROJECTS, now: NOW });
+    expect(s.sel).toBeNull();
+  });
+
+  test("intakes.sync は Execution で選んでいる Intake の詳細を、一覧から消えても残す", () => {
+    const s = reduce(
+      base({ intakes: INTAKES, execSel: "i7", intakeDetails: { i7: { kind: "ok", value: { ...INTAKE_ACTIVE, id: "i7" } } } }),
+      { type: "intakes.sync", intakes: INTAKES.filter((i) => i.id !== "i7") },
+    );
+    expect(s.intakeDetails.i7).toBeDefined();
+    expect(s.execSel).toBe("i7");
+  });
+});
+
 describe("設定のビュー", () => {
   test("設定ビューへ移ってもタスクの選択は消えない", () => {
     const s = reduce(base({ sel: "t-0a77" }), { type: "view", view: "settings" });
@@ -1700,12 +1678,6 @@ describe("設定のビュー", () => {
   test("設定ビューで j/k は何もしない", () => {
     const s = base({ view: "settings" });
     expect(reduce(s, { type: "move", delta: 1 })).toBe(s);
-  });
-
-  test("設定ビューでタスクを選ぶとタスクのビューに戻る", () => {
-    const s = reduce(base({ view: "settings" }), { type: "select", id: "t-7f3a" });
-    expect(s.view).toBe("tasks");
-    expect(s.sel).toBe("t-7f3a");
   });
 
   test("読み込んだ設定を持つ", () => {
@@ -1759,11 +1731,6 @@ describe("Intake の一覧の取り直し", () => {
     expect(stale.intakeDetails).toEqual({});
     const fresh = reduce(s, { type: "intake.detail", id: "a", gen: 2, loaded: detailOk("a") });
     expect(fresh.intakeDetails.a).toEqual(detailOk("a"));
-  });
-
-  test("intake.select と intake.showClosed は値を書く", () => {
-    expect(reduce(base(), { type: "intake.select", id: "new" }).intakeSel).toBe("new");
-    expect(reduce(base(), { type: "intake.showClosed", show: true }).showClosedIntakes).toBe(true);
   });
 });
 

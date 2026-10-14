@@ -1,12 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { ConnectionBanner } from "./components/ConnectionBanner";
 import { fileAnchor } from "./components/DiffFileBlock";
+import { ExecutionView } from "./components/ExecutionView";
 import { IntakeView } from "./components/IntakeView";
-import { ReviewView } from "./components/ReviewView";
 import { Rail, Sidebar } from "./components/Sidebar";
 import { SettingsView } from "./components/SettingsView";
 import { SetupWizard } from "./components/SetupWizard";
-import { TaskView } from "./components/TaskView";
 import { RemoveWorktreeModal } from "./components/RemoveWorktree";
 import { sendDecision } from "./decision";
 import { composeRejection, diffOf, draftOf, layoutOf, scopeOf, selectedTask } from "./model";
@@ -98,6 +97,7 @@ function useKeys() {
       if (e.key === "Escape" && s.modal) return dispatch({ type: "modal.close" });
       if (e.key === "Escape" && s.removing) return dispatch({ type: "remove.close" });
       if (e.key === "j" || e.key === "k") return dispatch({ type: "move", delta: e.key === "j" ? 1 : -1 });
+      if (s.view !== "execution") return;
       const t = selectedTask(s);
       if (!t || t.state !== "suspended") return;
       const loaded = diffOf(s, t.id, scopeOf(s, t.id));
@@ -128,12 +128,11 @@ function useKeys() {
 export default function App() {
   const { s } = useStore();
   useKeys();
-  const t = selectedTask(s);
   const mainRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
     mainRef.current?.scrollTo({ top: 0 });
-  }, [s.sel, s.intakeSel]);
+  }, [s.view, s.intakeSel, s.execSel]);
 
   const toast = s.toast && <div className="toast" role="status">{s.toast}</div>;
 
@@ -154,17 +153,7 @@ export default function App() {
         <Rail />
         <Sidebar />
         <main className="main" ref={mainRef}>
-          {s.view === "settings" ? (
-            <SettingsView />
-          ) : s.view === "intake" ? (
-            <IntakeView />
-          ) : !t ? (
-            <div className="pad"><p className="hint">左からタスクを選んでください</p></div>
-          ) : t.state === "suspended" ? (
-            <ReviewView key={t.id} t={t} />
-          ) : (
-            <TaskView key={t.id} t={t} />
-          )}
+          {s.view === "settings" ? <SettingsView /> : s.view === "intake" ? <IntakeView /> : <ExecutionView />}
         </main>
       </div>
       <RejectModal />

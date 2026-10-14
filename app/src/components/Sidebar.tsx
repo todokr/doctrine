@@ -8,34 +8,22 @@ import {
   intakeProgress,
   intakeSection,
   issueNumber,
-  taskIntakeMark,
   workspaceOfIntake,
 } from "../intake";
-import {
-  GROUPS,
-  ago,
-  countReview,
-  groupOf,
-  hm,
-  parseWorkspaceFilter,
-  sidebarOrder,
-  timeLabel,
-  visibleTasks,
-} from "../model";
+import { countExecutionAttention } from "../execution";
+import { ago, hm, parseWorkspaceFilter } from "../model";
 import { useStore } from "../store";
-import { type Tone, groupTone, sectionTone, toneClass } from "../tone";
-import type { Task, Workspace, WorkspaceFilter } from "../types";
+import { type Tone, sectionTone, toneClass } from "../tone";
+import type { Workspace, WorkspaceFilter } from "../types";
+import { ExecutionSidebar } from "./ExecutionSidebar";
 import { RateLimit } from "./RateLimit";
 
 const icons = {
   intake: (
     <svg viewBox="0 0 24 24"><rect x="3" y="4" width="6" height="5" rx="1" /><rect x="15" y="15" width="6" height="5" rx="1" /><rect x="15" y="4" width="6" height="5" rx="2.5" /><path d="M9 6.5h6M18 9v6M6 9v8.5h9" /></svg>
   ),
-  inbox: (
-    <svg viewBox="0 0 24 24"><path d="M3 13h5l1.5 3h5L16 13h5" /><path d="M5 5h14l2 8v6H3v-6z" /></svg>
-  ),
-  done: (
-    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><path d="m8 12 3 3 5-6" /></svg>
+  execution: (
+    <svg viewBox="0 0 24 24"><circle cx="6" cy="12" r="3" /><circle cx="18" cy="6" r="3" /><circle cx="18" cy="18" r="3" /><path d="M9 12h3l3-4.5M12 12l3 4.5" /></svg>
   ),
   addWorkspace: (
     <svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><path d="M12 10v6M9 13h6" /></svg>
@@ -48,18 +36,21 @@ const icons = {
 export function Rail() {
   const { s, dispatch } = useStore();
   const attention = countIntakeAttention(s.intakes);
+  const execAttention = countExecutionAttention(s.intakes, s.tasks);
   return (
     <nav className="rail" aria-label="ビュー">
       <button className="ib" title={attention > 0 ? `Intake（対応が要るもの ${attention} 件）` : "Intake"} aria-pressed={s.view === "intake"} onClick={() => dispatch({ type: "view", view: "intake" })}>
         {icons.intake}
         {attention > 0 && <span className="pip" />}
       </button>
-      <button className="ib" title="タスク" aria-pressed={s.view === "tasks"} onClick={() => dispatch({ type: "view", view: "tasks" })}>
-        {icons.inbox}
-        {countReview(s.tasks) > 0 && <span className="pip" />}
-      </button>
-      <button className="ib" title="終了したタスク" aria-pressed={s.view === "done"} onClick={() => dispatch({ type: "view", view: "done" })}>
-        {icons.done}
+      <button
+        className="ib"
+        title={execAttention > 0 ? `Execution（あなたの番 ${execAttention} 件）` : "Execution"}
+        aria-pressed={s.view === "execution"}
+        onClick={() => dispatch({ type: "view", view: "execution" })}
+      >
+        {icons.execution}
+        {execAttention > 0 && <span className="pip" />}
       </button>
       <span className="grow" />
       <button className="ib" title="workspace を追加" aria-label="workspace を追加" onClick={() => dispatch({ type: "wizard.open" })}>
@@ -72,29 +63,7 @@ export function Rail() {
   );
 }
 
-function Item({ t }: { t: Task }) {
-  const { s, dispatch } = useStore();
-  const p = s.projects.find((x) => x.id === t.project);
-  return (
-    <button
-      className={`it ${toneClass(groupTone(groupOf(t), t))}`}
-      aria-current={s.sel === t.id}
-      onClick={() => dispatch({ type: "select", id: t.id })}
-    >
-      <span className="t">{t.title}</span>
-      <span className="m">
-        <span className="pj">
-          <span className="pjdot" style={{ background: p?.color ?? "#666" }} />
-          {p?.id ?? t.project}
-        </span>
-        {t.intake && <span className="tag">{taskIntakeMark(t.intake)}</span>}
-        <span className="tm">{timeLabel(t, s.now)}</span>
-      </span>
-    </button>
-  );
-}
-
-/** 3 つのサイドバーが共有する workspace の絞り込み */
+/** Intake と Execution のサイドバーが共有する workspace の絞り込み */
 export function WorkspaceFilterSelect(props: {
   workspaces: Workspace[];
   value: WorkspaceFilter;
@@ -178,12 +147,6 @@ function IntakeSidebar() {
         <span className="grow" />
         <button className="plus" title="Issue を選んで Intake を始める" aria-label="Issue を選んで Intake を始める" aria-pressed={s.intakeSel === "new"} onClick={() => dispatch({ type: "intake.select", id: "new" })}>＋</button>
       </div>
-      <div className="side-head">
-        <div className="seg">
-          <button aria-pressed={!s.showClosedIntakes} onClick={() => dispatch({ type: "intake.showClosed", show: false })}>進行中</button>
-          <button aria-pressed={s.showClosedIntakes} onClick={() => dispatch({ type: "intake.showClosed", show: true })}>すべて</button>
-        </div>
-      </div>
       <div className="side-scroll">
         {INTAKE_SECTIONS.map((sec) => {
           const list = rows.filter((i) => intakeSection(i) === sec.key);
@@ -212,43 +175,8 @@ function SettingsSidebar() {
 }
 
 export function Sidebar() {
-  const { s, dispatch } = useStore();
-  if (s.view === "intake") return <IntakeSidebar />;
+  const { s } = useStore();
   if (s.view === "settings") return <SettingsSidebar />;
-  const ts = visibleTasks(s.tasks, s.projects, s.workspace);
-  const isDone = s.view === "done";
-  const count = ts.filter((t) => (groupOf(t) === "done") === isDone).length;
-
-  return (
-    <aside className="side">
-      <div className="side-head">
-        <WorkspaceFilterSelect
-          workspaces={s.workspaces}
-          value={s.workspace}
-          allLabel={isDone ? "終了したタスク" : "全タスク"}
-          onChange={(workspace) => dispatch({ type: "workspace", workspace })}
-        />
-        <span className="count">{count}</span>
-        <span className="grow" />
-      </div>
-      <div className="side-scroll">
-        {isDone ? (
-          sidebarOrder(s.tasks, s.projects, "done", s.workspace).map((t) => <Item key={t.id} t={t} />)
-        ) : (
-          GROUPS.map((g) => {
-            const list = ts.filter((t) => groupOf(t) === g.key).sort(g.sort);
-            if (!list.length) return null;
-            return (
-              <section className="grp" key={g.key}>
-                <h3><span className="lbl">{g.name}</span> <span className="count">{list.length}</span></h3>
-                {list.map((t) => <Item key={t.id} t={t} />)}
-              </section>
-            );
-          })
-        )}
-        {count === 0 && <p className="hint" style={{ padding: 8 }}>ありません</p>}
-      </div>
-      <RateLimit />
-    </aside>
-  );
+  if (s.view === "execution") return <ExecutionSidebar />;
+  return <IntakeSidebar />;
 }
