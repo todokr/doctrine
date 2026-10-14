@@ -22,7 +22,7 @@ import type { Task, TaskState } from "../types";
 import { StatusDot } from "./StatusDot";
 import { LogBlock } from "./LogBlock";
 import { Crumbs, OpenInEditor } from "./ReviewView";
-import { RemoveWorktreeButton } from "./WorktreeView";
+import { RemoveWorktreeButton } from "./RemoveWorktree";
 import { WorkflowRail } from "./WorkflowRail";
 
 export const STATE_WORD: Record<TaskState, string> = {
@@ -205,12 +205,8 @@ export function TaskView({ t }: { t: Task }) {
 
   // 今のステップが何回目か。履歴の先頭が今の（または最後の）実行にあたる
   const attempt = history[0]?.attempt ?? 1;
-  // t.worktree（DB の worktree_path）と worktree.list の path は文字列として一致するとは
-  // 限らない（デーモンは canonical() で比べている）ので、task_id で引く
-  const worktreeEntry = s.worktrees.find((e) => e.task_id === t.id);
-  const removePath = worktreeEntry?.path ?? t.worktree;
-  // 削除拒否は「完了時に未コミットの変更が残っていた」ので、行が見つからなくても true とみなす
-  const removeDirty = worktreeEntry?.dirty ?? (t.refused ? true : null);
+  // 削除拒否は「完了時に未コミットの変更が残っていた」ので true。それ以外は分からない
+  const removeDirty = t.refused ? true : null;
 
   return (
     <div className="pad">
@@ -255,7 +251,7 @@ export function TaskView({ t }: { t: Task }) {
               <SetupRetryHint t={t} />
               {t.worktree && (
                 <div className="actions">
-                  <RemoveWorktreeButton path={removePath!} dirty={removeDirty} />
+                  <RemoveWorktreeButton taskId={t.id} path={t.worktree} dirty={removeDirty} />
                 </div>
               )}
             </section>
@@ -266,7 +262,7 @@ export function TaskView({ t }: { t: Task }) {
             <section className="box danger" key="refused">
               <h2>worktree の削除を拒否しました</h2>
               <p>完了時に未コミットの変更が残っていました。ワークフローの最終ステップがコミットしていない可能性があります。中を確認してから削除してください。</p>
-              <RemoveWorktreeButton path={removePath!} dirty={removeDirty} />
+              <RemoveWorktreeButton taskId={t.id} path={t.worktree!} dirty={removeDirty} />
             </section>
           );
         }

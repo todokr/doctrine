@@ -18,14 +18,12 @@ import {
   hm,
   parseWorkspaceFilter,
   sidebarOrder,
-  staleDaysOf,
   timeLabel,
   visibleTasks,
 } from "../model";
 import { useStore } from "../store";
 import { groupTone, sectionTone, toneClass } from "../tone";
 import type { Task, Workspace, WorkspaceFilter } from "../types";
-import { isStaleWorktree, worktreesNeedAttention } from "../worktrees";
 import { RateLimit } from "./RateLimit";
 
 const icons = {
@@ -37,9 +35,6 @@ const icons = {
   ),
   done: (
     <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><path d="m8 12 3 3 5-6" /></svg>
-  ),
-  worktree: (
-    <svg viewBox="0 0 24 24"><path d="M7 3v12" /><circle cx="7" cy="18" r="3" /><circle cx="7" cy="6" r="3" /><circle cx="17" cy="18" r="3" /><path d="M7 9c0 6 4 6 8 8" /></svg>
   ),
   addWorkspace: (
     <svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><path d="M12 10v6M9 13h6" /></svg>
@@ -64,15 +59,6 @@ export function Rail() {
       </button>
       <button className="ib" title="終了したタスク" aria-pressed={s.view === "done"} onClick={() => dispatch({ type: "view", view: "done" })}>
         {icons.done}
-      </button>
-      <button
-        className="ib"
-        title="worktree と警告"
-        aria-pressed={s.view === "worktrees"}
-        onClick={() => dispatch({ type: "view", view: "worktrees" })}
-      >
-        {icons.worktree}
-        {worktreesNeedAttention(s.worktrees, s.warnings, s.intakes, staleDaysOf(s), s.now) && <span className="pip" />}
       </button>
       <span className="grow" />
       <button className="ib" title="workspace を追加" aria-label="workspace を追加" onClick={() => dispatch({ type: "wizard.open" })}>
@@ -214,27 +200,6 @@ function IntakeSidebar() {
   );
 }
 
-function WorktreeSidebar() {
-  const { s, dispatch } = useStore();
-  const staleCount = s.worktrees.filter((e) => isStaleWorktree(e, s.intakes, staleDaysOf(s), s.now)).length;
-  return (
-    <aside className="side">
-      <div className="side-head">
-        <WorkspaceFilterSelect
-          workspaces={s.workspaces}
-          value={s.workspace}
-          allLabel="すべての workspace"
-          onChange={(workspace) => dispatch({ type: "workspace", workspace })}
-        />
-      </div>
-      <div className="side-scroll">
-        <p className="hint" style={{ padding: 8 }}>古い worktree {staleCount} 件・警告 {s.warnings.length} 件</p>
-      </div>
-      <RateLimit />
-    </aside>
-  );
-}
-
 function SettingsSidebar() {
   return (
     <aside className="side">
@@ -246,7 +211,6 @@ function SettingsSidebar() {
 
 export function Sidebar() {
   const { s, dispatch } = useStore();
-  if (s.view === "worktrees") return <WorktreeSidebar />;
   if (s.view === "intake") return <IntakeSidebar />;
   if (s.view === "settings") return <SettingsSidebar />;
   const ts = visibleTasks(s.tasks, s.projects, s.workspace);

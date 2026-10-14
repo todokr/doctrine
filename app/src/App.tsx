@@ -7,7 +7,7 @@ import { Rail, Sidebar } from "./components/Sidebar";
 import { SettingsView } from "./components/SettingsView";
 import { SetupWizard } from "./components/SetupWizard";
 import { TaskView } from "./components/TaskView";
-import { RemoveWorktreeModal, WorktreeView } from "./components/WorktreeView";
+import { RemoveWorktreeModal } from "./components/RemoveWorktree";
 import { sendDecision } from "./decision";
 import { composeRejection, diffOf, draftOf, layoutOf, scopeOf, selectedTask } from "./model";
 import { useDecide, useStore } from "./store";
@@ -154,9 +154,7 @@ export default function App() {
         <Rail />
         <Sidebar />
         <main className="main" ref={mainRef}>
-          {s.view === "worktrees" ? (
-            <WorktreeView />
-          ) : s.view === "settings" ? (
+          {s.view === "settings" ? (
             <SettingsView />
           ) : s.view === "intake" ? (
             <IntakeView />

@@ -34,13 +34,11 @@ import type {
   ProjectConfigInput,
   ProjectSummary,
   TrackerIssue,
-  Warning,
   WorkflowDetail,
   WorkflowListEntry,
   WorkflowSaveResult,
   WorkflowStepChange,
   WorkspaceSummary,
-  WorktreeEntry,
 } from "../../shared/protocol.ts";
 import {
   contextOf,
@@ -98,8 +96,6 @@ function initialState(): State {
     modal: null,
     toast: null,
     conn: { status: "connecting" },
-    worktrees: [],
-    warnings: [],
     removing: null,
     settings: { kind: "loading" },
     wizard: null,
@@ -167,22 +163,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           dispatch({ type: "workspaces.sync", workspaces: workspaces.map(toWorkspace) });
           // 0 件ならウィザードを出す。読めなかった回は出さず、次の取り直しでまた読む
           if (!latest.current.workspacesChecked) dispatch({ type: "workspaces.checked", count: workspaces.length });
-        }
-
-        // worktree.list は worktree ごとに git status を回す（重い）ので、タスク一覧の
-        // 反映をそれに待たせないよう別の Promise.all で取る。
-        // アイコンの点はビューを開いていなくても要るので取り直しに乗せる
-        const [worktreeList, warningList] = await Promise.all([
-          rpc("worktree.list", {}).catch((): WorktreeEntry[] | null => null),
-          rpc("daemon.warnings", {}).catch((): Warning[] | null => null),
-        ]);
-        if (!alive || !refreshGate.isLatest(token)) return;
-        if (worktreeList || warningList) {
-          dispatch({
-            type: "worktrees.sync",
-            worktrees: worktreeList ?? latest.current.worktrees,
-            warnings: warningList,
-          });
         }
       } catch (e) {
         // 切断中は失敗して当然。理由はバナーが出している。
@@ -445,7 +425,7 @@ export function useDecide() {
     pause: (taskId: string) => rpc("task.pause", { task_id: taskId }),
     resume: (taskId: string) => rpc("task.resume", { task_id: taskId }),
     // 確認ダイアログを経た後しか呼ばないので、常に force を付ける
-    removeWorktree: (path: string) => rpc("worktree.remove", { path, force: true }),
+    removeWorktree: (taskId: string) => rpc("worktree.remove", { task_id: taskId, force: true }),
   };
 }
 
