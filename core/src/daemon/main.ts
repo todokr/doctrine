@@ -1,5 +1,5 @@
 #!/usr/bin/env -S deno run --allow-all
-import { dirname, join } from "@std/path";
+import { dirname, join } from "node:path";
 import { openDb } from "../db/migrate.ts";
 import { createClaudeAdapter } from "../adapter/claude.ts";
 import { defaultProbe, recoverOnStartup, type WorkflowLookup } from "../domain/recovery.ts";

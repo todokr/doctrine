@@ -52,7 +52,7 @@ test("linux では notify-send を起動する", async () => {
 
 test("darwin / linux 以外では何も起動しない", async () => {
   const { calls, run } = fakeRun();
-  await notifierFor("windows", run).notify("doctrine", "x");
+  await notifierFor("win32", run).notify("doctrine", "x");
   assert.equal(calls.length, 0);
 });
 

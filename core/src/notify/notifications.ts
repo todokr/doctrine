@@ -1,4 +1,4 @@
-import { basename } from "@std/path";
+import { basename } from "node:path";
 import type { ServerEvent } from "../../../shared/protocol.ts";
 import type { Db, ProjectRow, TaskRow } from "../db/schema.ts";
 import { getProject, getTask } from "../db/tasks.ts";

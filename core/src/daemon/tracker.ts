@@ -1,4 +1,4 @@
-import { basename, join } from "@std/path";
+import { basename, join } from "node:path";
 import { ghTracker } from "../github/ghTracker.ts";
 import { linearTracker } from "../linear/linearTracker.ts";
 import { type Tracker, type TrackerOf, WorkspaceConfigError } from "../tracker/tracker.ts";

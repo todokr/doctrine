@@ -1,4 +1,4 @@
-import { join } from "@std/path";
+import { join } from "node:path";
 import { runCommand } from "../util/exec.ts";
 
 /**

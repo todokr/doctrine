@@ -1,4 +1,4 @@
-import { basename, isAbsolute, join } from "@std/path";
+import { basename, isAbsolute, join } from "node:path";
 import type { Db, ProjectRow } from "../db/schema.ts";
 import { getProjectByPath, insertProject } from "../db/tasks.ts";
 import {

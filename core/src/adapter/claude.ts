@@ -1,5 +1,5 @@
 import { readNdjson } from "./ndjson.ts";
-import { exitCodeOf } from "../util/exec.ts";
+import { exitCodeOf, startChild } from "../util/exec.ts";
 import type { PermissionDenial } from "../../../shared/protocol.ts";
 import type { AgentAdapter, AgentEvent, AgentResult, AgentRun, StartOptions } from "./types.ts";
 
@@ -201,19 +201,11 @@ function structuredOutputOf(o: Record<string, unknown>): Record<string, unknown>
 export function createClaudeAdapter(bin = "claude"): AgentAdapter {
   function launch(args: string[], opts: StartOptions, runSessionId: string): AgentRun {
     const startedAt = new Date().toISOString();
-    let child: Deno.ChildProcess;
-    try {
-      child = new Deno.Command(bin, {
-        args,
-        cwd: opts.cwd,
-        stdin: "null",
-        stdout: "piped",
-        stderr: "piped",
-      }).spawn();
-    } catch (e) {
-      // 起動失敗（バイナリや cwd が無い）は同期例外で来る。呼び出し側は
+    const started = startChild(bin, args, { cwd: opts.cwd });
+    if ("failed" in started) {
+      // 起動失敗（バイナリや cwd が無い）。呼び出し側は
       // 「pid -1 で通知され、result が reject される」形で扱うので、それに揃える。
-      const result = Promise.reject(e);
+      const result = started.failed.then((e) => Promise.reject(e));
       result.catch(() => {}); // 呼び出し側が await するまでの間に未処理扱いされないように
       return {
         sessionId: runSessionId,
@@ -224,6 +216,7 @@ export function createClaudeAdapter(bin = "claude"): AgentAdapter {
         kill: () => {},
       };
     }
+    const child = started.child;
     // stderr を消費しないとパイプが埋まって子プロセスがブロックし、
     // headless でハングしないという契約が壊れる。診断用に末尾だけ残す。
     let stderrTail = "";

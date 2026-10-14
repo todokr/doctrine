@@ -1,4 +1,4 @@
-import { basename, dirname, isAbsolute, join, resolve, SEPARATOR } from "@std/path";
+import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { runCommand } from "../util/exec.ts";
 import { homeDir } from "../util/home.ts";
 
@@ -261,7 +261,7 @@ export async function canonical(p: string): Promise<string> {
  */
 export async function isUnderWorktreesDir(realPath: string): Promise<boolean> {
   const root = await canonical(join(stateDir(), "worktrees"));
-  return realPath.startsWith(root + SEPARATOR);
+  return realPath.startsWith(root + sep);
 }
 
 export type ListedWorktree = { path: string; branch: string | null };

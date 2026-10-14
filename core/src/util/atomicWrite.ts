@@ -1,4 +1,4 @@
-import { dirname, join } from "@std/path";
+import { dirname, join } from "node:path";
 
 /** target と同じディレクトリの一時ファイルに書いてから rename する。失敗したら一時ファイルを消して投げ直す。 */
 export async function writeTextFileAtomic(target: string, text: string): Promise<void> {

@@ -1,4 +1,4 @@
-import { dirname, join } from "@std/path";
+import { dirname, join } from "node:path";
 import { z } from "zod";
 import { formatZodIssues } from "../workflow/schema.ts";
 import { DEFAULT_GLOBAL_LIMIT } from "../domain/scheduler.ts";

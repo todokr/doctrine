@@ -1,4 +1,4 @@
-import { join } from "@std/path";
+import { join } from "node:path";
 import { parse as parseYaml, parseDocument } from "yaml";
 import { z } from "zod";
 import {

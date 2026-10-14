@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { exitCodeOf, runCommand, spawnChild } from "../../src/util/exec.ts";
+import { exitCodeOf, runCommand, spawnChild, startChild } from "../../src/util/exec.ts";
 
 test("runCommand は 1MB を超える出力を切り詰めずに返す", async () => {
   const { stdout } = await runCommand("sh", ["-c", "head -c 3000000 /dev/zero | tr '\\0' a"]);
@@ -42,6 +42,13 @@ test("spawnChild は存在しないコマンドで reject し、プロセスは�
     spawnChild("doctrine-no-such-binary", [], {}),
     (e: NodeJS.ErrnoException) => e.code === "ENOENT",
   );
+});
+
+test("startChild は起動に失敗したことを同期で返し、理由は failed で届く", async () => {
+  const r = startChild("doctrine-no-such-binary", [], {});
+  assert.ok("failed" in r);
+  const e = (await r.failed) as NodeJS.ErrnoException;
+  assert.equal(e.code, "ENOENT");
 });
 
 test("spawnChild は存在しない cwd で reject する", async () => {

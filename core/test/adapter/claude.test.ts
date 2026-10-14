@@ -358,6 +358,18 @@ test("result行なしでstderrに出力して死んだプロセスは失敗＆st
   }
 });
 
+test("claude のバイナリが無いとき pid は -1 で、result が reject する", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "doctrine-claude-"));
+  try {
+    const adapter = createClaudeAdapter(join(dir, "doctrine-no-such-claude"));
+    const run = adapter.start("x", { cwd: dir, sessionId: "s1" });
+    assert.equal(run.pid, -1);
+    await assert.rejects(run.result, (e: NodeJS.ErrnoException) => e.code === "ENOENT");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("assistant の tool_use をイベントにする", () => {
   const ev = normalize({
     type: "assistant",

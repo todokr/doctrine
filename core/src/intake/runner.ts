@@ -1,6 +1,8 @@
-import { join } from "@std/path";
+import { mkdir, stat } from "node:fs/promises";
+import { join } from "node:path";
 import type { AgentAdapter, AgentResult, RateLimitObservation } from "../adapter/types.ts";
 import { denialsColumn } from "../db/boundary.ts";
+import { isNotFound } from "../util/fsError.ts";
 import {
   getIntake,
   getIntakeRun,
@@ -317,14 +319,14 @@ async function prepareIntakeWorktrees(
   projects: readonly ProjectRow[],
 ): Promise<string> {
   const parent = intake.worktree_path ?? intakeWorktreePathFor(intake.id);
-  await Deno.mkdir(parent, { recursive: true });
+  await mkdir(parent, { recursive: true });
   const canonicalParent = await canonical(parent);
   for (const p of projects) {
     const child = join(canonicalParent, p.name);
     try {
-      await Deno.stat(child);
+      await stat(child);
     } catch (e) {
-      if (!(e instanceof Deno.errors.NotFound)) throw e;
+      if (!isNotFound(e)) throw e;
       await createDetachedWorktree({
         repoPath: p.path,
         worktreePath: child,

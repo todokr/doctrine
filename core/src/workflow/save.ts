@@ -1,4 +1,4 @@
-import { join } from "@std/path";
+import { join } from "node:path";
 import { isMap, isScalar, isSeq, parseDocument, Scalar, type YAMLMap } from "yaml";
 import type { Document } from "yaml";
 import type {

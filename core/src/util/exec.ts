@@ -13,41 +13,50 @@ export type Child = {
 
 /**
  * stdin を閉じ、stdout / stderr をパイプにして子プロセスを起こす。
- * 存在しないコマンドや cwd は `spawn` が同期では投げず `error` イベントで来るので、
- * `spawn` イベントか `error` イベントのどちらかを待ってから返す。
+ * 存在しないコマンドや cwd は `spawn` が投げずに `pid` を undefined にし、理由を後から
+ * `error` イベントで伝える。起動できたかは同期で返し、失敗の理由は `failed` で届ける。
  */
-export function spawnChild(
+export function startChild(
+  cmd: string,
+  args: string[],
+  opts: { cwd?: string; env?: Record<string, string> },
+): { child: Child } | { failed: Promise<Error> } {
+  let proc: ChildProcess;
+  try {
+    proc = spawn(cmd, args, { cwd: opts.cwd, env: opts.env, stdio: ["ignore", "pipe", "pipe"] });
+  } catch (e) {
+    return { failed: Promise.resolve(e as Error) };
+  }
+  if (proc.pid === undefined) {
+    return { failed: new Promise((resolve) => proc.once("error", resolve)) };
+  }
+  // 起動後の error（kill の失敗など）でプロセスが落ちないように聞いておく。
+  proc.on("error", () => {});
+  const status = new Promise<ExitStatus>((resolve) => {
+    proc.once("close", (code, signal) => resolve({ code, signal }));
+  });
+  return {
+    child: {
+      pid: proc.pid,
+      stdout: proc.stdout!,
+      stderr: proc.stderr!,
+      status,
+      kill: (signal = "SIGTERM") => {
+        proc.kill(signal);
+      },
+    },
+  };
+}
+
+/** startChild の失敗を reject にしたもの。 */
+export async function spawnChild(
   cmd: string,
   args: string[],
   opts: { cwd?: string; env?: Record<string, string> },
 ): Promise<Child> {
-  return new Promise((resolve, reject) => {
-    let proc: ChildProcess;
-    try {
-      proc = spawn(cmd, args, { cwd: opts.cwd, env: opts.env, stdio: ["ignore", "pipe", "pipe"] });
-    } catch (e) {
-      reject(e);
-      return;
-    }
-    const status = new Promise<ExitStatus>((res) => {
-      proc.once("close", (code, signal) => res({ code, signal }));
-    });
-    proc.once("error", reject);
-    proc.once("spawn", () => {
-      proc.off("error", reject);
-      // 起動後の error（kill の失敗など）でプロセスが落ちないように聞いておく。
-      proc.on("error", () => {});
-      resolve({
-        pid: proc.pid!,
-        stdout: proc.stdout!,
-        stderr: proc.stderr!,
-        status,
-        kill: (signal = "SIGTERM") => {
-          proc.kill(signal);
-        },
-      });
-    });
-  });
+  const r = startChild(cmd, args, opts);
+  if ("failed" in r) throw await r.failed;
+  return r.child;
 }
 
 /**

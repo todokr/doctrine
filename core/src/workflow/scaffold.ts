@@ -1,4 +1,4 @@
-import { basename, dirname, join } from "@std/path";
+import { basename, dirname, join } from "node:path";
 import { runCommand } from "../util/exec.ts";
 import { projectNameFrom } from "../db/workspaces.ts";
 import { parseProjectConfig } from "./project.ts";

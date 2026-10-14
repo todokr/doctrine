@@ -1,4 +1,4 @@
-import { join, SEPARATOR } from "@std/path";
+import { join, sep } from "node:path";
 
 /** 1ファイルあたりの上限。これを超えたら中身を返さない。 */
 export const MAX_REVIEW_FILE_BYTES = 64 * 1024;
@@ -43,7 +43,7 @@ async function readOne(root: string, path: string): Promise<ReviewFile> {
   }
   // 区切り文字まで含めて比べる。startsWith(root) だけだと、/w/task に対して
   // /w/task-evil/x が配下として通る。
-  if (!real.startsWith(root + SEPARATOR)) return { path, status: "outside_worktree" };
+  if (!real.startsWith(root + sep)) return { path, status: "outside_worktree" };
 
   // 通常ファイルかどうかを open 前に確かめる。名前付きパイプ（FIFO）は isFile が
   // false になるので stat だけで弾ける ―― open してしまうと書き手のいない FIFO で

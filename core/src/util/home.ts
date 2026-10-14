@@ -1,4 +1,4 @@
-import { isAbsolute, join } from "@std/path";
+import { isAbsolute, join } from "node:path";
 
 /**
  * node:os の homedir() に相当する。HOME が無い環境で相対パスや `/` に黙って倒すと、

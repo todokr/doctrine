@@ -23,7 +23,7 @@ export function notifySendArgs(title: string, body: string): string[] {
 
 /** デーモンの動作対象は darwin と linux だけ。それ以外では何もしない。run の reject はそのまま伝える。 */
 export function notifierFor(
-  os: typeof Deno.build.os = Deno.build.os,
+  os: NodeJS.Platform = process.platform,
   run: RunCommand = runCommand,
 ): Notifier {
   if (os === "darwin") {

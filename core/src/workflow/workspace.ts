@@ -1,4 +1,4 @@
-import { join, normalize } from "@std/path";
+import { join, normalize } from "node:path";
 import { parse as parseYaml, stringify } from "yaml";
 import { z } from "zod";
 import { formatZodIssues, WorkflowValidationError } from "./schema.ts";

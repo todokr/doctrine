@@ -1,4 +1,4 @@
-import { basename, dirname, isAbsolute, join } from "@std/path";
+import { basename, dirname, isAbsolute, join } from "node:path";
 import { computeDiff, mergeBase, type TaskDiff } from "../domain/diff.ts";
 import { branchOf, type Step, type Workflow, WorkflowValidationError } from "../workflow/schema.ts";
 import {

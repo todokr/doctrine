@@ -344,6 +344,20 @@ test("command ステップでも子プロセスのpidと開始時刻が通知さ
   assert.ok(Date.parse(seen[0].startedAt) > 0);
 });
 
+test("command ステップの cwd が無いとき onChildSpawned に -1 が来て例外が伝わる", async () => {
+  const spawned: number[] = [];
+  const d = await deps({ onChildSpawned: (pid) => void spawned.push(pid) });
+  await assert.rejects(
+    runCommandStep({ id: "s", run: "true" }, ctx, {
+      cwd: join(root, "nonexistent"),
+      taskId: "t1",
+      attempt: 1,
+      deps: d,
+    }),
+  );
+  assert.deepEqual(spawned, [-1]);
+});
+
 test("stdout はexitではなくcloseまで待ってから確定する（大量出力の取りこぼしがない）", async () => {
   const n = 200000;
   const out = await runCommandStep(

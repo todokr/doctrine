@@ -1,4 +1,4 @@
-import { basename, join } from "@std/path";
+import { basename, join } from "node:path";
 import type { Db } from "../db/schema.ts";
 import { getWorkspaceByPath, projectNameFrom } from "../db/workspaces.ts";
 import { parseWorkspaceConfig, WORKSPACE_YAML } from "../workflow/workspace.ts";

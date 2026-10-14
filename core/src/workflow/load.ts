@@ -1,4 +1,4 @@
-import { join } from "@std/path";
+import { join } from "node:path";
 import type { ProjectRow, TaskRow } from "../db/schema.ts";
 import { parseWorkflow, type Workflow } from "./schema.ts";
 import { withSetupStep } from "./project.ts";
