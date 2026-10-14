@@ -32,6 +32,8 @@ export function ExecDetail(p: {
   const { pending, call } = useCall();
   // 覚えた高さは前の窓の大きさのものなので、いまの領域に収め直す
   const [height, setHeight] = useState(() => clampPanelHeight(readPanelHeight(panelStorage()), p.room()));
+  // 初めの描画では親の ref がまだ無く room は窓の高さなので、付いてから領域の高さで収め直す
+  useEffect(() => setHeight((h) => clampPanelHeight(h, p.room())), []);
   const [prompts, setPrompts] = useState<Record<string, Loaded<string>>>({});
   const keys = useMemo(() => new Set(p.view.nodes.map((n) => n.key)), [p.view]);
 
