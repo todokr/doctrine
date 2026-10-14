@@ -90,7 +90,18 @@ pub fn socket_path() -> Result<PathBuf, String> {
 }
 
 /// 探索の規則そのもの。環境変数を読まないのでテストできる。
-pub fn find_dctld_in(explicit: Option<String>, path: Option<String>) -> Result<PathBuf, String> {
+///
+/// .app に同梱した dctld（実行ファイルの隣）があればそれだけを使う。
+/// アプリと同じビルドの dctld を使うためで、DOCTRINE_DCTLD でも上書きできない。
+/// 無いとき（開発時）だけ DOCTRINE_DCTLD → PATH の順に探す。
+pub fn find_dctld_in(
+    bundled: Option<PathBuf>,
+    explicit: Option<String>,
+    path: Option<String>,
+) -> Result<PathBuf, String> {
+    if let Some(b) = bundled.filter(|b| b.is_file()) {
+        return Ok(b);
+    }
     if let Some(p) = explicit.filter(|s| !s.is_empty()) {
         let p = PathBuf::from(p);
         return if p.is_file() {
@@ -112,7 +123,10 @@ pub fn find_dctld_in(explicit: Option<String>, path: Option<String>) -> Result<P
 }
 
 pub fn find_dctld(path: Option<String>) -> Result<PathBuf, String> {
-    find_dctld_in(env::var("DOCTRINE_DCTLD").ok(), path)
+    let bundled = env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|dir| dir.join("dctld")));
+    find_dctld_in(bundled, env::var("DOCTRINE_DCTLD").ok(), path)
 }
 
 const PATH_MARKER: &str = "__DOCTRINE_PATH__";
@@ -336,7 +350,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let bin = dir.path().join("dctld");
         std::fs::write(&bin, "#!/bin/sh\n").unwrap();
-        let found = find_dctld_in(None, Some(dir.path().to_string_lossy().into_owned()));
+        let found = find_dctld_in(None, None, Some(dir.path().to_string_lossy().into_owned()));
         assert_eq!(found.unwrap(), bin);
     }
 
@@ -345,24 +359,83 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let bin = dir.path().join("mydctld");
         std::fs::write(&bin, "#!/bin/sh\n").unwrap();
-        let found = find_dctld_in(Some(bin.to_string_lossy().into_owned()), None);
+        let found = find_dctld_in(None, Some(bin.to_string_lossy().into_owned()), None);
         assert_eq!(found.unwrap(), bin);
     }
 
     #[test]
     fn missing_dctld_says_how_to_install() {
         let dir = tempfile::tempdir().unwrap();
-        let err = find_dctld_in(None, Some(dir.path().to_string_lossy().into_owned())).unwrap_err();
+        let err = find_dctld_in(None, None, Some(dir.path().to_string_lossy().into_owned()))
+            .unwrap_err();
         assert!(err.contains("mise run core:install"), "案内が無い: {err}");
     }
 
     #[test]
     fn explicit_override_that_is_missing_is_an_error() {
-        let err = find_dctld_in(Some("/nope/dctld".into()), None).unwrap_err();
+        let err = find_dctld_in(None, Some("/nope/dctld".into()), None).unwrap_err();
         assert!(
             err.contains("DOCTRINE_DCTLD"),
             "どの設定が悪いか分からない: {err}"
         );
+    }
+
+    /// 親ディレクトリ `name` に `dctld` を置いて、そのパスを返す。
+    fn put_dctld(root: &Path, name: &str) -> PathBuf {
+        let dir = root.join(name);
+        std::fs::create_dir_all(&dir).unwrap();
+        let bin = dir.join("dctld");
+        std::fs::write(&bin, "#!/bin/sh\n").unwrap();
+        bin
+    }
+
+    #[test]
+    fn bundled_dctld_wins_over_override_and_path() {
+        let root = tempfile::tempdir().unwrap();
+        let bundled = put_dctld(root.path(), "bundled");
+        let overridden = put_dctld(root.path(), "override");
+        let on_path = put_dctld(root.path(), "onpath");
+        let path = on_path.parent().unwrap().to_string_lossy().into_owned();
+
+        let found = find_dctld_in(
+            Some(bundled.clone()),
+            Some(overridden.to_string_lossy().into_owned()),
+            Some(path.clone()),
+        );
+        assert_eq!(found.unwrap(), bundled);
+
+        // 同梱があれば、DOCTRINE_DCTLD が壊れていてもエラーにしない
+        let found = find_dctld_in(Some(bundled.clone()), Some("/nope/dctld".into()), Some(path));
+        assert_eq!(found.unwrap(), bundled);
+    }
+
+    #[test]
+    fn missing_bundled_dctld_falls_back_to_override_then_path() {
+        let root = tempfile::tempdir().unwrap();
+        let missing = root.path().join("bundled").join("dctld");
+        let overridden = put_dctld(root.path(), "override");
+        let on_path = put_dctld(root.path(), "onpath");
+        let path = on_path.parent().unwrap().to_string_lossy().into_owned();
+
+        let found = find_dctld_in(
+            Some(missing.clone()),
+            Some(overridden.to_string_lossy().into_owned()),
+            Some(path.clone()),
+        );
+        assert_eq!(found.unwrap(), overridden);
+
+        let found = find_dctld_in(Some(missing.clone()), None, Some(path));
+        assert_eq!(found.unwrap(), on_path);
+
+        let empty = root.path().join("empty");
+        std::fs::create_dir_all(&empty).unwrap();
+        let err = find_dctld_in(
+            Some(missing),
+            None,
+            Some(empty.to_string_lossy().into_owned()),
+        )
+        .unwrap_err();
+        assert!(err.contains("mise run core:install"), "案内が無い: {err}");
     }
 
     #[test]
