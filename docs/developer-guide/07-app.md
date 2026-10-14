@@ -146,7 +146,7 @@ React も Tauri も持ち込まず、同名の `*.test.ts` で単体テストす
 | --- | --- |
 | `intake.ts` | Intake 画面の導出（回答の正規化と検証、サイドバーの区分、どの面を出すか、コメントの操作、進行中の面の操作の出し分け） |
 | `pfd.ts` | PFD の図の配置。列は `diagram.ts:layoutGraph` の最長路に任せ、列の中の順は重心法で交差を減らす |
-| `rail.ts` | ワークフローの帯（タスク画面の実行状態付きと、設定画面の定義図） |
+| `rail.ts` | 設定画面のワークフローの定義図。タスク画面の帯の組み立て（`buildRail`）は `shared/rail.ts` にあり、デーモンの `intake.get` も使う |
 | `workflowEdit.ts` / `projectConfig.ts` / `settings.ts` | 設定フォームの変換・検証・差分・エラーの欄への振り分け。`workflowEdit.ts:TEMPLATE_VARIABLES` は `core/src/workflow/template.ts` と一致することをテストで固定している |
 | `worktrees.ts` | worktree の古さと削除可否、警告の並び |
 | `trackerCache.ts` | トラッカーの応答の stale-while-revalidate |
