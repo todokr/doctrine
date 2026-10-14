@@ -1,8 +1,9 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test } from "vitest";
-import { PFD_SAMPLE, PFD_STATUSES_A } from "../fixtures";
+import type { RailNode } from "../../../shared/rail.ts";
+import { PFD_SAMPLE, PFD_STATUSES_A, PFD_STATUSES_B } from "../fixtures";
 import { buildPfdView, LOOK, type PfdView } from "../pfd";
-import { PROCESS_TONE, toneClass } from "../tone";
+import { PROCESS_TONE, RUN_TONE, TASK_TONE, toneClass } from "../tone";
 import { PfdDiagram } from "./PfdDiagram";
 
 const render = (view: PfdView, selected: string | null = null) =>
@@ -146,5 +147,84 @@ describe("PfdDiagram", () => {
     const html = render(buildPfdView(PFD_SAMPLE));
     const stages = [...html.matchAll(/<text[^>]*class="pfd-stage"[^>]*>(\d+)<\/text>/g)].map((m) => m[1]);
     expect(stages).toEqual(["1", "2", "2", "3", "4"]);
+  });
+});
+
+const step = (id: string, status: RailNode["status"], current = false): RailNode =>
+  ({ id, type: "agent", status, current, unknown: false });
+
+describe("PfdDiagram の Execution の図", () => {
+  const rails = { "build-api": [step("impl", "success"), step("test", "running", true)] };
+  const exec = (o: { attention?: ReadonlySet<string> } = {}) =>
+    render(buildPfdView(PFD_SAMPLE, { statuses: PFD_STATUSES_B, exec: { rails, attention: o.attention } }));
+
+  test("区画をステップの数だけ、状態の色で描き、今のステップに now を付ける", () => {
+    const b = block(exec(), "プロセス", "API を作る");
+    const steps = b.match(/<rect class="pfd-step[^"]*"/g)!;
+    expect(steps).toHaveLength(2);
+    expect(steps[0]).toContain(toneClass(RUN_TONE.success));
+    expect(steps[1]).toContain(toneClass(RUN_TONE.running));
+    expect(steps[1]).toContain(" now");
+  });
+
+  test("タスクの無いプロセスは区画 1 本、人のプロセスは区画を描かない", () => {
+    const html = exec();
+    expect(block(html, "プロセス", "ボタンを作る").match(/class="pfd-step/g)).toHaveLength(1);
+    expect(block(html, "プロセス", "受け入れる")).not.toContain("pfd-step");
+  });
+
+  test("状態の文言を 1 行、状態の色で描く。補足は言葉と分けて描く", () => {
+    const html = exec();
+    for (const p of PFD_SAMPLE.processes) {
+      const state = PFD_STATUSES_B[p.id].state;
+      const b = block(html, "プロセス", p.name);
+      expect(b.match(/class="pfd-status"/g)).toHaveLength(1);
+      expect(b).toContain(`<tspan class="pfd-status-word ${toneClass(PROCESS_TONE[state].tone)}">${LOOK[state].word}</tspan>`);
+    }
+    expect(block(html, "プロセス", "スキーマを設計する")).toMatch(/class="pfd-status-detail"[^>]*> · タスクが止まった<\/tspan>/);
+    expect(block(html, "プロセス", "受け入れる")).not.toContain("pfd-status-detail");
+  });
+
+  test("レビュー待ちの言葉はタスクの承認待ちの色で描く", () => {
+    const html = render(buildPfdView(PFD_SAMPLE, { statuses: PFD_STATUSES_A, exec: { rails, suspended: new Set(["build-ui"]) } }));
+    const b = block(html, "プロセス", "ボタンを作る");
+    expect(b).toContain(`<tspan class="pfd-status-word ${toneClass(TASK_TONE.suspended)}">レビュー待ち</tspan>`);
+    expect(openTag(b)).toContain("レビュー待ち");
+  });
+
+  test("状態の線・段の数字・プロジェクト名・人の印を描かず、成果物の種類の印は描く", () => {
+    const html = exec();
+    for (const c of ["pfd-bar", "pfd-stage", "pfd-project", "pfd-inner"]) expect(html).not.toContain(c);
+    const human = block(html, "プロセス", "受け入れる");
+    expect(human).not.toMatch(/class="pfd-mark"[^>]*>[^<]*人/);
+    expect(block(html, "成果物", "Issue")).toMatch(/class="pfd-mark"[^>]*>既存<\/text>/);
+    expect(block(html, "成果物", "出力方針")).toMatch(/class="pfd-mark"[^>]*>決定<\/text>/);
+    expect(block(html, "成果物", "リリース")).toMatch(/class="pfd-mark"[^>]*>◎<\/text>/);
+  });
+
+  test("計画の図は状態の線・段の数字・プロジェクト名・人の印を描き、状態の文言と区画は描かない", () => {
+    const html = render(buildPfdView(PFD_SAMPLE, { statuses: PFD_STATUSES_B }));
+    for (const c of ["pfd-bar", "pfd-stage", "pfd-project", "pfd-inner"]) expect(html).toContain(c);
+    expect(html).not.toContain("pfd-status");
+    expect(html).not.toContain("pfd-step");
+  });
+
+  test("人の番のノードに attention を付け、読み上げにも入れる", () => {
+    const html = exec({ attention: new Set(["approve"]) });
+    const human = block(html, "プロセス", "受け入れる");
+    expect(openTag(human)).toContain("attention");
+    expect(openTag(human)).toContain("人の番");
+    expect(openTag(block(html, "プロセス", "API を作る"))).not.toContain("attention");
+  });
+
+  test("読み上げは状態の文言をそのまま使い、プロジェクト名は入れない", () => {
+    const html = exec();
+    expect(openTag(block(html, "プロセス", "スキーマを設計する"))).toContain("要確認 · タスクが止まった");
+    expect(openTag(block(html, "プロセス", "API を作る"))).not.toContain("プロジェクト");
+  });
+
+  test("箱の rect は pfd-box を持つ", () => {
+    const html = render(buildPfdView(PFD_SAMPLE));
+    expect(block(html, "成果物", "Issue")).toContain('class="pfd-box"');
   });
 });

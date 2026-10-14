@@ -1,22 +1,27 @@
+import { DIRECT_PROCESS_ID } from "../../../shared/intake/processStatus.ts";
+import type { IssueDetail } from "../../../shared/intake/tracker.ts";
 import { decisionTexts } from "../../../shared/intake/answerText.ts";
 import type { Pfd } from "../../../shared/intake/pfd.ts";
 import {
   getDraft,
   getIntake,
+  insertIntake,
+  insertProcesses,
   latestApproval,
   listProcesses,
+  type NewIntake,
   replaceCurrentTask,
 } from "../db/intakes.ts";
 import { loadQuestionSets } from "./questionSet.ts";
 import type { Db, IntakeProcessRow, IntakeRow, ProjectRow } from "../db/schema.ts";
-import { insertTask, type NewTask } from "../db/tasks.ts";
+import { getProject, getTask, insertTask, type NewTask } from "../db/tasks.ts";
 import { branchNameFor } from "../domain/worktree.ts";
 import { pinOf, type WorkflowLoader, type WorkflowPin } from "../workflow/load.ts";
 import { sha256Hex } from "./pfd/hash.ts";
 import { buildTaskPrompt } from "./pfd/prompt.ts";
 import { computeProcessStatuses, type ProcessProgress } from "./pfd/status.ts";
 import { baseBranchesOf, missingProjectMessage, projectsOfProcesses } from "./processProject.ts";
-import { intakeDraft, processProgressOf } from "./view.ts";
+import { directStatusOf, intakeDraft, processProgressOf } from "./view.ts";
 
 export type DispatchDeps = { loadWorkflow: WorkflowLoader };
 
@@ -233,6 +238,42 @@ export async function dispatchIntake(
 }
 
 /**
+ * direct の再投入。sub-issue は無く、題と prompt は置き換えるタスクから写す（Issue を読み直さない）。
+ * プロジェクトも置き換えるタスクのもの。
+ */
+async function redispatchDirect(
+  db: Db,
+  intake: IntakeRow,
+  processId: string,
+  deps: DispatchDeps,
+): Promise<{ taskId: string; replacedTaskId: string | null }> {
+  const status = await directStatusOf(db, intake.id);
+  if (processId !== DIRECT_PROCESS_ID || status.state !== "needs_attention") {
+    const state = processId === DIRECT_PROCESS_ID ? status.state : "案に無い";
+    throw new Error(`要確認のプロセスだけを再投入できます: ${processId}（${state}）`);
+  }
+  const previous = (await getTask(db, status.taskId))!;
+  const project = (await getProject(db, previous.project_id))!;
+  const pin = pinOf(await deps.loadWorkflow(project.path, project.default_workflow), project);
+  const task = directTask({
+    intakeId: intake.id,
+    issueUrl: intake.issue_url,
+    project,
+    title: previous.title,
+    prompt: previous.prompt,
+    pin,
+  });
+  const committed = await commitDispatch(db, {
+    intakeId: intake.id,
+    processId: DIRECT_PROCESS_ID,
+    expectedTaskId: previous.id,
+    task,
+  });
+  if (!committed) throw new Error("ほかの操作が先にタスクを置き換えました");
+  return { taskId: task.id, replacedTaskId: previous.id };
+}
+
+/**
  * 要確認のプロセスに新しいタスクを作る（C-6）。新しいタスクは同じプロセス・同じ sub-issue に紐づき、
  * 古いタスクは intake_process_id を持ったまま残る。自動 dispatch の一時停止は見ない（人の明示の操作のため）。
  */
@@ -246,6 +287,7 @@ export async function redispatchProcess(
   if (intake.state !== "active") {
     throw new Error(`再投入できる状態ではありません: ${intake.state}`);
   }
+  if (intake.mode === "direct") return await redispatchDirect(db, intake, o.processId, deps);
   const plan = await loadApprovedPlan(db, o.intakeId);
   if (!plan) throw new Error("承認された計画がありません");
   const src = await loadDispatchSource(db, intake, plan.pfd);
@@ -267,4 +309,67 @@ export async function redispatchProcess(
   const taskId = await dispatchProcess(db, src, row, project, pin);
   if (taskId === null) throw new Error("ほかの操作が先にタスクを置き換えました");
   return { taskId, replacedTaskId: row.current_task_id };
+}
+
+/** direct のタスクの prompt。Issue の本文の前に、題と URL を置く。 */
+export function directTaskPrompt(issue: Pick<IssueDetail, "url" | "title" | "body">): string {
+  return `# ${issue.title}\n\n${issue.url}\n\n${issue.body}`;
+}
+
+/** direct の Intake のタスク。issue_url は親 Issue そのもので、sub-issue は無い。 */
+export function directTask(o: {
+  intakeId: string;
+  issueUrl: string;
+  project: ProjectRow;
+  title: string;
+  prompt: string;
+  pin: WorkflowPin;
+}): NewTask {
+  const id = crypto.randomUUID();
+  return {
+    id,
+    project_id: o.project.id,
+    title: o.title,
+    prompt: o.prompt,
+    workflow_name: o.project.default_workflow,
+    branch: branchNameFor(id, o.title),
+    priority: 2,
+    intake_id: o.intakeId,
+    intake_process_id: DIRECT_PROCESS_ID,
+    issue_url: o.issueUrl,
+    parent_issue_url: null,
+    ...o.pin,
+  };
+}
+
+/**
+ * direct の Intake を、プロセス main とそのタスクごと 1 トランザクションで入れる（spec 5.1）。
+ * 調査・分解・承認・sub-issue の同期・投入はどれも通らない。
+ */
+export async function insertDirectIntake(
+  db: Db,
+  o: {
+    intake: Omit<NewIntake, "mode">;
+    project: ProjectRow;
+    issue: Pick<IssueDetail, "url" | "title" | "body">;
+    pin: WorkflowPin;
+  },
+): Promise<IntakeRow> {
+  return await db.transaction().execute(async (trx) => {
+    const row = await insertIntake(trx, { ...o.intake, mode: "direct" });
+    await insertProcesses(trx, row.id, [DIRECT_PROCESS_ID]);
+    const task = directTask({
+      intakeId: row.id,
+      issueUrl: row.issue_url,
+      project: o.project,
+      title: o.issue.title,
+      prompt: directTaskPrompt(o.issue),
+      pin: o.pin,
+    });
+    await insertTask(trx, task);
+    if (!(await replaceCurrentTask(trx, row.id, DIRECT_PROCESS_ID, null, task.id))) {
+      throw new Error("direct のタスクを紐づけられませんでした");
+    }
+    return row;
+  });
 }

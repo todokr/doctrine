@@ -10,7 +10,7 @@ import {
   WatchAlert,
 } from "./components/IntakeProgress";
 import { INTAKE_ACTIVE, NOW, PFD_SAMPLE, PFD_STATUSES_A } from "./fixtures";
-import { actionNeeded, progressOps, summaryOf } from "./intake";
+import { actionNeeded, isClosedIntake, progressOps, summaryOf } from "./intake";
 
 const noop = () => {};
 const disabled = (label: string) => new RegExp(`<button[^>]*disabled=""[^>]*>${label}</button>`);
@@ -26,6 +26,7 @@ function needed(o: Partial<Parameters<typeof ActionNeeded>[0]> = {}) {
       onComplete={noop}
       onRedispatch={noop}
       onOpenTask={noop}
+      readOnly={false}
       {...o}
     />,
   );
@@ -48,6 +49,13 @@ describe("ActionNeeded", () => {
   test("どちらも無ければ何も出さない", () => {
     expect(needed({ items: { yourTurn: [], needsAttention: [] } })).toBe("");
   });
+
+  test("中止した Intake では理由を読むだけで、決めた内容の欄・完了・再投入は出さない", () => {
+    const canceled = { ...INTAKE_ACTIVE, state: "canceled" as const };
+    const html = needed({ items: actionNeeded(canceled, PFD_SAMPLE), readOnly: isClosedIntake(canceled.state) });
+    for (const text of ["受け入れる", "要確認（タスクが止まった）", "t1"]) expect(html).toContain(text);
+    for (const text of ["決めた内容", "完了を記録する", "再投入する", "<textarea"]) expect(html).not.toContain(text);
+  });
 });
 
 describe("WatchAlert", () => {
@@ -63,6 +71,12 @@ const trail = (view: IntakeProcessView) => renderToStaticMarkup(<ProcessTrail vi
 const count = (html: string, text: string) => html.split(text).length - 1;
 
 describe("ProcessTrail", () => {
+  test("showSubIssue が false なら sub-issue の欄を出さない", () => {
+    const view = INTAKE_ACTIVE.processes[0];
+    const html = renderToStaticMarkup(<ProcessTrail view={view} onOpenTask={noop} showSubIssue={false} />);
+    expect(html).not.toContain("sub-issue");
+  });
+
   test("sub-issue・タスク・PR を別々の欄に出す", () => {
     const design = INTAKE_ACTIVE.processes.find((p) => p.id === "design")!;
     const html = trail(design);
@@ -73,7 +87,7 @@ describe("ProcessTrail", () => {
   });
 
   test("PR の番号と状態", () => {
-    const view = { ...PFD_STATUSES_A["build-api"], id: "build-api", sub_issue_url: null, task_ids: ["t2"] } as IntakeProcessView;
+    const view = { ...PFD_STATUSES_A["build-api"], id: "build-api", sub_issue_url: null, task_ids: ["t2"], rail: null } as IntakeProcessView;
     const html = trail(view);
     expect(html).toContain("#42");
     expect(html).toContain("レビュー中");
@@ -81,7 +95,7 @@ describe("ProcessTrail", () => {
   });
 
   test("人の完了は記録した内容を出す", () => {
-    const view = { ...PFD_STATUSES_A.approve, id: "approve", sub_issue_url: null, task_ids: [] } as IntakeProcessView;
+    const view = { ...PFD_STATUSES_A.approve, id: "approve", sub_issue_url: null, task_ids: [], rail: null } as IntakeProcessView;
     const html = trail(view);
     expect(html).toContain("完了（人）");
     expect(html).toContain("確認した");
@@ -108,7 +122,7 @@ const actions = (o: Partial<Parameters<typeof ProgressActions>[0]> & { state?: "
 describe("ProgressActions", () => {
   test("進行中は確認・一時停止・改訂", () => {
     const html = actions();
-    for (const text of ["更新する", "自動投入を一時停止", "改訂に入る…"]) expect(html).toContain(text);
+    for (const text of ["更新する", "自動投入を一時停止", "改訂を始める…"]) expect(html).toContain(text);
     expect(html).not.toContain("Issue を閉じる");
     expect(actions({ paused: true })).toContain("自動投入を再開");
   });
@@ -116,7 +130,7 @@ describe("ProgressActions", () => {
   test("完了は Issue を閉じるだけ", () => {
     const html = actions({ state: "completed" });
     expect(html).toContain("Issue を閉じる");
-    for (const text of ["更新する", "自動投入", "改訂に入る"]) expect(html).not.toContain(text);
+    for (const text of ["更新する", "自動投入", "改訂を始める"]) expect(html).not.toContain(text);
   });
 
   test("中止した Intake は操作を出さない", () => {
@@ -136,19 +150,25 @@ describe("ReviseDecide", () => {
 });
 
 describe("CancelDialog", () => {
-  const dialog = (approved: boolean) =>
-    renderToStaticMarkup(<CancelDialog approved={approved} pending={false} onSend={noop} onClose={noop} />);
+  const dialog = (scope: "none" | "plan" | "direct") =>
+    renderToStaticMarkup(<CancelDialog scope={scope} pending={false} onSend={noop} onClose={noop} />);
 
-  test("承認済みならタスクと sub-issue の扱いを選ばせる", () => {
-    const html = dialog(true);
+  test("plan の承認後はタスクと sub-issue の扱いを選ばせる", () => {
+    const html = dialog("plan");
     expect(html).toContain("そのままにする");
     expect(html).toContain("タスクを止め、sub-issue を取りやめとして閉じる");
   });
 
+  test("direct はタスクを止めるかを選ばせ、sub-issue には触れない", () => {
+    const html = dialog("direct");
+    expect(html).toContain("そのままにする");
+    expect(html).toContain("タスクを止める");
+    expect(html).not.toContain("sub-issue");
+  });
+
   test("承認前は選択肢を出さない", () => {
-    const html = dialog(false);
+    const html = dialog("none");
     expect(html).not.toContain("そのままにする");
-    expect(html).not.toContain("タスクを止め、sub-issue を取りやめとして閉じる");
     expect(html).toContain("中止する");
   });
 });

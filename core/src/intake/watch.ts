@@ -20,7 +20,7 @@ import { computeProcessStatuses, goalReached } from "./pfd/status.ts";
 import { baseBranchesOf, projectsOfProcesses } from "./processProject.ts";
 import { syncIssueStates } from "./issueStateSync.ts";
 import { closeMergedSubIssues, syncSubIssues } from "./subIssueSync.ts";
-import { processProgressOf } from "./view.ts";
+import { directStatusOf, processProgressOf } from "./view.ts";
 import type { WorkflowLoader } from "../workflow/load.ts";
 
 export const WATCH_INTERVAL_MS = 120_000;
@@ -102,6 +102,21 @@ async function approvedPlanOf(
   if (!plan) return null;
   const baseBranches = baseBranchesOf(await projectsOfProcesses(db, intake.workspace_id, plan.pfd));
   return { pfd: plan.pfd, baseBranches };
+}
+
+/** plan は goal の成果物が揃ったか、direct はプロセス main がマージされたか。plan で承認が無ければ false。 */
+async function reachedGoal(db: Db, intake: IntakeRow): Promise<boolean> {
+  if (intake.mode === "direct") return (await directStatusOf(db, intake.id)).state === "merged";
+  const plan = await approvedPlanOf(db, intake);
+  if (!plan) return false;
+  const statuses = computeProcessStatuses({
+    pfd: plan.pfd,
+    baseBranches: plan.baseBranches,
+    revising: false,
+    dispatchPaused: false,
+    progress: await processProgressOf(db, intake.id),
+  });
+  return goalReached(plan.pfd, statuses);
 }
 
 /**
@@ -224,7 +239,8 @@ export async function watchWorkspace(
   };
   try {
     // 改訂中の Intake は PR の観測だけ続ける。計画が変わりうるので、sub-issue の同期・投入・完了の判定は
-    // active のものだけが行う（投入は dispatchIntake の revising の検査でも止まる）
+    // active のものだけが行う（投入は dispatchIntake の revising の検査でも止まる）。
+    // direct の Intake は承認を持たないので、PR の観測と完了の判定だけが働く。
     const watched = (await listIntakes(db, { workspaceId })).filter(
       (i) => i.state === "active" || i.revising === 1,
     );
@@ -379,16 +395,7 @@ export async function watchWorkspace(
 
     for (const intake of intakes) {
       try {
-        const plan = await approvedPlanOf(db, intake);
-        if (!plan) continue;
-        const statuses = computeProcessStatuses({
-          pfd: plan.pfd,
-          baseBranches: plan.baseBranches,
-          revising: false,
-          dispatchPaused: false,
-          progress: await processProgressOf(db, intake.id),
-        });
-        if (!goalReached(plan.pfd, statuses)) continue;
+        if (!(await reachedGoal(db, intake))) continue;
         const transition = await completeIntake(db, intake.id);
         if (transition) report.transitions.push(transition);
       } catch (e) {

@@ -145,7 +145,11 @@ async function toAnswering(
   workspace = repo,
   issueUrl = ISSUE,
 ): Promise<IntakeSummary> {
-  const started = await call<IntakeSummary>("intake.start", { workspace, issue_url: issueUrl });
+  const started = await call<IntakeSummary>("intake.start", {
+    mode: "plan",
+    workspace,
+    issue_url: issueUrl,
+  });
   await tickUntil(ctx, started.id, "answering");
   return started;
 }
@@ -188,6 +192,7 @@ test("開始から承認までの一連の呼び出しが通る", async () => {
   const { ctx, events, call } = await setup({ tracker });
 
   const started = await call<IntakeSummary & { alreadyActive: boolean }>("intake.start", {
+    mode: "plan",
     workspace: repo,
     issue_url: ISSUE,
   });
@@ -387,8 +392,13 @@ test("reviewing でない Intake は承認できない", async () => {
 test("同じ Issue に進行中の Intake があるとき、開始は新しい Intake を作らない", async () => {
   const tracker = fakeTracker();
   const { ctx, call } = await setup({ tracker });
-  const first = await call<IntakeSummary>("intake.start", { workspace: repo, issue_url: ISSUE });
+  const first = await call<IntakeSummary>("intake.start", {
+    mode: "plan",
+    workspace: repo,
+    issue_url: ISSUE,
+  });
   const second = await call<IntakeSummary & { alreadyActive: boolean }>("intake.start", {
+    mode: "plan",
     workspace: repo,
     issue_url: ISSUE,
   });
@@ -401,7 +411,11 @@ test("同じ Issue に進行中の Intake があるとき、開始は新しい I
 
 test("中止した Issue はもう一度開始できる", async () => {
   const { ctx, events, call } = await setup();
-  const first = await call<IntakeSummary>("intake.start", { workspace: repo, issue_url: ISSUE });
+  const first = await call<IntakeSummary>("intake.start", {
+    mode: "plan",
+    workspace: repo,
+    issue_url: ISSUE,
+  });
   const canceled = await call<IntakeSummary>("intake.cancel", {
     intake_id: first.id,
     mode: "leave",
@@ -424,6 +438,7 @@ test("中止した Issue はもう一度開始できる", async () => {
   );
 
   const again = await call<IntakeSummary & { alreadyActive: boolean }>("intake.start", {
+    mode: "plan",
     workspace: repo,
     issue_url: ISSUE,
   });
@@ -435,7 +450,11 @@ test("中止した Issue はもう一度開始できる", async () => {
 
 test("中止は終端から拒まれ、mode が無ければ拒まれる", async () => {
   const { call } = await setup();
-  const first = await call<IntakeSummary>("intake.start", { workspace: repo, issue_url: ISSUE });
+  const first = await call<IntakeSummary>("intake.start", {
+    mode: "plan",
+    workspace: repo,
+    issue_url: ISSUE,
+  });
   await assert.rejects(() => call("intake.cancel", { intake_id: first.id }));
   await call("intake.cancel", { intake_id: first.id, mode: "stop" });
   await assert.rejects(() => call("intake.cancel", { intake_id: first.id, mode: "leave" }));
@@ -507,7 +526,11 @@ test("tracker.issues は進行中の Intake に印を付ける", async () => {
     },
   );
   const { call } = await setup({ tracker });
-  const started = await call<IntakeSummary>("intake.start", { workspace: repo, issue_url: ISSUE });
+  const started = await call<IntakeSummary>("intake.start", {
+    mode: "plan",
+    workspace: repo,
+    issue_url: ISSUE,
+  });
 
   const issues = await call<{ url: string; intake_id: string | null }[]>("tracker.issues", {
     workspace: repo,
@@ -847,7 +870,11 @@ test("自動 dispatch の切り替えは承認前と終端では拒まれる", a
 test("完了した Intake の親 Issue を閉じる", async () => {
   const tracker = fakeTracker();
   const { ctx, call } = await setup({ tracker });
-  const started = await call<IntakeSummary>("intake.start", { workspace: repo, issue_url: ISSUE });
+  const started = await call<IntakeSummary>("intake.start", {
+    mode: "plan",
+    workspace: repo,
+    issue_url: ISSUE,
+  });
   await updateIntake(ctx.db, started.id, { state: "completed" });
 
   const closed = await call<IntakeSummary>("intake.closeIssue", { intake_id: started.id });
@@ -859,7 +886,11 @@ test("完了した Intake の親 Issue を閉じる", async () => {
 test("完了していない Intake の親 Issue は閉じられない", async () => {
   const tracker = fakeTracker();
   const { call } = await setup({ tracker });
-  const started = await call<IntakeSummary>("intake.start", { workspace: repo, issue_url: ISSUE });
+  const started = await call<IntakeSummary>("intake.start", {
+    mode: "plan",
+    workspace: repo,
+    issue_url: ISSUE,
+  });
   await assert.rejects(
     () => call("intake.closeIssue", { intake_id: started.id }),
     /完了した Intake だけ/,
@@ -901,7 +932,12 @@ test("workspace のどのリポジトリにも無い Issue の intake.start を�
   const tracker = fakeTracker();
   const { call } = await setup({ tracker });
   await assert.rejects(
-    () => call("intake.start", { workspace: repo, issue_url: "https://github.com/x/y/issues/1" }),
+    () =>
+      call("intake.start", {
+        mode: "plan",
+        workspace: repo,
+        issue_url: "https://github.com/x/y/issues/1",
+      }),
     /この Issue は workspace のどのリポジトリにもありません: https:\/\/github\.com\/x\/y\/issues\/1/,
   );
   assert.deepEqual(await call<IntakeSummary[]>("intake.list", { include_closed: true }), []);
@@ -943,6 +979,7 @@ test("プロジェクトが 2 つの workspace でも intake.start が通る", a
   await call("workspace.add", { path: ws });
 
   const started = await call<IntakeSummary & { alreadyActive: boolean }>("intake.start", {
+    mode: "plan",
     workspace: ws,
     issue_url: ISSUE,
   });
@@ -967,8 +1004,12 @@ test("intake.list は workspace で絞る", async () => {
         "name: feature\nsteps:\n  - id: review\n    type: approval\n    title: 見て\n",
     });
     await call("workspace.add", { path: other });
-    await call("intake.start", { workspace: repo, issue_url: ISSUE });
-    await call("intake.start", { workspace: other, issue_url: "https://github.com/o/r/issues/2" });
+    await call("intake.start", { mode: "plan", workspace: repo, issue_url: ISSUE });
+    await call("intake.start", {
+      mode: "plan",
+      workspace: other,
+      issue_url: "https://github.com/o/r/issues/2",
+    });
 
     assert.equal((await call<IntakeSummary[]>("intake.list")).length, 2);
     const filtered = await call<IntakeSummary[]>("intake.list", { workspace: repo });
@@ -1267,6 +1308,7 @@ test("intake.logs は、ほかの Intake の実行や無い実行を指すと拒
   const { ctx, call } = await setup();
   const started = await toAnswering(ctx, call);
   const other = await call<IntakeSummary>("intake.start", {
+    mode: "plan",
     workspace: repo,
     issue_url: "https://github.com/o/r/issues/2",
   });
@@ -1291,7 +1333,11 @@ test("intake.logs の follow は接続の追従先をこの Intake に移し、f
     unfollow: () => (following = null),
     isFollowing: (id: string) => following === id,
   };
-  const started = await call<IntakeSummary>("intake.start", { workspace: repo, issue_url: ISSUE });
+  const started = await call<IntakeSummary>("intake.start", {
+    mode: "plan",
+    workspace: repo,
+    issue_url: ISSUE,
+  });
   await h("intake.logs", { intake_id: started.id, follow: true }, conn);
   assert.equal(following, started.id);
   await h("intake.logs", { intake_id: "other", follow: false }, conn).catch(() => {});
@@ -1395,6 +1441,7 @@ test("Linear のプロジェクトの Intake は開始・調査・親 Issue を�
   const { ctx, call, linearRepo } = await twoProjects({ github: gh, linear: lin });
 
   const started = await call<IntakeSummary>("intake.start", {
+    mode: "plan",
     workspace: linearRepo,
     issue_url: LINEAR_ISSUE,
   });
@@ -1415,10 +1462,11 @@ test("Linear のプロジェクトで Intake を始めると、親 Issue を inP
   const gh = fakeTracker();
   const lin = fakeTracker({}, { kind: "linear", status: linearStatus });
   const { call, linearRepo } = await twoProjects({ github: gh, linear: lin });
-  await call("intake.start", { workspace: linearRepo, issue_url: LINEAR_ISSUE });
+  await call("intake.start", { mode: "plan", workspace: linearRepo, issue_url: LINEAR_ISSUE });
   assert.deepEqual(lin.advances, [{ url: LINEAR_ISSUE, phase: "inProgress" }]);
   assert.deepEqual(gh.advances, []);
   const again = await call<IntakeSummary & { alreadyActive: boolean }>("intake.start", {
+    mode: "plan",
     workspace: linearRepo,
     issue_url: LINEAR_ISSUE,
   });
@@ -1430,7 +1478,7 @@ test("GitHub のプロジェクトで Intake を始めても状態を進めな�
   const gh = fakeTracker();
   const lin = fakeTracker({}, { kind: "linear", status: linearStatus });
   const { call } = await twoProjects({ github: gh, linear: lin });
-  await call("intake.start", { workspace: repo, issue_url: ISSUE });
+  await call("intake.start", { mode: "plan", workspace: repo, issue_url: ISSUE });
   assert.deepEqual(gh.advances, []);
   assert.deepEqual(lin.advances, []);
 });
@@ -1440,6 +1488,7 @@ test("親 Issue の状態を進められなくても開始は成功し、警告�
   const lin = fakeTracker({}, { kind: "linear", status: linearStatus, failAdvance: true });
   const { ctx, call, linearRepo } = await twoProjects({ github: gh, linear: lin });
   const started = await call<IntakeSummary & { alreadyActive: boolean }>("intake.start", {
+    mode: "plan",
     workspace: linearRepo,
     issue_url: LINEAR_ISSUE,
   });
@@ -1472,4 +1521,40 @@ test("Linear のプロジェクトの見張りと中止は Linear に sub-issue 
   await call("intake.cancel", { intake_id: reviewing.id, mode: "stop" });
   assert.ok(linFt.calls.some((c) => c.op === "closeIssue"));
   assert.deepEqual(ghFt.calls, []);
+});
+
+test("direct で開始すると、調査を立てずに active になり、プロセス main とタスクが 1 つずつできる", async () => {
+  const { ctx, call } = await setup();
+  const started = await call<IntakeSummary & { alreadyActive: boolean }>("intake.start", {
+    workspace: repo,
+    issue_url: ISSUE,
+    mode: "direct",
+  });
+  assert.equal(started.state, "active");
+  assert.equal(started.mode, "direct");
+  assert.deepEqual(started.progress, { done: 0, total: 1 });
+  assert.deepEqual(await listIntakeRuns(ctx.db, started.id), []);
+  const rows = await listProcesses(ctx.db, started.id);
+  assert.deepEqual(
+    rows.map((r) => [r.process_id, r.sub_issue_url]),
+    [["main", null]],
+  );
+  const task = (await getTask(ctx.db, rows[0].current_task_id!))!;
+  assert.equal(task.workflow_name, "feature");
+  assert.equal(task.issue_url, ISSUE);
+  assert.equal(task.parent_issue_url, null);
+  const detail = await call<IntakeDetail>("intake.get", { intake_id: started.id });
+  assert.deepEqual(
+    detail.processes[0].rail!.map((n) => n.id),
+    ["review"],
+  );
+});
+
+test("mode が plan でも direct でもない intake.start は拒まれる", async () => {
+  const { call } = await setup();
+  await assert.rejects(
+    () => call("intake.start", { workspace: repo, issue_url: ISSUE }),
+    /mode は plan か direct です/,
+  );
+  assert.deepEqual(await call<IntakeSummary[]>("intake.list"), []);
 });

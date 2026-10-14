@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   assertIntakeTransition,
   canIntakeTransition,
+  initialIntakeState,
   InvalidIntakeTransitionError,
   isIntakeTerminal,
   retryStateFor,
@@ -180,4 +181,9 @@ test("やり直し先は失敗した実行の purpose で決まる", () => {
   assert.equal(retryStateFor("investigate"), "investigating");
   assert.equal(retryStateFor("decompose"), "decomposing");
   assert.equal(retryStateFor("revise"), "decomposing");
+});
+
+test("作ったときの状態: plan は investigating、direct は active", () => {
+  assert.equal(initialIntakeState("plan"), "investigating");
+  assert.equal(initialIntakeState("direct"), "active");
 });

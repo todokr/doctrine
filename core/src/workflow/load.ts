@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import type { StepView } from "../../../shared/protocol.ts";
 import type { ProjectRow, TaskRow } from "../db/schema.ts";
 import { parseWorkflow, type Workflow } from "./schema.ts";
 import { withSetupStep } from "./project.ts";
@@ -44,4 +45,13 @@ export async function taskWorkflow(
   }
   const { workflow } = await load(project.path, task.workflow_name);
   return withSetupStep(workflow, project.setup ?? undefined);
+}
+
+/** 帯が描く分だけを残す。title は approval だけが持つ。 */
+export function toStepViews(workflow: Workflow): StepView[] {
+  return workflow.steps.map((step) => {
+    const view: StepView = { id: step.id, type: step.type };
+    if (step.type === "approval") view.title = step.title;
+    return view;
+  });
 }

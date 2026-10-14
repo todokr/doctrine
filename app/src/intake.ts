@@ -13,13 +13,14 @@ import {
 import type {
   IntakeComment,
   IntakeDetail,
+  IntakeMode,
   IntakeProcessView,
   IntakeQuestionSet,
   IntakeSummary,
   NewComment,
   WatchHealth,
 } from "../../shared/protocol.ts";
-import { LOOK, parsePfdKey, pfdKey } from "./pfd";
+import { LOOK, parsePfdKey, pfdKey, statusNote } from "./pfd";
 import type { Task, Workspace, WorkspaceFilter } from "./types";
 
 /** targetId は質問か仮定の id */
@@ -116,13 +117,11 @@ export function toggleOption(question: Question, optionIds: string[], optionId: 
   return question.options.map((o) => o.id).filter((id) => next.includes(id));
 }
 
-export type IntakeSection = "attention" | "working" | "active" | "closed";
+export type IntakeSection = "attention" | "working";
 
 export const INTAKE_SECTIONS: { key: IntakeSection; name: string }[] = [
   { key: "attention", name: "対応が要る" },
-  { key: "working", name: "調査・分解中" },
-  { key: "active", name: "進行中" },
-  { key: "closed", name: "終了" },
+  { key: "working", name: "調査・分解・改訂" },
 ];
 
 /** intake_runs.purpose の語 */
@@ -143,21 +142,30 @@ export const INTAKE_WORD: Record<IntakeState, string> = {
   canceled: "中止",
 };
 
+/** 取り込みの種類の語。mark は一覧と見出しの印 */
+export const MODE_WORD: Record<IntakeMode, { name: string; hint: string; mark: string }> = {
+  plan: { name: "計画して進める", hint: "複数の PR に分ける", mark: "Plan" },
+  direct: { name: "すぐ実行する", hint: "1 本の PR で済ませる", mark: "Direct" },
+};
+
 export function isClosedIntake(state: IntakeState): boolean {
   return state === "completed" || state === "canceled";
 }
 
-/** 人の対応が要る件数。needs_human はデーモンが決めるので、状態から数え直さない */
+/** 人の判断を待っている状態。Intake の Rail の点と「対応が要る」の区分はこれで決まる */
+const AWAITING_HUMAN: ReadonlySet<IntakeState> = new Set(["answering", "reviewing", "needs_attention"]);
+
 export function countIntakeAttention(intakes: IntakeSummary[]): number {
-  return intakes.filter((i) => i.needs_human).length;
+  return intakes.filter((i) => AWAITING_HUMAN.has(i.state)).length;
 }
 
-// 上から順に判定する。どの行もどこかの区分に入る
 export function intakeSection(i: IntakeSummary): IntakeSection {
-  if (isClosedIntake(i.state)) return "closed";
-  if (i.needs_human) return "attention";
-  if (i.state === "active") return "active";
-  return "working";
+  return AWAITING_HUMAN.has(i.state) ? "attention" : "working";
+}
+
+/** Intake の一覧に並ぶか。承認前（改訂中もここを通る）と、改訂に入るモードの active の Intake */
+export function inIntakeList(i: IntakeSummary, reviseId: string | null): boolean {
+  return i.id === reviseId || i.revising || (i.state !== "active" && !isClosedIntake(i.state));
 }
 
 /** workspace は "all" か Workspace.id */
@@ -177,10 +185,10 @@ export function workspaceOfIntake(
 export function intakeOrder(
   intakes: IntakeSummary[],
   workspace: WorkspaceFilter,
-  showClosed: boolean,
+  reviseId: string | null,
 ): IntakeSummary[] {
-  const rows = visibleIntakes(intakes, workspace);
-  return INTAKE_SECTIONS.filter((s) => showClosed || s.key !== "closed").flatMap((s) => {
+  const rows = visibleIntakes(intakes, workspace).filter((i) => inIntakeList(i, reviseId));
+  return INTAKE_SECTIONS.flatMap((s) => {
     const inSection = rows.filter((i) => intakeSection(i) === s.key);
     const sign = s.key === "attention" ? 1 : -1;
     return inSection.sort((a, b) => sign * (Date.parse(a.updated_at) - Date.parse(b.updated_at)));
@@ -455,25 +463,6 @@ export function processStatuses(processes: readonly IntakeProcessView[]): Record
   return Object.fromEntries(processes.map((p) => [p.id, p]));
 }
 
-export const BLOCKED_BY = {
-  revising: "改訂中",
-  paused: "一時停止中",
-  no_sub_issue: "sub-issue 待ち",
-} as const;
-
-export const ATTENTION_REASON = {
-  task_stopped: "タスクが止まった",
-  no_pr: "PR が無い",
-  pr_closed: "PR が閉じられた",
-} as const;
-
-/** LOOK の語に添える語（spec 6.6）。ready の blockedBy と needs_attention の reason だけ。ほかは null */
-export function statusNote(status: ProcessStatus): string | null {
-  if (status.state === "ready") return status.blockedBy === null ? null : BLOCKED_BY[status.blockedBy];
-  if (status.state === "needs_attention") return ATTENTION_REASON[status.reason];
-  return null;
-}
-
 /** 状態の語と添える語をまとめた 1 行（「着手可能（一時停止中）」） */
 export function statusText(status: ProcessStatus): string {
   const note = statusNote(status);
@@ -524,11 +513,12 @@ export function canCompleteHuman(note: string): boolean {
 /** 進行中の面で出す操作。中止は見出しが持つのでここに入れない */
 export type ProgressOps = { refresh: boolean; pause: boolean; revise: boolean; closeIssue: boolean };
 
-export function progressOps(detail: Pick<IntakeSummary, "state" | "revising">): ProgressOps {
+export function progressOps(detail: Pick<IntakeSummary, "state" | "revising" | "mode">): ProgressOps {
   const none = { refresh: false, pause: false, revise: false, closeIssue: false };
   if (detail.state === "completed") return { ...none, closeIssue: true };
-  if (detail.state === "active" && !detail.revising) return { ...none, refresh: true, pause: true, revise: true };
-  return none;
+  if (detail.state !== "active" || detail.revising) return none;
+  // direct は投入も、改訂する計画も持たない
+  return detail.mode === "direct" ? { ...none, refresh: true } : { ...none, refresh: true, pause: true, revise: true };
 }
 
 /** 見張りの失敗の箱の文言。失敗が続いていなければ null */
@@ -543,6 +533,7 @@ export function summaryOf(d: IntakeDetail): IntakeSummary {
     workspace_id: d.workspace_id,
     issue_url: d.issue_url,
     issue_title: d.issue_title,
+    mode: d.mode,
     state: d.state,
     revising: d.revising,
     attention_reason: d.attention_reason,

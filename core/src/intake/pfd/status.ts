@@ -1,5 +1,9 @@
 import type { Pfd, Process } from "../../../../shared/intake/pfd.ts";
-import type { PrFact, ProcessStatusEntry } from "../../../../shared/intake/processStatus.ts";
+import {
+  DIRECT_PROCESS_ID,
+  type PrFact,
+  type ProcessStatusEntry,
+} from "../../../../shared/intake/processStatus.ts";
 import type { TaskState } from "../../db/tasks.ts";
 
 /** intake_processes の 1 行と、そこから引いたタスクと PR の事実。 */
@@ -25,16 +29,12 @@ export type StatusInput = {
 
 const noProgress: ProcessProgress = { task: null, pr: null, subIssueUrl: null, humanDone: null };
 
-// 入力の成果物を見ずに決まる状態。決まらなければ null
-function settledState(
-  process: Process,
+// エージェントのプロセスの、タスクと PR だけで決まる状態。タスクが無ければ null
+function agentState(
+  id: string,
   progress: ProcessProgress,
   baseBranch: string | undefined,
 ): ProcessStatusEntry | null {
-  const id = process.id;
-  if (process.actor === "human") {
-    return progress.humanDone ? { id, state: "done", ...progress.humanDone } : null;
-  }
   const { task, pr } = progress;
   if (!task) return null;
   const taskId = task.id;
@@ -52,6 +52,31 @@ function settledState(
     return { id, state: "needs_attention", taskId, reason: "task_stopped" };
   }
   return { id, state: "running", taskId };
+}
+
+// 入力の成果物を見ずに決まる状態。決まらなければ null
+function settledState(
+  process: Process,
+  progress: ProcessProgress,
+  baseBranch: string | undefined,
+): ProcessStatusEntry | null {
+  if (process.actor === "human") {
+    return progress.humanDone ? { id: process.id, state: "done", ...progress.humanDone } : null;
+  }
+  return agentState(process.id, progress, baseBranch);
+}
+
+/**
+ * direct の Intake のプロセス main の状態。タスクは開始と同じトランザクションで作るので、
+ * running / pr_open / merged / needs_attention のどれかになる。
+ */
+export function directProcessStatus(
+  progress: ProcessProgress,
+  baseBranch: string,
+): ProcessStatusEntry {
+  const entry = agentState(DIRECT_PROCESS_ID, progress, baseBranch);
+  if (!entry) throw new Error("direct の Intake にタスクがありません");
+  return entry;
 }
 
 // マージ済みのプロセスと完了した人のプロセスの出力だけが、given に加わる（PRD W-2）

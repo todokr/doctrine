@@ -17,16 +17,18 @@ import {
 import { advanceParentIssue } from "./issueStateSync.ts";
 import { loadQuestionSets } from "./questionSet.ts";
 import type { Db, IntakeRow, IntakeState } from "../db/schema.ts";
-import type { TaskState } from "../db/tasks.ts";
+import { getProjectByPath, type TaskState } from "../db/tasks.ts";
 import { listProjectsOf } from "../db/workspaces.ts";
 import { cancelTask } from "../domain/cancelTask.ts";
 import { assertIntakeTransition, isIntakeTerminal } from "../domain/intakeStates.ts";
 import { killStaleChild, type ProcessProbe } from "../domain/recovery.ts";
+import { pinOf, type WorkflowLoader } from "../workflow/load.ts";
 import type { Tracker, TrackerOf } from "../tracker/tracker.ts";
 import type { WorkspaceRef, WorkspaceTracker } from "../tracker/workspaceTracker.ts";
 import type { Pfd } from "../../../shared/intake/pfd.ts";
+import type { IntakeMode } from "../../../shared/intake/state.ts";
 import { validateAnswers } from "../../../shared/intake/validateQuestion.ts";
-import { loadApprovedPlan } from "./dispatch.ts";
+import { insertDirectIntake, loadApprovedPlan } from "./dispatch.ts";
 import { baseBranchesOf, projectsOfProcesses } from "./processProject.ts";
 import { computeProcessStatuses } from "./pfd/status.ts";
 import { loadRevisionConstraints, processRowChanges, revisionIssues } from "./revision.ts";
@@ -54,11 +56,13 @@ async function requireIntake(db: Db, intakeId: string): Promise<IntakeRow> {
 /**
  * 同じ Issue の終わっていない Intake があれば、作らずにそれを返す。
  * 失敗応答は文字列しか運べず既存の id を返せないので、失敗にはしない（spec 13 章）。
+ * direct は調査を立てず、プロセス main とタスクを同じトランザクションで作る。ワークフローが読めなければ何も作らない。
  */
 export async function startIntake(
   db: Db,
   wt: Pick<WorkspaceTracker, "tracker" | "projectPathFor">,
-  o: { workspaceId: number; issueUrl: string; logRoot: string },
+  o: { workspaceId: number; issueUrl: string; logRoot: string; mode: IntakeMode },
+  deps: { loadWorkflow: WorkflowLoader },
 ): Promise<{ intake: IntakeRow; alreadyActive: boolean; problems: string[] }> {
   // gh が使えなくても、進行中の Intake は開けるように、gh を呼ぶ前にも引く。
   const opened = await findOpenIntakeByIssue(db, o.issueUrl);
@@ -73,21 +77,35 @@ export async function startIntake(
   const canonical = await findOpenIntakeByIssue(db, issue.url);
   if (canonical) return { intake: canonical, alreadyActive: true, problems: [] };
 
-  const id = crypto.randomUUID();
+  const problems: string[] = [];
+  const fields = {
+    id: crypto.randomUUID(),
+    workspace_id: o.workspaceId,
+    issue_url: issue.url,
+    issue_node_id: issue.nodeId,
+    issue_title: issue.title,
+  };
   try {
-    const intake = await db.transaction().execute(async (trx) => {
-      const row = await insertIntake(trx, {
-        id,
-        workspace_id: o.workspaceId,
-        issue_url: issue.url,
-        issue_node_id: issue.nodeId,
-        issue_title: issue.title,
+    let intake: IntakeRow;
+    if (o.mode === "direct") {
+      const project = await getProjectByPath(db, projectPath);
+      if (!project) throw new Error(`未登録のプロジェクトです: ${projectPath}`);
+      const loaded = await deps.loadWorkflow(project.path, project.default_workflow);
+      for (const w of loaded.warnings) problems.push(`作成時の検証: ${w}`);
+      intake = await insertDirectIntake(db, {
+        intake: fields,
+        project,
+        issue,
+        pin: pinOf(loaded, project),
       });
-      await enqueueIntakeRun(trx, id, "investigate", { logRoot: o.logRoot, resume: false });
-      return row;
-    });
+    } else {
+      intake = await db.transaction().execute(async (trx) => {
+        const row = await insertIntake(trx, fields);
+        await enqueueIntakeRun(trx, row.id, "investigate", { logRoot: o.logRoot, resume: false });
+        return row;
+      });
+    }
     // 失敗しても開始は成功させる。承認の後の見張りの周が issue_phase を見てやり直す
-    const problems: string[] = [];
     try {
       await advanceParentIssue(db, tracker, { projectPath, intake });
     } catch (e) {
@@ -267,6 +285,7 @@ export async function reviseIntake(
   o: { intakeId: string; comments: unknown; logRoot: string },
 ): Promise<IntakeTransition> {
   const intake = await requireIntake(db, o.intakeId);
+  if (intake.mode === "direct") throw new Error("direct の Intake は改訂できません");
   if (intake.state !== "active") {
     throw new Error(`改訂に入れる状態ではありません: ${intake.state}`);
   }
@@ -490,6 +509,7 @@ export async function setDispatchPaused(
   o: { intakeId: string; paused: boolean },
 ): Promise<IntakeRow> {
   const intake = await requireIntake(db, o.intakeId);
+  if (intake.mode === "direct") throw new Error("direct の Intake には自動投入がありません");
   const revising = intake.revising === 1 && !isIntakeTerminal(intake.state);
   if (intake.state !== "active" && !revising) {
     throw new Error(`自動 dispatch を切り替えられる状態ではありません: ${intake.state}`);

@@ -403,6 +403,7 @@ function intake(n: number, o: Partial<IntakeSummary>): IntakeSummary {
     workspace_id: 1,
     issue_url: `https://github.com/o/r/issues/${n}`,
     issue_title: `Issue ${n} のタイトル`,
+    mode: "plan",
     state: "investigating",
     revising: false,
     attention_reason: null,
@@ -642,6 +643,7 @@ export const INTAKE_ACTIVE: IntakeDetail = {
     ...status,
     sub_issue_url: `https://github.com/o/r/issues/10${i}`,
     task_ids: id === "design" ? ["t-old", "t1"] : [],
+    rail: null,
   })),
 };
 
@@ -722,22 +724,3 @@ export const ADDED_WORKSPACE: WorkspaceSummary & { created: string[]; alreadyReg
   ],
   alreadyRegistered: false,
 };
-
-/** 同梱の setup ワークフローで走るタスク（workflow_name は setup） */
-export function setupTask(state: Task["state"]): Task {
-  return {
-    id: "t-5e70",
-    wf: "setup",
-    project: "shop-api",
-    title: "shop-api のワークフローを作る",
-    prompt: "",
-    branch: "doctrine/t-5e70",
-    worktree: null,
-    state,
-    step: "apply",
-    attempt: 1,
-    prio: 2,
-    since: NOW - 5 * MIN,
-    intake: null,
-  };
-}

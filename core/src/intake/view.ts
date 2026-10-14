@@ -10,11 +10,19 @@ import {
 } from "../db/intakes.ts";
 import { loadQuestionSets } from "./questionSet.ts";
 import type { Db, IntakeDraftRow, IntakeRow } from "../db/schema.ts";
-import { getTask } from "../db/tasks.ts";
-import { baseBranchesOf, projectsOfProcesses } from "./processProject.ts";
+import { getProject, getTask } from "../db/tasks.ts";
+import { listStepRuns } from "../db/stepRuns.ts";
+import { taskWorkflow, toStepViews, type WorkflowLoader } from "../workflow/load.ts";
+import { buildRail, type RailNode } from "../../../shared/rail.ts";
+import { baseBranchesOf, directBaseBranch, projectsOfProcesses } from "./processProject.ts";
 import type { AttentionReason, CommentReply } from "../../../shared/intake/decomposer.ts";
 import type { Pfd } from "../../../shared/intake/pfd.ts";
-import type { PrFact, ProcessStatus } from "../../../shared/intake/processStatus.ts";
+import {
+  DIRECT_PROCESS_ID,
+  type PrFact,
+  type ProcessStatus,
+  type ProcessStatusEntry,
+} from "../../../shared/intake/processStatus.ts";
 import type { IntakeState } from "../../../shared/intake/state.ts";
 import type {
   IntakeDetail,
@@ -24,7 +32,7 @@ import type {
   StepRunDenials,
   WatchHealth,
 } from "../../../shared/protocol.ts";
-import { computeProcessStatuses, type ProcessProgress } from "./pfd/status.ts";
+import { computeProcessStatuses, directProcessStatus, type ProcessProgress } from "./pfd/status.ts";
 
 /** 人の手が要る状態か（spec 5 章）。active は、あなたの番か要確認のプロセスがあるときだけ。 */
 export function needsHuman(state: IntakeState, statuses: readonly ProcessStatus[]): boolean {
@@ -67,8 +75,22 @@ export async function processProgressOf(
   return progress;
 }
 
-/** 承認の前は空配列。承認後は、承認された案と DB の進み具合から組む。 */
+/** direct の Intake のプロセス main の状態（spec 5.3）。 */
+export async function directStatusOf(db: Db, intakeId: string): Promise<ProcessStatusEntry> {
+  const progress = (await processProgressOf(db, intakeId)).get(DIRECT_PROCESS_ID);
+  if (!progress) throw new Error(`direct の Intake ${intakeId} にプロセスがありません`);
+  return directProcessStatus(progress, await directBaseBranch(db, intakeId));
+}
+
+/**
+ * plan は承認の前は空配列。承認後は、承認された案と DB の進み具合から組む。
+ * direct はプロセス main の 1 つ。
+ */
 async function processStatusesOf(db: Db, row: IntakeRow): Promise<ProcessFacts[]> {
+  if (row.mode === "direct") {
+    const status = await directStatusOf(db, row.id);
+    return [{ id: status.id, status, subIssueUrl: null }];
+  }
   const approval = await latestApproval(db, row.id);
   if (!approval) return [];
   const pfd = JSON.parse((await getDraft(db, approval.draft_id))!.pfd) as Pfd;
@@ -99,6 +121,7 @@ function summaryOf(
     workspace_id: row.workspace_id,
     issue_url: row.issue_url,
     issue_title: row.issue_title,
+    mode: row.mode,
     state: row.state,
     revising: row.revising === 1,
     attention_reason:
@@ -142,11 +165,34 @@ export async function intakeDraft(db: Db, intakeId: string, draftId: number): Pr
   return toPfdDraft(row);
 }
 
+/** プロセス id → いまのタスクの帯。タスクが無いプロセスは入らない。 */
+async function railsOf(
+  db: Db,
+  intakeId: string,
+  loadWorkflow: WorkflowLoader,
+): Promise<Map<string, RailNode[] | null>> {
+  const rails = new Map<string, RailNode[] | null>();
+  for (const p of await listProcesses(db, intakeId)) {
+    if (p.retired_at !== null || p.current_task_id === null) continue;
+    const task = (await getTask(db, p.current_task_id))!;
+    const project = (await getProject(db, task.project_id))!;
+    // task.get と同じく、ワークフローが読めないことで intake.get を失敗させない
+    const workflow = await taskWorkflow(task, project, loadWorkflow).catch(() => null);
+    rails.set(
+      p.process_id,
+      buildRail(workflow && toStepViews(workflow), await listStepRuns(db, task.id), task),
+    );
+  }
+  return rails;
+}
+
 export async function toIntakeDetail(
   db: Db,
   row: IntakeRow,
   watch: WatchHealth,
+  loadWorkflow: WorkflowLoader,
 ): Promise<IntakeDetail> {
+  const rails = await railsOf(db, row.id, loadWorkflow);
   const facts = await processStatusesOf(db, row);
   const latest = await latestDraft(db, row.id);
   const approval = await latestApproval(db, row.id);
@@ -195,6 +241,7 @@ export async function toIntakeDetail(
         ...f.status,
         sub_issue_url: f.subIssueUrl,
         task_ids: taskIds.get(f.id) ?? [],
+        rail: rails.get(f.id) ?? null,
       }),
     ),
     runs: (await listIntakeRuns(db, row.id)).map((r) => ({

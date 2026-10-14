@@ -52,18 +52,6 @@ export function SettingsFields(props: {
         </p>
         {errors.terminalCommand && <p className="hint error">{errors.terminalCommand}</p>}
       </div>
-      <div className="settings-field">
-        <label className="hint" htmlFor="settings-stale-days">古い worktree とみなす日数</label>
-        <input
-          type="text"
-          inputMode="numeric"
-          id="settings-stale-days"
-          value={form.staleDays}
-          onChange={(e) => onChange({ ...form, staleDays: e.target.value })}
-        />
-        <p className="hint">終端状態になってからこの日数を過ぎた worktree を古いとみなします。</p>
-        {errors.staleDays && <p className="hint error">{errors.staleDays}</p>}
-      </div>
       <div className="actions">
         <button className="btn primary" disabled={!check.ok || pending} onClick={onSave}>保存</button>
       </div>

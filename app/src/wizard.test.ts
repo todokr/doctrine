@@ -5,15 +5,11 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 
 import { ADDED_WORKSPACE, DETECT_EXISTING, DETECT_PARENT, DETECT_REPO_ROOT } from "./fixtures";
 import {
-  DEFAULT_POLICY,
   blocker,
   initialWizard,
   next,
-  policyQuestions,
-  setupTargets,
   submitWizard,
   withDetection,
-  WorkspaceSetupError,
   type WizardState,
 } from "./wizard";
 import type { WorkspaceDetection } from "../../shared/protocol.ts";
@@ -51,10 +47,10 @@ describe("画面の分岐", () => {
     expect(next(onProjects)).toBe("tracker");
   });
 
-  test("workspace.yaml があれば tracker を飛ばして policy へ進む", () => {
+  test("workspace.yaml があれば tracker を飛ばして confirm へ進む", () => {
     const s = detected("/Users/me/work", DETECT_EXISTING, { step: "projects" });
     expect(blocker(s)).toBeNull();
-    expect(next(s)).toBe("policy");
+    expect(next(s)).toBe("confirm");
   });
 
   test("git 管理外で直下にリポジトリが無ければ先へ進めない", () => {
@@ -95,40 +91,16 @@ describe("画面の分岐", () => {
     expect(blocker({ ...s, tracker: { kind: "linear", team: " " } })).toContain("チーム");
     expect(blocker({ ...s, tracker: { kind: "linear", team: "ENG" } })).toBeNull();
   });
-
-  test("PR を開かない方針なら sync は false になり、追従の問を出さない", async () => {
-    expect(policyQuestions(DEFAULT_POLICY)).toHaveLength(7);
-    const branchOnly = { ...DEFAULT_POLICY, pr: "branch_only" as const, sync: true };
-    expect(policyQuestions(branchOnly).map((q) => q.key)).not.toContain("sync");
-
-    const calls = daemon({
-      "workspace.add": () => Promise.resolve(ADDED_WORKSPACE),
-      "workspace.setup": () => Promise.resolve([]),
-    });
-    await submitWizard(detected("/Users/me/work", DETECT_PARENT, { step: "confirm", policy: branchOnly }));
-    const setup = calls.find(([m]) => m === "workspace.setup")!;
-    expect((setup[1] as { policy: { sync: boolean } }).policy.sync).toBe(false);
-  });
-});
-
-describe("setupTargets", () => {
-  test("setupTargets は created に default.yaml が入っているプロジェクトだけを返す", () => {
-    expect(setupTargets(ADDED_WORKSPACE, ADDED_WORKSPACE.created)).toEqual(["shop-api"]);
-    expect(setupTargets(ADDED_WORKSPACE, [])).toEqual([]);
-  });
 });
 
 describe("submitWizard", () => {
-  test("submitWizard は workspace.add → workspace.setup の順に呼ぶ", async () => {
-    const calls = daemon({
-      "workspace.add": () => Promise.resolve(ADDED_WORKSPACE),
-      "workspace.setup": () => Promise.resolve([{ id: "t-5e70" }]),
-    });
+  test("submitWizard は workspace.add だけを呼ぶ", async () => {
+    const calls = daemon({ "workspace.add": () => Promise.resolve(ADDED_WORKSPACE) });
     const s = detected("/Users/me/work", DETECT_PARENT, {
       step: "confirm",
       tracker: { kind: "linear", team: "ENG" },
     });
-    const r = await submitWizard(s);
+    await submitWizard(s);
     expect(calls).toEqual([
       [
         "workspace.add",
@@ -138,9 +110,7 @@ describe("submitWizard", () => {
           tracker: { kind: "linear", team: "ENG" },
         },
       ],
-      ["workspace.setup", { workspace: 7, projects: ["shop-api"], policy: DEFAULT_POLICY }],
     ]);
-    expect(r.tasks).toEqual([{ id: "t-5e70" }]);
   });
 
   test("Linear のチームのキーは前後の空白を落として送る", async () => {
@@ -157,7 +127,6 @@ describe("submitWizard", () => {
   test("選ばなかったリポジトリは projects に入れない", async () => {
     const calls = daemon({
       "workspace.add": () => Promise.resolve(ADDED_WORKSPACE),
-      "workspace.setup": () => Promise.resolve([]),
     });
     const s = detected("/Users/me/work", DETECT_PARENT, { step: "confirm" });
     await submitWizard({ ...s, projects: [s.projects[0], { ...s.projects[1], selected: false }] });
@@ -188,32 +157,12 @@ describe("submitWizard", () => {
     expect(calls[0][1]).toEqual({ path: "/Users/me/work" });
   });
 
-  test("setup の対象が無ければ workspace.setup を呼ばない", async () => {
-    const calls = daemon({
-      "workspace.add": () => Promise.resolve({ ...ADDED_WORKSPACE, created: ["/Users/me/work/web/.doctrine/project.yaml"] }),
-    });
-    const r = await submitWizard(detected("/Users/me/work", DETECT_PARENT, { step: "confirm" }));
-    expect(calls.map(([m]) => m)).toEqual(["workspace.add"]);
-    expect(r.tasks).toEqual([]);
-  });
-
-  test("workspace.add が失敗したら投げ、workspace.setup を呼ばない", async () => {
+  test("workspace.add が失敗したら投げる", async () => {
     const calls = daemon({
       "workspace.add": () => Promise.reject("projects の web と api が同じパスを指しています"),
     });
     const s = detected("/Users/me/work", DETECT_PARENT, { step: "confirm" });
     await expect(submitWizard(s)).rejects.toBe("projects の web と api が同じパスを指しています");
     expect(calls.map(([m]) => m)).toEqual(["workspace.add"]);
-  });
-
-  test("workspace.setup が失敗したら、登録済みであることが分かる形で投げる", async () => {
-    daemon({
-      "workspace.add": () => Promise.resolve(ADDED_WORKSPACE),
-      "workspace.setup": () => Promise.reject("policy は必須です"),
-    });
-    const s = detected("/Users/me/work", DETECT_PARENT, { step: "confirm" });
-    const e = await submitWizard(s).catch((x: unknown) => x);
-    expect(e).toBeInstanceOf(WorkspaceSetupError);
-    expect((e as Error).message).toContain("policy は必須です");
   });
 });

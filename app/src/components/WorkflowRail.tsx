@@ -7,13 +7,12 @@ import type {
 } from "../../../shared/protocol.ts";
 import {
   buildDefinitionRail,
-  buildRail,
   laneY,
   NODE_H,
   NODE_W,
-  type RailNode,
   ROW_TOP,
 } from "../rail";
+import { buildRail, type RailNode } from "../../../shared/rail.ts";
 import { RUN_TONE, toneClass } from "../tone";
 
 /** `useId()` の記号（«r0» など）は url(#…) の中で WebKit が解決しないことがあるので、英数字だけにする */

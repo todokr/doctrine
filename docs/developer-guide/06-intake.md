@@ -6,6 +6,11 @@ Epic 粒度の Issue を、人がレビューした計画（PFD）と、順に�
 
 ## 6.1 全体の流れ
 
+取り込みには 2 種類ある（`intakes.mode`）。**plan** は下の流れで PFD に分解する。**direct** は分解しない。
+`intake.start`（`mode: "direct"`）が Intake（`active`）、プロセス `main`（`shared/intake/processStatus.ts:DIRECT_PROCESS_ID`）の行、
+タスク 1 本を 1 トランザクションで作る（`dispatch.ts:insertDirectIntake`）。調査・分解・承認・sub-issue・投入は無く、
+タスクの `issue_url` は親 Issue そのもの、ワークフローはプロジェクトの既定である。
+
 1. `intake.start` — 調査エージェントが Issue とリポジトリを読み、**質問**（人の判断が要る論点）と**仮定**（根拠から導いた結論）を返す
 2. `intake.answer` — 人が答え、仮定を認めるか書き直す
 3. 分解エージェントが Issue を **PFD**（成果物とプロセスの 2 種類の要素だけからなる図）に割る。デーモンが規則で検証し、通った案だけが人に届く
@@ -43,13 +48,14 @@ Epic 粒度の Issue を、人がレビューした計画（PFD）と、順に�
 | `answering` | 回答待ち |
 | `decomposing` | 分解中（改訂中なら改訂の実行） |
 | `reviewing` | 案のレビュー待ち |
-| `active` | 承認済み。sub-issue・投入・見張りが動く |
+| `active` | 承認済み（plan）か、direct で開始した。PR の観測と完了の判定が動き、plan では sub-issue と投入も動く |
 | `needs_attention` | 調査・分解の実行が失敗した |
 | `completed` / `canceled` | 終端 |
 
 ```mermaid
 stateDiagram-v2
   [*] --> investigating: intake.start
+  [*] --> active: intake.start（direct）
   investigating --> answering: 質問か仮定がある
   investigating --> decomposing: 質問も仮定も無い
   investigating --> needs_attention: 失敗 / 検証落ち 3 回 / 書き換え
@@ -72,6 +78,9 @@ stateDiagram-v2
 
 - `active → needs_attention` の辺は無い。承認後の失敗（sub-issue の作成、gh、タスクの停止）は Intake の状態を変えず、見張りの健康状態とプロセスごとの状態で見せる。1 つのプロセスの失敗で他の投入を止めないため
 - 遷移表には `needs_attention → investigating / decomposing`（やり直し）の辺もあるが、それを起こす RPC（`intake.retry`）は未実装である（[10 章](10-known-gaps.md)）
+- 作ったときの状態は `domain/intakeStates.ts:initialIntakeState` が mode から決める
+- direct の Intake には `intake.revise` と `intake.setDispatchPaused` を拒む。プロセス `main` の状態は
+  `pfd/status.ts:directProcessStatus` がタスクと PR だけから求める（`running` / `pr_open` / `merged` / `needs_attention`）
 - 書き込みはすべて `db/intakes.ts:updateIntake(..., { requireState })` で行い、遷移の正しさは呼び出し側が `assertIntakeTransition` で確かめる
 - 状態を変えた操作は `IntakeTransition` を返し、ハンドラが `intake.stateChanged` を配る。状態以外の変化は `intake.updated`
 
@@ -194,6 +203,8 @@ Process  = { id, name, actor: "agent" | "human", inputs: string[], outputs: stri
 **成果物は baseBranch にマージされたものである。** タスクの間で成果物を直接渡す経路は無く、下流のタスクは上流の PR がマージされた後に作られるので、
 worktree を切った時点で上流の成果物を持っている。
 
+`intake.get` の各プロセスは、いまのタスクのステップの帯 `rail` も持つ（`shared/rail.ts:buildRail`。タスクが pin したワークフローで組み、読めなければ null）。
+
 ## 6.7 承認の後
 
 ### sub-issue の同期（`subIssueSync.ts:syncSubIssues`）
@@ -216,6 +227,7 @@ worktree を切った時点で上流の成果物を持っている。
   タイトルはプロセス名、ワークフローはプロジェクトの既定、`issue_url` は sub-issue
 - **二重投入の防止**: `insertTask` と `replaceCurrentTask`（読んだ `current_task_id` と一致するときだけ置き換える）を 1 トランザクションで行う。0 行なら巻き戻す
 - `intake.redispatch` は `needs_attention` のプロセスに新しいタスクを作って置き換える。古いタスクは記録として残し、worktree は消す
+- direct の `intake.redispatch` は sub-issue を見ず、置き換えるタスクの題・prompt・プロジェクトを写した新しいタスクを作る（`dispatch.ts:redispatchDirect`）
 
 ### 見張り（`watch.ts`）
 
@@ -230,6 +242,10 @@ worktree を切った時点で上流の成果物を持っている。
 5. 観測したマージコミットが `origin/<base>` に届いているか（`git merge-base --is-ancestor`）を確かめてから投入する
 6. Linear なら sub-issue の状態を進める
 7. goal が揃っていれば `completed`。親 Issue は閉じない（`intake.closeIssue` で人が閉じる）
+
+direct の Intake は承認を持たないので、2 の sub-issue の同期と投入は何もしない。3 の観測は同じく行い、
+6 は Linear なら親 Issue だけを進める（`issueStateSync.ts:advanceParentIssue`。sub-issue が無いので sub-issue の分は動かない）。
+プロセス `main` が `merged` になれば `completed` にする（`watch.ts:reachedGoal`）。
 
 健康状態（`WatchHealth`: 最後に成功した時刻、連続失敗の回数、最後のエラー）はメモリだけに持ち、画面へ `IntakeSummary.watch` として渡る。
 

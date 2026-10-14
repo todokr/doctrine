@@ -13,8 +13,7 @@ import {
 } from "../workflow/project.ts";
 import { applyWorkflowChanges, writeWorkflowYaml } from "../workflow/save.ts";
 import type { TrackerConfig } from "../workflow/workspace.ts";
-import { pinOf, type WorkflowLoader, type WorkflowPin } from "../workflow/load.ts";
-import { SETUP_WORKFLOW_NAME, setupPrompt, setupWorkflowYaml } from "../workflow/setupWorkflow.ts";
+import { pinOf, toStepViews, type WorkflowLoader, type WorkflowPin } from "../workflow/load.ts";
 import {
   getProject,
   getProjectByPath,
@@ -26,12 +25,7 @@ import {
   type TaskRow,
   type TaskState,
 } from "../db/tasks.ts";
-import {
-  getWorkspaceByPath,
-  listProjectsOf,
-  listWorkspaces,
-  workspaceRefOf,
-} from "../db/workspaces.ts";
+import { getWorkspaceByPath, listWorkspaces, workspaceRefOf } from "../db/workspaces.ts";
 import {
   addWorkspace,
   syncProjectRow,
@@ -111,9 +105,7 @@ import type {
   IntakeLogs,
   RateLimitSample,
   ServerEvent,
-  SetupPolicy,
   StepRunDenials,
-  StepView,
   TaskGuide,
   TaskLogs,
   WorkflowDetail,
@@ -156,15 +148,6 @@ function parseDenials(raw: string | null): StepRunDenials | null {
   } catch {
     return null;
   }
-}
-
-/** 帯が描く分だけを残す。title は approval だけが持つ。 */
-function toStepViews(workflow: Workflow): StepView[] {
-  return workflow.steps.map((step) => {
-    const view: StepView = { id: step.id, type: step.type };
-    if (step.type === "approval") view.title = step.title;
-    return view;
-  });
 }
 
 /** workflow.get が返すステップ1件。branch は branchOf で分岐の種類を問わず取り出す。 */
@@ -323,7 +306,12 @@ function broadcastIntakeTransition(ctx: DaemonContext, t: IntakeTransition): voi
 /** 行を読み直して IntakeDetail にする。 */
 async function intakeDetailOf(ctx: DaemonContext, intakeId: string) {
   const row = (await getIntake(ctx.db, intakeId))!;
-  return await toIntakeDetail(ctx.db, row, ctx.intakeWatcher.health(row.workspace_id));
+  return await toIntakeDetail(
+    ctx.db,
+    row,
+    ctx.intakeWatcher.health(row.workspace_id),
+    ctx.loadWorkflow,
+  );
 }
 
 /** 操作が返した遷移をイベントにして配り、読み直した行の要約を返す。 */
@@ -471,42 +459,6 @@ export function createHandler(ctx: DaemonContext): Handler {
         // task.create の応答に乗せておけば、ログを探しに行かなくても
         // タスクを作った人の目の前に出る。
         return { ...task, warnings: loaded.warnings };
-      }
-      case "workspace.setup": {
-        const workspace = reqNumber(params, "workspace");
-        const names = params.projects;
-        if (!Array.isArray(names) || names.some((n) => typeof n !== "string")) {
-          throw new Error("projects は文字列の配列で渡してください");
-        }
-        const policy = params.policy as SetupPolicy | undefined;
-        if (!policy || typeof policy !== "object") throw new Error("policy は必須です");
-        if (policy.pr === "branch_only" && policy.sync) {
-          throw new Error("PR を開かない方針（pr: branch_only）では sync を true にできません");
-        }
-        const projects = await listProjectsOf(ctx.db, workspace);
-        const targets = (names as string[]).map((name) => {
-          const project = projects.find((p) => p.name === name);
-          if (!project) {
-            throw new Error(`workspace ${workspace} にプロジェクト ${name} はありません`);
-          }
-          return project;
-        });
-        const workflowYaml = setupWorkflowYaml();
-        return await ctx.db.transaction().execute(async (trx) => {
-          const tasks: TaskRow[] = [];
-          for (const project of targets) {
-            tasks.push(
-              await createTaskRow(trx, project, {
-                title: `${project.name} のワークフローを作る`,
-                prompt: setupPrompt(policy, project.base_branch),
-                workflowName: SETUP_WORKFLOW_NAME,
-                // 依存のインストールなどの setup は、YAML を書くだけのこのタスクには要らない
-                pin: { workflow_yaml: workflowYaml, workflow_setup: null },
-              }),
-            );
-          }
-          return tasks;
-        });
       }
       case "task.list": {
         const filter: { projectId?: number; state?: TaskState } = {};
@@ -851,13 +803,22 @@ export function createHandler(ctx: DaemonContext): Handler {
       }
 
       case "intake.start": {
+        const mode = params.mode;
+        if (mode !== "plan" && mode !== "direct") throw new Error("mode は plan か direct です");
         const ws = await reqWorkspace(ctx, params);
         const wt = await ctx.trackerOf(await workspaceRefOf(ctx.db, ws.id));
-        const { intake, alreadyActive, problems } = await startIntake(ctx.db, wt, {
-          workspaceId: ws.id,
-          issueUrl: req(params, "issue_url"),
-          logRoot: ctx.logRoot,
-        });
+        const { intake, alreadyActive, problems } = await startIntake(
+          ctx.db,
+          wt,
+          {
+            workspaceId: ws.id,
+            issueUrl: req(params, "issue_url"),
+            logRoot: ctx.logRoot,
+            mode,
+          },
+          { loadWorkflow: ctx.loadWorkflow },
+        );
+        // direct の作成時の検証の警告は、task.create と同じくタスクに紐づけずに積む
         for (const message of problems) ctx.warnings.push(message);
         const summary = await toIntakeSummary(
           ctx.db,
@@ -884,7 +845,12 @@ export function createHandler(ctx: DaemonContext): Handler {
       case "intake.get": {
         const intake = await getIntake(ctx.db, req(params, "intake_id"));
         if (!intake) throw new Error("Intake がありません");
-        return await toIntakeDetail(ctx.db, intake, ctx.intakeWatcher.health(intake.workspace_id));
+        return await toIntakeDetail(
+          ctx.db,
+          intake,
+          ctx.intakeWatcher.health(intake.workspace_id),
+          ctx.loadWorkflow,
+        );
       }
       case "intake.answer":
         return await settleIntakeCommand(

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { IntakeLogPanel } from "./components/IntakeLog";
-import { IntakeFacePlaceholder, IntakeHeading, RevisingBand } from "./components/IntakeView";
+import { IntakeFacePlaceholder, IntakeHeading, MovedToExecution, RevisingBand } from "./components/IntakeView";
 import { IssueChooser, IssueList, IssuePreview, TrackerUnavailable } from "./components/IssuePicker";
 import { GITHUB_ISSUES, INTAKES, LINEAR_ISSUES, WORKSPACES } from "./fixtures";
 
@@ -68,10 +68,15 @@ describe("IssuePreview", () => {
     expect(html).not.toContain("Intake を開始");
   });
 
-  test("Intake の無い Issue は開始ボタンを出す", () => {
-    const html = preview({});
-    expect(html).toMatch(/<button(?![^>]*disabled)[^>]*>Intake を開始<\/button>/);
-    expect(preview({ pending: true })).toMatch(/<button[^>]*disabled=""[^>]*>Intake を開始<\/button>/);
+  test("Intake の無い Issue は、計画して進めるとすぐ実行するの 2 つのボタンを出し、どちらも主ボタンにしない", () => {
+    const html = preview({ target: { kind: "start", url: "https://github.com/o/r/issues/8" } });
+    expect(html).toContain("計画して進める");
+    expect(html).toContain("複数の PR に分ける");
+    expect(html).toContain("すぐ実行する");
+    expect(html).toContain("1 本の PR で済ませる");
+    expect(html).not.toContain("btn primary");
+    expect(html).not.toContain("Intake を開始");
+    expect(preview({ pending: true })).toMatch(/<button[^>]*disabled=""[^>]*>計画して進める/);
   });
 
   test("本文は読み込み中・失敗・取れたときで出し分ける", () => {
@@ -239,6 +244,19 @@ describe("TrackerUnavailable", () => {
 });
 
 describe("IntakeView の部品", () => {
+  test("見出しのパンくずは label、見出しに種類の印を出す", () => {
+    const html = renderToStaticMarkup(
+      <IntakeHeading intake={{ ...reviewing, mode: "direct" }} workspace={WORKSPACES[0]} label="Execution" />,
+    );
+    expect(html).toContain('<span class="lbl">Execution</span>');
+    expect(html).toContain(">Direct<");
+  });
+
+  test("Execution へ移った Intake は案内と開くボタンを出す", () => {
+    const html = renderToStaticMarkup(<MovedToExecution onOpen={noop} />);
+    expect(html).toContain("Execution で開く");
+  });
+
   test("面の枠は状態の語と面の種類を出す", () => {
     const html = renderToStaticMarkup(<IntakeFacePlaceholder intake={reviewing} />);
     expect(html).toContain('data-face="review"');

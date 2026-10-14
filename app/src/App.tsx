@@ -1,14 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import { Composer } from "./components/Composer";
 import { ConnectionBanner } from "./components/ConnectionBanner";
 import { fileAnchor } from "./components/DiffFileBlock";
+import { ExecutionView } from "./components/ExecutionView";
 import { IntakeView } from "./components/IntakeView";
-import { ReviewView } from "./components/ReviewView";
 import { Rail, Sidebar } from "./components/Sidebar";
 import { SettingsView } from "./components/SettingsView";
 import { SetupWizard } from "./components/SetupWizard";
-import { TaskView } from "./components/TaskView";
-import { RemoveWorktreeModal, WorktreeView } from "./components/WorktreeView";
+import { RemoveWorktreeModal } from "./components/RemoveWorktree";
 import { sendDecision } from "./decision";
 import { composeRejection, diffOf, draftOf, layoutOf, scopeOf, selectedTask } from "./model";
 import { useDecide, useStore } from "./store";
@@ -64,11 +62,11 @@ function RejectModal() {
 }
 
 /**
- * main の上端に最も近い selector の要素から delta だけ離れた要素へスクロールする。
+ * パネルの上端に最も近い selector の要素から delta だけ離れた要素へスクロールする。
  * 上端をまたいでいる要素（今読んでいるもの）を基準にする
  */
 function moveBy(selector: string, delta: 1 | -1) {
-  const main = document.querySelector("main.main");
+  const main = document.querySelector(".exec-panel-body");
   if (!main) return;
   const els = [...main.querySelectorAll<HTMLElement>(selector)];
   if (!els.length) return;
@@ -99,6 +97,7 @@ function useKeys() {
       if (e.key === "Escape" && s.modal) return dispatch({ type: "modal.close" });
       if (e.key === "Escape" && s.removing) return dispatch({ type: "remove.close" });
       if (e.key === "j" || e.key === "k") return dispatch({ type: "move", delta: e.key === "j" ? 1 : -1 });
+      if (s.view !== "execution") return;
       const t = selectedTask(s);
       if (!t || t.state !== "suspended") return;
       const loaded = diffOf(s, t.id, scopeOf(s, t.id));
@@ -129,12 +128,11 @@ function useKeys() {
 export default function App() {
   const { s } = useStore();
   useKeys();
-  const t = selectedTask(s);
   const mainRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
     mainRef.current?.scrollTo({ top: 0 });
-  }, [s.sel, s.intakeSel, s.composer?.opened]);
+  }, [s.view, s.intakeSel, s.execSel]);
 
   const toast = s.toast && <div className="toast" role="status">{s.toast}</div>;
 
@@ -155,21 +153,7 @@ export default function App() {
         <Rail />
         <Sidebar />
         <main className="main" ref={mainRef}>
-          {s.view === "worktrees" ? (
-            <WorktreeView />
-          ) : s.view === "settings" ? (
-            <SettingsView />
-          ) : s.view === "intake" ? (
-            <IntakeView />
-          ) : s.composer ? (
-            <Composer key={s.composer.opened} init={s.composer.init} />
-          ) : !t ? (
-            <div className="pad"><p className="hint">左からタスクを選んでください</p></div>
-          ) : t.state === "suspended" ? (
-            <ReviewView key={t.id} t={t} />
-          ) : (
-            <TaskView key={t.id} t={t} />
-          )}
+          {s.view === "settings" ? <SettingsView /> : s.view === "intake" ? <IntakeView /> : <ExecutionView />}
         </main>
       </div>
       <RejectModal />

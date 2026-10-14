@@ -1,16 +1,18 @@
 import { type Dispatch, useEffect, useState } from "react";
 import type { IssueDetail, TrackerKind } from "../../../shared/intake/tracker.ts";
-import type { IntakeSummary, TrackerIssue } from "../../../shared/protocol.ts";
+import type { IntakeMode, IntakeSummary, TrackerIssue } from "../../../shared/protocol.ts";
 import { type Cached, revalidate, trackerCache, trackerCacheKey } from "../trackerCache";
 import {
   issueIdentifier,
+  inIntakeList,
   issueTarget,
+  MODE_WORD,
   parseIssueInput,
   trackerGuidance,
   type IssueTarget,
 } from "../intake";
 import { type Action, clock, type Loaded } from "../model";
-import { useIntakeRpc, useStore } from "../store";
+import { useIntakeRpc, useRefresh, useStore } from "../store";
 import type { Workspace } from "../types";
 import { StatusDot } from "./StatusDot";
 import { Markdown } from "./text";
@@ -101,7 +103,7 @@ export function IssuePreview(
     detail: Loaded<IssueDetail> | undefined;
     target: IssueTarget;
     pending: boolean;
-    onStart: () => void;
+    onStart: (mode: IntakeMode) => void;
     onOpen: (intakeId: string) => void;
   },
 ) {
@@ -129,7 +131,12 @@ export function IssuePreview(
       <div className="actions">
         {target.kind === "open"
           ? <button className="btn" onClick={() => onOpen(target.intakeId)}>進行中の Intake を開く</button>
-          : <button className="btn primary" disabled={pending} onClick={onStart}>Intake を開始</button>}
+          : (["plan", "direct"] as const).map((mode) => (
+            <button key={mode} className="btn" disabled={pending} onClick={() => onStart(mode)}>
+              {MODE_WORD[mode].name}
+              <span className="hint">（{MODE_WORD[mode].hint}）</span>
+            </button>
+          ))}
       </div>
     </div>
   );
@@ -231,11 +238,18 @@ export function pickerWorkspace(workspaces: Workspace[], chosen: number | undefi
 export async function startIntake(
   root: string,
   issueUrl: string,
-  deps: { start: ReturnType<typeof useIntakeRpc>["start"]; dispatch: Dispatch<Action> },
+  mode: IntakeMode,
+  deps: {
+    start: ReturnType<typeof useIntakeRpc>["start"];
+    dispatch: Dispatch<Action>;
+    refresh: () => Promise<void>;
+  },
 ): Promise<void> {
   try {
-    const { alreadyActive: _, ...intake } = await deps.start(root, issueUrl);
+    const { alreadyActive: _, ...intake } = await deps.start(root, issueUrl, mode);
     deps.dispatch({ type: "intake.started", intake });
+    // direct は開始と同時にタスクを投入する。次の取り直しを待たずに一覧へ載せる
+    if (intake.mode === "direct") void deps.refresh();
   } catch (e) {
     deps.dispatch({ type: "toast", message: `Intake を始められませんでした（${errorMessage(e)}）` });
   }
@@ -260,6 +274,7 @@ export function WorkspacePick(props: {
 export function IssuePicker() {
   const { s, dispatch } = useStore();
   const api = useIntakeRpc();
+  const refresh = useRefresh();
   const [chosen, setChosen] = useState<number | undefined>(() => s.workspace === "all" ? undefined : s.workspace);
   const workspace = pickerWorkspace(s.workspaces, chosen);
   const root = workspace?.path;
@@ -383,11 +398,15 @@ export function IssuePicker() {
             detail={detail}
             target={issueTarget(picked.url, s.intakes)}
             pending={pending}
-            onOpen={(id) => dispatch({ type: "intake.select", id })}
-            onStart={async () => {
+            onOpen={(id) => {
+              // 承認済みの Intake は Intake の一覧に無いので、Execution で開く
+              const row = s.intakes.find((i) => i.id === id);
+              dispatch(row && !inIntakeList(row, s.intakeRevise) ? { type: "intake.open", id } : { type: "intake.select", id });
+            }}
+            onStart={async (mode) => {
               setPending(true);
               try {
-                await startIntake(workspace.path, picked.url, { start: api.start, dispatch });
+                await startIntake(workspace.path, picked.url, mode, { start: api.start, dispatch, refresh });
               } finally {
                 setPending(false);
               }

@@ -26,22 +26,19 @@ import type { QuestionSetReply } from "../../shared/intake/validateQuestion.ts";
 import type {
   DaemonSlots,
   IntakeDetail,
+  IntakeMode,
   IntakeSummary,
   NewComment,
-  ParamsOf,
   PfdDraft,
   ProjectConfig,
   ProjectConfigInput,
   ProjectSummary,
-  ResultOf,
   TrackerIssue,
-  Warning,
   WorkflowDetail,
   WorkflowListEntry,
   WorkflowSaveResult,
   WorkflowStepChange,
   WorkspaceSummary,
-  WorktreeEntry,
 } from "../../shared/protocol.ts";
 import {
   contextOf,
@@ -76,7 +73,7 @@ function initialState(): State {
     logs: {},
     limits: {},
     now: Date.now(),
-    view: "tasks",
+    view: "execution",
     workspace: "all",
     sel: null,
     scope: {},
@@ -87,10 +84,12 @@ function initialState(): State {
     gen: {},
     intakes: [],
     intakeSel: null,
-    showClosedIntakes: false,
+    execSel: null,
+    execClosed: false,
     intakeDetails: {},
     intakeLogs: {},
     intakeGen: {},
+    intakeStale: {},
     intakeRevise: null,
     drafts: {},
     intakeDrafts: {},
@@ -99,11 +98,8 @@ function initialState(): State {
     modal: null,
     toast: null,
     conn: { status: "connecting" },
-    worktrees: [],
-    warnings: [],
     removing: null,
     settings: { kind: "loading" },
-    composer: null,
     wizard: null,
     workspaces: [],
     workspacesChecked: false,
@@ -121,6 +117,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   // 新しい応答の後に届くと、画面が一度古い状態に巻き戻る。
   // 最後に始めた1本だけが反映してよい（ロジック自体は refreshGate.ts でテスト済み）
   const [refreshGate] = useState(() => createRefreshGate());
+  // 帯の取り直しは詳細を消さずに何本も走る。最後に始めた 1 本だけを反映する
+  const [detailGate] = useState(() => createRefreshGate());
   // 購読の effect の中で作る refresh を、外の effect からも呼べるようにする
   const refreshRef = useRef<(() => Promise<void>) | null>(null);
 
@@ -140,10 +138,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           // ratelimit.sample は agent ステップが走っている間しか飛ばない。開いた直後に
           // 空欄にしないために DB の直近の行で埋める。これが落ちても一覧は出す
           rpc("ratelimit.recent", {}).catch(() => []),
-          // 「すべて」で出した終了分を取り直しで消さないよう、今の切り替えを渡す。
+          // 「終了」で出した分を取り直しで消さないよう、今の切り替えを渡す。
           // これが落ちてもタスクの一覧は出す。落ちたときは null にして、前の一覧と
           // Intake の下書きを残す（空の一覧で sync すると下書きが全部消える）
-          rpc("intake.list", { include_closed: latest.current.showClosedIntakes }).catch(
+          rpc("intake.list", { include_closed: latest.current.execClosed }).catch(
             (): IntakeSummary[] | null => null,
           ),
           // これが落ちても一覧は出す。落ちたときは null にして、前の workspace の一覧を残す
@@ -169,22 +167,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           dispatch({ type: "workspaces.sync", workspaces: workspaces.map(toWorkspace) });
           // 0 件ならウィザードを出す。読めなかった回は出さず、次の取り直しでまた読む
           if (!latest.current.workspacesChecked) dispatch({ type: "workspaces.checked", count: workspaces.length });
-        }
-
-        // worktree.list は worktree ごとに git status を回す（重い）ので、タスク一覧の
-        // 反映をそれに待たせないよう別の Promise.all で取る。
-        // アイコンの点はビューを開いていなくても要るので取り直しに乗せる
-        const [worktreeList, warningList] = await Promise.all([
-          rpc("worktree.list", {}).catch((): WorktreeEntry[] | null => null),
-          rpc("daemon.warnings", {}).catch((): Warning[] | null => null),
-        ]);
-        if (!alive || !refreshGate.isLatest(token)) return;
-        if (worktreeList || warningList) {
-          dispatch({
-            type: "worktrees.sync",
-            worktrees: worktreeList ?? latest.current.worktrees,
-            warnings: warningList,
-          });
         }
       } catch (e) {
         // 切断中は失敗して当然。理由はバナーが出している。
@@ -377,13 +359,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       );
   }, [reviewing, needGuide, gen]);
 
-  // 「すべて」の切り替えは、次の 15 秒を待たずに取り直す
+  // 「終了」の切り替えは、次の 15 秒を待たずに取り直す
   useEffect(() => {
     void refreshRef.current?.();
-  }, [s.showClosedIntakes]);
+  }, [s.execClosed]);
 
   // 開いている Intake の詳細。選ばれていて、まだ取っていないものだけ
-  const intakeId = s.view === "intake" && s.intakeSel !== "new" ? s.intakeSel : null;
+  const intakeId = s.view === "intake"
+    ? (s.intakeSel === "new" ? null : s.intakeSel)
+    : s.view === "execution"
+    ? s.execSel
+    : null;
   const needIntake = intakeId !== null && intakeDetailOf(s, intakeId) === undefined;
   const intakeGen = intakeId ? intakeGenOf(s, intakeId) : 0;
 
@@ -404,6 +390,22 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         })
       );
   }, [intakeId, needIntake, intakeGen]);
+
+  // Execution で開いている Intake のタスクが動いたら、詳細を残したまま取り直す（spec 7.2）
+  const execId = s.view === "execution" ? s.execSel : null;
+  const stale = execId === null ? 0 : s.intakeStale[execId] ?? 0;
+  useEffect(() => {
+    if (execId === null || stale === 0) return;
+    const id = execId;
+    const gen = intakeGenOf(latest.current, id);
+    const token = detailGate.begin();
+    void rpc("intake.get", { intake_id: id })
+      .then((value) => {
+        if (detailGate.isLatest(token)) dispatch({ type: "intake.detail", id, gen, loaded: { kind: "ok", value } });
+      })
+      // 落ちたら前の詳細を残す。次のタスクのイベントで取り直す
+      .catch(() => {});
+  }, [execId, stale]);
 
   useEffect(() => {
     if (!s.toast) return;
@@ -447,7 +449,7 @@ export function useDecide() {
     pause: (taskId: string) => rpc("task.pause", { task_id: taskId }),
     resume: (taskId: string) => rpc("task.resume", { task_id: taskId }),
     // 確認ダイアログを経た後しか呼ばないので、常に force を付ける
-    removeWorktree: (path: string) => rpc("worktree.remove", { path, force: true }),
+    removeWorktree: (taskId: string) => rpc("worktree.remove", { task_id: taskId, force: true }),
   };
 }
 
@@ -473,8 +475,9 @@ export function useIntakeRpc() {
     start: (
       workspacePath: string,
       issueUrl: string,
+      mode: IntakeMode,
     ): Promise<IntakeSummary & { alreadyActive: boolean }> =>
-      rpc("intake.start", { workspace: workspacePath, issue_url: issueUrl }),
+      rpc("intake.start", { workspace: workspacePath, issue_url: issueUrl, mode }),
     answer: (intakeId: string, questionSetId: number, reply: QuestionSetReply): Promise<IntakeSummary> =>
       rpc("intake.answer", {
         intake_id: intakeId,
@@ -528,19 +531,6 @@ export function useProjectConfigRpc(): ProjectConfigRpc {
     get: (project: string) => rpc("project.config.get", { project }),
     workflows: (project: string) => rpc("workflow.list", { project }),
     save: (project: string, config: ProjectConfigInput) => rpc("project.config.save", { project, config }),
-  };
-}
-
-/** コンポーザの RPC。project は Project.path。useIntakeRpc と同じくここでは catch しない */
-export type ComposerRpc = {
-  workflows: (project: string) => Promise<WorkflowListEntry[]>;
-  create: (params: ParamsOf<"task.create">) => Promise<ResultOf<"task.create">>;
-};
-
-export function useComposerRpc(): ComposerRpc {
-  return {
-    workflows: (project: string) => rpc("workflow.list", { project }),
-    create: (params: ParamsOf<"task.create">) => rpc("task.create", params),
   };
 }
 

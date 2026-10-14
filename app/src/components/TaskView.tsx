@@ -1,5 +1,4 @@
 import { Fragment, type ReactNode, useEffect, useState } from "react";
-import { canRetry, retryInit } from "../composer";
 import { rpc } from "../daemon/client";
 import { sendDecision } from "../decision";
 import {
@@ -16,7 +15,6 @@ import {
   RUN_WORD,
   stepRunHistory,
   stopReasons,
-  type ComposerInit,
 } from "../model";
 import { useDecide, useNotYet, useStore } from "../store";
 import { RUN_TONE, TASK_TONE } from "../tone";
@@ -24,7 +22,7 @@ import type { Task, TaskState } from "../types";
 import { StatusDot } from "./StatusDot";
 import { LogBlock } from "./LogBlock";
 import { Crumbs, OpenInEditor } from "./ReviewView";
-import { RemoveWorktreeButton } from "./WorktreeView";
+import { RemoveWorktreeButton } from "./RemoveWorktree";
 import { WorkflowRail } from "./WorkflowRail";
 
 export const STATE_WORD: Record<TaskState, string> = {
@@ -122,49 +120,11 @@ export function TaskActions(props: {
   );
 }
 
-/** hook を使わない。押すと init を渡して onOpen を呼ぶ */
-export function RetryButton(props: { init: ComposerInit; onOpen: (init: ComposerInit) => void }) {
-  return <button className="btn sm" onClick={() => props.onOpen(props.init)}>同じ内容で投入し直す</button>;
-}
-
-/** Intake 由来のタスクのやり直し方の案内。Intake の画面を開くボタンを添える */
-export function IntakeRetryHint(props: { intakeId: string; onOpenIntake: (id: string) => void }) {
+/** Intake 由来のタスクのやり直し方の案内 */
+export function IntakeRetryHint() {
   return (
     <p className="hint">
-      Intake から投入したタスクです。やり直すには、Intake の画面の「操作が必要」から「再投入する」を押してください。
-      <button className="el-link" onClick={() => props.onOpenIntake(props.intakeId)}>Intake を開く</button>
-    </p>
-  );
-}
-
-/** 同梱の setup ワークフローで default.yaml を書き終えた後の案内 */
-export function SetupDoneNotice({ t }: { t: Task }) {
-  if (t.wf !== "setup" || t.state !== "completed") return null;
-  return (
-    <section className="box attn">
-      <p>
-        <span className="mono">.doctrine/workflows/default.yaml</span> を書き換えました（未コミット）。
-        コミットしてから、Issue を取り込むかタスクを作ってください。
-      </p>
-    </section>
-  );
-}
-
-/** 失敗・中止した setup のタスクの立て直し方。setup は投入し直せないので、default.yaml を手で置く */
-export function SetupRetryHint({ t }: { t: Task }) {
-  if (t.wf !== "setup") return null;
-  return (
-    <p className="hint">
-      ワークフローを作るタスクは投入し直せません。
-      {t.worktree && (
-        <>
-          worktree の <span className="mono">.doctrine-out/default.yaml</span> が書けていれば、それを
-          <span className="mono">{t.project}</span> の <span className="mono">.doctrine/workflows/default.yaml</span>{" "}
-          に写してください。
-        </>
-      )}
-      {t.worktree ? "あるいは、" : ""}
-      ウィザードが置いた雛形の <span className="mono">.doctrine/workflows/default.yaml</span> を直接直してください。
+      Intake から投入したタスクです。やり直すには、Execution の「操作が必要」かプロセスの欄から「再投入する」を押してください。
     </p>
   );
 }
@@ -203,9 +163,6 @@ export function TaskView({ t }: { t: Task }) {
     }
   }
 
-  const openComposer = (init: ComposerInit) => dispatch({ type: "composer.open", init });
-  const openIntake = (id: string) => dispatch({ type: "intake.open", id });
-
   const detail = s.detail[t.id];
   const history = stepRunHistory(detail);
   const log = s.logs[t.id];
@@ -213,12 +170,8 @@ export function TaskView({ t }: { t: Task }) {
 
   // 今のステップが何回目か。履歴の先頭が今の（または最後の）実行にあたる
   const attempt = history[0]?.attempt ?? 1;
-  // t.worktree（DB の worktree_path）と worktree.list の path は文字列として一致するとは
-  // 限らない（デーモンは canonical() で比べている）ので、task_id で引く
-  const worktreeEntry = s.worktrees.find((e) => e.task_id === t.id);
-  const removePath = worktreeEntry?.path ?? t.worktree;
-  // 削除拒否は「完了時に未コミットの変更が残っていた」ので、行が見つからなくても true とみなす
-  const removeDirty = worktreeEntry?.dirty ?? (t.refused ? true : null);
+  // 削除拒否は「完了時に未コミットの変更が残っていた」ので true。それ以外は分からない
+  const removeDirty = t.refused ? true : null;
 
   return (
     <div className="pad">
@@ -237,7 +190,6 @@ export function TaskView({ t }: { t: Task }) {
         </span>
       </div>
 
-      <SetupDoneNotice t={t} />
       {stopReasons(s.tasks, t, detail).map((r) => {
         if (r.kind === "failed") {
           return (
@@ -251,9 +203,7 @@ export function TaskView({ t }: { t: Task }) {
               {t.worktree
                 ? (
                   <p>
-                    {canRetry(t)
-                      ? "worktree は証拠として残しています。中を確認してから、同じ内容で投入し直すか、削除してください。"
-                      : "worktree は証拠として残しています。中を確認してから削除してください。"}
+                    worktree は証拠として残しています。中を確認してから削除してください。
                   </p>
                 )
                 : (
@@ -261,12 +211,10 @@ export function TaskView({ t }: { t: Task }) {
                     worktree は残っていないので、中を見ることはできません。記録だけが残っています。
                   </p>
                 )}
-              {t.intake && <IntakeRetryHint intakeId={t.intake.id} onOpenIntake={openIntake} />}
-              <SetupRetryHint t={t} />
-              {(canRetry(t) || t.worktree) && (
+              {t.intake && <IntakeRetryHint />}
+              {t.worktree && (
                 <div className="actions">
-                  {canRetry(t) && <RetryButton init={retryInit(t, s.projects)} onOpen={openComposer} />}
-                  {t.worktree && <RemoveWorktreeButton path={removePath!} dirty={removeDirty} />}
+                  <RemoveWorktreeButton taskId={t.id} path={t.worktree} dirty={removeDirty} />
                 </div>
               )}
             </section>
@@ -277,7 +225,7 @@ export function TaskView({ t }: { t: Task }) {
             <section className="box danger" key="refused">
               <h2>worktree の削除を拒否しました</h2>
               <p>完了時に未コミットの変更が残っていました。ワークフローの最終ステップがコミットしていない可能性があります。中を確認してから削除してください。</p>
-              <RemoveWorktreeButton path={removePath!} dirty={removeDirty} />
+              <RemoveWorktreeButton taskId={t.id} path={t.worktree!} dirty={removeDirty} />
             </section>
           );
         }
@@ -290,13 +238,7 @@ export function TaskView({ t }: { t: Task }) {
       {t.state === "canceled" && (
         <section className="box quiet">
           <p>{t.worktree ? "中止しました。worktree は残しています。" : "中止しました。worktree は残っていません。"}</p>
-          {t.intake && <IntakeRetryHint intakeId={t.intake.id} onOpenIntake={openIntake} />}
-          <SetupRetryHint t={t} />
-          {canRetry(t) && (
-            <div className="actions">
-              <RetryButton init={retryInit(t, s.projects)} onOpen={openComposer} />
-            </div>
-          )}
+          {t.intake && <IntakeRetryHint />}
         </section>
       )}
       {t.state === "rate_limited" && (

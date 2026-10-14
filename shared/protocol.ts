@@ -11,7 +11,10 @@ import type { Pfd } from "./intake/pfd.ts";
 import type { ProcessStatus } from "./intake/processStatus.ts";
 import type { Answer, AssumptionResponse } from "./intake/question.ts";
 import type { QuestionSetContent, QuestionSetReply } from "./intake/validateQuestion.ts";
-import type { IntakeRunPurpose, IntakeRunStatus, IntakeState } from "./intake/state.ts";
+import type { IntakeMode, IntakeRunPurpose, IntakeRunStatus, IntakeState } from "./intake/state.ts";
+import type { RailNode } from "./rail.ts";
+
+export type { IntakeMode };
 
 export type Request = { id: number; method: string; params?: Record<string, unknown> };
 
@@ -308,18 +311,6 @@ export type ProjectSummary = {
   setup: string | null;
 };
 
-/** Quick Start で選んだワークフローの方針。setup のタスクの draft が読む。 */
-export type SetupPolicy = {
-  plan: boolean;
-  agentReview: boolean;
-  guide: boolean;
-  approval: "after_implement" | "after_plan_and_implement";
-  pr: "open_and_wait" | "branch_only";
-  /** pr が branch_only なら false */
-  sync: boolean;
-  models: { plan: string; implement: string; review: string; guide: string };
-};
-
 export type WorkspaceSummary = {
   id: number;
   path: string;
@@ -488,6 +479,7 @@ export type IntakeSummary = {
   workspace_id: number;
   issue_url: string;
   issue_title: string;
+  mode: IntakeMode;
   state: IntakeState;
   revising: boolean;
   attention_reason: AttentionReason | null;
@@ -540,6 +532,7 @@ export type IntakeRun = {
 export type IntakeProcessView = { id: string } & ProcessStatus & {
     sub_issue_url: string | null;
     task_ids: string[];
+    rail: RailNode[] | null;
   };
 
 /**
@@ -594,15 +587,6 @@ export type Methods = {
   /** ウィザードの「このディレクトリを選ぶ」ボタンが呼ぶ。ファイルは書かない。 */
   "workspace.detect": { params: { path: string }; result: WorkspaceDetection };
   /**
-   * 対象プロジェクトごとに、方針に沿って .doctrine/workflows/default.yaml を作るタスクを 1 つ作る。
-   * タスクは同梱の setup ワークフローを pin し、project.yaml の setup は差し込まない。
-   * workspace に無い名前が 1 つでもあれば何も作らない。
-   */
-  "workspace.setup": {
-    params: { workspace: number; projects: string[]; policy: SetupPolicy };
-    result: TaskSummary[];
-  };
-  /**
    * <project>/.doctrine/workflows/*.yaml を名前の昇順で。検証に落ちたものも issues とともに返す。
    * 既定の印と、setup を差し込んだ後のステップの列を添える。
    */
@@ -655,7 +639,7 @@ export type Methods = {
   };
   "tracker.issue": { params: { workspace: string; url: string }; result: IssueDetail };
   "intake.start": {
-    params: { workspace: string; issue_url: string };
+    params: { workspace: string; issue_url: string; mode: IntakeMode };
     result: IntakeSummary & { alreadyActive: boolean };
   };
   "intake.list": {

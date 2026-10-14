@@ -3,6 +3,7 @@
 - 日付: 2026-09-27
 - 状態: 設計合意
 - 前提: [workspace の設計](2026-09-26-workspace-design.md)（stage1 の Task 3 まで。`workspace.add` / `workspace.update` / `workspace.list`）
+- 後続: [アプリの再構成: Intake と Execution](2026-10-14-intake-execution-design.md) の 8.2 で、setup のタスク（5 章）と方針の聞き取り（4.5）を取り除いた。ウィザードは workspace の登録だけを行う
 
 ## 1. 何が足りないか
 

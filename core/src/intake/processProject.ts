@@ -1,4 +1,5 @@
 import type { Pfd, Process } from "../../../shared/intake/pfd.ts";
+import { DIRECT_PROCESS_ID } from "../../../shared/intake/processStatus.ts";
 import type { Db, ProjectRow } from "../db/schema.ts";
 import { listProjectsOf } from "../db/workspaces.ts";
 
@@ -32,4 +33,18 @@ export function missingProjectMessage(process: Process): string {
     return `プロセス ${process.id} に project がありません。改訂で project を足してください`;
   }
   return `プロジェクト ${process.project} は workspace にありません`;
+}
+
+/** direct の Intake の、いまのタスクのプロジェクトの base_branch。 */
+export async function directBaseBranch(db: Db, intakeId: string): Promise<string> {
+  const row = await db
+    .selectFrom("intake_processes as p")
+    .innerJoin("tasks as t", "t.id", "p.current_task_id")
+    .innerJoin("projects as pr", "pr.id", "t.project_id")
+    .select("pr.base_branch as base_branch")
+    .where("p.intake_id", "=", intakeId)
+    .where("p.process_id", "=", DIRECT_PROCESS_ID)
+    .executeTakeFirst();
+  if (!row) throw new Error(`direct の Intake ${intakeId} にタスクがありません`);
+  return row.base_branch;
 }

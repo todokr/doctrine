@@ -26,7 +26,7 @@ describe("WorkspaceFilterSelect", () => {
 
 function row(o: Partial<Parameters<typeof IntakeRow>[0]>) {
   return renderToStaticMarkup(
-    <IntakeRow intake={INTAKES[0]} workspace={WORKSPACES[1]} selected={false} now={NOW} onSelect={noop} {...o} />,
+    <IntakeRow intake={INTAKES[0]} workspace={WORKSPACES[1]} tone="run" selected={false} now={NOW} onSelect={noop} {...o} />,
   );
 }
 

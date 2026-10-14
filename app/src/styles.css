@@ -61,6 +61,7 @@ h1,h2,h3,h4,h5,h6,b,strong{font-weight:500}
 .ib[aria-pressed="true"]{background:var(--accent-soft);color:var(--accent-text)}
 .ib svg{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
 .ib .pip{position:absolute;top:6px;right:6px;width:7px;height:7px;border-radius:50%;background:var(--accent);border:2px solid var(--side)}
+.it .row-pip{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--accent)}
 
 /* sidebar */
 .side{background:var(--side);border-right:1px solid var(--line);display:flex;flex-direction:column;min-height:0}
@@ -505,8 +506,6 @@ tr.wt-stale{background:var(--accent-soft)}
 .wz-choices label{display:flex;gap:6px;align-items:center}
 .wz-q{border:1px solid var(--line);border-radius:9px;padding:8px 12px 10px;margin:0;display:grid;gap:6px}
 .wz-q legend{padding:0 4px;font-weight:500}
-.wz-models{display:grid;grid-template-columns:1fr 1fr;gap:8px}
-.wz-models label{display:grid;gap:3px}
 
 /* ワークフローのステップ編集欄 */
 .wf-edit{display:grid;gap:10px}
@@ -549,10 +548,22 @@ tr.wt-stale{background:var(--accent-soft)}
 /* PFD のプロセスの状態（spec 3.4） */
 .pfd-bar{stroke:var(--tone);stroke-width:4;stroke-linecap:round}
 .pfd-bar.dashed{stroke-dasharray:5 3;stroke-linecap:butt}
+/* Execution の図のステップの区画。.pfd-node rect の塗りと枠、選択の枠を区画には当てない */
+.pfd-node rect.pfd-step,.pfd-node.selected rect.pfd-step,.pfd-node:focus-visible rect.pfd-step{fill:var(--tone);stroke:none}
+/* いまのステップはタスク画面の帯（.wf-step.now .bar）と同じ薄い縁取り。区画の名前は状態の文言にある */
+.pfd-node rect.pfd-step.now,.pfd-node.selected rect.pfd-step.now,.pfd-node:focus-visible rect.pfd-step.now{stroke:var(--tone-soft);stroke-width:3;paint-order:stroke}
+/* Execution の図の状態の文言。状態の色は言葉の文字だけに使う */
+.pfd-status{font-size:10px}
+.pfd-status-word{fill:var(--tone-text);font-weight:500}
+.pfd-status-detail{fill:var(--ink-2)}
+/* 人の番は地の塗りだけで示す（spec 6.3）。枠は選択の枠のまま */
+.pfd-node.attention rect.pfd-box{fill:var(--accent-soft)}
 /* Intake の状態ごとの件数（spec 3.5）。.count はサイドバーの既存の件数表示と名前が被るので .counts 配下だけに絞る */
 .counts{display:flex;gap:18px;flex-wrap:wrap}
 .counts .count{display:grid;gap:3px;min-width:88px}
 .counts .count .v{font-family:var(--mono);font-size:12px}
+.counts .attn-jump{font:inherit;text-align:left;background:none;border:none;padding:0;cursor:pointer;color:inherit}
+.counts .attn-jump:disabled{cursor:default;opacity:.6}
 .counts .count .b{height:4px;border-radius:2px;background:var(--tone)}
 .counts .count.dashed .b{background:repeating-linear-gradient(90deg,var(--tone) 0 5px,transparent 5px 8px)}
 
@@ -563,3 +574,15 @@ tr.wt-stale{background:var(--accent-soft)}
 .prompt.clamp{display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}
 .toggle{justify-self:start !important;border:0;background:transparent;padding:0;color:var(--human-text);font-size:12px;text-decoration:underline;text-underline-offset:3px;cursor:pointer}
 .feedback{border-left:3px solid var(--accent);background:var(--accent-soft);border-radius:0 7px 7px 0;padding:10px 12px;line-height:1.65;white-space:pre-wrap;overflow-wrap:anywhere}
+
+/* Execution: 図の領域と下のパネル（spec 6.5）。外枠が main の高さを埋め、図とパネルがそれぞれスクロールする */
+.exec{display:flex;flex-direction:column;flex:1;min-height:0}
+.exec-top{flex:1;min-height:0;overflow:auto}
+.exec.maximized .exec-top{display:none}
+.exec-panel{display:flex;flex-direction:column;min-height:0;border-top:1px solid var(--line);background:var(--surface);position:relative}
+.exec-panel.max{flex:1}
+.exec-split{position:absolute;top:-4px;left:0;right:0;height:8px;cursor:row-resize;touch-action:none}
+.exec-panel-head{display:flex;align-items:center;gap:8px;padding:6px 14px;border-bottom:1px solid var(--line)}
+.exec-panel-title{font-weight:500;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.exec-panel-body{flex:1;min-height:0;overflow:auto}
+.exec-trail{display:flex;gap:18px;flex-wrap:wrap;padding:10px 24px 0}

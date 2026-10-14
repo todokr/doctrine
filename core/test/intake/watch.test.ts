@@ -422,7 +422,7 @@ test("baseBranch 以外へのマージでは下流を投入しない", async () 
   await watcher.request(workspaceId);
   assert.equal((await listTasks(db)).length, 1);
   const row = (await getIntake(db, "i1"))!;
-  const detail = await toIntakeDetail(db, row, watcher.health(workspaceId));
+  const detail = await toIntakeDetail(db, row, watcher.health(workspaceId), fakeWorkflowLoader());
   const p1 = detail.processes.find((p) => p.id === "1")!;
   assert.equal(p1.state, "needs_attention");
   assert.equal("reason" in p1 && p1.reason, "pr_closed");

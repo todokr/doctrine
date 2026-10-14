@@ -31,19 +31,19 @@ describe("useDecide の一時停止・再開", () => {
 });
 
 describe("useDecide の worktree の削除", () => {
-  test("確定すると force 付きの worktree.remove をパスで送る", async () => {
-    await useDecide().removeWorktree("/s/worktrees/doctrine/x");
+  test("確定すると force 付きの worktree.remove をタスク ID で送る", async () => {
+    await useDecide().removeWorktree("t-e812");
     expect(invoke).toHaveBeenCalledTimes(1);
     expect(invoke).toHaveBeenCalledWith("rpc", {
       method: "worktree.remove",
-      params: { path: "/s/worktrees/doctrine/x", force: true },
+      params: { task_id: "t-e812", force: true },
     });
   });
 
   test("拒否されたら理由付きの失敗になる", async () => {
     invoke.mockRejectedValueOnce("終わっていないタスク（running）の worktree は消せません");
     const r = await sendDecision(
-      useDecide().removeWorktree("/s/worktrees/doctrine/x"),
+      useDecide().removeWorktree("t-e812"),
       "worktree を削除できませんでした",
     );
     expect(r).toEqual({

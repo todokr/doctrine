@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { seedTasks } from "./fixtures";
 import { groupOf } from "./model";
-import { INTAKE_TONE, PROCESS_TONE, RUN_TONE, TASK_TONE, groupTone, sectionTone, toneClass } from "./tone";
+import { INTAKE_TONE, PROCESS_TONE, RUN_TONE, TASK_TONE, executionTone, groupTone, sectionTone, toneClass } from "./tone";
 import type { IntakeSummary } from "../../shared/protocol.ts";
 import type { Task } from "./types";
 
@@ -62,9 +62,14 @@ describe("トーンの対応表", () => {
     expect(sectionTone("attention", i({ state: "needs_attention" }))).toBe("danger");
     expect(sectionTone("attention", i({ state: "reviewing" }))).toBe("human");
     expect(sectionTone("working", i({ state: "investigating" }))).toBe("run");
-    expect(sectionTone("active", i({ state: "active" }))).toBe("idle");
-    expect(sectionTone("closed", i({ state: "completed" }))).toBe("ok");
-    expect(sectionTone("closed", i({ state: "canceled" }))).toBe("idle");
+  });
+
+  test("executionTone は完了 ok・中止 idle・人の番 human・それ以外 run", () => {
+    const i = (o: Partial<IntakeSummary>) => ({ state: "active", ...o }) as IntakeSummary;
+    expect(executionTone(i({ state: "completed" }), false)).toBe("ok");
+    expect(executionTone(i({ state: "canceled" }), false)).toBe("idle");
+    expect(executionTone(i({ state: "active" }), true)).toBe("human");
+    expect(executionTone(i({ state: "active" }), false)).toBe("run");
   });
 
   test("クラス名", () => {

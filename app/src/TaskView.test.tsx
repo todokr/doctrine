@@ -1,8 +1,7 @@
-import { describe, expect, test, vi } from "vitest";
+import { describe, expect, test } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
-import { IntakeRetryHint, RetryButton, SetupDoneNotice, SetupRetryHint, TaskActions } from "./components/TaskView";
-import { retryInit } from "./composer";
-import { PROJECTS, seedTasks, setupTask } from "./fixtures";
+import { IntakeRetryHint, TaskActions } from "./components/TaskView";
+import { seedTasks } from "./fixtures";
 import type { Task } from "./types";
 
 const task = (id: string) => seedTasks().find((t) => t.id === id)!;
@@ -67,77 +66,10 @@ describe("TaskActions", () => {
   });
 });
 
-describe("RetryButton", () => {
-  test("「同じ内容で投入し直す」のボタンを出す", () => {
-    const h = renderToStaticMarkup(<RetryButton init={retryInit(task("t-e812"), PROJECTS)} onOpen={noop} />);
-    expect(h).toContain("同じ内容で投入し直す");
-    expect(h).toContain('class="btn sm"');
-  });
-
-  test("押すと元のタスクの中身を渡してコンポーザを開く", () => {
-    const onOpen = vi.fn();
-    RetryButton({ init: retryInit(task("s-1105"), PROJECTS), onOpen }).props.onClick();
-    expect(onOpen).toHaveBeenCalledTimes(1);
-    expect(onOpen).toHaveBeenCalledWith({
-      project: "~/work/shop-api",
-      workflow: "shop-api/feature",
-      title: "決済 Webhook の署名検証",
-      prompt: "決済 Webhook の署名検証。詳細は issue を参照してください。",
-    });
-  });
-});
-
 describe("IntakeRetryHint", () => {
-  test("Intake の再投入を案内し、投入し直すボタンは出さない", () => {
-    const h = renderToStaticMarkup(<IntakeRetryHint intakeId="i1" onOpenIntake={noop} />);
+  test("Execution の再投入を案内する", () => {
+    const h = renderToStaticMarkup(<IntakeRetryHint />);
     expect(h).toContain("再投入する");
-    expect(h).toContain("Intake を開く");
-    expect(h).not.toContain("同じ内容で投入し直す");
-    expect(h).not.toContain("pfd.yaml");
-  });
-});
-
-describe("SetupDoneNotice", () => {
-  const COMMIT = "コミットしてから、Issue を取り込むかタスクを作ってください";
-
-  test("setup のタスクが completed ならコミットの案内を出す", () => {
-    const h = renderToStaticMarkup(<SetupDoneNotice t={setupTask("completed")} />);
-    expect(h).toContain(".doctrine/workflows/default.yaml");
-    expect(h).toContain("（未コミット）");
-    expect(h).toContain(COMMIT);
-  });
-
-  test("setup のタスクでも completed でなければ出さない", () => {
-    for (const state of ["running", "suspended", "failed"] as const) {
-      expect(renderToStaticMarkup(<SetupDoneNotice t={setupTask(state)} />)).toBe("");
-    }
-  });
-
-  test("ほかのワークフローのタスクには出さない", () => {
-    expect(renderToStaticMarkup(<SetupDoneNotice t={task("t-0a77")} />)).toBe("");
-    expect(renderToStaticMarkup(<SetupDoneNotice t={{ ...setupTask("completed"), wf: "default" }} />)).toBe("");
-  });
-});
-
-describe("SetupRetryHint", () => {
-  test("worktree が残っていれば .doctrine-out/default.yaml を写す案内と、雛形を直す案内を出す", () => {
-    const h = renderToStaticMarkup(
-      <SetupRetryHint t={{ ...setupTask("failed"), worktree: "/Users/me/.doctrine/worktrees/t-5e70" }} />,
-    );
-    expect(h).toContain(".doctrine-out/default.yaml");
-    expect(h).toContain("shop-api");
-    expect(h).toContain(".doctrine/workflows/default.yaml");
-    expect(h).toContain("雛形");
-    expect(h).not.toContain("同じ内容で投入し直す");
-  });
-
-  test("worktree が無ければ雛形を直す案内だけを出す", () => {
-    const h = renderToStaticMarkup(<SetupRetryHint t={setupTask("canceled")} />);
-    expect(h).not.toContain(".doctrine-out/default.yaml");
-    expect(h).toContain("雛形");
-  });
-
-  test("ほかのワークフローのタスクには出さない", () => {
-    expect(renderToStaticMarkup(<SetupRetryHint t={task("t-e812")} />)).toBe("");
+    expect(h).not.toContain("Intake を開く");
   });
 });
