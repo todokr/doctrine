@@ -1,0 +1,3 @@
+# app はリポジトリ直下の pnpm workspace（core・shared）に入らず、自前の pnpm-lock.yaml を持つ。
+# このファイルが無いと pnpm がルートの pnpm-workspace.yaml を拾い、app/node_modules を作らない。
+packages: []
