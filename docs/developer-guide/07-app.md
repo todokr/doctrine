@@ -73,7 +73,7 @@ localStorage を使わないのは、WebView を作り直すと消えるため�
 
 ### `model.ts` と `store.tsx`
 
-- [`app/src/model.ts`](../../app/src/model.ts): `State` と `Action` の型、純関数の `reduce`、画面の導出（サイドバーの区分、差し戻し文の組み立て、利用上限の表示、デーモンの形から画面の形への変換）。副作用を持たない
+- [`app/src/model.ts`](../../app/src/model.ts): `State` と `Action` の型、純関数の `reduce`、画面の導出（Intake の一覧の絞り込みと区分、差し戻し文の組み立て、利用上限の表示、デーモンの形から画面の形への変換）。副作用を持たない
 - [`app/src/store.tsx`](../../app/src/store.tsx): `StoreProvider` と副作用のすべて（購読、取り直し、下書きと設定の読み書き、レビュー中のタスクの diff / context / guide の取得、Intake の詳細の取得）。
   RPC を束ねるフック（`useDecide` / `useIntakeRpc` / `useSettingsRpc` / `useProjectConfigRpc` / `useWorkflowRpc` / `useSlotsRpc`）を export する
 - 送信のフックは catch しない。呼び出し側が `app/src/decision.ts:sendDecision` で `{ ok }` / `{ ok: false, message }` に変え、成功したときだけ後片付けの action を dispatch する（失敗したときに下書きを消さないため）
@@ -115,25 +115,26 @@ localStorage を使わないのは、WebView を作り直すと消えるため�
 ## 7.4 画面とファイルと RPC
 
 骨格は `app/src/App.tsx`。左端のアイコン列（`Rail`）、サイドバー、本体、モーダル、トーストからなる。
-本体は `view` と選んでいるタスクの状態で振り分け、`suspended` なら `ReviewView`、それ以外なら `TaskView` を出す。
+本体は `view`（`intake` / `execution` / `settings`）で振り分ける。Execution の本体（`ExecutionView`）は選んだ Intake の図を出し、
+図の下のスロットに、選んだ要素の欄と、開いたタスクの画面（`suspended` なら `ReviewView`、それ以外なら `TaskView`）を出す。
 
 | 画面 | ファイル | 使う RPC |
 | --- | --- | --- |
 | 接続バナー | `components/ConnectionBanner.tsx` | — |
-| サイドバー（タスク・Intake・worktree・設定） | `components/Sidebar.tsx` | —（store が取る） |
+| サイドバー（Intake・Execution・設定） | `components/Sidebar.tsx`、`components/ExecutionSidebar.tsx` | —（store が取る） |
 | 利用上限 | `components/RateLimit.tsx` | —（store が取る） |
-| タスク画面 | `components/TaskView.tsx`、`WorkflowRail.tsx`、`LogBlock.tsx` | `task.get`、`task.logs`、`task.pause` / `resume` / `cancel` |
+| タスク画面 | `components/TaskView.tsx`、`WorkflowRail.tsx`、`LogBlock.tsx`、`RemoveWorktree.tsx` | `task.get`、`task.logs`、`task.pause` / `resume` / `cancel`、`worktree.remove` |
 | レビュー画面 | `components/ReviewView.tsx`、`ReadingFlow.tsx`、`Guide.tsx`、`DiffFileBlock.tsx`、`Diagrams.tsx` | `task.diff` / `task.context` / `task.guide`、`task.approve`、`task.reject`（`App.tsx:RejectModal`） |
 | Intake の振り分け | `components/IntakeView.tsx` | `intake.abandonRevision`、`intake.cancel` |
 | Issue の選択 | `components/IssuePicker.tsx` | `tracker.status` / `tracker.issues` / `tracker.issue`、`intake.start` |
 | 質問に答える | `components/AnswerFace.tsx`、`QuestionForm.tsx`、`MaterialView.tsx`、`EvidenceView.tsx` | `intake.answer` |
 | 計画のレビュー | `components/PlanReview.tsx`、`PfdDiagram.tsx`、`PfdElementPanel.tsx`、`IntakeHistory.tsx` | `intake.processPrompt`、`intake.reject`、`intake.approve`、`intake.draft` |
-| 進行中の Intake | `components/IntakeProgress.tsx`、`StatusCounts.tsx` | `intake.completeHumanProcess`、`intake.redispatch`、`intake.refresh`、`intake.setDispatchPaused`、`intake.closeIssue`、`intake.revise` |
+| Execution | `components/ExecutionView.tsx`、`IntakeProgress.tsx`（部品）、`StatusCounts.tsx` | `intake.completeHumanProcess`、`intake.redispatch`、`intake.refresh`、`intake.setDispatchPaused`、`intake.closeIssue`、`intake.revise` |
+| 改訂に入る | `components/ReviseFace.tsx` | `intake.revise` |
 | Intake のログ | `components/IntakeLog.tsx` | `intake.logs` |
-| worktree と警告 | `components/WorktreeView.tsx` | `worktree.remove` |
 | 設定 | `components/SettingsView.tsx`、`ProjectConfigSection.tsx`、`WorkflowSettings.tsx` | `load_settings` / `save_settings`、`daemon.slots`、`daemon.setGlobalLimit`、`project.config.*`、`workflow.*` |
 
-`shared/protocol.ts` の `Methods` にある RPC は `task.create` を除いてどこかの画面が使っている（コンポーザは後続）。
+`shared/protocol.ts` の `Methods` にある RPC は `task.create` を除いてどこかの画面が使っている（`task.create` はどの画面も使わない）。
 
 キー操作（`App.tsx:useKeys`）: `j` / `k` で一覧を移動、`n` / `p` でファイル（ガイドの順では hunk）、`[` / `]` でガイドのグループ、`Esc` でモーダルを閉じる。
 **承認と差し戻しにはキーを割り当てない。**
@@ -145,10 +146,10 @@ React も Tauri も持ち込まず、同名の `*.test.ts` で単体テストす
 | ファイル | 役割 |
 | --- | --- |
 | `intake.ts` | Intake 画面の導出（回答の正規化と検証、サイドバーの区分、どの面を出すか、コメントの操作、進行中の面の操作の出し分け） |
+| `execution.ts` | Execution の一覧に並ぶか・区切り・人の番・並び |
 | `pfd.ts` | PFD の図の配置。列は `diagram.ts:layoutGraph` の最長路に任せ、列の中の順は重心法で交差を減らす |
 | `rail.ts` | 設定画面のワークフローの定義図。タスク画面の帯の組み立て（`buildRail`）は `shared/rail.ts` にあり、デーモンの `intake.get` も使う |
 | `workflowEdit.ts` / `projectConfig.ts` / `settings.ts` | 設定フォームの変換・検証・差分・エラーの欄への振り分け。`workflowEdit.ts:TEMPLATE_VARIABLES` は `core/src/workflow/template.ts` と一致することをテストで固定している |
-| `worktrees.ts` | worktree の古さと削除可否、警告の並び |
 | `trackerCache.ts` | トラッカーの応答の stale-while-revalidate |
 | `tone.ts` | 状態の色 5 種の唯一の対応表。**状態の色はここからだけ引く** |
 | `patch.ts` / `flow.ts` / `guide.ts` / `moves.ts` / `diagram.ts` / `highlight.ts` | レビュー画面（[5 章](05-review-guide.md)） |
