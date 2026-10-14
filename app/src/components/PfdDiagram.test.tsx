@@ -52,7 +52,7 @@ describe("PfdDiagram", () => {
     expect(given).toContain("既存");
     const goal = block(html, "成果物", "リリース");
     expect(openTag(goal)).toContain("goal");
-    expect(goal).toContain("◎");
+    expect(goal).toContain("🏁");
     const decision = block(html, "成果物", "出力方針");
     expect(openTag(decision)).toContain("decision");
     expect(decision).toContain("決定");
@@ -203,7 +203,7 @@ describe("PfdDiagram の Execution の図", () => {
     expect(human).not.toMatch(/class="pfd-mark"[^>]*>[^<]*人/);
     expect(block(html, "成果物", "Issue")).toMatch(/class="pfd-badge"[^]*>既存<\/text>/);
     expect(block(html, "成果物", "出力方針")).toMatch(/class="pfd-badge"[^]*>決定<\/text>/);
-    expect(block(html, "成果物", "リリース")).toMatch(/class="pfd-badge"[^]*>◎<\/text>/);
+    expect(block(html, "成果物", "リリース")).toMatch(/class="pfd-badge"[^]*>🏁<\/text>/);
   });
 
   test("計画の図は状態の線・段の数字・プロジェクト名・人の印を描き、状態の文言と区画は描かない", () => {

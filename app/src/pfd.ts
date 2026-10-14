@@ -45,7 +45,7 @@ export type PfdNode = {
   lines: string[];
   /** ラベルの最初の行のベースライン。行は LINE_H ずつ下げる */
   labelY: number;
-  /** 種類の印（◎・既存・決定・人・🔒）。プロセスはラベルの上の小さな行、成果物は badge に描く。Execution の図のプロセスは持たない */
+  /** 種類の印（🏁・既存・決定・人・🔒）。プロセスはラベルの上の小さな行、成果物は badge に描く。Execution の図のプロセスは持たない */
   marks: string[];
   /** 成果物の印を描く札。箱の左上の角にまたがる。印の無い成果物とプロセスは null */
   badge: { x: number; y: number; w: number; h: number } | null;
@@ -343,7 +343,7 @@ export function buildPfdView(
   const marksOf = (s: (typeof sources)[number]): string[] =>
     exec && s.kind === "process" ? [] : [
       o.frozen?.has(pfdKey(s.kind, s.id)) && "🔒",
-      s.goal && "◎",
+      s.goal && "🏁",
       s.given && !s.decision && "既存",
       s.decision && "決定",
       s.human && "人",

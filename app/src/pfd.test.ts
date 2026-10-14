@@ -90,7 +90,7 @@ describe("buildPfdView", () => {
     const view = buildPfdView(PFD_SAMPLE);
     expect(node(view, "a:policy").marks).toEqual(["決定"]);
     expect(node(view, "a:issue").marks).toEqual(["既存"]);
-    expect(node(view, "a:release").marks).toEqual(["◎"]);
+    expect(node(view, "a:release").marks).toEqual(["🏁"]);
     expect(node(view, "p:approve").marks).toEqual(["人"]);
   });
 
