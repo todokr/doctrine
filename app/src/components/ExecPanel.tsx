@@ -1,4 +1,38 @@
-import { type ReactNode, useRef } from "react";
+import { type PointerEvent, type ReactNode, useRef } from "react";
+
+type Drag = { y: number; h: number };
+
+/** 境目のドラッグの手当て。中断（pointercancel・キャプチャを失う）でも止め、そのときはいまの高さで終える */
+export function splitDrag(
+  drag: { current: Drag | null },
+  p: { height: number; onResize: (height: number) => void; onResizeEnd: (height: number) => void },
+) {
+  // 境目を上へ引くとパネルが高くなる
+  const heightAt = (clientY: number, d: Drag) => d.h - (clientY - d.y);
+  // 中断のイベントの座標は当てにならない
+  const abort = () => {
+    if (!drag.current) return;
+    drag.current = null;
+    p.onResizeEnd(p.height);
+  };
+  return {
+    onPointerDown: (e: PointerEvent<HTMLDivElement>) => {
+      e.currentTarget.setPointerCapture(e.pointerId);
+      drag.current = { y: e.clientY, h: p.height };
+    },
+    onPointerMove: (e: PointerEvent<HTMLDivElement>) => {
+      if (drag.current) p.onResize(heightAt(e.clientY, drag.current));
+    },
+    onPointerUp: (e: PointerEvent<HTMLDivElement>) => {
+      if (!drag.current) return;
+      const h = heightAt(e.clientY, drag.current);
+      drag.current = null;
+      p.onResizeEnd(h);
+    },
+    onPointerCancel: abort,
+    onLostPointerCapture: abort,
+  };
+}
 
 /** Execution の下のパネルの枠（spec 6.5）。高さは親が持ち、境目のドラッグは差分を onResize に渡すだけ */
 export function ExecPanel(p: {
@@ -11,9 +45,7 @@ export function ExecPanel(p: {
   onClose: () => void;
   children: ReactNode;
 }) {
-  const drag = useRef<{ y: number; h: number } | null>(null);
-  // 境目を上へ引くとパネルが高くなる
-  const heightAt = (clientY: number, d: { y: number; h: number }) => d.h - (clientY - d.y);
+  const drag = useRef<Drag | null>(null);
   return (
     <section className={p.maximized ? "exec-panel max" : "exec-panel"} style={p.maximized ? undefined : { height: p.height }} aria-label="詳細">
       {!p.maximized && (
@@ -22,19 +54,7 @@ export function ExecPanel(p: {
           role="separator"
           aria-orientation="horizontal"
           aria-label="パネルの高さ"
-          onPointerDown={(e) => {
-            e.currentTarget.setPointerCapture(e.pointerId);
-            drag.current = { y: e.clientY, h: p.height };
-          }}
-          onPointerMove={(e) => {
-            if (drag.current) p.onResize(heightAt(e.clientY, drag.current));
-          }}
-          onPointerUp={(e) => {
-            if (!drag.current) return;
-            const h = heightAt(e.clientY, drag.current);
-            drag.current = null;
-            p.onResizeEnd(h);
-          }}
+          {...splitDrag(drag, p)}
         />
       )}
       <div className="exec-panel-head">
