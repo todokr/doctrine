@@ -49,11 +49,11 @@ export interface Tracker {
 export type TrackerOf = (ws: WorkspaceRef) => Promise<WorkspaceTracker>;
 
 export class WorkspaceConfigError extends Error {
-  constructor(
-    readonly reason: "workspace_config_missing" | "workspace_config_invalid",
-    message: string,
-  ) {
+  readonly reason: "workspace_config_missing" | "workspace_config_invalid";
+
+  constructor(reason: "workspace_config_missing" | "workspace_config_invalid", message: string) {
     super(message);
+    this.reason = reason;
     this.name = "WorkspaceConfigError";
   }
 }

@@ -89,17 +89,20 @@ export type StepBoundary = {
 
 /** requireState と実際の状態が食い違った。書き込みは一切起きていない。 */
 export class StateConflictError extends Error {
-  constructor(
-    readonly taskId: string,
-    readonly expected: TaskState,
-    readonly actual: TaskState | null,
-  ) {
+  readonly taskId: string;
+  readonly expected: TaskState;
+  readonly actual: TaskState | null;
+
+  constructor(taskId: string, expected: TaskState, actual: TaskState | null) {
     super(
       `タスク ${taskId} の状態が変わっています（想定: ${expected}、実際: ${
         actual ?? "タスクなし"
       }）`,
     );
     this.name = "StateConflictError";
+    this.taskId = taskId;
+    this.expected = expected;
+    this.actual = actual;
   }
 }
 

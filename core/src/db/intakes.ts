@@ -105,17 +105,20 @@ export type IntakePatch = Partial<
 
 /** requireState と実際の状態が食い違った。書き込みは一切起きていない。 */
 export class IntakeStateConflictError extends Error {
-  constructor(
-    readonly intakeId: string,
-    readonly expected: IntakeState,
-    readonly actual: IntakeState | null,
-  ) {
+  readonly intakeId: string;
+  readonly expected: IntakeState;
+  readonly actual: IntakeState | null;
+
+  constructor(intakeId: string, expected: IntakeState, actual: IntakeState | null) {
     super(
       `Intake ${intakeId} の状態が変わっています（想定: ${expected}、実際: ${
         actual ?? "Intake なし"
       }）`,
     );
     this.name = "IntakeStateConflictError";
+    this.intakeId = intakeId;
+    this.expected = expected;
+    this.actual = actual;
   }
 }
 
