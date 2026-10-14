@@ -1,9 +1,12 @@
 use std::env;
 use std::fs::OpenOptions;
+use std::io::Read;
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt};
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::sync::mpsc;
+use std::time::{Duration, Instant};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Os {
@@ -119,15 +122,81 @@ pub fn find_dctld_in(
     Err("dctld が見つかりません（mise run core:install で入ります）".into())
 }
 
-pub fn find_dctld() -> Result<PathBuf, String> {
+pub fn find_dctld(path: Option<String>) -> Result<PathBuf, String> {
     let bundled = env::current_exe()
         .ok()
         .and_then(|exe| exe.parent().map(|dir| dir.join("dctld")));
-    find_dctld_in(
-        bundled,
-        env::var("DOCTRINE_DCTLD").ok(),
-        env::var("PATH").ok(),
-    )
+    find_dctld_in(bundled, env::var("DOCTRINE_DCTLD").ok(), path)
+}
+
+const PATH_MARKER: &str = "__DOCTRINE_PATH__";
+
+/// ログインシェルの出力から、PATH_MARKER に挟まれた PATH を取り出す。
+/// シェルが 0 以外で終わった・区切りが揃わない・中身が空のときは None。
+fn extract_login_path(stdout: &[u8], success: bool) -> Option<String> {
+    if !success {
+        return None;
+    }
+    let text = String::from_utf8_lossy(stdout);
+    let start = text.find(PATH_MARKER)? + PATH_MARKER.len();
+    let len = text[start..].find(PATH_MARKER)?;
+    let path = &text[start..start + len];
+    (!path.is_empty()).then(|| path.to_string())
+}
+
+/// `shell -l -c script` を走らせ、`timeout` までにシェルが終わり stdout も読み終えれば
+/// (成功したか, stdout) を返す。起動できない・締め切りを過ぎたら None。
+fn run_login_shell(shell: &str, script: &str, timeout: Duration) -> Option<(bool, Vec<u8>)> {
+    let deadline = Instant::now() + timeout;
+    let mut child = Command::new(shell)
+        .arg("-l")
+        .arg("-c")
+        .arg(script)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+
+    // 読み取りスレッドは join しない。.zprofile が stdout を継いだ孫を常駐させると
+    // シェルが終わってもパイプの書き込み側が閉じず、read_to_end が戻らない。
+    let (tx, rx) = mpsc::channel::<Vec<u8>>();
+    let mut stdout = child.stdout.take()?;
+    std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        let _ = stdout.read_to_end(&mut buf);
+        let _ = tx.send(buf);
+    });
+
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+        }
+    };
+
+    let out = rx
+        .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+        .ok()?;
+    Some((status.success(), out))
+}
+
+/// dctld に渡す PATH を、ログインシェル（$SHELL、無ければ /bin/zsh）から読む。読めなければ None。
+fn login_shell_path() -> Option<String> {
+    let shell = env::var("SHELL")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "/bin/zsh".into());
+    let script = format!("printf '{PATH_MARKER}%s{PATH_MARKER}' \"$PATH\"");
+    let (success, stdout) = run_login_shell(&shell, &script, Duration::from_secs(3))?;
+    extract_login_path(&stdout, success)
 }
 
 /// 状態ディレクトリを 0o700 で作る。
@@ -153,8 +222,12 @@ fn ensure_state_dir(root: &Path) -> Result<(), String> {
 /// どちらも assertSocketNotLive を素通りして**同じ DB に2つのデーモンが書く**
 /// （まさに assertSocketNotLive が防ごうとしている事態）。(2) dctld が先に死ぬと
 /// ゾンビが残る。呼び出し側が Child を持ち、try_wait() で生死を見て両方を防ぐ。
+///
+/// Finder から起動したアプリの PATH には /usr/bin などしか無く、dctld も、dctld が呼ぶ
+/// claude / gh / git も見えない。ログインシェルの PATH を、探索と子の環境にだけ使う。
 pub fn spawn_dctld() -> Result<Child, String> {
-    let bin = find_dctld()?;
+    let login_path = login_shell_path();
+    let bin = find_dctld(login_path.clone().or_else(|| env::var("PATH").ok()))?;
     let e = current_env();
     let root = resolve_state_root(e.state_dir, e.home)?;
     ensure_state_dir(&root)?;
@@ -172,12 +245,15 @@ pub fn spawn_dctld() -> Result<Child, String> {
         .try_clone()
         .map_err(|e| format!("ログを複製できません: {e}"))?;
 
-    Command::new(&bin)
-        .process_group(0) // Ctrl-C は前面プロセスグループ全体に届く。そこから抜ける
+    let mut cmd = Command::new(&bin);
+    cmd.process_group(0) // Ctrl-C は前面プロセスグループ全体に届く。そこから抜ける
         .stdin(Stdio::null())
         .stdout(Stdio::from(log))
-        .stderr(Stdio::from(err))
-        .spawn()
+        .stderr(Stdio::from(err));
+    if let Some(p) = &login_path {
+        cmd.env("PATH", p);
+    }
+    cmd.spawn()
         .map_err(|e| format!("dctld を起動できません ({}): {e}", bin.display()))
 }
 
@@ -370,5 +446,84 @@ mod tests {
         ensure_state_dir(&root).unwrap();
         let mode = std::fs::metadata(&root).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode, 0o700, "状態ディレクトリが他人から読める: {mode:o}");
+    }
+
+    #[test]
+    fn extracts_path_between_markers() {
+        let out = b"__DOCTRINE_PATH__/opt/homebrew/bin:/usr/bin__DOCTRINE_PATH__";
+        assert_eq!(
+            extract_login_path(out, true).as_deref(),
+            Some("/opt/homebrew/bin:/usr/bin")
+        );
+    }
+
+    #[test]
+    fn extracts_path_surrounded_by_shell_noise() {
+        let out = b"Last login: ...\nwelcome\n__DOCTRINE_PATH__/a:/b__DOCTRINE_PATH__\nbye\n";
+        assert_eq!(extract_login_path(out, true).as_deref(), Some("/a:/b"));
+    }
+
+    #[test]
+    fn missing_marker_is_none() {
+        assert_eq!(extract_login_path(b"/usr/bin:/bin", true), None);
+        assert_eq!(extract_login_path(b"__DOCTRINE_PATH__/usr/bin", true), None);
+    }
+
+    #[test]
+    fn empty_path_is_none() {
+        assert_eq!(
+            extract_login_path(b"__DOCTRINE_PATH____DOCTRINE_PATH__", true),
+            None
+        );
+    }
+
+    #[test]
+    fn failed_shell_is_none() {
+        assert_eq!(
+            extract_login_path(b"__DOCTRINE_PATH__/a__DOCTRINE_PATH__", false),
+            None,
+            "終了コードが 0 以外なのに出力を使っている"
+        );
+    }
+
+    #[test]
+    fn nonexistent_shell_is_none() {
+        assert!(run_login_shell("/nope/doctrine-shell", "true", Duration::from_secs(3)).is_none());
+    }
+
+    #[test]
+    fn runs_login_shell_and_reads_path() {
+        let script = format!("printf '{PATH_MARKER}%s{PATH_MARKER}' /x:/y");
+        let (success, stdout) =
+            run_login_shell("/bin/sh", &script, Duration::from_secs(5)).expect("シェルが走らない");
+        assert_eq!(
+            extract_login_path(&stdout, success).as_deref(),
+            Some("/x:/y")
+        );
+    }
+
+    #[test]
+    fn nonzero_exit_is_reported() {
+        let r = run_login_shell("/bin/sh", "printf x; exit 3", Duration::from_secs(5));
+        assert!(matches!(r, Some((false, _))), "失敗が伝わらない");
+    }
+
+    #[test]
+    fn shell_that_hangs_times_out() {
+        let start = Instant::now();
+        let r = run_login_shell("/bin/sh", "exec sleep 10", Duration::from_millis(200));
+        assert!(r.is_none());
+        assert!(start.elapsed() < Duration::from_secs(5), "締め切りで戻らない");
+    }
+
+    #[test]
+    fn grandchild_holding_stdout_does_not_block() {
+        let start = Instant::now();
+        let r = run_login_shell("/bin/sh", "sleep 10 & printf ok", Duration::from_millis(500));
+        assert!(r.is_none());
+        assert!(
+            start.elapsed() < Duration::from_secs(5),
+            "孫が stdout を握ると戻らない"
+        );
     }
 }
