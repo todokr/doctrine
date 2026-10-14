@@ -83,7 +83,7 @@ Issue を選んだ後、開始のボタンの前で取り込みの種類を選�
 
 1. Intake の行。状態は `active`
 2. `intake_processes` の行 1 つ。プロセスの id は `main`。sub-issue は持たない
-3. タスク 1 本。タイトルは Issue のタイトル、プロンプトは Issue の本文、ワークフローはプロジェクトの既定、
+3. タスク 1 本。タイトルは Issue のタイトル、プロンプトは Issue のタイトル・URL・本文（5.3）、ワークフローはプロジェクトの既定、
    `issue_url` は Issue そのもの、`parent_issue_url` は null、`intake_id` / `intake_process_id` は 1 と 2 を指す
 
 調査・分解の実行、PFD の案と承認、sub-issue の同期、投入（`dispatchIntake`）は direct では一度も走らない。
@@ -113,8 +113,9 @@ PFD は保存しない。図は画面が組み立てる（6.2）。
 （`waiting` / `your_turn` / `done` は人のプロセスか入力の成果物が要るので起きない。`ready` はタスクを開始と同時に作るので起きない）。
 
 見張りは direct の Intake も対象にする。sub-issue の同期と投入は飛ばし、PR の観測だけを行う。
-`main` が `merged`（マージコミットが `origin/<base>` に届いたことの確認まで含む、いまの判定）になったら `completed` にする。
-親 Issue を閉じないのは plan と同じ。
+`main` が `merged`（PR が `MERGED` で base が一致する、いまの goal の判定と同じ）になったら `completed` にする。
+plan と違い、direct のタスクは `issue_url` に Issue そのものを持つので、PR の Closes で Issue が閉じてよい。
+タスクのプロンプトは Issue のタイトル・URL・本文を並べたものにする（本文だけでは何の Issue か分からない）。
 
 ## 6. Execution
 
@@ -158,7 +159,10 @@ PR のマージ待ち（`pr_open`）は人の番に入れない。
 一覧の点と Rail の点は、`active` の Intake について「`needs_human` が真（`active` ではプロセスの `your_turn` / `needs_attention` と同じ意味になる）、
 または store のタスクの一覧にその `intake_id` を持つ `suspended` のタスクがある」で求める。要約に列を足す必要は無い。
 
-図の上の `StatusCounts` に「あなたの番 N 件」を足す。押すと、図の中の先頭の人の番のノードを選ぶ。
+改訂中の Intake は状態が承認前のものに戻るので `needs_human` が承認前の意味になり、走り続けているプロセスの
+`your_turn` / `needs_attention` は Execution の点に出ない（タスクの承認待ちは出る）。改訂中は Intake 側の点と画面で扱う。
+
+図の上の `StatusCounts` に「要対応 N 件」を足す（既存の「あなたの番」は人のプロセスだけを数えるので文言を分ける）。押すと、図の中の先頭の人の番のノードを選ぶ。
 
 ### 6.4 見出しと操作
 
