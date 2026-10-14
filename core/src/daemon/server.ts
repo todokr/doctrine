@@ -138,6 +138,8 @@ export function createServer(handler: Handler) {
         s.once("error", reject);
         s.listen(path, () => {
           s.off("error", reject);
+          // listen 後の error（accept の EMFILE など）も聞かないとデーモンごと落ちる。
+          s.on("error", (e) => console.error("ソケットサーバでエラーが起きました", e));
           resolve();
         });
       });

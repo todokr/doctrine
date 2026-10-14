@@ -74,7 +74,7 @@ jobs:
           common='^(\.github/|mise\.toml$)'
 
           core=false
-          if matches "$common" || matches '^(core/|shared/|package\.json$|pnpm-lock\.yaml$|pnpm-workspace\.yaml$|tsconfig\.base\.json$)'; then
+          if matches "$common" || matches '^(core/|shared/|package\.json$|pnpm-lock\.yaml$|pnpm-workspace\.yaml$|tsconfig\.base\.json$|biome\.json$)'; then
             core=true
           fi
 
