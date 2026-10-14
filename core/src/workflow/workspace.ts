@@ -1,4 +1,4 @@
-import { join, normalize } from "@std/path";
+import { join, normalize } from "node:path";
 import { parse as parseYaml, stringify } from "yaml";
 import { z } from "zod";
 import { formatZodIssues, WorkflowValidationError } from "./schema.ts";
@@ -14,15 +14,21 @@ export type TrackerConfig =
 
 export const trackerSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("github") }).strict(),
-  z.object({
-    kind: z.literal("linear"),
-    team: z.string().min(1),
-    states: z.object({
-      todo: z.string().min(1),
-      inProgress: z.string().min(1),
-      inReview: z.string().min(1),
-    }).partial().strict().optional(),
-  }).strict(),
+  z
+    .object({
+      kind: z.literal("linear"),
+      team: z.string().min(1),
+      states: z
+        .object({
+          todo: z.string().min(1),
+          inProgress: z.string().min(1),
+          inReview: z.string().min(1),
+        })
+        .partial()
+        .strict()
+        .optional(),
+    })
+    .strict(),
 ]);
 
 export type WorkspaceProjectEntry = { name: string; path: string };
@@ -37,14 +43,18 @@ export const WORKSPACE_YAML = join(".doctrine", "workspace.yaml");
 
 const PROJECT_NAME = /^[a-z0-9-]+$/;
 
-const schema = z.object({
-  name: z.string().min(1).optional(),
-  projects: z.record(
-    z.string().regex(PROJECT_NAME, "プロジェクトの名前は [a-z0-9-]+ で書いてください"),
-    z.string().min(1),
-  ).refine((p) => Object.keys(p).length > 0, "projects に 1 つ以上書いてください"),
-  tracker: trackerSchema.default({ kind: "github" }),
-}).strict();
+const schema = z
+  .object({
+    name: z.string().min(1).optional(),
+    projects: z
+      .record(
+        z.string().regex(PROJECT_NAME, "プロジェクトの名前は [a-z0-9-]+ で書いてください"),
+        z.string().min(1),
+      )
+      .refine((p) => Object.keys(p).length > 0, "projects に 1 つ以上書いてください"),
+    tracker: trackerSchema.default({ kind: "github" }),
+  })
+  .strict();
 
 /** rootDirName は name を省略したときの既定値。projects は書かれた順を保つ。 */
 export function parseWorkspaceConfig(yamlText: string, rootDirName: string): WorkspaceConfig {
@@ -87,7 +97,7 @@ export function workspaceYamlFor(
   };
   if (tracker) obj.tracker = tracker;
   const body = stringify(obj);
-  return `# doctrine の workspace 設定（dctl workspace-add が雛形として作成）\n${body}`;
+  return `# doctrine の workspace 設定（doctrine が workspace の登録時に雛形として作成）\n${body}`;
 }
 
 /** normalize は末尾の "/" を残すので、重複判定のために 1 つ落とす。 */

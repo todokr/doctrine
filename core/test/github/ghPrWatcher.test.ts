@@ -1,4 +1,4 @@
-import { test } from "@std/testing/bdd";
+import { test } from "node:test";
 import assert from "node:assert/strict";
 import { ghPrWatcher, PR_ALIASES_PER_QUERY } from "../../src/github/ghPrWatcher.ts";
 import { fakeGh, parseGraphqlArgs } from "../helpers/gh.ts";
@@ -46,14 +46,16 @@ test("複数のブランチを 1 回で引き、別名ごとに振り分ける",
   assert.deepEqual(g.typed, { owner: "{owner}", name: "{repo}" });
   assert.deepEqual(g.raw, { h0: "doctrine/a-ログイン", h1: "doctrine/b" });
   assert.ok(!g.query.includes("doctrine/"));
-  assert.deepEqual(m.get("doctrine/a-ログイン"), [{
-    number: 7,
-    url: "https://github.com/o/r/pull/7",
-    state: "MERGED",
-    baseRef: "main",
-    mergedAt: "2026-09-21T00:00:00Z",
-    mergeCommit: "abc",
-  }]);
+  assert.deepEqual(m.get("doctrine/a-ログイン"), [
+    {
+      number: 7,
+      url: "https://github.com/o/r/pull/7",
+      state: "MERGED",
+      baseRef: "main",
+      mergedAt: "2026-09-21T00:00:00Z",
+      mergeCommit: "abc",
+    },
+  ]);
   assert.deepEqual(m.get("doctrine/b"), []);
 });
 
@@ -84,7 +86,10 @@ test("別名が 50 を超えたら分けて引く", async () => {
   const m = await ghPrWatcher(run).pullRequests(P, manyBranches(51));
   assert.equal(calls.length, 2);
   const first = parseGraphqlArgs(calls[0].args).raw;
-  assert.deepEqual(Object.keys(first), Array.from({ length: 50 }, (_, i) => `h${i}`));
+  assert.deepEqual(
+    Object.keys(first),
+    Array.from({ length: 50 }, (_, i) => `h${i}`),
+  );
   assert.deepEqual(parseGraphqlArgs(calls[1].args).raw, { h0: "doctrine/t50" });
   assert.equal(m.size, 51);
 });

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, test } from "@std/testing/bdd";
+import { afterEach, beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
 import { createMockAdapter } from "../../src/adapter/mock.ts";
 import { getIntake, listIntakeRuns } from "../../src/db/intakes.ts";

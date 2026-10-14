@@ -11,7 +11,7 @@
 | `workflow/template.ts` | `{{ ... }}` の展開 |
 | `workflow/project.ts` | `project.yaml` の検証、`setup` の自動挿入（`withSetupStep`）、画面からの保存 |
 | `workflow/load.ts` | ディスクからの読み込み、作成時の固定（`pinOf`）、タスクが従う定義の解決（`taskWorkflow`） |
-| `workflow/scaffold.ts` | `dctl workspace-add` が作る `.doctrine/` の雛形 |
+| `workflow/scaffold.ts` | workspace の登録時に置く `.doctrine/` の雛形 |
 | `workflow/save.ts` | 画面からのステップ編集を、コメントを残したまま YAML に当てる |
 | `domain/engine.ts` | `decide`（純粋な進行規則）、`runTask`（1 タスクを次に止まる地点まで進める）、`applyApproval` |
 | `domain/stepRunner.ts` | ステップ 1 回の実行。ログの書き出し、`StepOutcome` を返す |
@@ -44,10 +44,9 @@
 - 分岐 `Branch = { goto, maxAttempts, feed?, onExhausted?: "fail" | "suspend" }`。`goto` は前方・後方・自分自身のどこを指してもよいが、実在しなければ拒否する。approval の `onReject` に `onExhausted: suspend` は書けない（却下は既に人の判断なので）
 - `branchOf(step)` が分岐を 1 つに決める。approval は `onReject`、guide で `onFailure` を省略したら `{ goto: 自分, maxAttempts: 3, feed: "{{ steps.<自分>.last_stderr }}" }`、それ以外は `onFailure`
 - `review.files` は worktree からの相対パスだけを許す（空文字・`/` 始まり・`~` 始まり・`..` を含むものを拒否）。実行時にも `domain/reviewFiles.ts:readReviewFiles` が realpath で worktree の配下かを確かめ直す
-- **非冪等コマンドの警告**（`NON_IDEMPOTENT`）: command と poll の `run` に `gh pr create` / `gh pr comment` / `gh release create` / `git push` / `npm publish` / `pnpm publish` があれば、エラーではなく警告に積む。警告が外へ出るのは `task.create` の応答、`ctx.warnings`、`dctl workflow-check` の stderr
+- **非冪等コマンドの警告**（`NON_IDEMPOTENT`）: command と poll の `run` に `gh pr create` / `gh pr comment` / `gh release create` / `git push` / `npm publish` / `pnpm publish` があれば、エラーではなく警告に積む。警告が外へ出るのは `task.create` の応答と `ctx.warnings`
 - エラーメッセージは `formatZodIssues` が `path: 日本語` の形にし、`WorkflowValidationError.issues` に配列で持つ
 - テンプレートの変数は**パース時に検証しない**。未知の変数は実行時の `expand` で初めて `TemplateError` になる
-- `dctl workflow-check <file>` はデーモンに繋がず、ファイルを読んで `parseWorkflow` に通すだけの検証コマンド。通れば終了コード 0（警告は stderr に 1 行ずつ）、落ちれば 1 でエラーを stderr に出す。ファイルが無ければ 1 で `ファイルがありません: <file>`
 
 ### テンプレート変数（`template.ts`）
 
@@ -318,7 +317,7 @@ pause から resume すると `current_step_id` は進んでいないので、�
 - **ブランチ**: `doctrine/<taskId>-<slug>`（`branchNameFor`）。slug はタイトルを NFKC 正規化し、ASCII の英数字以外を `-` にして小文字にし、40 文字で切ったもの。ASCII の英数字が 1 つも無いタイトルでは slug が空になり、ブランチは `doctrine/<taskId>` になる
 - **作成**: 枠を取ったときに `git worktree add -b <branch> <path> <base>`。続けて `ensureDoctrineOutExcluded` が `.doctrine-out/` を `.git/info/exclude` に追記する。これで中間成果物が `git status`（削除拒否の判定）にも diff にも混ざらない
 - **削除**: `completed` のときだけ `cleanupAfterRun` が `force: false` で消す。未コミットの変更があれば拒否し、警告と `task.cleanedUp { outcome: "refused" }` を出す。ブランチは残す
-- `failed` / `canceled` は残す。`worktree.remove`（`dctl gc`）で手で消し、そのときレビュー参照も一緒に消す。終わっていないタスクの worktree は `force` でも消せない
+- `failed` / `canceled` は残す。`worktree.remove` で手で消し、そのときレビュー参照も一緒に消す。終わっていないタスクの worktree は `force` でも消せない
 - 起動時に `findOrphans` が DB に無い worktree を警告する（自動では消さない）
 
 ## 3.14 Claude Code アダプタ
@@ -349,7 +348,7 @@ resume: claude -p --resume <sessionId> <prompt> --output-format stream-json --ve
 `systemPrompt.ts:BUILTIN_APPEND_SYSTEM_PROMPT` を agent と guide の両方に `--append-system-prompt` で付ける。
 内容は「Bash は 1 回 1 コマンドにし、`;` `&&` `|` などで繋がない」「`git -C` を使わない」の 2 つ。
 `allowedTools` の許可は先頭一致なので、繋いだ形や `git -C` 始まりは許可に合わず拒否されるためである。
-ワークフロー側から変えることはできない。文面を別ファイルにしないのは、`deno compile` の単一バイナリに同梱できないため（`guidePrompt.ts` と `intake/prompt.ts` も同じ理由）。
+ワークフロー側から変えることはできない。文面を別ファイルにしないのは、単一バイナリ（esbuild + SEA）に同梱されないため（`guidePrompt.ts` と `intake/prompt.ts` も同じ理由）。
 
 ## 3.15 エンジンのコールバックとイベント
 

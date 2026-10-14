@@ -1,4 +1,4 @@
-import { join } from "@std/path";
+import { join } from "node:path";
 import { isMap, isScalar, isSeq, parseDocument, Scalar, type YAMLMap } from "yaml";
 import type { Document } from "yaml";
 import type {
@@ -21,7 +21,7 @@ function setOrDelete(map: YAMLMap, key: string, value: string | null | undefined
  * （引用符などの見た目を保つ）、新しい要素は既存の先頭要素と同じ type の Scalar にする。
  * キーが無ければ新しく作る。
  */
-// deno-lint-ignore no-explicit-any
+// biome-ignore lint/suspicious/noExplicitAny: 読み込んだワークフロー YAML の Document は中身の型を持たない
 function setStringSeq(doc: Document<any>, parent: YAMLMap, key: string, values: string[]): void {
   const existing = parent.get(key, true);
   if (isSeq(existing)) {
@@ -48,7 +48,7 @@ function setStringSeq(doc: Document<any>, parent: YAMLMap, key: string, values: 
  * guide で分岐が無いとき（既定の分岐）に変更が来たら、既定値を明示的に書いてから当てる。
  */
 function applyBranchChange(
-  // deno-lint-ignore no-explicit-any
+  // biome-ignore lint/suspicious/noExplicitAny: 読み込んだワークフロー YAML の Document は中身の型を持たない
   doc: Document<any>,
   stepMap: YAMLMap,
   stepType: string,
@@ -63,13 +63,14 @@ function applyBranchChange(
   }
   let branchNode = stepMap.get(key, true);
   if (!isMap(branchNode)) {
-    const defaults = stepType === "guide"
-      ? {
-        goto: stepId,
-        maxAttempts: DEFAULT_GUIDE_MAX_ATTEMPTS,
-        feed: `{{ steps.${stepId}.last_stderr }}`,
-      }
-      : {};
+    const defaults =
+      stepType === "guide"
+        ? {
+            goto: stepId,
+            maxAttempts: DEFAULT_GUIDE_MAX_ATTEMPTS,
+            feed: `{{ steps.${stepId}.last_stderr }}`,
+          }
+        : {};
     stepMap.set(key, doc.createNode(defaults));
     branchNode = stepMap.get(key, true);
   }
@@ -83,7 +84,7 @@ function applyBranchChange(
 }
 
 function applyStepChange(
-  // deno-lint-ignore no-explicit-any
+  // biome-ignore lint/suspicious/noExplicitAny: 読み込んだワークフロー YAML の Document は中身の型を持たない
   doc: Document<any>,
   stepMap: YAMLMap,
   stepType: string,
@@ -166,11 +167,13 @@ export function applyWorkflowChanges(
   if (doc.errors.length > 0) {
     return {
       ok: false,
-      issues: [{
-        stepId: null,
-        field: null,
-        message: `YAMLとして読めません: ${doc.errors.map((e) => e.message).join(", ")}`,
-      }],
+      issues: [
+        {
+          stepId: null,
+          field: null,
+          message: `YAMLとして読めません: ${doc.errors.map((e) => e.message).join(", ")}`,
+        },
+      ],
     };
   }
 

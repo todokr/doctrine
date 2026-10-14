@@ -63,10 +63,7 @@ export function fakeTracker(
         ...issue,
       });
     },
-    status: () =>
-      Promise.resolve(
-        o.status ?? { ok: true, target: { id: "R1", name: "o/r" } },
-      ),
+    status: () => Promise.resolve(o.status ?? { ok: true, target: { id: "R1", name: "o/r" } }),
     listIssues: (_projectPath, listOptions) => {
       listCalls.push(listOptions);
       if (o.failList) return Promise.reject(new Error("gh issue list に失敗しました"));

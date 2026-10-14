@@ -12,7 +12,7 @@ doctrine はまだ配布用のビルドがありません。リポジトリを�
 | ツール | 用途 |
 | --- | --- |
 | [Git](https://git-scm.com/) | リポジトリの取得。doctrine はタスクごとに git worktree を作る |
-| [mise](https://mise.jdx.dev/) | Deno・Node.js・pnpm・Rust を決まった版で入れる。版は `mise.toml` が決める |
+| [mise](https://mise.jdx.dev/) | Node.js・pnpm・Rust を決まった版で入れる。版は `mise.toml` が決める |
 | [Claude Code](https://docs.claude.com/en/docs/claude-code/overview)（`claude`） | ワークフローの各ステップを実行するエージェント。ログインまで済ませておく |
 | [GitHub CLI](https://cli.github.com/)（`gh`） | Issue の取り込みと PR の作成・マージの見張り。`gh auth login` を済ませておく |
 
@@ -21,7 +21,7 @@ doctrine はまだ配布用のビルドがありません。リポジトリを�
 - macOS: Xcode Command Line Tools（`xcode-select --install`）
 - Linux: WebKitGTK 4.1 など（[Tauri の前提](https://tauri.app/start/prerequisites/)）
 
-mise はシェルで有効にしておきます（[mise の activate](https://mise.jdx.dev/getting-started.html)）。有効でないと、mise が入れた `deno` や `pnpm` が PATH に乗りません。
+mise はシェルで有効にしておきます（[mise の activate](https://mise.jdx.dev/getting-started.html)）。有効でないと、mise が入れた `node` や `pnpm` が PATH に乗りません。
 
 ## 1. リポジトリを取得する
 
@@ -34,20 +34,20 @@ cd doctrine
 
 ```sh
 mise trust        # このリポジトリの mise.toml を信頼する
-mise install      # Deno / Node.js / pnpm / Rust
+mise install      # Node.js / pnpm / Rust
 mise run setup    # 依存を lock ファイルどおりに取る
 ```
 
-## 3. `dctl` と `dctld` を PATH に置く
+## 3. `dctld` を PATH に置く
 
 ```sh
 mise run core:install
 ```
 
-CLI の `dctl` とデーモンの `dctld` が `~/.deno/bin` に入ります。`~/.deno/bin` が PATH に無ければ、シェルの設定に足します。
+デーモンの `dctld` の起動スクリプトが `~/.local/bin` に入ります。`~/.local/bin` が PATH に無ければ、シェルの設定に足します。
 
 ```sh
-export PATH="$HOME/.deno/bin:$PATH"
+export PATH="$HOME/.local/bin:$PATH"
 ```
 
 ## 4. アプリを起動する
@@ -75,7 +75,7 @@ setup のタスクを作るのは、今回ワークフローの雛形を置い�
 ## 6. setup のタスクを承認する
 
 登録が終わるとタスク一覧に移り、setup のタスク（「`<プロジェクト名>` のワークフローを作る」）が選ばれています。
-タスクではエージェントがリポジトリを調べて YAML を書き、`dctl workflow-check` で検証してから、承認の画面で止まります。
+タスクではエージェントがリポジトリを調べて YAML を書き、承認の画面で止まります。
 
 承認の画面では 2 つのファイルを読みます。
 

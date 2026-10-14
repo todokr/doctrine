@@ -77,7 +77,11 @@ export async function insertActiveIntake(
     replies: "[]",
   });
   await insertApproval(db, { intake_id: "i1", draft_id: draft.id, hash: draft.hash });
-  await insertProcesses(db, "i1", pfd.processes.map((p) => p.id));
+  await insertProcesses(
+    db,
+    "i1",
+    pfd.processes.map((p) => p.id),
+  );
   await updateIntake(db, "i1", { state: "active" });
   return { runId };
 }
@@ -86,9 +90,12 @@ export const DIRECT_WORKFLOW =
   'name: feature\nsteps:\n  - id: a\n    type: command\n    run: "true"\n  - id: review\n    type: approval\n    title: 見て\n';
 
 /** direct で開始した Intake（id は d1、親 Issue は PARENT_URL）を 1 つ持つ DB。 */
-export async function seedDirect(): Promise<
-  { db: Db; projectId: number; workspaceId: number; taskId: string }
-> {
+export async function seedDirect(): Promise<{
+  db: Db;
+  projectId: number;
+  workspaceId: number;
+  taskId: string;
+}> {
   const db = await openDb(":memory:");
   const project = await seedProject(db, { path: "/repo", default_workflow: "feature" });
   const loaded = await fakeWorkflowLoader(DIRECT_WORKFLOW)("/repo", "feature");

@@ -1,13 +1,13 @@
-import { z } from "zod";
+import type { z } from "zod";
 import { runCommand } from "../util/exec.ts";
 
 /**
  * gh を cwd で走らせて stdout を返す。非 0 終了は Error、gh が PATH に無ければ
- * Deno.errors.NotFound を投げる。
+ * code が ENOENT の Error を投げる。
  */
 export type GhRun = (args: string[], cwd: string) => Promise<string>;
 
-/** 例外は包まずに伝える。呼び出し側が NotFound で「gh が無い」を見分ける。 */
+/** 例外は包まずに伝える。呼び出し側が ENOENT で「gh が無い」を見分ける。 */
 export const defaultGhRun: GhRun = async (args, cwd) => {
   const { stdout } = await runCommand("gh", args, { cwd });
   return stdout;

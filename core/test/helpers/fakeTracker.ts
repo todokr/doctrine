@@ -100,7 +100,8 @@ export function fakeTracker(o: { kind?: TrackerKind } = {}): FakeTracker {
     findSubIssues: (_projectPath, parent) =>
       settle((): SubIssue[] => {
         record({ op: "findSubIssues", parentUrl: parent.url });
-        return issues.filter((i) => i.parentUrl === parent.url)
+        return issues
+          .filter((i) => i.parentUrl === parent.url)
           .map((i) => ({ ref: i.ref, body: i.body, state: i.state }));
       }),
     updateIssue: (_projectPath, issue, o) =>

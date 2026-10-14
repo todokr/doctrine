@@ -1,4 +1,5 @@
-import { dirname, join } from "@std/path";
+import { type FileHandle, mkdir, open } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import type { Db } from "../db/schema.ts";
 import type { AgentStep, CommandStep, GuideStep } from "../workflow/schema.ts";
 import { expand, type TemplateContext } from "../workflow/template.ts";
@@ -10,7 +11,7 @@ import type {
   StartOptions,
 } from "../adapter/types.ts";
 import { renderEvent } from "../adapter/render.ts";
-import { exitCodeOf } from "../util/exec.ts";
+import { type Child, exitCodeOf, spawnChild } from "../util/exec.ts";
 import type { PermissionDenial } from "../../../shared/protocol.ts";
 import type { Guide } from "../../../shared/guide/schema.ts";
 import type { GuideHunk } from "../../../shared/guide/hunkId.ts";
@@ -113,12 +114,12 @@ function lineBuffer(emit: (line: string) => void): { push(c: string): void; flus
  * とどめる — 例外を投げて daemon 全体（他タスクも含む）を落とすことは絶対にしない。
  */
 export async function openLog(path: string): Promise<Log> {
-  let file: Deno.FsFile | null = null;
+  let file: FileHandle | null = null;
   let failed = false;
 
   try {
-    await Deno.mkdir(dirname(path), { recursive: true });
-    file = await Deno.open(path, { append: true, create: true });
+    await mkdir(dirname(path), { recursive: true });
+    file = await open(path, "a");
   } catch (e) {
     failed = true;
     console.error(`ログファイルを開けませんでした（ステップの実行は継続します）: ${path}`, e);
@@ -136,8 +137,7 @@ export async function openLog(path: string): Promise<Log> {
       pending = pending
         .then(async () => {
           if (failed) return;
-          let offset = 0;
-          while (offset < bytes.length) offset += await f.write(bytes.subarray(offset));
+          await f.appendFile(bytes);
         })
         .catch((e) => {
           if (!failed) {
@@ -155,15 +155,17 @@ export async function openLog(path: string): Promise<Log> {
       // ステップの結果には影響させない。
       await pending;
       try {
-        file.close();
-      } catch { /* 既に閉じている */ }
+        await file.close();
+      } catch {
+        /* 既に閉じている */
+      }
     },
   };
 }
 
 /** 子プロセスの出力を読み切る。マルチバイト文字の途中で割れたチャンクは次のチャンクまで保留する。 */
 async function drain(
-  stream: ReadableStream<Uint8Array>,
+  stream: AsyncIterable<Uint8Array>,
   onText: (text: string) => void,
 ): Promise<void> {
   const decoder = new TextDecoder();
@@ -188,17 +190,11 @@ export async function runCommandStep(
   const startedAt = new Date().toISOString();
 
   try {
-    let child: Deno.ChildProcess;
+    let child: Child;
     try {
-      child = new Deno.Command("sh", {
-        args: ["-c", command],
-        cwd: o.cwd,
-        stdin: "null",
-        stdout: "piped",
-        stderr: "piped",
-      }).spawn();
+      child = await spawnChild("sh", ["-c", command], { cwd: o.cwd });
     } catch (e) {
-      // 起動失敗（cwd が無いなど）は同期例外で来る。pid は -1 として通知してから伝播させる。
+      // 起動失敗（cwd が無いなど）。pid は -1 として通知してから伝播させる。
       await o.deps.onChildSpawned?.(-1, startedAt);
       throw e;
     }

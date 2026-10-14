@@ -1,5 +1,8 @@
-#!/usr/bin/env -S deno run --allow-all
-import { dirname, join } from "@std/path";
+#!/usr/bin/env node
+import { once } from "node:events";
+import { mkdir, rm, stat } from "node:fs/promises";
+import { connect } from "node:net";
+import { dirname, join } from "node:path";
 import { openDb } from "../db/migrate.ts";
 import { createClaudeAdapter } from "../adapter/claude.ts";
 import { defaultProbe, recoverOnStartup, type WorkflowLookup } from "../domain/recovery.ts";
@@ -16,6 +19,7 @@ import { createServer, socketPath } from "./server.ts";
 import { createHandler, type DaemonContext, tick } from "./handlers.ts";
 import { createWarningLog } from "./warnings.ts";
 import { stateRoot } from "../util/home.ts";
+import { isNotFound } from "../util/fsError.ts";
 import { notifierFor } from "../notify/notifier.ts";
 import { createEventNotifier } from "../notify/notifications.ts";
 
@@ -58,16 +62,23 @@ export function buildWorkflowLookup(
  * 場合は必ず拒否する側に倒す。
  */
 async function assertSocketNotLive(path: string): Promise<void> {
-  const exists = await Deno.stat(path).then(() => true, () => false);
+  const exists = await stat(path).then(
+    () => true,
+    () => false,
+  );
   if (!exists) return;
 
   let result: { kind: "live" } | { kind: "stale" } | { kind: "unknown"; code: string };
   try {
-    const conn = await Deno.connect({ transport: "unix", path });
-    conn.close();
+    const conn = connect(path);
+    try {
+      await once(conn, "connect");
+    } finally {
+      conn.destroy();
+    }
     result = { kind: "live" };
   } catch (err) {
-    if (err instanceof Deno.errors.ConnectionRefused || err instanceof Deno.errors.NotFound) {
+    if ((err as NodeJS.ErrnoException).code === "ECONNREFUSED" || isNotFound(err)) {
       result = { kind: "stale" };
     } else {
       result = { kind: "unknown", code: (err as { code?: string }).code ?? String(err) };
@@ -84,7 +95,7 @@ async function assertSocketNotLive(path: string): Promise<void> {
     );
   }
   // 古いソケットファイル。次の listen() が改めて unlink するが、ここで消しておいても害はない。
-  await Deno.remove(path).catch(() => {});
+  await rm(path, { force: true });
 }
 
 /**
@@ -110,21 +121,23 @@ export async function tickCycle(ctx: DaemonContext): Promise<void> {
   }
 }
 
-export async function startDaemon(o: {
-  dbPath?: string;
-  socketPath?: string;
-  logRoot?: string;
-  configPath?: string;
-  tickMs?: number;
-  watchMs?: number;
-} = {}): Promise<{ stop(): Promise<void> }> {
+export async function startDaemon(
+  o: {
+    dbPath?: string;
+    socketPath?: string;
+    logRoot?: string;
+    configPath?: string;
+    tickMs?: number;
+    watchMs?: number;
+  } = {},
+): Promise<{ stop(): Promise<void> }> {
   const resolvedSocketPath = o.socketPath ?? socketPath();
   await assertSocketNotLive(resolvedSocketPath);
 
   // SQLite は親ディレクトリを作らない。作らずに開くと "unable to open database file"
   // という原因の分かりにくいエラーで即終了する。ソケット側（server.listen）と揃えて 0o700 で作る。
   const dbPath = o.dbPath ?? join(stateRoot(), "doctrine.db");
-  await Deno.mkdir(dirname(dbPath), { recursive: true, mode: 0o700 });
+  await mkdir(dirname(dbPath), { recursive: true, mode: 0o700 });
   const db = await openDb(dbPath);
 
   const configPath = o.configPath ?? defaultConfigPath();
@@ -201,8 +214,9 @@ export async function startDaemon(o: {
   for (const project of await listProjects(db)) {
     const known = [
       ...(await listTasks(db, { projectId: project.id })).map((t) => t.worktree_path),
-      ...(await listIntakes(db, { workspaceId: project.workspace_id, includeClosed: true }))
-        .map((i) => i.worktree_path),
+      ...(await listIntakes(db, { workspaceId: project.workspace_id, includeClosed: true })).map(
+        (i) => i.worktree_path,
+      ),
     ].filter((p): p is string => p !== null);
     for (const orphan of await findOrphans(project.path, known)) {
       ctx.warnings.push(`対応するタスクのない worktree: ${orphan}`);
@@ -215,12 +229,12 @@ export async function startDaemon(o: {
   const timer = setInterval(() => {
     void tickCycle(ctx);
   }, o.tickMs ?? 1000);
-  Deno.unrefTimer(timer);
+  timer.unref();
 
   const watchTimer = setInterval(() => {
     void ctx.intakeWatcher.cycle();
   }, o.watchMs ?? WATCH_INTERVAL_MS);
-  Deno.unrefTimer(watchTimer);
+  watchTimer.unref();
 
   return {
     async stop() {

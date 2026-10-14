@@ -1,6 +1,6 @@
 # 4. デーモン・永続化・RPC
 
-対象は `core/src/daemon/`、`core/src/db/`、`shared/protocol.ts`、`core/src/cli/dctl.ts`。
+対象は `core/src/daemon/`、`core/src/db/`、`shared/protocol.ts`。
 
 ## 4.1 dctld の起動（`main.ts:startDaemon`）
 
@@ -15,7 +15,7 @@
 7. **クラッシュ復帰**（[3.12](03-workflow-engine.md)）。listen の後に行うので復帰中にも RPC が届きうる。そのため復帰の書き込みも `requireState` 付き
 8. プロジェクトごとに孤児の worktree を探して警告する
 9. Intake の見張りを 1 周回す
-10. タイマーを張る。`tick` を 1 秒ごと、見張りを 120 秒ごと（`WATCH_INTERVAL_MS`）。どちらも `Deno.unrefTimer` 済みで、プロセスを生かしているのはソケットのリスナーだけ
+10. タイマーを張る。`tick` を 1 秒ごと、見張りを 120 秒ごと（`WATCH_INTERVAL_MS`）。どちらも `unref()` 済みで、プロセスを生かしているのはソケットのリスナーだけ
 
 `startDaemon` は `{ stop() }` を返すが、呼ぶのはテストだけである。**シグナル処理は無い。** SIGINT / SIGTERM では即座に終わり、
 後始末は次の起動に任せる（残ったソケットは `assertSocketNotLive` が消し、書きかけのトランザクションは WAL が捨て、生き残った `claude` は復帰処理が殺す）。
@@ -243,24 +243,3 @@
 置き場は設定ディレクトリ。スキーマは `.strict()` で、読めない・壊れている・知らないキーがある場合は既定値と警告で起動する。書き込みは tmp に `0o600` で書いてから rename する。
 `project.yaml` の `tracker` は呼ぶたびに読み直すので、こちらは再起動が要らない。
 
-## 4.7 dctl
-
-1 コマンドを 1 RPC にし、`result` を整形した JSON で標準出力に出す。失敗は標準エラーに出して終了コード 1。タイムアウトは 30 秒。
-
-| コマンド | RPC |
-| --- | --- |
-| `add --project --title --prompt [--workflow] [--priority]` | `task.create` |
-| `ls [--project] [--state]` / `get <id>` | `task.list` / `task.get` |
-| `approve <id>` / `reject <id> --comment` | `task.approve` / `task.reject` |
-| `pause` / `resume` / `cancel <id>` | `task.pause` / `task.resume` / `task.cancel` |
-| `logs <id> [--tail] [--step_run_id] [--follow]` | `task.logs` |
-| `diff <id> [--since last_review]` | `task.diff` |
-| `projects` / `workspaces` / `workspace-add --path` / `workspace-update --path` | `project.list` / `workspace.list` / `workspace.add` / `workspace.update` |
-| `intake ls` / `intake get <id>` / `intake logs <id>` | `intake.list` / `intake.get` / `intake.logs` |
-| `worktrees` / `gc <id>` / `gc --path <path>` | `worktree.list` / `worktree.remove` |
-| `ratelimit` / `slots` / `slots set --limit <n>` | `ratelimit.recent` / `daemon.slots` / `daemon.setGlobalLimit` |
-
-Intake を動かす操作（開始・回答・承認・人のプロセスの完了など）は dctl にあえて置いていない。承認と人の完了は人だけが行うためである。
-
-数値のフラグは CLI 側で NaN を弾く（NaN は JSON で null になり、デーモンが黙って既定値に倒すため）。
-`logs --follow` は追従を張り、`log.line` / `intake.logLine` を 1 行ずつ出し続ける。SIGINT で終了コード 0。

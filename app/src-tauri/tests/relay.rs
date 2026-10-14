@@ -374,7 +374,7 @@ async fn spawn_失敗の理由は接続失敗の文言で上書きされない()
     let path = dir.path().join("nope").join("dctld.sock"); // 親ディレクトリも無い＝ENOENT
     let (emit, seen) = collector();
     let spawn: Spawner =
-        Arc::new(|| Err("dctld が見つかりません（deno task install で入ります）".into()));
+        Arc::new(|| Err("dctld が見つかりません（mise run core:install で入ります）".into()));
     let mut opts = options();
     opts.spawn = Some(spawn);
     let (_relay, driver) = Relay::new(path, emit, opts);

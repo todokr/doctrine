@@ -9,9 +9,10 @@ import {
 import type { Pfd } from "./pfd.ts";
 
 export const commentReplySchema = z.strictObject({
-  commentId: z.number().int().describe(
-    "返答する差し戻しのコメントの番号（文面で 1 から振られている）",
-  ),
+  commentId: z
+    .number()
+    .int()
+    .describe("返答する差し戻しのコメントの番号（文面で 1 から振られている）"),
   reply: z.string().describe("そのコメントへの返答。どう直したか、または直さない理由"),
 });
 
@@ -20,9 +21,7 @@ export const commentReplySchema = z.strictObject({
  * kind と中身の対応はデーモンが確かめる（spec 7 章）。
  */
 export const decomposerOutputSchema = z.strictObject({
-  kind: z
-    .enum(["questions", "pfd"])
-    .describe("質問と仮定を返すなら questions、PFD を返すなら pfd"),
+  kind: z.enum(["questions", "pfd"]).describe("質問と仮定を返すなら questions、PFD を返すなら pfd"),
   questions: questionSetSchema
     .nullable()
     .describe(

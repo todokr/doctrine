@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, test } from "@std/testing/bdd";
+import { afterEach, beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -76,7 +76,7 @@ async function registerWorkspace(h: ReturnType<typeof createHandler>): Promise<n
     join(tp, ".doctrine", "workspace.yaml"),
     "projects:\n  a: ../a/repo\n  b: ../b/repo\n",
   );
-  const w = await h("workspace.add", { path: tp }, NOOP_CONN) as { id: number };
+  const w = (await h("workspace.add", { path: tp }, NOOP_CONN)) as { id: number };
   return w.id;
 }
 
@@ -85,14 +85,17 @@ test("対象プロジェクトごとにタスクを 1 つ作る", async () => {
   const h = createHandler(ctx);
   const workspace = await registerWorkspace(h);
 
-  const tasks = await h(
+  const tasks = (await h(
     "workspace.setup",
     { workspace, projects: ["a", "b"], policy: POLICY },
     NOOP_CONN,
-  ) as TaskSummary[];
+  )) as TaskSummary[];
 
   assert.equal(tasks.length, 2);
-  assert.deepEqual(tasks.map((t) => t.title), ["a のワークフローを作る", "b のワークフローを作る"]);
+  assert.deepEqual(
+    tasks.map((t) => t.title),
+    ["a のワークフローを作る", "b のワークフローを作る"],
+  );
   assert.ok(tasks.every((t) => t.workflow_name === "setup"));
   assert.equal(tasks[0].prompt, setupPrompt(POLICY, "main"));
   assert.equal(tasks[1].prompt, setupPrompt(POLICY, "develop"));
@@ -104,11 +107,11 @@ test("タスクは同梱ワークフローを pin し、setup を差し込まな
   const h = createHandler(ctx);
   const workspace = await registerWorkspace(h);
 
-  const [t] = await h(
+  const [t] = (await h(
     "workspace.setup",
     { workspace, projects: ["b"], policy: POLICY },
     NOOP_CONN,
-  ) as TaskSummary[];
+  )) as TaskSummary[];
 
   const row = (await getTask(ctx.db, t.id))!;
   assert.equal(row.workflow_yaml, setupWorkflowYaml());

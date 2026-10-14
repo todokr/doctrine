@@ -89,10 +89,7 @@ export function truncatePatch(
  * base ブランチとの共通祖先。worktree を作った後に base が進んでいても
  * 正しい基準になるよう、毎回取り直す。
  */
-export async function mergeBase(
-  worktreePath: string,
-  baseBranch: string,
-): Promise<string> {
+export async function mergeBase(worktreePath: string, baseBranch: string): Promise<string> {
   const { stdout } = await runCommand("git", [
     "-C",
     worktreePath,
@@ -119,7 +116,7 @@ function splitZ(s: string): string[] {
 function parseNameStatus(out: string): Map<string, Renamed | Copied | NotRenamed> {
   const parts = splitZ(out);
   const result = new Map<string, Renamed | Copied | NotRenamed>();
-  for (let i = 0; i < parts.length;) {
+  for (let i = 0; i < parts.length; ) {
     const letter = parts[i][0];
     if (letter === "R" || letter === "C") {
       result.set(parts[i + 2], { status: letter, old_path: parts[i + 1] });
@@ -142,7 +139,7 @@ function parseNameStatus(out: string): Map<string, Renamed | Copied | NotRenamed
 function parseNumstat(out: string): Map<string, Counted | NotCounted> {
   const parts = splitZ(out);
   const result = new Map<string, Counted | NotCounted>();
-  for (let i = 0; i < parts.length;) {
+  for (let i = 0; i < parts.length; ) {
     const fields = parts[i].split("\t");
     const [add, del] = fields;
     // パスにタブが入っていても壊れないよう、3つ目以降は繋ぎ直す
@@ -215,9 +212,6 @@ export async function computeDiff(o: {
     );
   }
 
-  const { patch, truncated } = truncatePatch(
-    rawPatch,
-    o.patchLimitBytes ?? PATCH_LIMIT_BYTES,
-  );
+  const { patch, truncated } = truncatePatch(rawPatch, o.patchLimitBytes ?? PATCH_LIMIT_BYTES);
   return { files, patch, truncated };
 }

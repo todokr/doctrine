@@ -7,13 +7,18 @@ export async function insertRateLimitSample(
   db: Db,
   s: { window: string; utilization: number; resets_at: string | null },
 ): Promise<void> {
-  await db.insertInto("rate_limit_samples")
+  await db
+    .insertInto("rate_limit_samples")
     .values({ ...s, observed_at: new Date().toISOString() })
     .execute();
 }
 
 export function recentRateLimitSamples(db: Db, limit: number): Promise<RateLimitRow[]> {
-  return db.selectFrom("rate_limit_samples").selectAll().orderBy("id", "desc").limit(limit)
+  return db
+    .selectFrom("rate_limit_samples")
+    .selectAll()
+    .orderBy("id", "desc")
+    .limit(limit)
     .execute();
 }
 
@@ -27,7 +32,9 @@ export async function rateLimitsObservedSince(
   db: Db,
   since: string,
 ): Promise<RateLimitObservation[]> {
-  const rows = await db.selectFrom("rate_limit_samples").selectAll()
+  const rows = await db
+    .selectFrom("rate_limit_samples")
+    .selectAll()
     .where("observed_at", ">=", since)
     .orderBy("id", "asc")
     .execute();

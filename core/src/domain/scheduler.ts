@@ -21,7 +21,9 @@ const RUNNING_INTAKE_STATES: IntakeState[] = ["investigating", "decomposing"];
  * Intake の実行は全体枠だけを取り、プロジェクト枠は取らない（spec 7 章）。
  */
 export async function currentUsage(db: Db): Promise<SlotUsage> {
-  const rows = await db.selectFrom("tasks").select(["project_id", "state"])
+  const rows = await db
+    .selectFrom("tasks")
+    .select(["project_id", "state"])
     .where("state", "in", ["running", "suspended", "paused", "rate_limited", "waiting"])
     .execute();
 
@@ -32,7 +34,8 @@ export async function currentUsage(db: Db): Promise<SlotUsage> {
       usage.byProject.set(r.project_id, (usage.byProject.get(r.project_id) ?? 0) + 1);
     }
   }
-  const intakeRuns = await db.selectFrom("intake_runs")
+  const intakeRuns = await db
+    .selectFrom("intake_runs")
     .select((eb) => eb.fn.countAll<number>().as("n"))
     .where("status", "=", "running")
     .executeTakeFirstOrThrow();
@@ -47,11 +50,10 @@ export async function currentUsage(db: Db): Promise<SlotUsage> {
  * 待ちは runTask の中で sleep せず、タスク行の rate_limited_until と tick で表す。
  * sleep にすると、デーモンを再起動した瞬間に待ちが消えてタスクが永久に止まる。
  */
-export async function releaseDueRateLimited(
-  db: Db,
-  now: Date = new Date(),
-): Promise<string[]> {
-  const due = await db.selectFrom("tasks").select("id")
+export async function releaseDueRateLimited(db: Db, now: Date = new Date()): Promise<string[]> {
+  const due = await db
+    .selectFrom("tasks")
+    .select("id")
     .where("state", "=", "rate_limited")
     .where("rate_limited_until", "<=", now.toISOString())
     .orderBy("rate_limited_until", "asc")
@@ -81,7 +83,9 @@ export async function releaseDueRateLimited(
  * 待ち方は releaseDueRateLimited と同じで、runTask の中では sleep しない。
  */
 export async function releaseDueWaiting(db: Db, now: Date = new Date()): Promise<string[]> {
-  const due = await db.selectFrom("tasks").select("id")
+  const due = await db
+    .selectFrom("tasks")
+    .select("id")
     .where("state", "=", "waiting")
     .where("waiting_until", "<=", now.toISOString())
     .orderBy("waiting_until", "asc")
@@ -112,7 +116,9 @@ export async function releaseDueIntakeRateLimited(
   db: Db,
   o: { logRoot: string; now?: Date },
 ): Promise<string[]> {
-  const due = await db.selectFrom("intakes").select(["id", "state"])
+  const due = await db
+    .selectFrom("intakes")
+    .select(["id", "state"])
     .where("state", "in", RUNNING_INTAKE_STATES)
     .where("rate_limited_until", "<=", (o.now ?? new Date()).toISOString())
     .orderBy("rate_limited_until", "asc")
@@ -120,8 +126,12 @@ export async function releaseDueIntakeRateLimited(
 
   const released: string[] = [];
   for (const { id, state } of due) {
-    const last = await db.selectFrom("intake_runs").select("purpose")
-      .where("intake_id", "=", id).orderBy("id", "desc").executeTakeFirst();
+    const last = await db
+      .selectFrom("intake_runs")
+      .select("purpose")
+      .where("intake_id", "=", id)
+      .orderBy("id", "desc")
+      .executeTakeFirst();
     if (last === undefined) continue;
     try {
       await db.transaction().execute(async (trx) => {
@@ -142,10 +152,15 @@ export async function releaseDueIntakeRateLimited(
  * タスクの rate_limited と、Intake の rate_limited_until の両方を見る。
  */
 export async function hasActiveRateLimit(db: Db): Promise<boolean> {
-  const task = await db.selectFrom("tasks").select("id")
-    .where("state", "=", "rate_limited").executeTakeFirst();
+  const task = await db
+    .selectFrom("tasks")
+    .select("id")
+    .where("state", "=", "rate_limited")
+    .executeTakeFirst();
   if (task !== undefined) return true;
-  const intake = await db.selectFrom("intakes").select("id")
+  const intake = await db
+    .selectFrom("intakes")
+    .select("id")
     .where("state", "in", RUNNING_INTAKE_STATES)
     .where("rate_limited_until", "is not", null)
     .executeTakeFirst();
@@ -162,7 +177,8 @@ export async function selectAdmissibleIntakeRuns(
 ): Promise<IntakeRunRow[]> {
   const free = globalLimit - (await currentUsage(db)).global;
   if (free <= 0) return [];
-  return await db.selectFrom("intake_runs")
+  return await db
+    .selectFrom("intake_runs")
     .innerJoin("intakes", "intakes.id", "intake_runs.intake_id")
     .selectAll("intake_runs")
     .where("intake_runs.status", "=", "queued")
@@ -174,12 +190,14 @@ export async function selectAdmissibleIntakeRuns(
 
 /** queued のタスクを受付順に。再開したタスク → 優先度 → 作成時刻の FIFO。 */
 async function queuedInAdmissionOrder(db: Db): Promise<TaskRow[]> {
-  return await db.selectFrom("tasks").selectAll()
+  return await db
+    .selectFrom("tasks")
+    .selectAll()
     .where("state", "=", "queued")
-    .orderBy("resumed", "desc").orderBy("priority", "asc").orderBy("created_at", "asc").orderBy(
-      "id",
-      "asc",
-    )
+    .orderBy("resumed", "desc")
+    .orderBy("priority", "asc")
+    .orderBy("created_at", "asc")
+    .orderBy("id", "asc")
     .execute();
 }
 
@@ -228,7 +246,8 @@ export type SlotsSnapshot = {
 export async function slotsSnapshot(db: Db, globalLimit: number): Promise<SlotsSnapshot> {
   const inUse = (await currentUsage(db)).global;
   const waitingTasks = await queuedInAdmissionOrder(db);
-  const waitingIntakeRuns = await db.selectFrom("intake_runs")
+  const waitingIntakeRuns = await db
+    .selectFrom("intake_runs")
     .innerJoin("intakes", "intakes.id", "intake_runs.intake_id")
     .select([
       "intake_runs.id",

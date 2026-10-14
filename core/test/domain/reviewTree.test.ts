@@ -1,4 +1,4 @@
-import { afterEach, test } from "@std/testing/bdd";
+import { afterEach, test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";

@@ -1,4 +1,4 @@
-import { test } from "@std/testing/bdd";
+import { test } from "node:test";
 import assert from "node:assert/strict";
 import { getIntake, listProcesses, upsertPrObservation } from "../../src/db/intakes.ts";
 import { getTask } from "../../src/db/tasks.ts";
@@ -14,7 +14,10 @@ test("direct: Intake は active で、プロセス main とタスク 1 本を持
   assert.equal(intake.mode, "direct");
   assert.equal(intake.state, "active");
   const rows = await listProcesses(db, "d1");
-  assert.deepEqual(rows.map((r) => [r.process_id, r.sub_issue_url]), [["main", null]]);
+  assert.deepEqual(
+    rows.map((r) => [r.process_id, r.sub_issue_url]),
+    [["main", null]],
+  );
   const task = (await getTask(db, taskId))!;
   assert.equal(task.project_id, projectId);
   assert.equal(task.title, "直す");
@@ -46,7 +49,7 @@ test("direct: タスクを入れられなければ、Intake もプロセスも�
       project,
       issue: { url: "https://github.com/o/r/issues/2", title: "別", body: "" },
       pin: { workflow_yaml: loaded.text, workflow_setup: null },
-    })
+    }),
   );
   assert.equal(await getIntake(db, "d2"), undefined);
   assert.deepEqual(await listProcesses(db, "d2"), []);
@@ -71,7 +74,10 @@ test("direct: intake.get はプロセス main 1 つと帯を返し、PR のマ�
   assert.equal(main.state, "running");
   assert.equal(main.sub_issue_url, null);
   assert.deepEqual(main.task_ids, [taskId]);
-  assert.deepEqual(main.rail!.map((n) => n.id), ["a", "review"]);
+  assert.deepEqual(
+    main.rail!.map((n) => n.id),
+    ["a", "review"],
+  );
 
   await upsertPrObservation(db, {
     task_id: taskId,

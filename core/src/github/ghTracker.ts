@@ -5,24 +5,28 @@ import type { SubIssue, Tracker } from "../tracker/tracker.ts";
 
 const repoSchema = z.object({ id: z.string(), nameWithOwner: z.string() });
 
-const listSchema = z.array(z.object({
-  url: z.string(),
-  number: z.number(),
-  title: z.string(),
-  assignees: z.array(z.object({ login: z.string() })),
-  updatedAt: z.string(),
-}));
+const listSchema = z.array(
+  z.object({
+    url: z.string(),
+    number: z.number(),
+    title: z.string(),
+    assignees: z.array(z.object({ login: z.string() })),
+    updatedAt: z.string(),
+  }),
+);
 
 const viewSchema = z.object({
   url: z.string(),
   id: z.string(),
   title: z.string(),
   body: z.string(),
-  comments: z.array(z.object({
-    author: z.object({ login: z.string() }).nullable(),
-    body: z.string(),
-    createdAt: z.string(),
-  })),
+  comments: z.array(
+    z.object({
+      author: z.object({ login: z.string() }).nullable(),
+      body: z.string(),
+      createdAt: z.string(),
+    }),
+  ),
 });
 
 const issueNode = z.object({ id: z.string(), url: z.string() });
@@ -33,25 +37,27 @@ const createSchema = z.object({
 
 const subIssuesSchema = z.object({
   data: z.object({
-    node: z.object({
-      subIssues: z.object({
-        nodes: z.array(issueNode.extend({ state: z.enum(["OPEN", "CLOSED"]), body: z.string() })),
-      }).optional(),
-    }).nullable(),
+    node: z
+      .object({
+        subIssues: z
+          .object({
+            nodes: z.array(
+              issueNode.extend({ state: z.enum(["OPEN", "CLOSED"]), body: z.string() }),
+            ),
+          })
+          .optional(),
+      })
+      .nullable(),
   }),
 });
 
 const mutationSchema = (name: string) =>
   z.object({ data: z.object({ [name]: z.object({ issue: z.object({ id: z.string() }) }) }) });
 
-const CREATE_SUB_ISSUE =
-  `mutation($repositoryId: ID!, $parentIssueId: ID!, $title: String!, $body: String!) { createIssue(input: { repositoryId: $repositoryId, parentIssueId: $parentIssueId, title: $title, body: $body }) { issue { id url } } }`;
-const FIND_SUB_ISSUES =
-  `query($id: ID!) { node(id: $id) { ... on Issue { subIssues(first: 100) { nodes { id url state body } } } } }`;
-const UPDATE_ISSUE =
-  `mutation($id: ID!, $title: String!, $body: String!) { updateIssue(input: { id: $id, title: $title, body: $body }) { issue { id } } }`;
-const CLOSE_ISSUE =
-  `mutation($id: ID!, $reason: IssueClosedStateReason!) { closeIssue(input: { issueId: $id, stateReason: $reason }) { issue { id } } }`;
+const CREATE_SUB_ISSUE = `mutation($repositoryId: ID!, $parentIssueId: ID!, $title: String!, $body: String!) { createIssue(input: { repositoryId: $repositoryId, parentIssueId: $parentIssueId, title: $title, body: $body }) { issue { id url } } }`;
+const FIND_SUB_ISSUES = `query($id: ID!) { node(id: $id) { ... on Issue { subIssues(first: 100) { nodes { id url state body } } } } }`;
+const UPDATE_ISSUE = `mutation($id: ID!, $title: String!, $body: String!) { updateIssue(input: { id: $id, title: $title, body: $body }) { issue { id } } }`;
+const CLOSE_ISSUE = `mutation($id: ID!, $reason: IssueClosedStateReason!) { closeIssue(input: { issueId: $id, stateReason: $reason }) { issue { id } } }`;
 
 const STATE_REASON = { completed: "COMPLETED", not_planned: "NOT_PLANNED" } as const;
 

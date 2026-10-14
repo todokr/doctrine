@@ -1,4 +1,4 @@
-import { test } from "@std/testing/bdd";
+import { test } from "node:test";
 import assert from "node:assert/strict";
 import { buildGuidePrompt, type GuidePromptInput } from "../../src/domain/guidePrompt.ts";
 import { GUIDE_HUNKS_RELPATH } from "../../src/domain/guideInputs.ts";
@@ -25,23 +25,27 @@ test("タスクの指示がそのまま入る", () => {
 });
 
 test("テスト結果のステップid・終了コード・stdout・stderr が入る", () => {
-  const p = buildGuidePrompt(inputOf({
-    lastCommand: {
-      stepId: "verify",
-      exitCode: 1,
-      stdout: "1 テスト失敗",
-      stderr: "型が合いません",
-    },
-  }));
+  const p = buildGuidePrompt(
+    inputOf({
+      lastCommand: {
+        stepId: "verify",
+        exitCode: 1,
+        stdout: "1 テスト失敗",
+        stderr: "型が合いません",
+      },
+    }),
+  );
   for (const s of ["verify", "終了コード: 1", "1 テスト失敗", "型が合いません"]) {
     assert.ok(p.includes(s), s);
   }
 });
 
 test("シグナルで殺されたテスト結果も書ける", () => {
-  const p = buildGuidePrompt(inputOf({
-    lastCommand: { stepId: "verify", exitCode: null, stdout: "", stderr: "" },
-  }));
+  const p = buildGuidePrompt(
+    inputOf({
+      lastCommand: { stepId: "verify", exitCode: null, stdout: "", stderr: "" },
+    }),
+  );
   assert.ok(p.includes("シグナルで終了"));
 });
 

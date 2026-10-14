@@ -6,7 +6,7 @@ import type { FrozenPart } from "./pfd/validate.ts";
 /**
  * 調査・分解エージェントへ送る文面。guidePrompt.ts と同じく expand() に通さず、
  * テンプレートリテラルで直接組む（Issue 本文の {{ }} をテンプレートとして読まないため）。
- * 文面を別ファイルに出さない（deno compile が別ファイルを同梱しない）。
+ * 文面を別ファイルに出さない（単一バイナリに別ファイルが同梱されない）。
  */
 
 /** 分解のプロンプトに載せるプロジェクト。repo は GitHub の owner/name で、GitHub でないか引けなければ null。 */
@@ -123,9 +123,12 @@ const QUESTION_RULES = `## 論点の規則 — 質問と仮定
 - 質問も仮定も無ければ、\`questions\` と \`assumptions\` に空配列を返す`;
 
 function formatIssue(issue: IssueDetail): string {
-  const comments = issue.comments.length === 0 ? "（コメントなし）" : issue.comments
-    .map((c) => `### ${c.author ?? "（削除されたユーザー）"}（${c.createdAt}）\n\n${c.body}`)
-    .join("\n\n");
+  const comments =
+    issue.comments.length === 0
+      ? "（コメントなし）"
+      : issue.comments
+          .map((c) => `### ${c.author ?? "（削除されたユーザー）"}（${c.createdAt}）\n\n${c.body}`)
+          .join("\n\n");
   return `URL: ${issue.url}
 タイトル: ${issue.title}
 
@@ -153,9 +156,10 @@ function formatProjects(projects: readonly PromptProject[]): string {
 }
 
 /** 会話の最初に 1 回だけ送る。調査の実行として、質問だけを返させる。 */
-export function buildInitialPrompt(
-  input: { issue: IssueDetail; projects: readonly PromptProject[] },
-): string {
+export function buildInitialPrompt(input: {
+  issue: IssueDetail;
+  projects: readonly PromptProject[];
+}): string {
   return `あなたは、Issue を PFD（Process Flow Diagram）で分解する前に、分解の論点を洗い出して人に確かめてもらう役です。
 リポジトリは読むだけで、書き換えません。出力は最終応答の構造化出力で返し、ファイルには書きません。
 
@@ -204,7 +208,10 @@ export function buildRevisionPrompt(input: {
   feedback: string;
   projects: readonly PromptProject[];
 }): string {
-  const retired = input.retiredProcessIds.length === 0 ? "" : `## 使えない id
+  const retired =
+    input.retiredProcessIds.length === 0
+      ? ""
+      : `## 使えない id
 
 前の改訂で取りやめたプロセスの id は、新しい案で使えません。別の id にしてください。
 
@@ -212,9 +219,8 @@ ${input.retiredProcessIds.map((id) => `- ${id}`).join("\n")}
 
 `;
   const decided = Object.entries(input.decisions);
-  const decisions = decided.length === 0
-    ? "なし"
-    : decided.map(([id, text]) => `- ${id}: ${text}`).join("\n");
+  const decisions =
+    decided.length === 0 ? "なし" : decided.map(([id, text]) => `- ${id}: ${text}`).join("\n");
   return `あなたは、承認されて進行中の計画（PFD）を、人のコメントに沿って直す役です。
 リポジトリは読むだけで、書き換えません。出力は最終応答の構造化出力で返し、ファイルには書きません。
 

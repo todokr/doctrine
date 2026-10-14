@@ -141,7 +141,7 @@ CLI が受け付ける範囲に収めるため、`core/test/guide/jsonSchema.tes
 - すべての object が `additionalProperties: false`
 - `minLength` / `maxLength` / `minimum` / `maximum` / `pattern` / `format` / `$ref` / `$defs` を使わない
 - `minItems` は 0 か 1、optional なプロパティは全体で 24 個以下、`anyOf` と `oneOf` は合わせて 16 個以下
-- 出力はスナップショット（`core/test/guide/__snapshots__/jsonSchema.test.ts.snap`）と一致する
+- 出力はスナップショット（`core/test/guide/jsonSchema.test.ts.snapshot`）と一致する
 
 ## 5.5 guide ステップ
 

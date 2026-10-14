@@ -22,20 +22,23 @@ import { type Kysely, type Migration, type MigrationProvider, Migrator, sql } fr
  * 列の定義を書き写さないので、前のマイグレーションで ALTER が足した列や CHECK を落とさない。
  * 呼ぶ前に外部キーの検査を止めておくこと（0005 と同じ理由）。
  */
-// deno-lint-ignore no-explicit-any
+// biome-ignore lint/suspicious/noExplicitAny: マイグレーションは今の schema.ts ではなく当時のスキーマを相手にする
 async function rebuildWithCheck(db: Kysely<any>, table: string, from: string, to: string) {
   const { rows } = await sql<{ sql: string }>`
     SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ${table}
   `.execute(db);
   const ddl = rows[0]?.sql;
-  if (!ddl || !ddl.includes(from)) {
+  if (!ddl?.includes(from)) {
     throw new Error(`${table} の CHECK が想定と違います: ${ddl}`);
   }
-  const indexes = (await sql<{ sql: string }>`
+  const indexes = (
+    await sql<{ sql: string }>`
     SELECT sql FROM sqlite_master WHERE type = 'index' AND tbl_name = ${table} AND sql IS NOT NULL
-  `.execute(db)).rows.map((r) => r.sql);
+  `.execute(db)
+  ).rows.map((r) => r.sql);
 
-  const created = ddl.replace(from, to)
+  const created = ddl
+    .replace(from, to)
     .replace(/^CREATE TABLE\s+("?)\w+\1/, `CREATE TABLE "${table}_new"`);
   await sql.raw(created).execute(db);
   await sql.raw(`INSERT INTO "${table}_new" SELECT * FROM "${table}"`).execute(db);
@@ -57,9 +60,11 @@ const migrations: Record<string, Migration> = {
    * 列を足さない）。ここで足して、全DBをこの形に揃える。
    */
   "0001_baseline": {
-    // deno-lint-ignore no-explicit-any
+    // biome-ignore lint/suspicious/noExplicitAny: マイグレーションは今の schema.ts ではなく当時のスキーマを相手にする
     async up(db: Kysely<any>) {
-      await db.schema.createTable("projects").ifNotExists()
+      await db.schema
+        .createTable("projects")
+        .ifNotExists()
         .addColumn("id", "integer", (c) => c.primaryKey().autoIncrement())
         .addColumn("path", "text", (c) => c.notNull().unique())
         .addColumn("default_workflow", "text", (c) => c.notNull())
@@ -68,16 +73,21 @@ const migrations: Record<string, Migration> = {
         .addColumn("setup", "text")
         .execute();
 
-      await db.schema.createTable("tasks").ifNotExists()
+      await db.schema
+        .createTable("tasks")
+        .ifNotExists()
         .addColumn("id", "text", (c) => c.primaryKey())
         .addColumn("project_id", "integer", (c) => c.notNull().references("projects.id"))
         .addColumn("title", "text", (c) => c.notNull())
         .addColumn("prompt", "text", (c) => c.notNull())
         .addColumn("workflow_name", "text", (c) => c.notNull())
         .addColumn("state", "text", (c) =>
-          c.notNull().check(
-            sql`state IN ('queued','running','suspended','paused','completed','failed','canceled')`,
-          ))
+          c
+            .notNull()
+            .check(
+              sql`state IN ('queued','running','suspended','paused','completed','failed','canceled')`,
+            ),
+        )
         .addColumn("current_step_id", "text")
         .addColumn("attempt_counts", "text", (c) => c.notNull().defaultTo("{}"))
         .addColumn("branch", "text", (c) => c.notNull())
@@ -95,20 +105,28 @@ const migrations: Record<string, Migration> = {
       if (!taskColumns.rows.some((c) => c.name === "pending_feed")) {
         await db.schema.alterTable("tasks").addColumn("pending_feed", "text").execute();
       }
-      await db.schema.createIndex("idx_tasks_state").ifNotExists()
-        .on("tasks").column("state").execute();
-      await db.schema.createIndex("idx_tasks_project").ifNotExists()
-        .on("tasks").columns(["project_id", "state"]).execute();
+      await db.schema
+        .createIndex("idx_tasks_state")
+        .ifNotExists()
+        .on("tasks")
+        .column("state")
+        .execute();
+      await db.schema
+        .createIndex("idx_tasks_project")
+        .ifNotExists()
+        .on("tasks")
+        .columns(["project_id", "state"])
+        .execute();
 
-      await db.schema.createTable("step_runs").ifNotExists()
+      await db.schema
+        .createTable("step_runs")
+        .ifNotExists()
         .addColumn("id", "integer", (c) => c.primaryKey().autoIncrement())
         .addColumn("task_id", "text", (c) => c.notNull().references("tasks.id"))
         .addColumn("step_id", "text", (c) => c.notNull())
         .addColumn("attempt", "integer", (c) => c.notNull())
-        .addColumn(
-          "status",
-          "text",
-          (c) => c.notNull().check(sql`status IN ('running','success','failed','degraded')`),
+        .addColumn("status", "text", (c) =>
+          c.notNull().check(sql`status IN ('running','success','failed','degraded')`),
         )
         .addColumn("exit_code", "integer")
         .addColumn("started_at", "text", (c) => c.notNull())
@@ -118,10 +136,16 @@ const migrations: Record<string, Migration> = {
         .addColumn("num_turns", "integer")
         .addColumn("duration_ms", "integer")
         .execute();
-      await db.schema.createIndex("idx_step_runs_task").ifNotExists()
-        .on("step_runs").columns(["task_id", "id"]).execute();
+      await db.schema
+        .createIndex("idx_step_runs_task")
+        .ifNotExists()
+        .on("step_runs")
+        .columns(["task_id", "id"])
+        .execute();
 
-      await db.schema.createTable("step_outputs").ifNotExists()
+      await db.schema
+        .createTable("step_outputs")
+        .ifNotExists()
         .addColumn("task_id", "text", (c) => c.notNull().references("tasks.id"))
         .addColumn("step_id", "text", (c) => c.notNull())
         .addColumn("stdout", "text", (c) => c.notNull())
@@ -130,7 +154,9 @@ const migrations: Record<string, Migration> = {
         .addPrimaryKeyConstraint("step_outputs_pk", ["task_id", "step_id"])
         .execute();
 
-      await db.schema.createTable("rate_limit_samples").ifNotExists()
+      await db.schema
+        .createTable("rate_limit_samples")
+        .ifNotExists()
         .addColumn("id", "integer", (c) => c.primaryKey().autoIncrement())
         .addColumn("observed_at", "text", (c) => c.notNull())
         .addColumn("window", "text", (c) => c.notNull())
@@ -140,9 +166,11 @@ const migrations: Record<string, Migration> = {
     },
   },
   "0002_task_sessions": {
-    // deno-lint-ignore no-explicit-any
+    // biome-ignore lint/suspicious/noExplicitAny: マイグレーションは今の schema.ts ではなく当時のスキーマを相手にする
     async up(db: Kysely<any>) {
-      await db.schema.createTable("task_sessions").ifNotExists()
+      await db.schema
+        .createTable("task_sessions")
+        .ifNotExists()
         .addColumn("task_id", "text", (c) => c.notNull().references("tasks.id"))
         .addColumn("role", "text", (c) => c.notNull())
         .addColumn("session_id", "text", (c) => c.notNull())
@@ -166,18 +194,22 @@ const migrations: Record<string, Migration> = {
    * ない（切ろうにもマイグレーションはトランザクションの中なので切れない）。
    */
   "0003_review_records": {
-    // deno-lint-ignore no-explicit-any
+    // biome-ignore lint/suspicious/noExplicitAny: マイグレーションは今の schema.ts ではなく当時のスキーマを相手にする
     async up(db: Kysely<any>) {
       // --- 1. step_runs の再構築（awaiting / interrupted と review_tree） ---
-      await db.schema.createTable("step_runs_new")
+      await db.schema
+        .createTable("step_runs_new")
         .addColumn("id", "integer", (c) => c.primaryKey().autoIncrement())
         .addColumn("task_id", "text", (c) => c.notNull().references("tasks.id"))
         .addColumn("step_id", "text", (c) => c.notNull())
         .addColumn("attempt", "integer", (c) => c.notNull())
         .addColumn("status", "text", (c) =>
-          c.notNull().check(
-            sql`status IN ('running','awaiting','success','failed','degraded','interrupted')`,
-          ))
+          c
+            .notNull()
+            .check(
+              sql`status IN ('running','awaiting','success','failed','degraded','interrupted')`,
+            ),
+        )
         .addColumn("exit_code", "integer")
         .addColumn("started_at", "text", (c) => c.notNull())
         .addColumn("ended_at", "text")
@@ -198,11 +230,15 @@ const migrations: Record<string, Migration> = {
       `.execute(db);
       await db.schema.dropTable("step_runs").execute();
       await db.schema.alterTable("step_runs_new").renameTo("step_runs").execute();
-      await db.schema.createIndex("idx_step_runs_task")
-        .on("step_runs").columns(["task_id", "id"]).execute();
+      await db.schema
+        .createIndex("idx_step_runs_task")
+        .on("step_runs")
+        .columns(["task_id", "id"])
+        .execute();
 
       // --- 2. step_outputs の再構築（主キーを step_run_id に） ---
-      await db.schema.createTable("step_outputs_new")
+      await db.schema
+        .createTable("step_outputs_new")
         .addColumn("step_run_id", "integer", (c) => c.primaryKey().references("step_runs.id"))
         .addColumn("stdout", "text", (c) => c.notNull())
         .addColumn("stderr", "text", (c) => c.notNull())
@@ -227,9 +263,12 @@ const migrations: Record<string, Migration> = {
       // suspended は approval でしか起こらないので、current_step_id がそのまま
       // approval ステップの id である。待ち始めた時刻は updated_at（suspended へ
       // 遷移した時刻そのもの）。ツリーは過去に遡れないので NULL。
-      const suspended = await sql<
-        { id: string; current_step_id: string; attempt_counts: string; updated_at: string }
-      >`
+      const suspended = await sql<{
+        id: string;
+        current_step_id: string;
+        attempt_counts: string;
+        updated_at: string;
+      }>`
         SELECT id, current_step_id, attempt_counts, updated_at FROM tasks
          WHERE state = 'suspended' AND current_step_id IS NOT NULL
       `.execute(db);
@@ -270,12 +309,10 @@ const migrations: Record<string, Migration> = {
    * 制約に関わらない列なので、テーブル再構築は要らない。
    */
   "0004_step_outputs_last_names": {
-    // deno-lint-ignore no-explicit-any
+    // biome-ignore lint/suspicious/noExplicitAny: マイグレーションは今の schema.ts ではなく当時のスキーマを相手にする
     async up(db: Kysely<any>) {
-      await db.schema.alterTable("step_outputs")
-        .renameColumn("stdout", "last_stdout").execute();
-      await db.schema.alterTable("step_outputs")
-        .renameColumn("stderr", "last_stderr").execute();
+      await db.schema.alterTable("step_outputs").renameColumn("stdout", "last_stdout").execute();
+      await db.schema.alterTable("step_outputs").renameColumn("stderr", "last_stderr").execute();
     },
   },
   /**
@@ -295,22 +332,26 @@ const migrations: Record<string, Migration> = {
    * そのときは defer_foreign_keys の方が効く。
    */
   "0005_rate_limited": {
-    // deno-lint-ignore no-explicit-any
+    // biome-ignore lint/suspicious/noExplicitAny: マイグレーションは今の schema.ts ではなく当時のスキーマを相手にする
     async up(db: Kysely<any>) {
       await sql`PRAGMA foreign_keys = OFF`.execute(db);
       await sql`PRAGMA defer_foreign_keys = ON`.execute(db);
 
       // --- 1. tasks の再構築（state に rate_limited、rate_limited_until 列） ---
-      await db.schema.createTable("tasks_new")
+      await db.schema
+        .createTable("tasks_new")
         .addColumn("id", "text", (c) => c.primaryKey())
         .addColumn("project_id", "integer", (c) => c.notNull().references("projects.id"))
         .addColumn("title", "text", (c) => c.notNull())
         .addColumn("prompt", "text", (c) => c.notNull())
         .addColumn("workflow_name", "text", (c) => c.notNull())
         .addColumn("state", "text", (c) =>
-          c.notNull().check(
-            sql`state IN ('queued','running','suspended','paused','rate_limited','completed','failed','canceled')`,
-          ))
+          c
+            .notNull()
+            .check(
+              sql`state IN ('queued','running','suspended','paused','rate_limited','completed','failed','canceled')`,
+            ),
+        )
         .addColumn("current_step_id", "text")
         .addColumn("attempt_counts", "text", (c) => c.notNull().defaultTo("{}"))
         .addColumn("branch", "text", (c) => c.notNull())
@@ -338,19 +379,26 @@ const migrations: Record<string, Migration> = {
       await db.schema.dropTable("tasks").execute();
       await db.schema.alterTable("tasks_new").renameTo("tasks").execute();
       await db.schema.createIndex("idx_tasks_state").on("tasks").column("state").execute();
-      await db.schema.createIndex("idx_tasks_project")
-        .on("tasks").columns(["project_id", "state"]).execute();
+      await db.schema
+        .createIndex("idx_tasks_project")
+        .on("tasks")
+        .columns(["project_id", "state"])
+        .execute();
 
       // --- 2. step_runs の再構築（status に rate_limited） ---
-      await db.schema.createTable("step_runs_new")
+      await db.schema
+        .createTable("step_runs_new")
         .addColumn("id", "integer", (c) => c.primaryKey().autoIncrement())
         .addColumn("task_id", "text", (c) => c.notNull().references("tasks.id"))
         .addColumn("step_id", "text", (c) => c.notNull())
         .addColumn("attempt", "integer", (c) => c.notNull())
         .addColumn("status", "text", (c) =>
-          c.notNull().check(
-            sql`status IN ('running','awaiting','success','failed','degraded','interrupted','rate_limited')`,
-          ))
+          c
+            .notNull()
+            .check(
+              sql`status IN ('running','awaiting','success','failed','degraded','interrupted','rate_limited')`,
+            ),
+        )
         .addColumn("exit_code", "integer")
         .addColumn("started_at", "text", (c) => c.notNull())
         .addColumn("ended_at", "text")
@@ -371,8 +419,11 @@ const migrations: Record<string, Migration> = {
       `.execute(db);
       await db.schema.dropTable("step_runs").execute();
       await db.schema.alterTable("step_runs_new").renameTo("step_runs").execute();
-      await db.schema.createIndex("idx_step_runs_task")
-        .on("step_runs").columns(["task_id", "id"]).execute();
+      await db.schema
+        .createIndex("idx_step_runs_task")
+        .on("step_runs")
+        .columns(["task_id", "id"])
+        .execute();
 
       const violations = await sql<{ table: string }>`PRAGMA foreign_key_check`.execute(db);
       await sql`PRAGMA foreign_keys = ON`.execute(db);
@@ -399,7 +450,7 @@ const migrations: Record<string, Migration> = {
    * ワークフロー定義が無いと決まらないので、goto_step_id は NULL のままにする。
    */
   "0006_step_run_bounced": {
-    // deno-lint-ignore no-explicit-any
+    // biome-ignore lint/suspicious/noExplicitAny: マイグレーションは今の schema.ts ではなく当時のスキーマを相手にする
     async up(db: Kysely<any>) {
       // --- 1. step_outputs を外部キーの無い一時テーブルへ退避する ---
       // CREATE TABLE ... AS SELECT は制約を引き継がないので、step_runs を
@@ -408,15 +459,19 @@ const migrations: Record<string, Migration> = {
       await db.schema.dropTable("step_outputs").execute();
 
       // --- 2. step_runs の再構築（bounced と goto_step_id） ---
-      await db.schema.createTable("step_runs_new")
+      await db.schema
+        .createTable("step_runs_new")
         .addColumn("id", "integer", (c) => c.primaryKey().autoIncrement())
         .addColumn("task_id", "text", (c) => c.notNull().references("tasks.id"))
         .addColumn("step_id", "text", (c) => c.notNull())
         .addColumn("attempt", "integer", (c) => c.notNull())
         .addColumn("status", "text", (c) =>
-          c.notNull().check(
-            sql`status IN ('running','awaiting','success','failed','degraded','interrupted','rate_limited','bounced')`,
-          ))
+          c
+            .notNull()
+            .check(
+              sql`status IN ('running','awaiting','success','failed','degraded','interrupted','rate_limited','bounced')`,
+            ),
+        )
         .addColumn("exit_code", "integer")
         .addColumn("started_at", "text", (c) => c.notNull())
         .addColumn("ended_at", "text")
@@ -443,11 +498,15 @@ const migrations: Record<string, Migration> = {
       `.execute(db);
       await db.schema.dropTable("step_runs").execute();
       await db.schema.alterTable("step_runs_new").renameTo("step_runs").execute();
-      await db.schema.createIndex("idx_step_runs_task")
-        .on("step_runs").columns(["task_id", "id"]).execute();
+      await db.schema
+        .createIndex("idx_step_runs_task")
+        .on("step_runs")
+        .columns(["task_id", "id"])
+        .execute();
 
       // --- 3. step_outputs を作り直して退避した行を戻す ---
-      await db.schema.createTable("step_outputs")
+      await db.schema
+        .createTable("step_outputs")
         .addColumn("step_run_id", "integer", (c) => c.primaryKey().references("step_runs.id"))
         .addColumn("last_stdout", "text", (c) => c.notNull())
         .addColumn("last_stderr", "text", (c) => c.notNull())
@@ -473,7 +532,7 @@ const migrations: Record<string, Migration> = {
    * テーブル再構築は要らない。
    */
   "0007_step_run_permission_denials": {
-    // deno-lint-ignore no-explicit-any
+    // biome-ignore lint/suspicious/noExplicitAny: マイグレーションは今の schema.ts ではなく当時のスキーマを相手にする
     async up(db: Kysely<any>) {
       await db.schema.alterTable("step_runs").addColumn("permission_denials", "text").execute();
     },
@@ -487,7 +546,7 @@ const migrations: Record<string, Migration> = {
    * 0006 と同じ理由で step_outputs を退避してから step_runs を作り直す。
    */
   "0008_step_run_drop_degraded": {
-    // deno-lint-ignore no-explicit-any
+    // biome-ignore lint/suspicious/noExplicitAny: マイグレーションは今の schema.ts ではなく当時のスキーマを相手にする
     async up(db: Kysely<any>) {
       await sql`UPDATE step_runs SET status = 'success' WHERE status = 'degraded'`.execute(db);
 
@@ -496,15 +555,19 @@ const migrations: Record<string, Migration> = {
       await db.schema.dropTable("step_outputs").execute();
 
       // --- 2. step_runs の再構築（status から degraded を外す） ---
-      await db.schema.createTable("step_runs_new")
+      await db.schema
+        .createTable("step_runs_new")
         .addColumn("id", "integer", (c) => c.primaryKey().autoIncrement())
         .addColumn("task_id", "text", (c) => c.notNull().references("tasks.id"))
         .addColumn("step_id", "text", (c) => c.notNull())
         .addColumn("attempt", "integer", (c) => c.notNull())
         .addColumn("status", "text", (c) =>
-          c.notNull().check(
-            sql`status IN ('running','awaiting','success','failed','interrupted','rate_limited','bounced')`,
-          ))
+          c
+            .notNull()
+            .check(
+              sql`status IN ('running','awaiting','success','failed','interrupted','rate_limited','bounced')`,
+            ),
+        )
         .addColumn("exit_code", "integer")
         .addColumn("started_at", "text", (c) => c.notNull())
         .addColumn("ended_at", "text")
@@ -531,11 +594,15 @@ const migrations: Record<string, Migration> = {
       `.execute(db);
       await db.schema.dropTable("step_runs").execute();
       await db.schema.alterTable("step_runs_new").renameTo("step_runs").execute();
-      await db.schema.createIndex("idx_step_runs_task")
-        .on("step_runs").columns(["task_id", "id"]).execute();
+      await db.schema
+        .createIndex("idx_step_runs_task")
+        .on("step_runs")
+        .columns(["task_id", "id"])
+        .execute();
 
       // --- 3. step_outputs を作り直して退避した行を戻す ---
-      await db.schema.createTable("step_outputs")
+      await db.schema
+        .createTable("step_outputs")
         .addColumn("step_run_id", "integer", (c) => c.primaryKey().references("step_runs.id"))
         .addColumn("last_stdout", "text", (c) => c.notNull())
         .addColumn("last_stderr", "text", (c) => c.notNull())
@@ -573,18 +640,22 @@ const migrations: Record<string, Migration> = {
    * 固定しているため。
    */
   "0009_intake": {
-    // deno-lint-ignore no-explicit-any
+    // biome-ignore lint/suspicious/noExplicitAny: マイグレーションは今の schema.ts ではなく当時のスキーマを相手にする
     async up(db: Kysely<any>) {
-      await db.schema.createTable("intakes")
+      await db.schema
+        .createTable("intakes")
         .addColumn("id", "text", (c) => c.primaryKey())
         .addColumn("project_id", "integer", (c) => c.notNull().references("projects.id"))
         .addColumn("issue_url", "text", (c) => c.notNull())
         .addColumn("issue_node_id", "text", (c) => c.notNull())
         .addColumn("issue_title", "text", (c) => c.notNull())
         .addColumn("state", "text", (c) =>
-          c.notNull().check(
-            sql`state IN ('investigating','answering','decomposing','reviewing','active','needs_attention','completed','canceled')`,
-          ))
+          c
+            .notNull()
+            .check(
+              sql`state IN ('investigating','answering','decomposing','reviewing','active','needs_attention','completed','canceled')`,
+            ),
+        )
         .addColumn("revising", "integer", (c) => c.notNull().defaultTo(0))
         .addColumn("attention_reason", "text")
         .addColumn("dispatch_paused", "integer", (c) => c.notNull().defaultTo(0))
@@ -602,19 +673,21 @@ const migrations: Record<string, Migration> = {
         WHERE state NOT IN ('completed','canceled')
       `.execute(db);
 
-      await db.schema.createTable("intake_runs")
+      await db.schema
+        .createTable("intake_runs")
         .addColumn("id", "integer", (c) => c.primaryKey().autoIncrement())
         .addColumn("intake_id", "text", (c) => c.notNull().references("intakes.id"))
-        .addColumn(
-          "purpose",
-          "text",
-          (c) => c.notNull().check(sql`purpose IN ('investigate','decompose','revise')`),
+        .addColumn("purpose", "text", (c) =>
+          c.notNull().check(sql`purpose IN ('investigate','decompose','revise')`),
         )
         .addColumn("attempt", "integer", (c) => c.notNull())
         .addColumn("status", "text", (c) =>
-          c.notNull().check(
-            sql`status IN ('queued','running','success','failed','rate_limited','interrupted')`,
-          ))
+          c
+            .notNull()
+            .check(
+              sql`status IN ('queued','running','success','failed','rate_limited','interrupted')`,
+            ),
+        )
         .addColumn("started_at", "text")
         .addColumn("ended_at", "text")
         .addColumn("log_path", "text", (c) => c.notNull())
@@ -626,7 +699,8 @@ const migrations: Record<string, Migration> = {
         .addColumn("permission_denials", "text")
         .execute();
 
-      await db.schema.createTable("intake_question_sets")
+      await db.schema
+        .createTable("intake_question_sets")
         .addColumn("id", "integer", (c) => c.primaryKey().autoIncrement())
         .addColumn("intake_id", "text", (c) => c.notNull().references("intakes.id"))
         .addColumn("run_id", "integer", (c) => c.notNull().references("intake_runs.id"))
@@ -636,7 +710,8 @@ const migrations: Record<string, Migration> = {
         .addColumn("answered_at", "text")
         .execute();
 
-      await db.schema.createTable("intake_drafts")
+      await db.schema
+        .createTable("intake_drafts")
         .addColumn("id", "integer", (c) => c.primaryKey().autoIncrement())
         .addColumn("intake_id", "text", (c) => c.notNull().references("intakes.id"))
         .addColumn("seq", "integer", (c) => c.notNull())
@@ -648,14 +723,13 @@ const migrations: Record<string, Migration> = {
         .addUniqueConstraint("intake_drafts_seq", ["intake_id", "seq"])
         .execute();
 
-      await db.schema.createTable("intake_comments")
+      await db.schema
+        .createTable("intake_comments")
         .addColumn("id", "integer", (c) => c.primaryKey().autoIncrement())
         .addColumn("intake_id", "text", (c) => c.notNull().references("intakes.id"))
         .addColumn("draft_id", "integer", (c) => c.notNull().references("intake_drafts.id"))
-        .addColumn(
-          "target_kind",
-          "text",
-          (c) => c.notNull().check(sql`target_kind IN ('artifact','process','whole')`),
+        .addColumn("target_kind", "text", (c) =>
+          c.notNull().check(sql`target_kind IN ('artifact','process','whole')`),
         )
         .addColumn("target_id", "text")
         .addColumn("body", "text", (c) => c.notNull())
@@ -666,7 +740,8 @@ const migrations: Record<string, Migration> = {
         )
         .execute();
 
-      await db.schema.createTable("intake_approvals")
+      await db.schema
+        .createTable("intake_approvals")
         .addColumn("id", "integer", (c) => c.primaryKey().autoIncrement())
         .addColumn("intake_id", "text", (c) => c.notNull().references("intakes.id"))
         .addColumn("draft_id", "integer", (c) => c.notNull().references("intake_drafts.id"))
@@ -674,7 +749,8 @@ const migrations: Record<string, Migration> = {
         .addColumn("approved_at", "text", (c) => c.notNull())
         .execute();
 
-      await db.schema.createTable("intake_processes")
+      await db.schema
+        .createTable("intake_processes")
         .addColumn("intake_id", "text", (c) => c.notNull().references("intakes.id"))
         .addColumn("process_id", "text", (c) => c.notNull())
         .addColumn("sub_issue_url", "text")
@@ -688,14 +764,13 @@ const migrations: Record<string, Migration> = {
         .addPrimaryKeyConstraint("intake_processes_pk", ["intake_id", "process_id"])
         .execute();
 
-      await db.schema.createTable("pr_observations")
+      await db.schema
+        .createTable("pr_observations")
         .addColumn("task_id", "text", (c) => c.primaryKey().references("tasks.id"))
         .addColumn("pr_number", "integer", (c) => c.notNull())
         .addColumn("pr_url", "text", (c) => c.notNull())
-        .addColumn(
-          "state",
-          "text",
-          (c) => c.notNull().check(sql`state IN ('OPEN','MERGED','CLOSED')`),
+        .addColumn("state", "text", (c) =>
+          c.notNull().check(sql`state IN ('OPEN','MERGED','CLOSED')`),
         )
         .addColumn("base_ref", "text", (c) => c.notNull())
         .addColumn("merged_at", "text")
@@ -703,14 +778,14 @@ const migrations: Record<string, Migration> = {
         .addColumn("observed_at", "text", (c) => c.notNull())
         .execute();
 
-      await db.schema.alterTable("tasks")
+      await db.schema
+        .alterTable("tasks")
         .addColumn("intake_id", "text", (c) => c.references("intakes.id"))
         .execute();
-      await db.schema.alterTable("tasks")
-        .addColumn(
-          "intake_process_id",
-          "text",
-          (c) => c.check(sql`(intake_id IS NULL) = (intake_process_id IS NULL)`),
+      await db.schema
+        .alterTable("tasks")
+        .addColumn("intake_process_id", "text", (c) =>
+          c.check(sql`(intake_id IS NULL) = (intake_process_id IS NULL)`),
         )
         .execute();
       await db.schema.alterTable("tasks").addColumn("issue_url", "text").execute();
@@ -726,12 +801,14 @@ const migrations: Record<string, Migration> = {
    * 0009 と同じく ADD COLUMN で REFERENCES を付けられる。
    */
   "0010_intake_revision": {
-    // deno-lint-ignore no-explicit-any
+    // biome-ignore lint/suspicious/noExplicitAny: マイグレーションは今の schema.ts ではなく当時のスキーマを相手にする
     async up(db: Kysely<any>) {
-      await db.schema.alterTable("intakes")
+      await db.schema
+        .alterTable("intakes")
         .addColumn("revision_run_id", "integer", (c) => c.references("intake_runs.id"))
         .execute();
-      await db.schema.alterTable("intake_comments")
+      await db.schema
+        .alterTable("intake_comments")
         .addColumn("run_id", "integer", (c) => c.references("intake_runs.id"))
         .execute();
     },
@@ -745,7 +822,7 @@ const migrations: Record<string, Migration> = {
    * 従来どおりディスクの YAML を読む。制約の無い列なので再構築は要らない。
    */
   "0011_task_workflow_pin": {
-    // deno-lint-ignore no-explicit-any
+    // biome-ignore lint/suspicious/noExplicitAny: マイグレーションは今の schema.ts ではなく当時のスキーマを相手にする
     async up(db: Kysely<any>) {
       await db.schema.alterTable("tasks").addColumn("workflow_yaml", "text").execute();
       await db.schema.alterTable("tasks").addColumn("workflow_setup", "text").execute();
@@ -758,12 +835,14 @@ const migrations: Record<string, Migration> = {
    * 「answers が非 null なら assumption_responses も非 null」を保つ。
    */
   "0012_intake_assumptions": {
-    // deno-lint-ignore no-explicit-any
+    // biome-ignore lint/suspicious/noExplicitAny: マイグレーションは今の schema.ts ではなく当時のスキーマを相手にする
     async up(db: Kysely<any>) {
-      await db.schema.alterTable("intake_question_sets")
+      await db.schema
+        .alterTable("intake_question_sets")
         .addColumn("assumptions", "text", (c) => c.notNull().defaultTo("[]"))
         .execute();
-      await db.schema.alterTable("intake_question_sets")
+      await db.schema
+        .alterTable("intake_question_sets")
         .addColumn("assumption_responses", "text")
         .execute();
       await sql`UPDATE intake_question_sets SET assumption_responses = '[]'
@@ -777,7 +856,7 @@ const migrations: Record<string, Migration> = {
    * 外部キーの止め方と確かめ方は 0005 と同じ。
    */
   "0013_waiting": {
-    // deno-lint-ignore no-explicit-any
+    // biome-ignore lint/suspicious/noExplicitAny: マイグレーションは今の schema.ts ではなく当時のスキーマを相手にする
     async up(db: Kysely<any>) {
       await sql`PRAGMA foreign_keys = OFF`.execute(db);
       await sql`PRAGMA defer_foreign_keys = ON`.execute(db);
@@ -811,7 +890,7 @@ const migrations: Record<string, Migration> = {
    * intakes は親 Issue、intake_processes は sub-issue の分。
    */
   "0014_issue_phase": {
-    // deno-lint-ignore no-explicit-any
+    // biome-ignore lint/suspicious/noExplicitAny: マイグレーションは今の schema.ts ではなく当時のスキーマを相手にする
     async up(db: Kysely<any>) {
       await db.schema.alterTable("intakes").addColumn("issue_phase", "text").execute();
       await db.schema.alterTable("intake_processes").addColumn("sub_issue_phase", "text").execute();
@@ -827,9 +906,10 @@ const migrations: Record<string, Migration> = {
    * 確かめ方は 0005 と同じ。
    */
   "0015_workspace": {
-    // deno-lint-ignore no-explicit-any
+    // biome-ignore lint/suspicious/noExplicitAny: マイグレーションは今の schema.ts ではなく当時のスキーマを相手にする
     async up(db: Kysely<any>) {
-      await db.schema.createTable("workspaces")
+      await db.schema
+        .createTable("workspaces")
         .addColumn("id", "integer", (c) => c.primaryKey().autoIncrement())
         .addColumn("path", "text", (c) => c.notNull().unique())
         .addColumn("name", "text", (c) => c.notNull())
@@ -854,7 +934,8 @@ const migrations: Record<string, Migration> = {
       await sql`PRAGMA foreign_keys = OFF`.execute(db);
       await sql`PRAGMA defer_foreign_keys = ON`.execute(db);
 
-      await db.schema.createTable("projects_new")
+      await db.schema
+        .createTable("projects_new")
         .addColumn("id", "integer", (c) => c.primaryKey().autoIncrement())
         .addColumn("workspace_id", "integer", (c) => c.notNull().references("workspaces.id"))
         .addColumn("name", "text", (c) => c.notNull())
@@ -889,21 +970,25 @@ const migrations: Record<string, Migration> = {
    * intakes を DROP すると intake_* と tasks.intake_id が参照を失うので、外部キーの止め方と確かめ方は 0015 と同じ。
    */
   "0016_intake_workspace": {
-    // deno-lint-ignore no-explicit-any
+    // biome-ignore lint/suspicious/noExplicitAny: マイグレーションは今の schema.ts ではなく当時のスキーマを相手にする
     async up(db: Kysely<any>) {
       await sql`PRAGMA foreign_keys = OFF`.execute(db);
       await sql`PRAGMA defer_foreign_keys = ON`.execute(db);
 
-      await db.schema.createTable("intakes_new")
+      await db.schema
+        .createTable("intakes_new")
         .addColumn("id", "text", (c) => c.primaryKey())
         .addColumn("workspace_id", "integer", (c) => c.notNull().references("workspaces.id"))
         .addColumn("issue_url", "text", (c) => c.notNull())
         .addColumn("issue_node_id", "text", (c) => c.notNull())
         .addColumn("issue_title", "text", (c) => c.notNull())
         .addColumn("state", "text", (c) =>
-          c.notNull().check(
-            sql`state IN ('investigating','answering','decomposing','reviewing','active','needs_attention','completed','canceled')`,
-          ))
+          c
+            .notNull()
+            .check(
+              sql`state IN ('investigating','answering','decomposing','reviewing','active','needs_attention','completed','canceled')`,
+            ),
+        )
         .addColumn("revising", "integer", (c) => c.notNull().defaultTo(0))
         .addColumn("attention_reason", "text")
         .addColumn("dispatch_paused", "integer", (c) => c.notNull().defaultTo(0))
@@ -952,13 +1037,12 @@ const migrations: Record<string, Migration> = {
 
   /** Intake の取り込みの種類（spec 2026-10-14-intake-execution-design.md 5.1）。既存の行は plan。 */
   "0017_intake_mode": {
-    // deno-lint-ignore no-explicit-any
+    // biome-ignore lint/suspicious/noExplicitAny: マイグレーションは今の schema.ts ではなく当時のスキーマを相手にする
     async up(db: Kysely<any>) {
-      await db.schema.alterTable("intakes")
-        .addColumn(
-          "mode",
-          "text",
-          (c) => c.notNull().defaultTo("plan").check(sql`mode IN ('plan', 'direct')`),
+      await db.schema
+        .alterTable("intakes")
+        .addColumn("mode", "text", (c) =>
+          c.notNull().defaultTo("plan").check(sql`mode IN ('plan', 'direct')`),
         )
         .execute();
     },
@@ -967,10 +1051,15 @@ const migrations: Record<string, Migration> = {
 
 /** 名前を [a-z0-9-]+ に丸める。空になれば "project"。 */
 function nameFrom(dirName: string): string {
-  return dirName.toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "") || "project";
+  return (
+    dirName
+      .toLowerCase()
+      .replace(/[^a-z0-9-]+/g, "-")
+      .replace(/^-+|-+$/g, "") || "project"
+  );
 }
 
-/** ファイルを動的 import しない（権限も要らず、deno check で型検査される）。 */
+/** ファイルを動的 import しない（単一バイナリに同梱され、tsc で型検査される）。 */
 const provider: MigrationProvider = {
   getMigrations: () => Promise.resolve(migrations),
 };
@@ -980,20 +1069,24 @@ const provider: MigrationProvider = {
  * （Migrator は結果を返すだけで投げないので、ここで投げ直す）。
  * SQLite の DDL はトランザクションに入るので、失敗したらその回の分は丸ごと巻き戻る。
  */
-// deno-lint-ignore no-explicit-any
+// biome-ignore lint/suspicious/noExplicitAny: マイグレーションは今の schema.ts ではなく当時のスキーマを相手にする
 export async function migrateToLatest(db: Kysely<any>): Promise<void> {
   throwIfFailed(await new Migrator({ db, provider }).migrateToLatest());
 }
 
 /** name まで（name を含む）流す。テストが古い番号の形の DB を作るのに使う。失敗の投げ方は migrateToLatest と同じ。 */
-// deno-lint-ignore no-explicit-any
+// biome-ignore lint/suspicious/noExplicitAny: マイグレーションは今の schema.ts ではなく当時のスキーマを相手にする
 export async function migrateTo(db: Kysely<any>, name: string): Promise<void> {
   throwIfFailed(await new Migrator({ db, provider }).migrateTo(name));
 }
 
-function throwIfFailed(
-  { error, results }: { error?: unknown; results?: { migrationName: string; status: string }[] },
-) {
+function throwIfFailed({
+  error,
+  results,
+}: {
+  error?: unknown;
+  results?: { migrationName: string; status: string }[];
+}) {
   if (error !== undefined) {
     const failed = results?.find((r) => r.status === "Error")?.migrationName;
     const reason = error instanceof Error ? error.message : String(error);

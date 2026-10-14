@@ -1,4 +1,4 @@
-import { test } from "@std/testing/bdd";
+import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   getIntake,
@@ -29,7 +29,10 @@ async function freeze(db: Awaited<ReturnType<typeof seedActive>>["db"]): Promise
     await updateProcess(db, "i1", id, { sub_issue_url: SUB(Number(id)) });
   }
   const report = await dispatchIntake(db, "i1", { loadWorkflow: fakeWorkflowLoader() });
-  assert.deepEqual(report.created.map((c) => c.processId), ["1"]);
+  assert.deepEqual(
+    report.created.map((c) => c.processId),
+    ["1"],
+  );
   await updateProcess(db, "i1", "3", { human_done_at: "2026-09-21T00:00:00.000Z" });
 }
 
@@ -53,12 +56,14 @@ test("loadRevisionConstraints: 固定の成果物と取りやめた id を集め
   await updateProcess(db, "i1", "4", { retired_at: "t" });
 
   const c = await loadRevisionConstraints(db, "i1");
-  assert.deepEqual(c.frozen.processes.map((p) => p.id), ["1", "3"]);
-  assert.deepEqual(c.frozen.artifacts.map((a) => a.id), [
-    "schema",
-    "new-table",
-    "metric-definition",
-  ]);
+  assert.deepEqual(
+    c.frozen.processes.map((p) => p.id),
+    ["1", "3"],
+  );
+  assert.deepEqual(
+    c.frozen.artifacts.map((a) => a.id),
+    ["schema", "new-table", "metric-definition"],
+  );
   assert.deepEqual(c.retiredProcessIds, new Set(["4"]));
   assert.equal(c.approved.pfd.title, example().title);
 });
@@ -113,13 +118,16 @@ test("approveIntake: 再承認で行を揃え、状態を active に戻す", asy
   assert.equal(intake.revising, 0);
   assert.equal(intake.revision_run_id, null);
   const rows = await listProcesses(db, "i1");
-  assert.deepEqual(rows.map((r) => [r.process_id, r.retired_at !== null]), [
-    ["1", false],
-    ["2", false],
-    ["3", false],
-    ["4", true],
-    ["4b", false],
-  ]);
+  assert.deepEqual(
+    rows.map((r) => [r.process_id, r.retired_at !== null]),
+    [
+      ["1", false],
+      ["2", false],
+      ["3", false],
+      ["4", true],
+      ["4b", false],
+    ],
+  );
   assert.equal((await latestApproval(db, "i1"))!.draft_id, draft.id);
 });
 

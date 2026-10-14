@@ -1,4 +1,4 @@
-import { test } from "@std/testing/bdd";
+import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { PrFact } from "../../../../shared/intake/processStatus.ts";
 import type { TaskState } from "../../../src/db/tasks.ts";
@@ -13,7 +13,11 @@ import { example } from "./fixture.ts";
 
 const base: StatusInput = {
   pfd: example(),
-  baseBranches: new Map([["1", "main"], ["2", "main"], ["4", "main"]]),
+  baseBranches: new Map([
+    ["1", "main"],
+    ["2", "main"],
+    ["4", "main"],
+  ]),
   revising: false,
   dispatchPaused: false,
   progress: new Map(),
@@ -205,10 +209,16 @@ test("computeProcessStatuses: W-9 の 8 状態をすべて返せる", () => {
   for (const input of inputs) {
     for (const e of computeProcessStatuses(input)) seen.add(e.state);
   }
-  assert.deepEqual(
-    [...seen].sort(),
-    ["done", "merged", "needs_attention", "pr_open", "ready", "running", "waiting", "your_turn"],
-  );
+  assert.deepEqual([...seen].sort(), [
+    "done",
+    "merged",
+    "needs_attention",
+    "pr_open",
+    "ready",
+    "running",
+    "waiting",
+    "your_turn",
+  ]);
 });
 
 function goalReachedOf(input: StatusInput): boolean {
@@ -244,7 +254,10 @@ test("goalReached: 人のプロセスの完了でも揃う", () => {
 test("computeProcessStatuses: baseBranch はプロセスごとに見る", () => {
   const input: StatusInput = {
     ...base,
-    baseBranches: new Map([["1", "main"], ["2", "develop"]]),
+    baseBranches: new Map([
+      ["1", "main"],
+      ["2", "develop"],
+    ]),
   };
   const progress = withProgress({
     "1": agent("completed", pr("MERGED", "main")),
@@ -258,7 +271,10 @@ test("computeProcessStatuses: baseBranch はプロセスごとに見る", () => 
 test("computeProcessStatuses: 別のプロセスの baseBranch へのマージは merged にしない", () => {
   const input: StatusInput = {
     ...base,
-    baseBranches: new Map([["1", "develop"], ["2", "main"]]),
+    baseBranches: new Map([
+      ["1", "develop"],
+      ["2", "main"],
+    ]),
   };
   const progress = withProgress({ "1": agent("completed", pr("MERGED", "main")) }).progress;
   assert.deepEqual(entry({ ...input, progress }, "1"), {

@@ -1,6 +1,8 @@
-import { join } from "@std/path";
+import { mkdir, stat } from "node:fs/promises";
+import { join } from "node:path";
 import type { AgentAdapter, AgentResult, RateLimitObservation } from "../adapter/types.ts";
 import { denialsColumn } from "../db/boundary.ts";
+import { isNotFound } from "../util/fsError.ts";
 import {
   getIntake,
   getIntakeRun,
@@ -67,7 +69,7 @@ import { loadRevisionConstraints } from "./revision.ts";
 export { MAX_INVALID_OUTPUTS } from "./conversation.ts";
 
 /**
- * 読むだけの道具（spec 7 章）。Write・Edit・gh・dctl は含めない。
+ * 読むだけの道具（spec 7 章）。Write・Edit・gh は含めない。
  * cwd が git リポジトリでないので、git の許可はプロジェクトごとの git -C <名前> に展開する（workspace spec 5 章）。
  */
 export function intakeAllowedTools(projectNames: readonly string[]): string[] {
@@ -103,9 +105,13 @@ export async function enqueueIntakeRun(
   purpose: IntakeRunPurpose,
   o: { logRoot: string; resume: boolean },
 ): Promise<number> {
-  const latest = await db.selectFrom("intake_runs").select("attempt")
-    .where("intake_id", "=", intakeId).where("purpose", "=", purpose)
-    .orderBy("id", "desc").executeTakeFirst();
+  const latest = await db
+    .selectFrom("intake_runs")
+    .select("attempt")
+    .where("intake_id", "=", intakeId)
+    .where("purpose", "=", purpose)
+    .orderBy("id", "desc")
+    .executeTakeFirst();
   const attempt = latest === undefined ? 1 : latest.attempt + (o.resume ? 0 : 1);
   return await insertIntakeRun(db, {
     intake_id: intakeId,
@@ -119,7 +125,8 @@ export async function enqueueIntakeRun(
 
 /** queued のときだけ running にして started_at を入れる。書けたら true。 */
 export async function claimIntakeRun(db: Db, runId: number): Promise<boolean> {
-  const updated = await db.updateTable("intake_runs")
+  const updated = await db
+    .updateTable("intake_runs")
     .set({ status: "running", started_at: new Date().toISOString() })
     .where("id", "=", runId)
     .where("status", "=", "queued")
@@ -159,12 +166,17 @@ async function settle(db: Db, deps: IntakeRunnerDeps, s: Settle): Promise<boolea
   if (s.to !== undefined) assertIntakeTransition(intake.state, s.to, intake.revising === 1);
   try {
     await db.transaction().execute(async (trx) => {
-      await updateIntake(trx, intake.id, {
-        ...s.intakePatch,
-        ...(s.to !== undefined ? { state: s.to } : {}),
-        child_pid: null,
-        child_started_at: null,
-      }, { requireState: intake.state });
+      await updateIntake(
+        trx,
+        intake.id,
+        {
+          ...s.intakePatch,
+          ...(s.to !== undefined ? { state: s.to } : {}),
+          child_pid: null,
+          child_started_at: null,
+        },
+        { requireState: intake.state },
+      );
       // 改訂をやめて入り直すと、状態は decomposing のまま別の改訂になる。前の改訂の実行は書かない。
       if (run.purpose === "revise") {
         const current = await getIntake(trx, intake.id);
@@ -231,8 +243,8 @@ async function conversationRows(
   intake: IntakeRow,
   run: IntakeRunRow,
 ): Promise<ConversationRows> {
-  const closedAll = (await listIntakeRuns(db, intake.id)).filter((r) =>
-    !NOT_OPEN.includes(r.status)
+  const closedAll = (await listIntakeRuns(db, intake.id)).filter(
+    (r) => !NOT_OPEN.includes(r.status),
   );
   const draftsAll = await listDrafts(db, intake.id);
   const commentsAll = await listComments(db, intake.id);
@@ -267,17 +279,19 @@ async function promptProjectsOf(
   projects: readonly ProjectRow[],
   wt: WorkspaceTracker,
 ): Promise<PromptProject[]> {
-  return await Promise.all(projects.map(async (p) => {
-    let repo: string | null = null;
-    if (wt.kind === "github" && wt.tracker.repoOf) {
-      try {
-        repo = (await wt.tracker.repoOf(p.path)).nameWithOwner;
-      } catch {
-        repo = null;
+  return await Promise.all(
+    projects.map(async (p) => {
+      let repo: string | null = null;
+      if (wt.kind === "github" && wt.tracker.repoOf) {
+        try {
+          repo = (await wt.tracker.repoOf(p.path)).nameWithOwner;
+        } catch {
+          repo = null;
+        }
       }
-    }
-    return { name: p.name, baseBranch: p.base_branch, repo };
-  }));
+      return { name: p.name, baseBranch: p.base_branch, repo };
+    }),
+  );
 }
 
 /** 会話の最初に送る文面。revise は承認済みの計画と固定された部分を載せる。 */
@@ -317,14 +331,14 @@ async function prepareIntakeWorktrees(
   projects: readonly ProjectRow[],
 ): Promise<string> {
   const parent = intake.worktree_path ?? intakeWorktreePathFor(intake.id);
-  await Deno.mkdir(parent, { recursive: true });
+  await mkdir(parent, { recursive: true });
   const canonicalParent = await canonical(parent);
   for (const p of projects) {
     const child = join(canonicalParent, p.name);
     try {
-      await Deno.stat(child);
+      await stat(child);
     } catch (e) {
-      if (!(e instanceof Deno.errors.NotFound)) throw e;
+      if (!isNotFound(e)) throw e;
       await createDetachedWorktree({
         repoPath: p.path,
         worktreePath: child,
@@ -406,15 +420,16 @@ export async function runIntakeRun(db: Db, runId: number, deps: IntakeRunnerDeps
       drafts: rows.drafts,
       comments: rows.comments,
     });
-    const opening = continuation === null || fresh
-      ? await (async () => {
-        const wt = await deps.trackerOf(await workspaceRefOf(db, intake.workspace_id));
-        const projectPath = (await wt.projectPathFor(intake.issue_url)) ?? projects[0].path;
-        const issue = await wt.tracker.readIssue(projectPath, intake.issue_url);
-        const promptProjects = await promptProjectsOf(projects, wt);
-        return { issue, projects: promptProjects };
-      })()
-      : null;
+    const opening =
+      continuation === null || fresh
+        ? await (async () => {
+            const wt = await deps.trackerOf(await workspaceRefOf(db, intake.workspace_id));
+            const projectPath = (await wt.projectPathFor(intake.issue_url)) ?? projects[0].path;
+            const issue = await wt.tracker.readIssue(projectPath, intake.issue_url);
+            const promptProjects = await promptProjectsOf(projects, wt);
+            return { issue, projects: promptProjects };
+          })()
+        : null;
     const firstPrompt = () => firstPromptOf(db, intake, run, opening!, rows);
 
     if (fresh) {
@@ -424,7 +439,7 @@ export async function runIntakeRun(db: Db, runId: number, deps: IntakeRunnerDeps
       prompt = continuation === null ? initial : `${initial}\n\n${continuation}`;
     } else {
       sessionId = intake.claude_session_id!;
-      prompt = continuation ?? await firstPrompt();
+      prompt = continuation ?? (await firstPrompt());
     }
   } catch (e) {
     return await failAgent(
@@ -497,9 +512,10 @@ export async function runIntakeRun(db: Db, runId: number, deps: IntakeRunnerDeps
     const verdict = classifyRateLimit({
       status: "failed",
       observed: rateLimits,
-      samples: rateLimits.length > 0
-        ? []
-        : await rateLimitsObservedSince(db, run.started_at ?? new Date().toISOString()),
+      samples:
+        rateLimits.length > 0
+          ? []
+          : await rateLimitsObservedSince(db, run.started_at ?? new Date().toISOString()),
       now: new Date(),
     });
     let note = "";
@@ -519,13 +535,13 @@ export async function runIntakeRun(db: Db, runId: number, deps: IntakeRunnerDeps
         });
         return;
       }
-      note =
-        `利用上限に連続して ${MAX_CONSECUTIVE_RATE_LIMITS} 回当たりました（次に明けるのは ${verdict.resetsAt}）`;
+      note = `利用上限に連続して ${MAX_CONSECUTIVE_RATE_LIMITS} 回当たりました（次に明けるのは ${verdict.resetsAt}）`;
     } else if (verdict.kind === "too-long") {
       note = `利用上限に達しましたが、枠が明けるのが ${verdict.resetsAt} と遠いので待ちません`;
     }
     const message = [result.text || result.stderrTail || `終了コード ${result.exitCode}`, note]
-      .filter((m) => m !== "").join("\n");
+      .filter((m) => m !== "")
+      .join("\n");
     return await failAgent(db, deps, { run, intake, result, message }, fresh);
   }
 

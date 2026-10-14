@@ -1,4 +1,6 @@
-import { basename, dirname, join } from "@std/path";
+import { isNotFound } from "../util/fsError.ts";
+import { mkdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
+import { basename, dirname, join } from "node:path";
 import { runCommand } from "../util/exec.ts";
 import { projectNameFrom } from "../db/workspaces.ts";
 import { parseProjectConfig } from "./project.ts";
@@ -27,7 +29,7 @@ export async function ensureProjectScaffold(path: string): Promise<{ created: st
   const created: string[] = [];
 
   if (await exists(projectYaml)) {
-    const cfg = parseProjectConfig(await Deno.readTextFile(projectYaml));
+    const cfg = parseProjectConfig(await readFile(projectYaml, "utf8"));
     const workflow = join(dir, "workflows", `${cfg.defaultWorkflow}.yaml`);
     if (!(await exists(workflow))) {
       throw new Error(
@@ -39,13 +41,13 @@ export async function ensureProjectScaffold(path: string): Promise<{ created: st
   }
 
   const base = await detectBaseBranch(path);
-  await Deno.mkdir(join(dir, "workflows"), { recursive: true });
+  await mkdir(join(dir, "workflows"), { recursive: true });
   const workflowYaml = join(dir, "workflows", `${DEFAULT_WORKFLOW_NAME}.yaml`);
   if (!(await exists(workflowYaml))) {
-    await Deno.writeTextFile(workflowYaml, defaultWorkflowYamlFor(base), { createNew: true });
+    await writeFile(workflowYaml, defaultWorkflowYamlFor(base), { flag: "wx" });
     created.push(workflowYaml);
   }
-  await Deno.writeTextFile(projectYaml, projectYamlFor(base), { createNew: true });
+  await writeFile(projectYaml, projectYamlFor(base), { flag: "wx" });
   created.push(projectYaml);
   return { created };
 }
@@ -67,14 +69,12 @@ export async function ensureWorkspaceScaffold(
 
   if (init) {
     const projects = Object.entries(init.projects).map(([name, path]) => ({ name, path }));
-    await Deno.mkdir(dirname(yamlPath), { recursive: true });
-    await Deno.writeTextFile(yamlPath, workspaceYamlFor(projects, init.tracker), {
-      createNew: true,
-    });
+    await mkdir(dirname(yamlPath), { recursive: true });
+    await writeFile(yamlPath, workspaceYamlFor(projects, init.tracker), { flag: "wx" });
     return { created: [yamlPath] };
   }
 
-  const realRoot = await Deno.realPath(root);
+  const realRoot = await realpath(root);
   const top = await requireNotSubdirectory(realRoot);
   if (top === null) {
     throw new Error(
@@ -82,9 +82,9 @@ export async function ensureWorkspaceScaffold(
         `（${root} は git リポジトリではありません。束ねるリポジトリを projects に書いてください）`,
     );
   }
-  await Deno.mkdir(dirname(yamlPath), { recursive: true });
+  await mkdir(dirname(yamlPath), { recursive: true });
   const text = workspaceYamlFor([{ name: projectNameFrom(basename(realRoot)), path: "." }]);
-  await Deno.writeTextFile(yamlPath, text, { createNew: true });
+  await writeFile(yamlPath, text, { flag: "wx" });
   return { created: [yamlPath] };
 }
 
@@ -113,7 +113,7 @@ export async function requireNotSubdirectory(root: string): Promise<string | nul
 }
 
 async function assertRepoRoot(path: string): Promise<void> {
-  const real = await Deno.realPath(path);
+  const real = await realpath(path);
   const top = await requireNotSubdirectory(real);
   if (top === null) {
     throw new Error(
@@ -130,16 +130,17 @@ async function assertRepoRoot(path: string): Promise<void> {
  */
 async function detectBaseBranch(root: string): Promise<string | undefined> {
   try {
-    const ref =
-      (await runCommand("git", ["-C", root, "symbolic-ref", "--short", "refs/remotes/origin/HEAD"]))
-        .stdout.trim();
+    const ref = (
+      await runCommand("git", ["-C", root, "symbolic-ref", "--short", "refs/remotes/origin/HEAD"])
+    ).stdout.trim();
     if (ref.startsWith("origin/")) return ref.slice("origin/".length);
   } catch {
     // origin が無い、または origin/HEAD が設定されていない
   }
   try {
-    const current = (await runCommand("git", ["-C", root, "branch", "--show-current"])).stdout
-      .trim();
+    const current = (
+      await runCommand("git", ["-C", root, "branch", "--show-current"])
+    ).stdout.trim();
     if (current) return current;
   } catch {
     // 取れなければ既定値に任せる
@@ -149,10 +150,10 @@ async function detectBaseBranch(root: string): Promise<string | undefined> {
 
 async function exists(p: string): Promise<boolean> {
   try {
-    await Deno.stat(p);
+    await stat(p);
     return true;
   } catch (e) {
-    if (e instanceof Deno.errors.NotFound) return false;
+    if (isNotFound(e)) return false;
     throw e;
   }
 }
@@ -160,7 +161,7 @@ async function exists(p: string): Promise<boolean> {
 /** setup は書かない — doctrine はパッケージマネージャを強制しない（spec 3章） */
 function projectYamlFor(baseBranch: string | undefined): string {
   const lines = [
-    "# doctrine のプロジェクト設定（dctl workspace-add が雛形として作成したもの）",
+    "# doctrine のプロジェクト設定（doctrine が workspace の登録時に雛形として作成したもの）",
     "#",
     "# setup: 新しい worktree で最初に走らせるコマンド。例: pnpm install --frozen-lockfile",
     `defaultWorkflow: ${DEFAULT_WORKFLOW_NAME}`,
@@ -204,7 +205,7 @@ function toolLines(tools: string[]): string {
 export function defaultWorkflowYamlFor(baseBranch: string | undefined): string {
   const base = baseBranch ?? "main";
   const readOnly = toolLines(READ_ONLY_TOOLS);
-  return `# doctrine の既定ワークフロー（dctl workspace-add が雛形として作成したもの）
+  return `# doctrine の既定ワークフロー（doctrine が workspace の登録時に雛形として作成したもの）
 # plan → plan-review → plan-gate → implement → verify → agent-review → review-gate → guide → review
 #
 # エージェントを planner / plan-reviewer / implementer / code-reviewer / guide の5つの役割に分け、

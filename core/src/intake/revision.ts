@@ -15,8 +15,8 @@ export type RevisionConstraints = {
 export function frozenProcessIds(rows: readonly IntakeProcessRow[]): Set<string> {
   return new Set(
     rows
-      .filter((r) =>
-        r.retired_at === null && (r.current_task_id !== null || r.human_done_at !== null)
+      .filter(
+        (r) => r.retired_at === null && (r.current_task_id !== null || r.human_done_at !== null),
       )
       .map((r) => r.process_id),
   );
@@ -73,7 +73,8 @@ export function processRowChanges(
   const hasRow = new Set(rows.map((r) => r.process_id));
   return {
     insert: pfd.processes.map((p) => p.id).filter((id) => !hasRow.has(id)),
-    retire: rows.filter((r) => r.retired_at === null && !inPfd.has(r.process_id))
+    retire: rows
+      .filter((r) => r.retired_at === null && !inPfd.has(r.process_id))
       .map((r) => r.process_id),
   };
 }

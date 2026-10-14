@@ -63,7 +63,7 @@ import {
 import { createRefreshGate } from "./refreshGate";
 import { settleListeners } from "./settleListeners";
 
-/** 取りこぼしを吸収する保険。dctl add で作られた queued はイベントが飛ばない */
+/** 取りこぼしを吸収する保険。アプリを通さずに RPC で作られた queued はイベントが飛ばない */
 const REFRESH_MS = 15_000;
 
 const errorMessage = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -222,7 +222,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             return;
           }
           if ("intake_id" in ev) {
-            // dctl から始めた Intake は、まだ一覧に無い
+            // 別の接続から始めた Intake は、まだ一覧に無い
             if (!latest.current.intakes.some((i) => i.id === ev.intake_id)) {
               void refresh();
               return;

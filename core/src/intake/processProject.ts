@@ -37,7 +37,8 @@ export function missingProjectMessage(process: Process): string {
 
 /** direct の Intake の、いまのタスクのプロジェクトの base_branch。 */
 export async function directBaseBranch(db: Db, intakeId: string): Promise<string> {
-  const row = await db.selectFrom("intake_processes as p")
+  const row = await db
+    .selectFrom("intake_processes as p")
     .innerJoin("tasks as t", "t.id", "p.current_task_id")
     .innerJoin("projects as pr", "pr.id", "t.project_id")
     .select("pr.base_branch as base_branch")

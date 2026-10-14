@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import assert from "node:assert/strict";
-import { afterEach, beforeEach, test } from "@std/testing/bdd";
+import { afterEach, beforeEach, test } from "node:test";
 import type { Pfd } from "../../../shared/intake/pfd.ts";
 import { getIntake, listProcesses } from "../../src/db/intakes.ts";
 import { openDb } from "../../src/db/migrate.ts";
@@ -183,14 +183,16 @@ test("3 リポジトリの workspace で、1 つの Intake が各リポジトリ
         const pr = merged.get(g.raw[`h${i}`]);
         found[`b${i}`] = {
           nodes: pr
-            ? [{
-              number: pr.number,
-              url: pr.url,
-              state: "MERGED",
-              baseRefName: "main",
-              mergedAt: "2026-09-30T00:00:00Z",
-              mergeCommit: { oid: pr.oid },
-            }]
+            ? [
+                {
+                  number: pr.number,
+                  url: pr.url,
+                  state: "MERGED",
+                  baseRefName: "main",
+                  mergedAt: "2026-09-30T00:00:00Z",
+                  mergeCommit: { oid: pr.oid },
+                },
+              ]
             : [],
         };
       }
@@ -213,7 +215,7 @@ test("3 リポジトリの workspace で、1 つの Intake が各リポジトリ
   const lap = async () => {
     await watcher.request(workspaceId);
     const health = watcher.health(workspaceId);
-    assert.equal(health.consecutiveFailures, 0, health.lastError ?? undefined);
+    assert.equal(health.consecutiveFailures, 0, health.lastError ?? "");
   };
   const subOf = async (id: string) =>
     (await listProcesses(db, "i1")).find((p) => p.process_id === id)!;
@@ -243,7 +245,10 @@ test("3 リポジトリの workspace で、1 つの Intake が各リポジトリ
       [kubernetes.path, "R_kubernetes"],
     ],
   );
-  assert.deepEqual(creates.map((c) => c.g.raw.parentIssueId), ["I_1", "I_1", "I_1"]);
+  assert.deepEqual(
+    creates.map((c) => c.g.raw.parentIssueId),
+    ["I_1", "I_1", "I_1"],
+  );
   assert.ok((await subOf("1")).sub_issue_url?.startsWith("https://github.com/o/terraform/issues/"));
   assert.ok((await subOf("2")).sub_issue_url?.startsWith("https://github.com/o/tp/issues/"));
   assert.ok(
@@ -281,9 +286,15 @@ test("3 リポジトリの workspace で、1 つの Intake が各リポジトリ
   const done = (await getIntake(db, "i1"))!;
   assert.equal(done.state, "completed");
   assert.notEqual(done.ended_at, null);
-  assert.deepEqual(transitions.map((t) => [t.from, t.to]), [["active", "completed"]]);
+  assert.deepEqual(
+    transitions.map((t) => [t.from, t.to]),
+    [["active", "completed"]],
+  );
   const all = await listTasks(db);
   assert.deepEqual(all.map((t) => t.intake_process_id).toSorted(), ["1", "2", "3"]);
   assert.equal(createCalls().length, 3);
-  assert.equal(gh.calls.some((c) => /closeIssue/.test(parseGraphqlArgs(c.args).query)), false);
+  assert.equal(
+    gh.calls.some((c) => /closeIssue/.test(parseGraphqlArgs(c.args).query)),
+    false,
+  );
 });

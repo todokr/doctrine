@@ -1,4 +1,4 @@
-import { test } from "@std/testing/bdd";
+import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createWarningLog, WARNING_CAPACITY } from "../../src/daemon/warnings.ts";
 import type { ServerEvent } from "../../../shared/protocol.ts";
@@ -20,7 +20,10 @@ test("push した警告は新しい順に返る", () => {
   const { warnings } = log();
   warnings.push("古い");
   warnings.push("新しい");
-  assert.deepEqual(warnings.recent().map((w) => w.message), ["新しい", "古い"]);
+  assert.deepEqual(
+    warnings.recent().map((w) => w.message),
+    ["新しい", "古い"],
+  );
 });
 
 test("直近 WARNING_CAPACITY 件だけを保つ", () => {

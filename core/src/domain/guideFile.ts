@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { z } from "zod/v4";
 import type { Guide, GuideLocation } from "../../../shared/guide/schema.ts";
@@ -46,10 +46,10 @@ export function checkGuideLocations(
   };
 
   guide.readingOrder.forEach((g, i) =>
-    g.locations.forEach((loc, j) => check(`readingOrder.${i}.locations.${j}`, loc))
+    g.locations.forEach((loc, j) => check(`readingOrder.${i}.locations.${j}`, loc)),
   );
   guide.risks.forEach((r, i) =>
-    r.locations.forEach((loc, j) => check(`risks.${i}.locations.${j}`, loc))
+    r.locations.forEach((loc, j) => check(`risks.${i}.locations.${j}`, loc)),
   );
   return issues;
 }
@@ -80,9 +80,9 @@ export async function readGuideFile(worktreePath: string): Promise<GuideRead> {
 
   let size: number;
   try {
-    const stat = await Deno.stat(path);
-    if (!stat.isFile) return { status: "missing" };
-    size = stat.size;
+    const info = await stat(path);
+    if (!info.isFile()) return { status: "missing" };
+    size = info.size;
   } catch {
     return { status: "missing" };
   }
@@ -90,7 +90,7 @@ export async function readGuideFile(worktreePath: string): Promise<GuideRead> {
 
   let text: string;
   try {
-    text = await Deno.readTextFile(path);
+    text = await readFile(path, "utf8");
   } catch {
     return { status: "missing" };
   }

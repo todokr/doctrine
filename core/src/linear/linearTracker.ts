@@ -13,33 +13,39 @@ const person = z.object({ displayName: z.string() }).nullable();
 
 const listSchema = z.object({
   issues: z.object({
-    nodes: z.array(z.object({
-      url: z.string(),
-      identifier: z.string(),
-      title: z.string(),
-      updatedAt: z.string(),
-      assignee: person,
-    })),
+    nodes: z.array(
+      z.object({
+        url: z.string(),
+        identifier: z.string(),
+        title: z.string(),
+        updatedAt: z.string(),
+        assignee: person,
+      }),
+    ),
   }),
 });
 
 const readSchema = z.object({
-  issue: z.object({
-    id: z.string(),
-    url: z.string(),
-    title: z.string(),
-    description: z.string().nullable(),
-    comments: z.object({
-      nodes: z.array(z.object({ body: z.string(), createdAt: z.string(), user: person })),
-    }),
-  }).nullable(),
+  issue: z
+    .object({
+      id: z.string(),
+      url: z.string(),
+      title: z.string(),
+      description: z.string().nullable(),
+      comments: z.object({
+        nodes: z.array(z.object({ body: z.string(), createdAt: z.string(), user: person })),
+      }),
+    })
+    .nullable(),
 });
 
 const parentSchema = z.object({
-  issue: z.object({
-    team: z.object({ id: z.string() }),
-    assignee: z.object({ id: z.string() }).nullable(),
-  }).nullable(),
+  issue: z
+    .object({
+      team: z.object({ id: z.string() }),
+      assignee: z.object({ id: z.string() }).nullable(),
+    })
+    .nullable(),
 });
 
 const createSchema = z.object({
@@ -50,66 +56,66 @@ const createSchema = z.object({
 });
 
 const childrenSchema = z.object({
-  issue: z.object({
-    children: z.object({
-      nodes: z.array(z.object({
-        id: z.string(),
-        url: z.string(),
-        description: z.string().nullable(),
-        state: z.object({ type: z.string() }),
-      })),
-    }),
-  }).nullable(),
+  issue: z
+    .object({
+      children: z.object({
+        nodes: z.array(
+          z.object({
+            id: z.string(),
+            url: z.string(),
+            description: z.string().nullable(),
+            state: z.object({ type: z.string() }),
+          }),
+        ),
+      }),
+    })
+    .nullable(),
 });
 
 const updateSchema = z.object({ issueUpdate: z.object({ success: z.boolean() }) });
 
 const teamStatesSchema = z.object({
-  issue: z.object({
-    team: z.object({
-      states: z.object({
-        nodes: z.array(z.object({ id: z.string(), type: z.string(), position: z.number() })),
+  issue: z
+    .object({
+      team: z.object({
+        states: z.object({
+          nodes: z.array(z.object({ id: z.string(), type: z.string(), position: z.number() })),
+        }),
       }),
-    }),
-  }).nullable(),
+    })
+    .nullable(),
 });
 
 const issueStateSchema = z.object({
-  issue: z.object({
-    state: z.object({ id: z.string(), type: z.string(), position: z.number() }),
-    team: z.object({
-      states: z.object({
-        nodes: z.array(
-          z.object({
-            id: z.string(),
-            name: z.string(),
-            type: z.string(),
-            position: z.number(),
-          }),
-        ),
+  issue: z
+    .object({
+      state: z.object({ id: z.string(), type: z.string(), position: z.number() }),
+      team: z.object({
+        states: z.object({
+          nodes: z.array(
+            z.object({
+              id: z.string(),
+              name: z.string(),
+              type: z.string(),
+              position: z.number(),
+            }),
+          ),
+        }),
       }),
-    }),
-  }).nullable(),
+    })
+    .nullable(),
 });
 
 const VIEWER = `query { viewer { id } }`;
-const STATE_OF_ISSUE =
-  `query($id: String!) { issue(id: $id) { state { id type position } team { states { nodes { id name type position } } } } }`;
+const STATE_OF_ISSUE = `query($id: String!) { issue(id: $id) { state { id type position } team { states { nodes { id name type position } } } } }`;
 const TEAM = `query($key: String!) { teams(filter: { key: { eq: $key } }) { nodes { id name } } }`;
-const LIST_ISSUES =
-  `query($filter: IssueFilter!) { issues(first: 100, filter: $filter, orderBy: updatedAt) { nodes { url identifier title updatedAt assignee { displayName } } } }`;
-const READ_ISSUE =
-  `query($id: String!) { issue(id: $id) { id url title description comments(first: 100) { nodes { body createdAt user { displayName } } } } }`;
-const PARENT_OF_SUB_ISSUE =
-  `query($id: String!) { issue(id: $id) { team { id } assignee { id } } }`;
-const CREATE_ISSUE =
-  `mutation($input: IssueCreateInput!) { issueCreate(input: $input) { success issue { id url } } }`;
-const FIND_SUB_ISSUES =
-  `query($id: String!) { issue(id: $id) { children(first: 100) { nodes { id url description state { type } } } } }`;
-const UPDATE_ISSUE =
-  `mutation($id: String!, $input: IssueUpdateInput!) { issueUpdate(id: $id, input: $input) { success } }`;
-const TEAM_STATES_OF_ISSUE =
-  `query($id: String!) { issue(id: $id) { team { states { nodes { id type position } } } } }`;
+const LIST_ISSUES = `query($filter: IssueFilter!) { issues(first: 100, filter: $filter, orderBy: updatedAt) { nodes { url identifier title updatedAt assignee { displayName } } } }`;
+const READ_ISSUE = `query($id: String!) { issue(id: $id) { id url title description comments(first: 100) { nodes { body createdAt user { displayName } } } } }`;
+const PARENT_OF_SUB_ISSUE = `query($id: String!) { issue(id: $id) { team { id } assignee { id } } }`;
+const CREATE_ISSUE = `mutation($input: IssueCreateInput!) { issueCreate(input: $input) { success issue { id url } } }`;
+const FIND_SUB_ISSUES = `query($id: String!) { issue(id: $id) { children(first: 100) { nodes { id url description state { type } } } } }`;
+const UPDATE_ISSUE = `mutation($id: String!, $input: IssueUpdateInput!) { issueUpdate(id: $id, input: $input) { success } }`;
+const TEAM_STATES_OF_ISSUE = `query($id: String!) { issue(id: $id) { team { states { nodes { id type position } } } } }`;
 
 const CLOSED_TYPES = ["completed", "canceled"];
 const STATE_TYPE = { completed: "completed", not_planned: "canceled" } as const;
@@ -295,7 +301,8 @@ export function linearTracker(o: {
       const lookup = named === undefined ? PHASE_LOOKUP[phase] : { name: named };
       let target;
       if ("type" in lookup) {
-        target = nodes.filter((s) => s.type === lookup.type)
+        target = nodes
+          .filter((s) => s.type === lookup.type)
           .sort((a, b) => a.position - b.position)[0];
         if (!target) throw new Error(`チームに種類が ${lookup.type} の状態がありません`);
       } else {

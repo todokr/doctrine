@@ -8,9 +8,7 @@ import { validateQuestions } from "../../../shared/intake/validateQuestion.ts";
 import { validatePfd } from "./pfd/validate.ts";
 import { type RevisionConstraints, revisionIssues } from "./revision.ts";
 
-export type OutputCheck =
-  | { ok: true; output: DecomposerOutput }
-  | { ok: false; issues: string[] };
+export type OutputCheck = { ok: true; output: DecomposerOutput } | { ok: false; issues: string[] };
 
 // 誤りの理由は zod 同梱の日本語ロケールに任せる。z.config() はアプリ側のメッセージまで変えるので使わない
 const parseOptions = { error: z.locales.ja().localeError };
@@ -59,7 +57,9 @@ export function checkDecomposerOutput(
 
   if (out.kind === "questions") {
     if (
-      out.questions === null || out.assumptions === null || out.pfd !== null ||
+      out.questions === null ||
+      out.assumptions === null ||
+      out.pfd !== null ||
       out.replies !== null
     ) {
       return {
@@ -73,7 +73,9 @@ export function checkDecomposerOutput(
   }
 
   if (
-    out.pfd === null || out.replies === null || out.questions !== null ||
+    out.pfd === null ||
+    out.replies === null ||
+    out.questions !== null ||
     out.assumptions !== null
   ) {
     return {
@@ -91,13 +93,11 @@ export function checkDecomposerOutput(
   }
 
   const issues: string[] = [];
-  for (
-    const v of validatePfd(out.pfd, {
-      decisionIds: ctx.decisionIds,
-      frozen: null,
-      projectNames: ctx.projectNames,
-    })
-  ) {
+  for (const v of validatePfd(out.pfd, {
+    decisionIds: ctx.decisionIds,
+    frozen: null,
+    projectNames: ctx.projectNames,
+  })) {
     issues.push(`${v.rule} ${v.id}: ${v.message}`);
   }
   if (ctx.revision) issues.push(...revisionIssues(out.pfd, ctx.revision, ctx.projectNames));

@@ -35,7 +35,7 @@ export async function loadApprovedPlan(db: Db, intakeId: string): Promise<Approv
   const approval = await latestApproval(db, intakeId);
   if (!approval) return null;
   const draft = await getDraft(db, approval.draft_id);
-  if (!draft || draft.hash !== approval.hash || draft.hash !== await sha256Hex(draft.pfd)) {
+  if (!draft || draft.hash !== approval.hash || draft.hash !== (await sha256Hex(draft.pfd))) {
     throw new Error(`Intake ${intakeId} の承認と案の内容が食い違っています`);
   }
   return { pfd: JSON.parse(draft.pfd) as Pfd, draftId: draft.id };
@@ -54,7 +54,7 @@ export async function commitDispatch(
   try {
     await db.transaction().execute(async (trx) => {
       await insertTask(trx, o.task);
-      if (!await replaceCurrentTask(trx, o.intakeId, o.processId, o.expectedTaskId, o.task.id)) {
+      if (!(await replaceCurrentTask(trx, o.intakeId, o.processId, o.expectedTaskId, o.task.id))) {
         throw new DispatchConflict();
       }
     });
@@ -86,7 +86,8 @@ type DispatchSource = {
 async function loadDispatchSource(db: Db, intake: IntakeRow, pfd: Pfd): Promise<DispatchSource> {
   const projects = await projectsOfProcesses(db, intake.workspace_id, pfd);
   const rows = new Map(
-    (await listProcesses(db, intake.id)).filter((r) => r.retired_at === null)
+    (await listProcesses(db, intake.id))
+      .filter((r) => r.retired_at === null)
       .map((r) => [r.process_id, r]),
   );
   const humanNotes: Record<string, string> = {};
@@ -195,15 +196,15 @@ export async function dispatchIntake(
 ): Promise<DispatchReport> {
   const report: DispatchReport = { created: [], errors: [] };
   const intake = await getIntake(db, intakeId);
-  if (
-    !intake || intake.state !== "active" || intake.revising === 1 || intake.dispatch_paused === 1
-  ) return report;
+  if (intake?.state !== "active" || intake.revising === 1 || intake.dispatch_paused === 1)
+    return report;
   const plan = await loadApprovedPlan(db, intakeId);
   if (!plan) return report;
   const src = await loadDispatchSource(db, intake, plan.pfd);
   const statuses = statusesOf(src, await processProgressOf(db, intakeId));
 
-  const ready = statuses.filter((s) => s.state === "ready" && s.blockedBy === null)
+  const ready = statuses
+    .filter((s) => s.state === "ready" && s.blockedBy === null)
     .map((s) => plan.pfd.processes.find((p) => p.id === s.id)!)
     .filter((p) => p.actor === "agent");
   if (ready.length === 0) return report;
@@ -254,8 +255,9 @@ export async function redispatchProcess(
   if (!plan) throw new Error("承認された計画がありません");
   const src = await loadDispatchSource(db, intake, plan.pfd);
   const row = src.rows.get(o.processId);
-  const status = statusesOf(src, await processProgressOf(db, o.intakeId))
-    .find((s) => s.id === o.processId);
+  const status = statusesOf(src, await processProgressOf(db, o.intakeId)).find(
+    (s) => s.id === o.processId,
+  );
   if (!row || status?.state !== "needs_attention") {
     throw new Error(
       `要確認のプロセスだけを再投入できます: ${o.processId}（${status?.state ?? "案に無い"}）`,
@@ -266,10 +268,7 @@ export async function redispatchProcess(
     const process = plan.pfd.processes.find((p) => p.id === o.processId)!;
     throw new Error(missingProjectMessage(process));
   }
-  const pin = pinOf(
-    await deps.loadWorkflow(project.path, project.default_workflow),
-    project,
-  );
+  const pin = pinOf(await deps.loadWorkflow(project.path, project.default_workflow), project);
   const taskId = await dispatchProcess(db, src, row, project, pin);
   if (taskId === null) throw new Error("ほかの操作が先にタスクを置き換えました");
   return { taskId, replacedTaskId: row.current_task_id };
@@ -331,7 +330,7 @@ export async function insertDirectIntake(
       pin: o.pin,
     });
     await insertTask(trx, task);
-    if (!await replaceCurrentTask(trx, row.id, DIRECT_PROCESS_ID, null, task.id)) {
+    if (!(await replaceCurrentTask(trx, row.id, DIRECT_PROCESS_ID, null, task.id))) {
       throw new Error("direct のタスクを紐づけられませんでした");
     }
     return row;

@@ -1,22 +1,25 @@
-import { afterEach, test } from "@std/testing/bdd";
+import { tmpdir } from "node:os";
+import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { afterEach, test } from "node:test";
 import assert from "node:assert/strict";
-import { join } from "@std/path";
+import { join } from "node:path";
 import { MAX_REVIEW_FILE_BYTES, readReviewFiles } from "../../src/domain/reviewFiles.ts";
+import { runCommand } from "../../src/util/exec.ts";
 
 const dirs: string[] = [];
 afterEach(async () => {
-  await Promise.all(dirs.splice(0).map((d) => Deno.remove(d, { recursive: true })));
+  await Promise.all(dirs.splice(0).map((d) => rm(d, { recursive: true, force: true })));
 });
 
 async function worktree(files: Record<string, string> = {}): Promise<string> {
-  const root = await Deno.makeTempDir({ prefix: "doctrine-reviewfiles-" });
+  const root = await mkdtemp(join(tmpdir(), "doctrine-reviewfiles-"));
   dirs.push(root);
   const wt = join(root, "wt");
-  await Deno.mkdir(wt, { recursive: true });
+  await mkdir(wt, { recursive: true });
   for (const [rel, content] of Object.entries(files)) {
     const path = join(wt, rel);
-    await Deno.mkdir(join(path, ".."), { recursive: true });
-    await Deno.writeTextFile(path, content);
+    await mkdir(join(path, ".."), { recursive: true });
+    await writeFile(path, content);
   }
   return wt;
 }
@@ -34,8 +37,14 @@ test("宣言されたファイルの本文が返る", async () => {
 test("宣言された順に、宣言された数だけ返る", async () => {
   const wt = await worktree({ "a.md": "a", "b.md": "b" });
   const files = await readReviewFiles(wt, ["b.md", "missing.md", "a.md"]);
-  assert.deepEqual(files.map((f) => f.path), ["b.md", "missing.md", "a.md"]);
-  assert.deepEqual(files.map((f) => f.status), ["ok", "missing", "ok"]);
+  assert.deepEqual(
+    files.map((f) => f.path),
+    ["b.md", "missing.md", "a.md"],
+  );
+  assert.deepEqual(
+    files.map((f) => f.status),
+    ["ok", "missing", "ok"],
+  );
 });
 
 test("無いファイルは missing（中身も大きさも持たない）", async () => {
@@ -68,7 +77,7 @@ test("ちょうど 64KB は読める", async () => {
 
 test("UTF-8 として読めなければ binary", async () => {
   const wt = await worktree();
-  await Deno.writeFile(join(wt, "logo.png"), new Uint8Array([0x89, 0x50, 0x4e, 0xff, 0xfe]));
+  await writeFile(join(wt, "logo.png"), new Uint8Array([0x89, 0x50, 0x4e, 0xff, 0xfe]));
   const [file] = await readReviewFiles(wt, ["logo.png"]);
   assert.equal(file.status, "binary");
   if (file.status !== "binary") throw new Error("unreachable");
@@ -78,9 +87,9 @@ test("UTF-8 として読めなければ binary", async () => {
 test("worktree の外を指すシンボリックリンクは outside_worktree", async () => {
   const wt = await worktree();
   const secret = join(wt, "..", "secret.txt");
-  await Deno.writeTextFile(secret, "とても秘密\n");
-  await Deno.mkdir(join(wt, ".doctrine-out"), { recursive: true });
-  await Deno.symlink(secret, join(wt, ".doctrine-out", "plan.md"));
+  await writeFile(secret, "とても秘密\n");
+  await mkdir(join(wt, ".doctrine-out"), { recursive: true });
+  await symlink(secret, join(wt, ".doctrine-out", "plan.md"));
 
   const [file] = await readReviewFiles(wt, [".doctrine-out/plan.md"]);
   assert.deepEqual(file, { path: ".doctrine-out/plan.md", status: "outside_worktree" });
@@ -88,7 +97,7 @@ test("worktree の外を指すシンボリックリンクは outside_worktree", 
 
 test("worktree の中を指すシンボリックリンクは読める", async () => {
   const wt = await worktree({ "docs/plan.md": "# 計画\n" });
-  await Deno.symlink(join(wt, "docs", "plan.md"), join(wt, "plan.md"));
+  await symlink(join(wt, "docs", "plan.md"), join(wt, "plan.md"));
   const [file] = await readReviewFiles(wt, ["plan.md"]);
   assert.equal(file.status, "ok");
 });
@@ -97,9 +106,9 @@ test("worktree と同じ接頭辞のディレクトリは配下と誤判定し�
   const wt = await worktree();
   // wt は <root>/wt。兄弟の <root>/wt-evil は startsWith(wt) を通ってしまう。
   const evil = `${wt}-evil`;
-  await Deno.mkdir(evil, { recursive: true });
-  await Deno.writeTextFile(join(evil, "x.md"), "よそのファイル\n");
-  await Deno.symlink(join(evil, "x.md"), join(wt, "x.md"));
+  await mkdir(evil, { recursive: true });
+  await writeFile(join(evil, "x.md"), "よそのファイル\n");
+  await symlink(join(evil, "x.md"), join(wt, "x.md"));
 
   const [file] = await readReviewFiles(wt, ["x.md"]);
   assert.equal(file.status, "outside_worktree");
@@ -115,15 +124,15 @@ test("worktree そのものが無ければ、宣言された全件が missing", 
 
 test("1件の失敗が他の件を巻き込まない", async () => {
   const wt = await worktree({ "ok.md": "読める\n" });
-  await Deno.mkdir(join(wt, "locked"), { recursive: true });
-  await Deno.writeTextFile(join(wt, "locked", "a.md"), "x");
-  await Deno.chmod(join(wt, "locked"), 0o000);
+  await mkdir(join(wt, "locked"), { recursive: true });
+  await writeFile(join(wt, "locked", "a.md"), "x");
+  await chmod(join(wt, "locked"), 0o000);
   try {
     const files = await readReviewFiles(wt, ["locked/a.md", "ok.md"]);
     assert.equal(files[0].status, "missing", "読めないものは missing に倒す");
     assert.equal(files[1].status, "ok", "他の件は読める");
   } finally {
-    await Deno.chmod(join(wt, "locked"), 0o755);
+    await chmod(join(wt, "locked"), 0o755);
   }
 });
 
@@ -142,8 +151,7 @@ test("スキーマ検証をすり抜ける空白付き・区切り以外の .. �
 test("書き手のいない名前付きパイプを宣言しても readReviewFiles は固まらない", async () => {
   const wt = await worktree({ "ok.md": "読める\n" });
   const fifo = join(wt, "pipe");
-  const { code } = await new Deno.Command("mkfifo", { args: [fifo] }).output();
-  assert.equal(code, 0, "mkfifo コマンドに失敗した");
+  await runCommand("mkfifo", [fifo]);
 
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<"timeout">((resolve) => {

@@ -1,4 +1,4 @@
-import { basename } from "@std/path";
+import { basename } from "node:path";
 import type { ServerEvent } from "../../../shared/protocol.ts";
 import type { Db, ProjectRow, TaskRow } from "../db/schema.ts";
 import { getProject, getTask } from "../db/tasks.ts";
@@ -50,8 +50,8 @@ export async function notificationFor(
 ): Promise<Notification | null> {
   const title = "doctrine";
   if (
-    ev.event === "task.stateChanged" && (ev.to === "suspended" || ev.to === "failed") ||
-    ev.event === "task.cleanedUp" && ev.outcome === "refused"
+    (ev.event === "task.stateChanged" && (ev.to === "suspended" || ev.to === "failed")) ||
+    (ev.event === "task.cleanedUp" && ev.outcome === "refused")
   ) {
     const task = await getTask(deps.db, ev.task_id);
     if (!task) return null;

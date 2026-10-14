@@ -202,9 +202,8 @@ async function decideRateLimit(
     observed: outcome.rateLimits,
     // イベントを1件も受け取れなかったときだけ、その実行の開始以降に観測された
     // 記録を代替の根拠にする。
-    samples: outcome.rateLimits.length > 0
-      ? []
-      : await rateLimitsObservedSince(db, outcome.startedAt),
+    samples:
+      outcome.rateLimits.length > 0 ? [] : await rateLimitsObservedSince(db, outcome.startedAt),
     now: new Date(),
   });
   if (verdict.kind === "none") return verdict;
@@ -220,8 +219,7 @@ async function decideRateLimit(
   if (consecutiveRateLimited(closed, stepId) >= MAX_CONSECUTIVE_RATE_LIMITS) {
     return {
       kind: "give-up",
-      note:
-        `利用上限に連続して ${MAX_CONSECUTIVE_RATE_LIMITS} 回当たりました（次に明けるのは ${verdict.resetsAt}）`,
+      note: `利用上限に連続して ${MAX_CONSECUTIVE_RATE_LIMITS} 回当たりました（次に明けるのは ${verdict.resetsAt}）`,
     };
   }
   return verdict;
@@ -393,11 +391,12 @@ export async function runTask(
     // （ステップ内の再試行かどうかではない）。session を省略すると全 agent ステップが
     // 同じ既定ロールを共有するので、今までどおり「タスクに会話は1本」になる。
     // guide の session は必須なので、既定ロールには落ちない。
-    const role = step.type === "agent"
-      ? (step.session ?? DEFAULT_SESSION_ROLE)
-      : step.type === "guide"
-      ? step.session
-      : null;
+    const role =
+      step.type === "agent"
+        ? (step.session ?? DEFAULT_SESSION_ROLE)
+        : step.type === "guide"
+          ? step.session
+          : null;
     const existingSessionId = role ? await getSessionId(db, taskId, role) : undefined;
     const hadSession = existingSessionId !== undefined;
     const sessionId = existingSessionId ?? crypto.randomUUID();
@@ -422,17 +421,19 @@ export async function runTask(
         // そのロールで resume してしまうのを防ぐ（project.setup は全ワークフローの
         // 先頭に command ステップとして入るので、これは常道の形で必ず踏む）。
         sessionUpsert: role ? { role, session_id: sessionId } : undefined,
-        ...(reopenRunId !== null ? { stepRunReopen: { id: reopenRunId } } : {
-          stepRun: {
-            step_id: step.id,
-            attempt,
-            status: "running",
-            exit_code: null,
-            started_at: new Date().toISOString(),
-            ended_at: null,
-            log_path: logPath,
-          },
-        }),
+        ...(reopenRunId !== null
+          ? { stepRunReopen: { id: reopenRunId } }
+          : {
+              stepRun: {
+                step_id: step.id,
+                attempt,
+                status: "running",
+                exit_code: null,
+                started_at: new Date().toISOString(),
+                ended_at: null,
+                log_path: logPath,
+              },
+            }),
       }))!;
     } catch (e) {
       if (e instanceof StateConflictError) return;
@@ -483,32 +484,31 @@ export async function runTask(
         resume: isResume,
         baseBranch: project.base_branch,
         lastCommand: taskContext.lastCommand,
-        rejections: taskContext.reviews.flatMap((r) => r.status === "rejected" ? [r.comment] : []),
+        rejections: taskContext.reviews.flatMap((r) =>
+          r.status === "rejected" ? [r.comment] : [],
+        ),
         feed: pendingFeed,
         deps: runnerDeps,
       });
     } else {
-      outcome = await runAgentStep(
-        step,
-        ctx,
-        {
-          cwd: task.worktree_path!,
-          taskId,
-          attempt,
-          sessionId,
-          resume: isResume,
-          feed: pendingFeed,
-          deps: runnerDeps,
-        },
-      );
+      outcome = await runAgentStep(step, ctx, {
+        cwd: task.worktree_path!,
+        taskId,
+        attempt,
+        sessionId,
+        resume: isResume,
+        feed: pendingFeed,
+        deps: runnerDeps,
+      });
     }
     pendingFeed = null;
 
     // 上限に当たれるのはアダプタを通る agent / guide ステップだけ。command ステップは
     // この分岐に入る余地がない。
-    const verdict: RateLimitDecision = step.type === "agent" || step.type === "guide"
-      ? await decideRateLimit(db, outcome, taskId, step.id)
-      : { kind: "none" };
+    const verdict: RateLimitDecision =
+      step.type === "agent" || step.type === "guide"
+        ? await decideRateLimit(db, outcome, taskId, step.id)
+        : { kind: "none" };
 
     const polled = step.type === "poll" ? pollVerdict(outcome.exitCode) : null;
 
@@ -650,7 +650,7 @@ export async function runTask(
     // 待たずに失敗させた上限（give-up）は decide に渡さない（下の分岐）ので、
     // onFailure があっても差し戻しとは記録しない。
     const bounced = verdict.kind !== "give-up" && decision.kind === "goto";
-    const recordedStatus: StepRunStatus = bounced ? "bounced" : outcome.status as StepRunStatus;
+    const recordedStatus: StepRunStatus = bounced ? "bounced" : (outcome.status as StepRunStatus);
 
     try {
       await commitStepBoundary(db, {
@@ -673,9 +673,8 @@ export async function runTask(
         outputs: {
           last_stdout: outcome.stdout,
           // 待たずに失敗させた上限は、board 上で普通の失敗と区別が付くようにする。
-          last_stderr: verdict.kind === "give-up"
-            ? withNote(outcome.stderr, verdict.note)
-            : outcome.stderr,
+          last_stderr:
+            verdict.kind === "give-up" ? withNote(outcome.stderr, verdict.note) : outcome.stderr,
           exit_code: outcome.exitCode,
         },
       });

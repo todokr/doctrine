@@ -1,4 +1,4 @@
-import { join } from "@std/path";
+import { join } from "node:path";
 import { parse as parseYaml, parseDocument } from "yaml";
 import { z } from "zod";
 import {
@@ -16,12 +16,14 @@ export type ProjectConfig = {
   baseBranch: string;
 };
 
-const schema = z.object({
-  setup: z.string().min(1).optional(),
-  defaultWorkflow: z.string().min(1),
-  maxConcurrent: z.number().int().min(1).default(5),
-  baseBranch: z.string().min(1).default("main"),
-}).strict();
+const schema = z
+  .object({
+    setup: z.string().min(1).optional(),
+    defaultWorkflow: z.string().min(1),
+    maxConcurrent: z.number().int().min(1).default(5),
+    baseBranch: z.string().min(1).default("main"),
+  })
+  .strict();
 
 export function parseProjectConfig(yamlText: string): ProjectConfig {
   let raw: unknown;

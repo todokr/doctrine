@@ -1,4 +1,4 @@
-import { test } from "@std/testing/bdd";
+import { test } from "node:test";
 import assert from "node:assert/strict";
 import { parseWorkspaceConfig, workspaceYamlFor } from "../../src/workflow/workspace.ts";
 import { WorkflowValidationError } from "../../src/workflow/schema.ts";
@@ -55,10 +55,7 @@ test("同じパスを 2 つの名前で指すと落ちる", () => {
 
 test("雛形は読み直すと同じ projects になる", () => {
   const projects = [{ name: "doctrine", path: "." }];
-  assert.deepEqual(
-    parseWorkspaceConfig(workspaceYamlFor(projects), "doctrine").projects,
-    projects,
-  );
+  assert.deepEqual(parseWorkspaceConfig(workspaceYamlFor(projects), "doctrine").projects, projects);
 });
 
 test("tracker を渡すと雛形に書かれ、読み直すと同じ tracker になる", () => {
@@ -136,8 +133,8 @@ test("知らない kind は落とし、選べる値を示す", () => {
   } catch (e) {
     assert(e instanceof WorkflowValidationError);
     assert(
-      e.issues.some((i) =>
-        i.includes("tracker.kind") && i.includes("github") && i.includes("linear")
+      e.issues.some(
+        (i) => i.includes("tracker.kind") && i.includes("github") && i.includes("linear"),
       ),
     );
   }

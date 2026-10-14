@@ -1,4 +1,4 @@
-import { test } from "@std/testing/bdd";
+import { test } from "node:test";
 import assert from "node:assert/strict";
 import { openDb } from "../../src/db/migrate.ts";
 import { insertTask } from "../../src/db/tasks.ts";
@@ -37,9 +37,12 @@ import type { Db } from "../../src/db/schema.ts";
 
 const ISSUE = "https://github.com/o/r/issues/1";
 
-async function fixture(): Promise<
-  { d: Db; projectId: number; workspaceId: number; runId: number }
-> {
+async function fixture(): Promise<{
+  d: Db;
+  projectId: number;
+  workspaceId: number;
+  runId: number;
+}> {
   const d = await openDb(":memory:");
   const p = await seedProject(d, { path: "/repo" });
   const projectId = p.id;
@@ -143,12 +146,14 @@ test("listIntakes は既定で終わった Intake を除き、includeClosed で�
   });
   await updateIntake(d, "i1", { state: "completed" });
 
-  assert.deepEqual((await listIntakes(d)).map((i) => i.id), ["i2", "i3"]);
-  assert.deepEqual((await listIntakes(d, { includeClosed: true })).map((i) => i.id), [
-    "i1",
-    "i2",
-    "i3",
-  ]);
+  assert.deepEqual(
+    (await listIntakes(d)).map((i) => i.id),
+    ["i2", "i3"],
+  );
+  assert.deepEqual(
+    (await listIntakes(d, { includeClosed: true })).map((i) => i.id),
+    ["i1", "i2", "i3"],
+  );
   assert.deepEqual(
     (await listIntakes(d, { workspaceId: other.workspace_id })).map((i) => i.id),
     ["i3"],
@@ -163,9 +168,14 @@ test("updateIntake は requireState が一致すれば書き、updated_at を進
   const { d } = await fixture();
   const before = (await getIntake(d, "i1"))!;
   await new Promise((r) => setTimeout(r, 5));
-  await updateIntake(d, "i1", { state: "answering", child_pid: 42 }, {
-    requireState: "investigating",
-  });
+  await updateIntake(
+    d,
+    "i1",
+    { state: "answering", child_pid: 42 },
+    {
+      requireState: "investigating",
+    },
+  );
   const after = (await getIntake(d, "i1"))!;
   assert.equal(after.state, "answering");
   assert.equal(after.child_pid, 42);
@@ -232,7 +242,10 @@ test("実行は queued で立て、閉じるときに結果を書く", async () 
     started_at: "2026-09-21T00:02:00.000Z",
     log_path: "/logs/2",
   });
-  assert.deepEqual((await listIntakeRuns(d, "i1")).map((r) => r.id), [runId, second]);
+  assert.deepEqual(
+    (await listIntakeRuns(d, "i1")).map((r) => r.id),
+    [runId, second],
+  );
   assert.equal(await getIntakeRun(d, 999), undefined);
 });
 
@@ -291,7 +304,10 @@ test("案の seq は Intake ごとに 1 から振られ、latestDraft は最後�
 
   assert.equal((await latestDraft(d, "i1"))?.id, b.id);
   assert.equal((await latestDraft(d, "i2"))?.id, c.id);
-  assert.deepEqual((await listDrafts(d, "i1")).map((x) => x.seq), [1, 2]);
+  assert.deepEqual(
+    (await listDrafts(d, "i1")).map((x) => x.seq),
+    [1, 2],
+  );
   assert.equal((await getDraft(d, a.id))?.hash, "h");
   assert.equal(await latestDraft(d, "nope"), undefined);
 });
@@ -301,11 +317,14 @@ test("同じ Intake に同じ seq の案は入らない", async () => {
   await insertDraft(d, newDraft(runId));
   await assert.rejects(
     () =>
-      d.insertInto("intake_drafts").values({
-        ...newDraft(runId),
-        seq: 1,
-        created_at: "2026-09-21T00:00:00.000Z",
-      }).execute(),
+      d
+        .insertInto("intake_drafts")
+        .values({
+          ...newDraft(runId),
+          seq: 1,
+          created_at: "2026-09-21T00:00:00.000Z",
+        })
+        .execute(),
     /UNIQUE/,
   );
 });
@@ -317,15 +336,24 @@ test("コメントの target_id は whole のときだけ null", async () => {
   await insertComments(d, "i1", draft.id, [], null);
   assert.deepEqual(await listComments(d, "i1"), []);
 
-  await insertComments(d, "i1", draft.id, [
-    { target_kind: "whole", target_id: null, body: "全体" },
-    { target_kind: "process", target_id: "p1", body: "p1 へ" },
-  ], null);
+  await insertComments(
+    d,
+    "i1",
+    draft.id,
+    [
+      { target_kind: "whole", target_id: null, body: "全体" },
+      { target_kind: "process", target_id: "p1", body: "p1 へ" },
+    ],
+    null,
+  );
   const rows = await listComments(d, "i1");
-  assert.deepEqual(rows.map((r) => [r.target_kind, r.target_id, r.body, r.draft_id]), [
-    ["whole", null, "全体", draft.id],
-    ["process", "p1", "p1 へ", draft.id],
-  ]);
+  assert.deepEqual(
+    rows.map((r) => [r.target_kind, r.target_id, r.body, r.draft_id]),
+    [
+      ["whole", null, "全体", draft.id],
+      ["process", "p1", "p1 へ", draft.id],
+    ],
+  );
 
   await assert.rejects(
     () =>
@@ -360,10 +388,16 @@ test("insertComments: runId を各行の run_id に入れる", async () => {
     { target_kind: "whole" as const, target_id: null, body: "b" },
   ];
   await insertComments(d, "i1", draft.id, two, runId);
-  assert.deepEqual((await listComments(d, "i1")).map((r) => r.run_id), [runId, runId]);
+  assert.deepEqual(
+    (await listComments(d, "i1")).map((r) => r.run_id),
+    [runId, runId],
+  );
 
   await insertComments(d, "i1", draft.id, two, null);
-  assert.deepEqual((await listComments(d, "i1")).slice(2).map((r) => r.run_id), [null, null]);
+  assert.deepEqual(
+    (await listComments(d, "i1")).slice(2).map((r) => r.run_id),
+    [null, null],
+  );
 });
 
 test("retireProcesses: 生きた行だけに retired_at を入れる", async () => {
@@ -374,11 +408,14 @@ test("retireProcesses: 生きた行だけに retired_at を入れる", async () 
   await retireProcesses(d, "i1", [], "tx");
   await retireProcesses(d, "i1", ["2", "3"], "t1");
   const rows = await listProcesses(d, "i1");
-  assert.deepEqual(rows.map((r) => [r.process_id, r.retired_at]), [
-    ["1", null],
-    ["2", "t0"],
-    ["3", "t1"],
-  ]);
+  assert.deepEqual(
+    rows.map((r) => [r.process_id, r.retired_at]),
+    [
+      ["1", null],
+      ["2", "t0"],
+      ["3", "t1"],
+    ],
+  );
 });
 
 test("latestApproval は最後の承認を返す", async () => {
@@ -401,7 +438,10 @@ test("承認のプロセスは (intake_id, process_id) で 1 行", async () => {
 
   await insertProcesses(d, "i1", ["p2", "p1"]);
   const rows = await listProcesses(d, "i1");
-  assert.deepEqual(rows.map((r) => r.process_id), ["p1", "p2"]);
+  assert.deepEqual(
+    rows.map((r) => r.process_id),
+    ["p1", "p2"],
+  );
   assert.ok(rows.every((r) => r.sub_issue_closed === 0 && r.current_task_id === null));
   assert.ok(rows.every((r) => r.retired_at === null && r.sub_issue_url === null));
 

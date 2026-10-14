@@ -1,5 +1,6 @@
-import { test } from "@std/testing/bdd";
+import { test } from "node:test";
 import assert from "node:assert/strict";
+import { runCommand } from "../../src/util/exec.ts";
 import { openDb } from "../../src/db/migrate.ts";
 import { getTask, insertTask } from "../../src/db/tasks.ts";
 import { seedProject } from "../helpers/project.ts";
@@ -331,7 +332,7 @@ test("defaultProbe が使う ps コマンドはロケール・タイムゾーン
 });
 
 /**
- * デーモンを模した Deno プロセスを指定の TZ で起動し、その中で実際に子を spawn して
+ * デーモンを模した Node プロセスを指定の TZ で起動し、その中で実際に子を spawn して
  * defaultProbe（＝本物の ps 出力）を通した isSameChild の結果を返す。
  * ProcessProbe をモックしたテストでは ps 出力のパース経路を通らないので、
  * 「TZ=UTC の ps 出力をローカルタイムゾーンで解釈してしまう」類のずれを検出できない。
@@ -351,7 +352,9 @@ async function killOwnChildUnderTz(tz: string): Promise<TzProbeResult> {
   // シグナルが本当に子へ届いたかを子の終了シグナルで確かめる。
   const script = `
     import { defaultProbe, isSameChild, killStaleChild } from ${JSON.stringify(recoveryUrl)};
-    const child = new Deno.Command("sleep", { args: ["30"] }).spawn();
+    import { spawn } from "node:child_process";
+    const child = spawn("sleep", ["30"], { stdio: "ignore" });
+    const exited = new Promise((r) => child.once("exit", (_code, signal) => r(signal)));
     const recorded = new Date().toISOString();
     let result;
     try {
@@ -364,19 +367,15 @@ async function killOwnChildUnderTz(tz: string): Promise<TzProbeResult> {
     } finally {
       // kill が届いていなければここで後始末する（その場合 exitSignal は SIGKILL になる）。
       const timer = setTimeout(() => { try { child.kill("SIGKILL"); } catch { /* 既に終了 */ } }, 2000);
-      const status = await child.status;
+      const exitSignal = await exited;
       clearTimeout(timer);
-      console.log(JSON.stringify({ ...result, exitSignal: status.signal }));
+      console.log(JSON.stringify({ ...result, exitSignal }));
     }
   `;
-  const out = await new Deno.Command(Deno.execPath(), {
-    args: ["eval", "--config", new URL("../../deno.json", import.meta.url).pathname, script],
+  const { stdout } = await runCommand(process.execPath, ["--input-type=module", "-e", script], {
     env: { TZ: tz },
-    stdout: "piped",
-    stderr: "piped",
-  }).output();
-  assert.ok(out.success, new TextDecoder().decode(out.stderr));
-  return JSON.parse(new TextDecoder().decode(out.stdout));
+  });
+  return JSON.parse(stdout);
 }
 
 for (const tz of ["Asia/Tokyo", "America/Los_Angeles", "UTC"]) {

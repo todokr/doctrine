@@ -9,7 +9,7 @@
 # 差分だけを読んでガイドを書く。
 #
 # verify は型検査とテストを回すだけの command ステップ。通ったかどうかを
-# エージェントに確かめさせず、ここで機械的に落とす。core / app / pfd の3つとも流す。
+# エージェントに確かめさせず、ここで機械的に落とす。core / app の2つとも流す。
 # app は依存の取得（pnpm install --frozen-lockfile）から始めるので、
 # pnpm-lock.yaml が package.json と食い違っていればここで落ちる。
 #
@@ -67,7 +67,7 @@ steps:
       - "Bash(find:*)"
       - "Bash(sed -n:*)"
       - "Bash(mise tasks:*)"
-      - "Bash(deno fmt --check:*)"
+      - "Bash(pnpm exec biome check:*)"
       - "Bash(gh pr view:*)"
       - "Bash(gh pr list:*)"
       - "Bash(gh pr diff:*)"
@@ -99,7 +99,7 @@ steps:
       作業ディレクトリは worktree のルートです。Bash に渡すパスは worktree のルートからの
       相対で書いてください。コマンドは1つずつ実行してください。`&&` や `cd` でつなぐと
       権限で拒否されます。許可は `&&` でつないだ各コマンドに個別に照合されるので、
-      `cd core && deno fmt --check` は `cd` の側で落ちます。
+      `cd core && pnpm exec biome check` は `cd` の側で落ちます。
       `git` に `-C` を付けないでください。`Bash(git diff:*)` のような許可に前方一致
       しなくなります。`git diff develop...HEAD` のようにそのまま書きます。
 
@@ -125,8 +125,7 @@ steps:
       - "Bash(find:*)"
       - "Bash(sed -n:*)"
       - "Bash(mise tasks:*)"
-      - "Bash(deno fmt --check:*)"
-      - "Bash(deno lint:*)"
+      - "Bash(pnpm exec biome check:*)"
       - "Bash(gh pr view:*)"
       - "Bash(gh pr list:*)"
       - "Bash(gh pr diff:*)"
@@ -153,7 +152,7 @@ steps:
       作業ディレクトリは worktree のルートです。Bash に渡すパスは worktree のルートからの
       相対で書いてください。コマンドは1つずつ実行してください。`&&` や `cd` でつなぐと
       権限で拒否されます。許可は `&&` でつないだ各コマンドに個別に照合されるので、
-      `cd core && deno fmt --check` は `cd` の側で落ちます。
+      `cd core && pnpm exec biome check` は `cd` の側で落ちます。
       `git` に `-C` を付けないでください。`Bash(git diff:*)` のような許可に前方一致
       しなくなります。`git diff develop...HEAD` のようにそのまま書きます。
 
@@ -179,7 +178,7 @@ steps:
     permissionMode: acceptEdits
     # acceptEdits では Bash がすべて拒否されるので、このリポジトリで要るものだけ許可する。
     # 許可は `&&` や `cd` でつないだ各コマンドに個別に照合されるため、`cd app && pnpm add`
-    # は通らない。app の依存は `pnpm -C app`、deno lint はパスを引数に渡して実行させる。
+    # は通らない。app の依存は `pnpm -C app`、biome はパスを引数に渡して実行させる。
     allowedTools:
       - "Bash(mise run core:test:*)"
       - "Bash(mise run core:check:*)"
@@ -187,13 +186,9 @@ steps:
       - "Bash(mise run app:deps:*)"
       - "Bash(mise run app:test:*)"
       - "Bash(mise run app:build:*)"
-      - "Bash(mise run pfd:deps:*)"
-      - "Bash(mise run pfd:test:*)"
-      - "Bash(mise run pfd:check:*)"
       - "Bash(pnpm -C app:*)"
-      - "Bash(deno fmt:*)"
-      - "Bash(deno lint:*)"
-      - "Bash(deno eval:*)"
+      - "Bash(pnpm exec biome:*)"
+      - "Bash(node -e:*)"
       - "Bash(git status:*)"
       - "Bash(git diff:*)"
       - "Bash(git log:*)"
@@ -233,13 +228,12 @@ steps:
 
       - core/ と shared/: `mise run core:check` と `mise run core:test`
       - app/ と shared/: `mise run app:test` と `mise run app:build`
-      - pfd/: `mise run pfd:check` と `mise run pfd:test`
 
       作業ディレクトリは worktree のルートです。Bash に渡すパスは worktree のルートからの相対で書いてください。
       コマンドは1つずつ実行してください。`&&` や `cd` でつなぐと権限で拒否されます。
       `git` に `-C` を付けないでください。`Bash(git diff:*)` のような許可に前方一致しなくなります。`git diff develop...HEAD` のようにそのまま書きます。
       app の依存を足すときは `pnpm -C app add <パッケージ>` を使い、pnpm-lock.yaml は手で編集しないでください。
-      deno lint は `deno lint core/src/...` のようにパスを渡して実行します。
+      整形と lint は `pnpm exec biome check --write core/src/...` のようにパスを渡して実行します。
 
       差し戻されて再度呼ばれた場合は、指摘を直して再度コミットしてください。
 
@@ -254,12 +248,12 @@ steps:
       必要なコマンドが権限で拒否されたときは、ロックファイルの手編集のような回避策を取らず、
       できる範囲までコミットして、できなかったことを implement-notes.md に書いて終えてください。
 
-  # deno test は失敗の詳細を stdout に、deno check は stderr に出すので両方渡す。
+  # node --test と tsc は失敗の詳細を stdout に、mise と pnpm は stderr に出すので両方渡す。
   # app:deps を app:test の前に置くのは、implement が依存を足した直後でも
   # node_modules が pnpm-lock.yaml と揃った状態でテストを流すため。
   - id: verify
     type: command
-    run: "mise run core:check && mise run core:test && mise run app:deps && mise run app:test && mise run app:build && mise run pfd:check && mise run pfd:test"
+    run: "mise run core:check && mise run core:test && mise run app:deps && mise run app:test && mise run app:build"
     onFailure:
       goto: implement
       maxAttempts: 3
@@ -288,8 +282,7 @@ steps:
       - "Bash(find:*)"
       - "Bash(sed -n:*)"
       - "Bash(mise tasks:*)"
-      - "Bash(deno fmt --check:*)"
-      - "Bash(deno lint:*)"
+      - "Bash(pnpm exec biome check:*)"
       - "Bash(gh pr view:*)"
       - "Bash(gh pr list:*)"
       - "Bash(gh pr diff:*)"
@@ -297,9 +290,9 @@ steps:
       - "Bash(gh issue list:*)"
     prompt: |
       直前の verify ステップで、core の型検査とテスト、app の依存の取得
-      （pnpm install --frozen-lockfile）・テスト・ビルド（tsc と vite build）、
-      pfd の型検査とテストが通っています。自分で回す必要はありません。
-      deno fmt --check と deno lint、cargo は verify に含まれていません。
+      （pnpm install --frozen-lockfile）・テスト・ビルド（tsc と vite build）が
+      通っています。自分で回す必要はありません。
+      biome check（整形と lint）と cargo は verify に含まれていません。
 
       implement が積んだコミットを毎回読み直して審査し、結果を
       {{ worktree.path }}/.doctrine-out/review.md に上書きしてください。
@@ -307,10 +300,10 @@ steps:
       作業ディレクトリは worktree のルートです。Bash に渡すパスは worktree のルートからの
       相対で書いてください。コマンドは1つずつ実行してください。`&&` や `cd` でつなぐと
       権限で拒否されます。許可は `&&` でつないだ各コマンドに個別に照合されるので、
-      `cd core && deno fmt --check` は `cd` の側で落ちます。
+      `cd core && pnpm exec biome check` は `cd` の側で落ちます。
       `git` に `-C` を付けないでください。`Bash(git diff:*)` のような許可に前方一致
       しなくなります。`git diff develop...HEAD` のようにそのまま書きます。
-      `deno fmt --check --config core/deno.json` のように、ルートからの相対パスで実行します。
+      `pnpm exec biome check core/src` のように、ルートからの相対パスで実行します。
 
       `git diff develop...HEAD` と `git log develop..HEAD` で実装の差分とコミットを読み、
       {{ worktree.path }}/.doctrine-out/plan.md と突き合わせます。
@@ -368,8 +361,7 @@ steps:
       - "Bash(find:*)"
       - "Bash(sed -n:*)"
       - "Bash(mise tasks:*)"
-      - "Bash(deno fmt --check:*)"
-      - "Bash(deno lint:*)"
+      - "Bash(pnpm exec biome check:*)"
       - "Bash(gh pr view:*)"
       - "Bash(gh pr list:*)"
       - "Bash(gh pr diff:*)"
@@ -413,9 +405,6 @@ steps:
       - "Bash(mise run app:deps:*)"
       - "Bash(mise run app:test:*)"
       - "Bash(mise run app:build:*)"
-      - "Bash(mise run pfd:deps:*)"
-      - "Bash(mise run pfd:test:*)"
-      - "Bash(mise run pfd:check:*)"
       - "Bash(pnpm -C app:*)"
       - "Bash(grep:*)"
       - "Bash(sed -n:*)"
@@ -439,7 +428,7 @@ steps:
 
   - id: verify-sync
     type: command
-    run: "mise run core:check && mise run core:test && mise run app:deps && mise run app:test && mise run app:build && mise run pfd:check && mise run pfd:test"
+    run: "mise run core:check && mise run core:test && mise run app:deps && mise run app:test && mise run app:build"
     onFailure:
       goto: sync
       maxAttempts: 3
@@ -453,7 +442,7 @@ steps:
   # たびに頭から再実行されるので、既に PR があれば作らない形にしてある。push は同じ
   # コミットを送り直すだけなので、二度実行しても効果が変わらない。
   #
-  # gh pr create と git push は NON_IDEMPOTENT に引っかかり、dctl add のたびに警告が出る。
+  # gh pr create と git push は NON_IDEMPOTENT に引っかかり、タスクを作るたびに警告が出る。
   # 検出は文字列でしか見ないのでガードの有無を区別できない。警告は消さないでおく。
   # 正規表現にガードを理解させると、ガードを外したときに黙って通るようになる。
   #

@@ -50,9 +50,7 @@ export function workspaceTracker(ws: WorkspaceRef, tracker: Tracker): WorkspaceT
       return results;
     },
     async listIssues(o) {
-      const settled = await Promise.allSettled(
-        projects.map((p) => tracker.listIssues(p.path, o)),
-      );
+      const settled = await Promise.allSettled(projects.map((p) => tracker.listIssues(p.path, o)));
       const multi = projects.length > 1;
       const issues = settled.flatMap((r, i) => {
         if (r.status === "rejected") return [];

@@ -1,4 +1,4 @@
-import { test } from "@std/testing/bdd";
+import { test } from "node:test";
 import assert from "node:assert/strict";
 import { checkDecomposerOutput } from "../../src/intake/output.ts";
 import type { Assumption, Question } from "../../../shared/intake/question.ts";
@@ -144,21 +144,24 @@ test("workspace に無い project の PFD は unknown_project で弾く", () => 
   const issues = issuesOf(
     checkDecomposerOutput(pfdOut(example()), ctx({ projectNames: new Set(["other"]) })),
   );
-  assert.ok(issues.some((i) => /^unknown_project 1:/.test(i)), issues.join("\n"));
+  assert.ok(
+    issues.some((i) => /^unknown_project 1:/.test(i)),
+    issues.join("\n"),
+  );
 });
 
 test("agent のプロセスに project が無い PFD は missing_project で弾く", () => {
   const pfd = example();
   delete pfd.processes[0].project;
   const issues = issuesOf(checkDecomposerOutput(pfdOut(pfd), ctx()));
-  assert.ok(issues.some((i) => /^missing_project 1:/.test(i)), issues.join("\n"));
+  assert.ok(
+    issues.some((i) => /^missing_project 1:/.test(i)),
+    issues.join("\n"),
+  );
 });
 
 test("決定の成果物は答えのある質問を指せば通る", () => {
-  const r = checkDecomposerOutput(
-    pfdOut(withDecision()),
-    ctx({ decisionIds: new Set(["q1"]) }),
-  );
+  const r = checkDecomposerOutput(pfdOut(withDecision()), ctx({ decisionIds: new Set(["q1"]) }));
   assert.equal(r.ok, true);
 });
 
@@ -180,7 +183,10 @@ test("replies の番号が範囲外なら違反", () => {
 test("replies の番号が重複したら違反", () => {
   const issues = issuesOf(
     checkDecomposerOutput(
-      pfdOut(example(), [{ commentId: 1, reply: "r" }, { commentId: 1, reply: "s" }]),
+      pfdOut(example(), [
+        { commentId: 1, reply: "r" },
+        { commentId: 1, reply: "s" },
+      ]),
       ctx({ feedbackCount: 1 }),
     ),
   );
@@ -205,21 +211,30 @@ test("改訂では、投入済みのプロセスを変えた案を frozen_change
   const pfd = example();
   pfd.processes[0].steps = "別の手順にする";
   const issues = issuesOf(checkDecomposerOutput(pfdOut(pfd), reviseCtx()));
-  assert.ok(issues.some((i) => /^frozen_changed 1:/.test(i)), issues.join("\n"));
+  assert.ok(
+    issues.some((i) => /^frozen_changed 1:/.test(i)),
+    issues.join("\n"),
+  );
 });
 
 test("改訂では、投入済みのプロセスの出力の成果物を変えた案を弾く", () => {
   const pfd = example();
   pfd.artifacts.find((a) => a.id === "new-table")!.verify = "別の確かめ方";
   const issues = issuesOf(checkDecomposerOutput(pfdOut(pfd), reviseCtx()));
-  assert.ok(issues.some((i) => /^frozen_changed new-table:/.test(i)), issues.join("\n"));
+  assert.ok(
+    issues.some((i) => /^frozen_changed new-table:/.test(i)),
+    issues.join("\n"),
+  );
 });
 
 test("改訂では、投入済みのプロセスの入力の成果物を変えた案を弾く", () => {
   const pfd = example();
   pfd.artifacts.find((a) => a.id === "schema")!.name = "別の名前";
   const issues = issuesOf(checkDecomposerOutput(pfdOut(pfd), reviseCtx()));
-  assert.ok(issues.some((i) => /^frozen_changed schema:/.test(i)), issues.join("\n"));
+  assert.ok(
+    issues.some((i) => /^frozen_changed schema:/.test(i)),
+    issues.join("\n"),
+  );
 });
 
 test("改訂では、固定されていないプロセスを変えた案は通る", () => {
@@ -229,11 +244,16 @@ test("改訂では、固定されていないプロセスを変えた案は通�
 });
 
 test("改訂では、取りやめたプロセスの id を使った案を弾く", () => {
-  const issues = issuesOf(checkDecomposerOutput(
-    pfdOut(example()),
-    reviseCtx({ revision: { ...revising, retiredProcessIds: new Set(["4"]) } }),
-  ));
-  assert.ok(issues.some((i) => /^retired_reused 4:/.test(i)), issues.join("\n"));
+  const issues = issuesOf(
+    checkDecomposerOutput(
+      pfdOut(example()),
+      reviseCtx({ revision: { ...revising, retiredProcessIds: new Set(["4"]) } }),
+    ),
+  );
+  assert.ok(
+    issues.some((i) => /^retired_reused 4:/.test(i)),
+    issues.join("\n"),
+  );
 });
 
 test("改訂でなければ固定を見ない", () => {

@@ -18,9 +18,7 @@ export const materialSchema = z.discriminatedUnion("kind", [
     kind: z.literal("table"),
     caption: z.string().describe("表の見出し"),
     columns: z.array(z.string()).describe("列の名前"),
-    rows: z
-      .array(z.array(z.string()))
-      .describe("行。各行の列数は columns と同じにする"),
+    rows: z.array(z.array(z.string())).describe("行。各行の列数は columns と同じにする"),
   }),
   z.strictObject({
     kind: z.literal("code"),
@@ -49,9 +47,9 @@ export const questionSchema = z.strictObject({
   kind: z
     .enum(["single", "multiple", "free"])
     .describe("single: 1 つ選ぶ / multiple: 1 つ以上選ぶ / free: 選択肢を持たず文章で答える"),
-  options: z.array(optionSchema).describe(
-    "選択肢。free では空配列。説明はどれかを推す書き方をしない",
-  ),
+  options: z
+    .array(optionSchema)
+    .describe("選択肢。free では空配列。説明はどれかを推す書き方をしない"),
   materials: z.array(materialSchema).describe("判断の材料。無ければ空配列"),
 });
 
@@ -61,10 +59,7 @@ export const questionSetSchema = z.array(questionSchema);
 export const evidenceSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("issue"),
-    commentUrl: z
-      .string()
-      .nullable()
-      .describe("根拠にした Issue のコメントの URL。本文なら null"),
+    commentUrl: z.string().nullable().describe("根拠にした Issue のコメントの URL。本文なら null"),
     quote: z.string().describe("根拠にした箇所の引用"),
   }),
   z.strictObject({

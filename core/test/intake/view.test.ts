@@ -1,4 +1,4 @@
-import { test } from "@std/testing/bdd";
+import { test } from "node:test";
 import assert from "node:assert/strict";
 import { getIntake, replaceCurrentTask, upsertPrObservation } from "../../src/db/intakes.ts";
 import { insertProject, insertTask, type NewTask } from "../../src/db/tasks.ts";
@@ -19,9 +19,7 @@ test("人の入力を待つ状態は needsHuman になる", () => {
 
 test("投入前後の状態は、プロセスの状態によらず needsHuman にならない", () => {
   const statuses: ProcessStatus[] = [{ state: "your_turn" }];
-  for (
-    const s of ["investigating", "decomposing", "completed", "canceled"] as IntakeState[]
-  ) {
+  for (const s of ["investigating", "decomposing", "completed", "canceled"] as IntakeState[]) {
     assert.equal(needsHuman(s, statuses), false, s);
   }
 });
@@ -147,24 +145,23 @@ test("プロセスのいまのタスクの帯を、pin されたワークフロ�
     workflow_setup: null,
   });
   await replaceCurrentTask(db, "i1", "1", null, "t1");
-  await db.updateTable("tasks").set({ current_step_id: "review" }).where(
-    "id",
-    "=",
-    "t1",
-  ).execute();
+  await db.updateTable("tasks").set({ current_step_id: "review" }).where("id", "=", "t1").execute();
   for (const step_id of ["a", "gone"]) {
-    await db.insertInto("step_runs").values({
-      task_id: "t1",
-      step_id,
-      attempt: 1,
-      status: "success",
-      exit_code: 0,
-      started_at: "2026-10-14T00:00:00.000Z",
-      ended_at: "2026-10-14T00:01:00.000Z",
-      log_path: "",
-      review_tree: null,
-      goto_step_id: null,
-    }).execute();
+    await db
+      .insertInto("step_runs")
+      .values({
+        task_id: "t1",
+        step_id,
+        attempt: 1,
+        status: "success",
+        exit_code: 0,
+        started_at: "2026-10-14T00:00:00.000Z",
+        ended_at: "2026-10-14T00:01:00.000Z",
+        log_path: "",
+        review_tree: null,
+        goto_step_id: null,
+      })
+      .execute();
   }
 
   const detail = await toIntakeDetail(
@@ -176,12 +173,11 @@ test("プロセスのいまのタスクの帯を、pin されたワークフロ�
   const rail = detail.processes.find((p) => p.id === "1")!.rail!;
   assert.deepEqual(
     rail.map((n) => [n.id, n.status, n.current, n.unknown]),
-    [["a", "success", false, false], ["review", "pending", true, false], [
-      "gone",
-      "success",
-      false,
-      true,
-    ]],
+    [
+      ["a", "success", false, false],
+      ["review", "pending", true, false],
+      ["gone", "success", false, true],
+    ],
   );
   assert.equal(detail.processes.find((p) => p.id === "2")!.rail, null);
 });
@@ -190,11 +186,8 @@ test("ワークフローを読めないタスクの帯は null で、intake.get 
   const { db, projectId } = await seedActive();
   await insertTask(db, newTaskFor("t1", projectId, "1"));
   await replaceCurrentTask(db, "i1", "1", null, "t1");
-  const detail = await toIntakeDetail(
-    db,
-    (await getIntake(db, "i1"))!,
-    INITIAL_WATCH_HEALTH,
-    () => Promise.reject(new Error("読めない")),
+  const detail = await toIntakeDetail(db, (await getIntake(db, "i1"))!, INITIAL_WATCH_HEALTH, () =>
+    Promise.reject(new Error("読めない")),
   );
   assert.equal(detail.processes.find((p) => p.id === "1")!.rail, null);
 });

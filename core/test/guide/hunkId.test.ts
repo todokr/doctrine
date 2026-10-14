@@ -1,4 +1,4 @@
-import { test } from "@std/testing/bdd";
+import { test } from "node:test";
 import assert from "node:assert/strict";
 import { listHunks } from "../../../shared/guide/hunkId.ts";
 
@@ -160,8 +160,7 @@ index 104f954..967f419 100644
 });
 
 test("C クォートされたパスを復号して files[].path と同じ形にする", () => {
-  const patch =
-    `diff --git "a/\\346\\227\\245\\346\\234\\254\\350\\252\\236.ts" "b/\\346\\227\\245\\346\\234\\254\\350\\252\\236.ts"
+  const patch = `diff --git "a/\\346\\227\\245\\346\\234\\254\\350\\252\\236.ts" "b/\\346\\227\\245\\346\\234\\254\\350\\252\\236.ts"
 index 104f954..967f419 100644
 --- "a/\\346\\227\\245\\346\\234\\254\\350\\252\\236.ts"
 +++ "b/\\346\\227\\245\\346\\234\\254\\350\\252\\236.ts"

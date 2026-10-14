@@ -1,7 +1,7 @@
-import { afterEach, beforeEach, test } from "@std/testing/bdd";
+import { afterEach, beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { mkdir, mkdtemp, readFile, realpath, rm, utimes, writeFile } from "node:fs/promises";
+import { existsSync, rmSync } from "node:fs";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { tmpdir } from "node:os";
@@ -76,9 +76,9 @@ beforeEach(async () => {
 });
 afterEach(async () => {
   await until(() =>
-    contexts.every((c) =>
-      c.running.size === 0 && c.runningIntakeRuns.size === 0 && c.intakeWatcher.idle()
-    )
+    contexts.every(
+      (c) => c.running.size === 0 && c.runningIntakeRuns.size === 0 && c.intakeWatcher.idle(),
+    ),
   );
   contexts.length = 0;
   await rm(root, { recursive: true, force: true });
@@ -112,7 +112,8 @@ async function context(events: ServerEvent[] = []): Promise<DaemonContext> {
  * ディスクの YAML が読めない経路を試すテストが、pin 後もその経路を再現するために使う。
  */
 async function unpin(ctx: DaemonContext, taskId: string): Promise<void> {
-  await ctx.db.updateTable("tasks")
+  await ctx.db
+    .updateTable("tasks")
     .set({ workflow_yaml: null, workflow_setup: null })
     .where("id", "=", taskId)
     .execute();
@@ -121,7 +122,7 @@ async function unpin(ctx: DaemonContext, taskId: string): Promise<void> {
 test("workspace.add でプロジェクトを登録し、設定を読む", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
-  const ws = await h("workspace.add", { path: repo }, NOOP_CONN) as WorkspaceSummary;
+  const ws = (await h("workspace.add", { path: repo }, NOOP_CONN)) as WorkspaceSummary;
   const p = ws.projects[0];
   assert.equal(p.default_workflow, "feature");
   assert.equal(p.name, "repo");
@@ -131,7 +132,7 @@ test("workspace.add でプロジェクトを登録し、設定を読む", async 
   const w = await getWorkspace(ctx.db, p.workspace_id);
   assert.equal(w?.path, repo);
   assert.equal(w?.name, "repo");
-  const list = await h("project.list", {}, NOOP_CONN) as unknown[];
+  const list = (await h("project.list", {}, NOOP_CONN)) as unknown[];
   assert.equal(list.length, 1);
 });
 
@@ -139,7 +140,11 @@ test("task.create は queued のタスクを作り、worktree はまだ作らな
   const ctx = await context();
   const h = createHandler(ctx);
   await h("workspace.add", { path: repo }, NOOP_CONN);
-  const t = await h("task.create", { project: repo, title: "T", prompt: "直して" }, NOOP_CONN) as {
+  const t = (await h(
+    "task.create",
+    { project: repo, title: "T", prompt: "直して" },
+    NOOP_CONN,
+  )) as {
     id: string;
   };
   const row = (await getTask(ctx.db, t.id))!;
@@ -153,7 +158,11 @@ test("不正なワークフロー名はタスク作成時に落とす", async ()
   const h = createHandler(ctx);
   await h("workspace.add", { path: repo }, NOOP_CONN);
   await assert.rejects(() =>
-    h("task.create", { project: repo, title: "T", prompt: "p", workflow: "nonexistent" }, NOOP_CONN)
+    h(
+      "task.create",
+      { project: repo, title: "T", prompt: "p", workflow: "nonexistent" },
+      NOOP_CONN,
+    ),
   );
 });
 
@@ -165,11 +174,11 @@ test("非冪等コマンドを含むワークフローは task.create の応答�
     "name: risky\nsteps:\n  - id: open-pr\n    type: command\n    run: gh pr create --fill\n",
   );
   await h("workspace.add", { path: repo }, NOOP_CONN);
-  const created = await h(
+  const created = (await h(
     "task.create",
     { project: repo, title: "T", prompt: "p", workflow: "risky" },
     NOOP_CONN,
-  ) as { warnings: string[] };
+  )) as { warnings: string[] };
   assert.equal(created.warnings.length, 1, "レスポンスに警告が乗る（ユーザーの目の前に出る）");
   assert.match(created.warnings[0], /gh pr create/);
   assert.equal(ctx.warnings.recent().length, 1, "デーモンの警告にも記録される");
@@ -180,11 +189,11 @@ test("冪等なワークフローは task.create で警告を出さない", asyn
   const ctx = await context();
   const h = createHandler(ctx);
   await h("workspace.add", { path: repo }, NOOP_CONN);
-  const created = await h(
+  const created = (await h(
     "task.create",
     { project: repo, title: "T", prompt: "p" },
     NOOP_CONN,
-  ) as { warnings: string[] };
+  )) as { warnings: string[] };
   assert.deepEqual(created.warnings, []);
   assert.equal(ctx.warnings.recent().length, 0);
 });
@@ -193,7 +202,7 @@ test("task.list は紐づけ付きのタスクの intake_id・intake_process_id�
   const ctx = await context();
   const h = createHandler(ctx);
   await h("workspace.add", { path: repo }, NOOP_CONN);
-  const [project] = await h("project.list", {}, NOOP_CONN) as ProjectSummary[];
+  const [project] = (await h("project.list", {}, NOOP_CONN)) as ProjectSummary[];
   await insertIntake(ctx.db, {
     id: "i1",
     workspace_id: project.workspace_id,
@@ -215,7 +224,7 @@ test("task.list は紐づけ付きのタスクの intake_id・intake_process_id�
     parent_issue_url: "https://github.com/o/r/issues/1",
   });
 
-  const tasks = await h("task.list", {}, NOOP_CONN) as unknown as Record<string, unknown>[];
+  const tasks = (await h("task.list", {}, NOOP_CONN)) as unknown as Record<string, unknown>[];
   const row = tasks.find((t) => t.id === "t-link")!;
   assert.equal(row.intake_id, "i1");
   assert.equal(row.intake_process_id, "p1");
@@ -228,7 +237,7 @@ test("task.create で作ったタスクは紐づけを持たない", async () =>
   const ctx = await context();
   const h = createHandler(ctx);
   await h("workspace.add", { path: repo }, NOOP_CONN);
-  const created = await h(
+  const created = (await h(
     "task.create",
     {
       project: repo,
@@ -238,9 +247,9 @@ test("task.create で作ったタスクは紐づけを持たない", async () =>
       issue_url: "https://github.com/o/r/issues/2",
     },
     NOOP_CONN,
-  ) as { id: string };
+  )) as { id: string };
 
-  const tasks = await h("task.list", {}, NOOP_CONN) as unknown as Record<string, unknown>[];
+  const tasks = (await h("task.list", {}, NOOP_CONN)) as unknown as Record<string, unknown>[];
   const row = tasks.find((t) => t.id === created.id)!;
   assert.equal(row.intake_id, null);
   assert.equal(row.intake_process_id, null);
@@ -289,11 +298,11 @@ test("却下ループを何度回しても task.approve/task.reject は警告を
       "  - id: push\n    type: command\n    run: git push\n",
   );
   await h("workspace.add", { path: repo }, NOOP_CONN);
-  const t = await h(
+  const t = (await h(
     "task.create",
     { project: repo, title: "T", prompt: "p", workflow: "risky-loop" },
     NOOP_CONN,
-  ) as { id: string; warnings: string[] };
+  )) as { id: string; warnings: string[] };
   assert.equal(t.warnings.length, 1, "作成時に push ステップの警告が1件出る");
   const afterCreate = ctx.warnings.recent().length;
   assert.equal(afterCreate, 1);
@@ -337,7 +346,7 @@ test("tick で枠を取り、worktree を作って approval まで進む", async
   const ctx = await context(events);
   const h = createHandler(ctx);
   await h("workspace.add", { path: repo }, NOOP_CONN);
-  const t = await h("task.create", { project: repo, title: "T", prompt: "p" }, NOOP_CONN) as {
+  const t = (await h("task.create", { project: repo, title: "T", prompt: "p" }, NOOP_CONN)) as {
     id: string;
   };
   await tick(ctx);
@@ -358,11 +367,11 @@ test("task.approve で queued に戻り、行列の先頭に入る", async () =>
     join(repo, ".doctrine", "workflows", "twostep.yaml"),
     'name: twostep\nsteps:\n  - id: review\n    type: approval\n    title: 見て\n  - id: after\n    type: command\n    run: "true"\n',
   );
-  const t = await h(
+  const t = (await h(
     "task.create",
     { project: repo, title: "T", prompt: "p", workflow: "twostep" },
     NOOP_CONN,
-  ) as { id: string };
+  )) as { id: string };
   await tick(ctx);
   await until(() => ctx.running.size === 0);
   await h("task.approve", { task_id: t.id }, NOOP_CONN);
@@ -375,7 +384,7 @@ test("task.reject はコメントを必須にする", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
   await h("workspace.add", { path: repo }, NOOP_CONN);
-  const t = await h("task.create", { project: repo, title: "T", prompt: "p" }, NOOP_CONN) as {
+  const t = (await h("task.create", { project: repo, title: "T", prompt: "p" }, NOOP_CONN)) as {
     id: string;
   };
   await tick(ctx);
@@ -387,7 +396,7 @@ test("task.cancel は canceled にして worktree を残す", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
   await h("workspace.add", { path: repo }, NOOP_CONN);
-  const t = await h("task.create", { project: repo, title: "T", prompt: "p" }, NOOP_CONN) as {
+  const t = (await h("task.create", { project: repo, title: "T", prompt: "p" }, NOOP_CONN)) as {
     id: string;
   };
   await tick(ctx);
@@ -405,16 +414,16 @@ test("task.list は state でフィルタできる", async () => {
   await h("workspace.add", { path: repo }, NOOP_CONN);
   await h("task.create", { project: repo, title: "A", prompt: "p" }, NOOP_CONN);
   await h("task.create", { project: repo, title: "B", prompt: "p" }, NOOP_CONN);
-  const queued = await h("task.list", { state: "queued" }, NOOP_CONN) as unknown[];
+  const queued = (await h("task.list", { state: "queued" }, NOOP_CONN)) as unknown[];
   assert.equal(queued.length, 2);
 });
 
 test("worktree.list はタスク・Intake・孤児の worktree を全部返す", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
-  const project = (await h("workspace.add", { path: repo }, NOOP_CONN) as WorkspaceSummary)
+  const project = ((await h("workspace.add", { path: repo }, NOOP_CONN)) as WorkspaceSummary)
     .projects[0];
-  const t = await h("task.create", { project: repo, title: "T", prompt: "p" }, NOOP_CONN) as {
+  const t = (await h("task.create", { project: repo, title: "T", prompt: "p" }, NOOP_CONN)) as {
     id: string;
   };
   await tick(ctx);
@@ -440,47 +449,56 @@ test("worktree.list はタスク・Intake・孤児の worktree を全部返す",
     baseBranch: "main",
   });
   const fixed = new Date("2026-01-01T00:00:00.000Z");
-  await Deno.utime(orphan, fixed, fixed);
+  await utimes(orphan, fixed, fixed);
 
-  const res = await h("worktree.list", {}, NOOP_CONN) as WorktreeEntry[];
+  const res = (await h("worktree.list", {}, NOOP_CONN)) as WorktreeEntry[];
   assert.equal(res.length, 3);
-  assert.deepEqual(res.find((e) => e.path === row.worktree_path), {
-    project: repo,
-    path: row.worktree_path!,
-    branch: row.branch,
-    task_id: t.id,
-    task_state: "suspended",
-    intake_id: null,
-    dirty: false,
-    age_basis: row.updated_at,
-  });
-  assert.deepEqual(res.find((e) => e.path === intakeWorktree), {
-    project: repo,
-    path: intakeWorktree,
-    branch: null,
-    task_id: null,
-    task_state: null,
-    intake_id: "i1",
-    dirty: false,
-    age_basis: intake.updated_at,
-  });
-  assert.deepEqual(res.find((e) => e.path === orphan), {
-    project: repo,
-    path: orphan,
-    branch: "doctrine/orphan",
-    task_id: null,
-    task_state: null,
-    intake_id: null,
-    dirty: false,
-    age_basis: "2026-01-01T00:00:00.000Z",
-  });
+  assert.deepEqual(
+    res.find((e) => e.path === row.worktree_path),
+    {
+      project: repo,
+      path: row.worktree_path!,
+      branch: row.branch,
+      task_id: t.id,
+      task_state: "suspended",
+      intake_id: null,
+      dirty: false,
+      age_basis: row.updated_at,
+    },
+  );
+  assert.deepEqual(
+    res.find((e) => e.path === intakeWorktree),
+    {
+      project: repo,
+      path: intakeWorktree,
+      branch: null,
+      task_id: null,
+      task_state: null,
+      intake_id: "i1",
+      dirty: false,
+      age_basis: intake.updated_at,
+    },
+  );
+  assert.deepEqual(
+    res.find((e) => e.path === orphan),
+    {
+      project: repo,
+      path: orphan,
+      branch: "doctrine/orphan",
+      task_id: null,
+      task_state: null,
+      intake_id: null,
+      dirty: false,
+      age_basis: "2026-01-01T00:00:00.000Z",
+    },
+  );
 });
 
 test("worktree.list は終端状態のタスクと未コミットの変更を返す", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
   await h("workspace.add", { path: repo }, NOOP_CONN);
-  const t = await h("task.create", { project: repo, title: "T", prompt: "p" }, NOOP_CONN) as {
+  const t = (await h("task.create", { project: repo, title: "T", prompt: "p" }, NOOP_CONN)) as {
     id: string;
   };
   await tick(ctx);
@@ -490,7 +508,7 @@ test("worktree.list は終端状態のタスクと未コミットの変更を返
   assert.equal(row.state, "canceled");
   await writeFile(join(row.worktree_path!, "dirty.txt"), "未コミット\n");
 
-  const res = await h("worktree.list", {}, NOOP_CONN) as WorktreeEntry[];
+  const res = (await h("worktree.list", {}, NOOP_CONN)) as WorktreeEntry[];
   assert.equal(res.length, 1);
   assert.equal(res[0].task_id, t.id);
   assert.equal(res[0].task_state, "canceled");
@@ -511,7 +529,7 @@ test("worktree.list はディスクから消えた worktree を返さない", as
   // git の登録は残る（prunable）が、ディスクにはもう無い
   await rm(gone, { recursive: true, force: true });
 
-  const res = await h("worktree.list", {}, NOOP_CONN) as WorktreeEntry[];
+  const res = (await h("worktree.list", {}, NOOP_CONN)) as WorktreeEntry[];
   assert.equal(res.length, 0);
 });
 
@@ -519,7 +537,7 @@ test("DB の worktree_path は worktree.list と同じ表記（実パス）で�
   const ctx = await context();
   const h = createHandler(ctx);
   await h("workspace.add", { path: repo }, NOOP_CONN);
-  const t = await h("task.create", { project: repo, title: "T", prompt: "p" }, NOOP_CONN) as {
+  const t = (await h("task.create", { project: repo, title: "T", prompt: "p" }, NOOP_CONN)) as {
     id: string;
   };
   await tick(ctx);
@@ -527,10 +545,10 @@ test("DB の worktree_path は worktree.list と同じ表記（実パス）で�
   const saved = (await getTask(ctx.db, t.id))!.worktree_path!;
   // macOS の tmpdir は /var -> /private/var の symlink 配下。未解決のまま保存すると
   // git が報告するパスと食い違う。
-  assert.equal(saved, await Deno.realPath(saved));
+  assert.equal(saved, await realpath(saved));
   // DB から外すと、同じ表記のまま孤児として出てくる
   await ctx.db.updateTable("tasks").set({ worktree_path: null }).where("id", "=", t.id).execute();
-  const res = await h("worktree.list", {}, NOOP_CONN) as WorktreeEntry[];
+  const res = (await h("worktree.list", {}, NOOP_CONN)) as WorktreeEntry[];
   assert.deepEqual(
     res.filter((e) => e.task_id === null && e.intake_id === null).map((e) => e.path),
     [saved],
@@ -551,11 +569,11 @@ test("完了したタスクの worktree は削除され、ブランチは残る"
     join(repo, ".doctrine", "workflows", "quick.yaml"),
     'name: quick\nsteps:\n  - id: a\n    type: command\n    run: "true"\n',
   );
-  const t = await h(
+  const t = (await h(
     "task.create",
     { project: repo, title: "T", prompt: "p", workflow: "quick" },
     NOOP_CONN,
-  ) as { id: string };
+  )) as { id: string };
   await tick(ctx);
   await until(async () => (await getTask(ctx.db, t.id))?.state === "completed");
   await until(() => ctx.running.size === 0);
@@ -578,16 +596,19 @@ test("未コミットの変更が残っていたら削除せず警告する", as
     join(repo, ".doctrine", "workflows", "dirty.yaml"),
     'name: dirty\nsteps:\n  - id: a\n    type: command\n    run: "touch leftover.txt"\n',
   );
-  const t = await h(
+  const t = (await h(
     "task.create",
     { project: repo, title: "T", prompt: "p", workflow: "dirty" },
     NOOP_CONN,
-  ) as { id: string };
+  )) as { id: string };
   await tick(ctx);
   await until(async () => (await getTask(ctx.db, t.id))?.state === "completed");
   await until(() => ctx.running.size === 0);
   assert.ok((await getTask(ctx.db, t.id))?.worktree_path, "削除を拒否して残す");
-  assert.ok(ctx.warnings.recent().some((w) => /未コミット/.test(w.message)), "警告として出す");
+  assert.ok(
+    ctx.warnings.recent().some((w) => /未コミット/.test(w.message)),
+    "警告として出す",
+  );
 });
 
 test("差し戻しは task.get の stepRuns と stepRun.finished の両方から読める", async () => {
@@ -603,48 +624,55 @@ test("差し戻しは task.get の stepRuns と stepRun.finished の両方から
       '  - id: plan-gate\n    type: command\n    run: "exit 1"\n' +
       "    onFailure:\n      goto: plan\n      maxAttempts: 2\n",
   );
-  const t = await h(
+  const t = (await h(
     "task.create",
     { project: repo, title: "T", prompt: "p", workflow: "gate" },
     NOOP_CONN,
-  ) as { id: string };
+  )) as { id: string };
   await tick(ctx);
   await until(async () => (await getTask(ctx.db, t.id))?.state === "failed");
   await until(() => ctx.running.size === 0);
 
-  const got = await h("task.get", { task_id: t.id }, NOOP_CONN) as {
+  const got = (await h("task.get", { task_id: t.id }, NOOP_CONN)) as {
     stepRuns: { step_id: string; status: string; goto_step_id: string | null; attempt: number }[];
   };
   assert.deepEqual(
-    got.stepRuns.filter((r) => r.step_id === "plan-gate")
+    got.stepRuns
+      .filter((r) => r.step_id === "plan-gate")
       .map((r) => [r.status, r.goto_step_id, r.attempt]),
-    [["bounced", "plan", 1], ["failed", null, 2]],
-    "差し戻しと本当の失敗が dctl get から見分けられる",
+    [
+      ["bounced", "plan", 1],
+      ["failed", null, 2],
+    ],
+    "差し戻しと本当の失敗が task.get から見分けられる",
   );
 
-  const finished = events.filter((e) =>
-    e.event === "stepRun.finished" && e.step_id === "plan-gate"
+  const finished = events.filter(
+    (e) => e.event === "stepRun.finished" && e.step_id === "plan-gate",
   );
-  assert.deepEqual(finished.map((e) => ({ ...e, task_id: "", step_run_id: 0 })), [
-    {
-      event: "stepRun.finished",
-      task_id: "",
-      step_run_id: 0,
-      step_id: "plan-gate",
-      status: "bounced",
-      goto_step_id: "plan",
-      attempt: 1,
-    },
-    {
-      event: "stepRun.finished",
-      task_id: "",
-      step_run_id: 0,
-      step_id: "plan-gate",
-      status: "failed",
-      goto_step_id: null,
-      attempt: 2,
-    },
-  ]);
+  assert.deepEqual(
+    finished.map((e) => ({ ...e, task_id: "", step_run_id: 0 })),
+    [
+      {
+        event: "stepRun.finished",
+        task_id: "",
+        step_run_id: 0,
+        step_id: "plan-gate",
+        status: "bounced",
+        goto_step_id: "plan",
+        attempt: 1,
+      },
+      {
+        event: "stepRun.finished",
+        task_id: "",
+        step_run_id: 0,
+        step_id: "plan-gate",
+        status: "failed",
+        goto_step_id: null,
+        attempt: 2,
+      },
+    ],
+  );
 });
 
 test("失敗したタスクの worktree は削除しない", async () => {
@@ -655,11 +683,11 @@ test("失敗したタスクの worktree は削除しない", async () => {
     join(repo, ".doctrine", "workflows", "boom.yaml"),
     'name: boom\nsteps:\n  - id: a\n    type: command\n    run: "exit 1"\n',
   );
-  const t = await h(
+  const t = (await h(
     "task.create",
     { project: repo, title: "T", prompt: "p", workflow: "boom" },
     NOOP_CONN,
-  ) as { id: string };
+  )) as { id: string };
   await tick(ctx);
   await until(async () => (await getTask(ctx.db, t.id))?.state === "failed");
   await until(() => ctx.running.size === 0);
@@ -674,11 +702,11 @@ test("作成時の定義を持たないタスクは、tick 時点でワークフ
     join(repo, ".doctrine", "workflows", "vanishing.yaml"),
     'name: vanishing\nsteps:\n  - id: a\n    type: command\n    run: "true"\n',
   );
-  const t = await h(
+  const t = (await h(
     "task.create",
     { project: repo, title: "T", prompt: "p", workflow: "vanishing" },
     NOOP_CONN,
-  ) as { id: string };
+  )) as { id: string };
   // 作成時の定義を持たない行（0011 より前）を再現し、tick までの間にディスクが壊れる/消える場合を試す。
   await unpin(ctx, t.id);
   await writeFile(join(repo, ".doctrine", "workflows", "vanishing.yaml"), "not: [valid");
@@ -708,11 +736,11 @@ test("runTask が例外を投げても daemon は落ちず、タスクは failed
     join(repo, ".doctrine", "workflows", "brokenvar.yaml"),
     'name: brokenvar\nsteps:\n  - id: a\n    type: command\n    run: "echo {{ steps.nope.last_stdout }}"\n',
   );
-  const t = await h(
+  const t = (await h(
     "task.create",
     { project: repo, title: "T", prompt: "p", workflow: "brokenvar" },
     NOOP_CONN,
-  ) as { id: string };
+  )) as { id: string };
 
   await tick(ctx);
   await until(async () => (await getTask(ctx.db, t.id))?.state === "failed");
@@ -730,27 +758,29 @@ test("stepRun.started の step_run_id は本物で、task.logs から引ける",
     join(repo, ".doctrine", "workflows", "quick.yaml"),
     'name: quick\nsteps:\n  - id: a\n    type: command\n    run: "true"\n',
   );
-  const t = await h(
+  const t = (await h(
     "task.create",
     { project: repo, title: "T", prompt: "p", workflow: "quick" },
     NOOP_CONN,
-  ) as { id: string };
+  )) as { id: string };
   await tick(ctx);
   await until(async () => (await getTask(ctx.db, t.id))?.state === "completed");
   await until(() => ctx.running.size === 0);
 
-  const started = events.find((e) => e.event === "stepRun.started") as {
-    event: "stepRun.started";
-    step_run_id: number;
-  } | undefined;
+  const started = events.find((e) => e.event === "stepRun.started") as
+    | {
+        event: "stepRun.started";
+        step_run_id: number;
+      }
+    | undefined;
   assert.ok(started, "stepRun.started イベントが届いていない");
   assert.ok(started!.step_run_id > 0, "プレースホルダーの0であってはならない");
 
-  const log = await h(
+  const log = (await h(
     "task.logs",
     { task_id: t.id, step_run_id: started!.step_run_id },
     NOOP_CONN,
-  ) as { log_path: string };
+  )) as { log_path: string };
   assert.ok(log.log_path.length > 0, "届いた step_run_id で本物のログが引ける");
 });
 
@@ -782,11 +812,11 @@ test("ratelimit.sample と ratelimit.recent は、生の resetsAt を ISO 8601 �
     join(repo, ".doctrine", "workflows", "one.yaml"),
     'name: one\nsteps:\n  - id: a\n    type: agent\n    prompt: "p"\n',
   );
-  const t = await h(
+  const t = (await h(
     "task.create",
     { project: repo, title: "T", prompt: "p", workflow: "one" },
     NOOP_CONN,
-  ) as { id: string };
+  )) as { id: string };
   await tick(ctx);
   await until(async () => (await getTask(ctx.db, t.id))?.state === "completed");
   await until(() => ctx.running.size === 0);
@@ -795,7 +825,7 @@ test("ratelimit.sample と ratelimit.recent は、生の resetsAt を ISO 8601 �
   const sampled = events.filter((e) => e.event === "ratelimit.sample");
   assert.deepEqual(Object.fromEntries(sampled.map((e) => [e.window, e.resets_at])), expected);
 
-  const recent = await h("ratelimit.recent", {}, NOOP_CONN) as {
+  const recent = (await h("ratelimit.recent", {}, NOOP_CONN)) as {
     observed_at: string;
     window: string;
     utilization: number;
@@ -820,11 +850,11 @@ test("worktree 作成に失敗したタスクは failed になり、他プロジ
     "defaultWorkflow: feature\nmaxConcurrent: 1\nbaseBranch: nonexistent-base\n",
   );
   await h("workspace.add", { path: repo }, NOOP_CONN);
-  const broken = await h(
+  const broken = (await h(
     "task.create",
     { project: repo, title: "broken", prompt: "p" },
     NOOP_CONN,
-  ) as { id: string };
+  )) as { id: string };
 
   // 健全な別プロジェクト: 同じ pass で普通に進めるはず。
   const healthyRoot = await realpath(await mkdtemp(join(tmpdir(), "doctrine-daemon-healthy-")));
@@ -835,11 +865,11 @@ test("worktree 作成に失敗したタスクは failed になり、他プロジ
       "name: feature\nsteps:\n  - id: review\n    type: approval\n    title: 見て\n",
   });
   await h("workspace.add", { path: healthyRepo }, NOOP_CONN);
-  const healthy = await h(
+  const healthy = (await h(
     "task.create",
     { project: healthyRepo, title: "healthy", prompt: "p" },
     NOOP_CONN,
-  ) as { id: string };
+  )) as { id: string };
 
   try {
     await tick(ctx);
@@ -862,7 +892,8 @@ test("worktree 作成に失敗したタスクは failed になり、他プロジ
 
 // --- 実行中の cancel / pause が runTask のループを止める -------------------
 
-const TWO_AGENTS = 'name: twoagents\nsteps:\n  - id: a\n    type: agent\n    prompt: "p1"\n' +
+const TWO_AGENTS =
+  'name: twoagents\nsteps:\n  - id: a\n    type: agent\n    prompt: "p1"\n' +
   '  - id: b\n    type: agent\n    prompt: "p2"\n';
 
 /**
@@ -874,18 +905,18 @@ async function midFlight(
   h: ReturnType<typeof createHandler>,
   o: { adapter?: MockAdapter; workflow?: string } = {},
 ) {
-  const adapter = o.adapter ??
-    createMockAdapter({ result: { ok: true, text: "done" }, delayMs: 300 });
+  const adapter =
+    o.adapter ?? createMockAdapter({ result: { ok: true, text: "done" }, delayMs: 300 });
   ctx.adapter = adapter;
   const workflow = o.workflow ?? TWO_AGENTS;
   const name = parseWorkflow(workflow).workflow.name;
   await writeFile(join(repo, ".doctrine", "workflows", `${name}.yaml`), workflow);
   await h("workspace.add", { path: repo }, NOOP_CONN);
-  const t = await h(
+  const t = (await h(
     "task.create",
     { project: repo, title: "T", prompt: "p", workflow: name },
     NOOP_CONN,
-  ) as { id: string };
+  )) as { id: string };
   await tick(ctx);
   // 最初のステップの running 行が立ち、子が動き出したところまで待つ。
   await until(
@@ -943,7 +974,7 @@ function terminatedAdapter(): MockAdapter {
 }
 
 function finishedOf(events: ServerEvent[]) {
-  return events.flatMap((e) => e.event === "stepRun.finished" ? [e] : []);
+  return events.flatMap((e) => (e.event === "stepRun.finished" ? [e] : []));
 }
 
 function warningsOf(events: ServerEvent[]) {
@@ -978,7 +1009,8 @@ test("onFailure のあるステップを task.pause で止めても差し戻し�
   const adapter = terminatedAdapter();
   const { taskId } = await midFlight(ctx, h, {
     adapter,
-    workflow: 'name: retry\nsteps:\n  - id: a\n    type: agent\n    prompt: "p1"\n' +
+    workflow:
+      'name: retry\nsteps:\n  - id: a\n    type: agent\n    prompt: "p1"\n' +
       "    onFailure:\n      goto: a\n      maxAttempts: 3\n",
   });
 
@@ -989,7 +1021,10 @@ test("onFailure のあるステップを task.pause で止めても差し戻し�
   assert.equal(runs.length, 1);
   assert.equal(runs[0].status, "interrupted");
   assert.equal(runs[0].goto_step_id, null);
-  assert.deepEqual(finishedOf(events).map((e) => e.status), ["interrupted"]);
+  assert.deepEqual(
+    finishedOf(events).map((e) => e.status),
+    ["interrupted"],
+  );
   assert.equal(adapter.calls.length, 1);
 });
 
@@ -1002,7 +1037,10 @@ test("running のタスクに task.cancel を送ると、走っていた実行�
   await h("task.cancel", { task_id: taskId }, NOOP_CONN);
   await until(() => ctx.running.size === 0, 5000, "runTask の終了");
 
-  assert.deepEqual((await listStepRuns(ctx.db, taskId)).map((r) => r.status), ["interrupted"]);
+  assert.deepEqual(
+    (await listStepRuns(ctx.db, taskId)).map((r) => r.status),
+    ["interrupted"],
+  );
   assert.equal((await getTask(ctx.db, taskId))?.state, "canceled");
   assert.deepEqual(warningsOf(events), []);
 });
@@ -1014,7 +1052,7 @@ test("最終ステップの approval を承認したら worktree は削除され
   const h = createHandler(ctx);
   await h("workspace.add", { path: repo }, NOOP_CONN);
   // beforeEach の feature.yaml は approval 1ステップだけ。承認がそのまま完了になる。
-  const t = await h("task.create", { project: repo, title: "T", prompt: "p" }, NOOP_CONN) as {
+  const t = (await h("task.create", { project: repo, title: "T", prompt: "p" }, NOOP_CONN)) as {
     id: string;
   };
   await tick(ctx);
@@ -1045,20 +1083,23 @@ test("最終ステップの approval でも未コミットの変更が残って�
       "  - id: review\n    type: approval\n    title: 見て\n",
   );
   await h("workspace.add", { path: repo }, NOOP_CONN);
-  const t = await h(
+  const t = (await h(
     "task.create",
     { project: repo, title: "T", prompt: "p", workflow: "dirtyapproval" },
     NOOP_CONN,
-  ) as { id: string };
+  )) as { id: string };
   await tick(ctx);
   await until(async () => (await getTask(ctx.db, t.id))?.state === "suspended");
   await until(() => ctx.running.size === 0);
 
-  const after = await h("task.approve", { task_id: t.id }, NOOP_CONN) as { state: string };
+  const after = (await h("task.approve", { task_id: t.id }, NOOP_CONN)) as { state: string };
 
   assert.equal(after.state, "completed", "後始末に失敗しても承認自体は成立している");
   assert.ok((await getTask(ctx.db, t.id))?.worktree_path, "削除を拒否して残す");
-  assert.ok(ctx.warnings.recent().some((w) => /未コミット/.test(w.message)), "警告として出す");
+  assert.ok(
+    ctx.warnings.recent().some((w) => /未コミット/.test(w.message)),
+    "警告として出す",
+  );
 });
 
 // --- tick の再入 ----------------------------------------------------------
@@ -1080,16 +1121,16 @@ test("tick が重なって呼ばれても maxConcurrent: 1 のプロジェクト
   const ctx = await context();
   const h = createHandler(ctx);
   await h("workspace.add", { path: repo }, NOOP_CONN);
-  const a = await h("task.create", { project: repo, title: "A", prompt: "p" }, NOOP_CONN) as {
+  const a = (await h("task.create", { project: repo, title: "A", prompt: "p" }, NOOP_CONN)) as {
     id: string;
   };
   // 受付順の FIFO は created_at（ミリ秒精度）で、同じミリ秒に作られると id（ランダムな UUID）で
   // 決まる。A が先に admit される前提を運に任せないよう、B の優先度を下げて順序を固定する。
-  const b = await h(
+  const b = (await h(
     "task.create",
     { project: repo, title: "B", prompt: "p", priority: 3 },
     NOOP_CONN,
-  ) as { id: string };
+  )) as { id: string };
 
   // 実際に admit された回数を数える。2周目が2件目を繰り上げたならここが増える。
   const admitted: string[] = [];
@@ -1149,9 +1190,9 @@ test("tick が重なって呼ばれても maxConcurrent: 1 のプロジェクト
 test("窓の中に priority 0 のタスクが入っても maxConcurrent: 1 のプロジェクトで2件が走り出さない", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
-  const project = (await h("workspace.add", { path: repo }, NOOP_CONN) as WorkspaceSummary)
+  const project = ((await h("workspace.add", { path: repo }, NOOP_CONN)) as WorkspaceSummary)
     .projects[0];
-  const a = await h("task.create", { project: repo, title: "A", prompt: "p" }, NOOP_CONN) as {
+  const a = (await h("task.create", { project: repo, title: "A", prompt: "p" }, NOOP_CONN)) as {
     id: string;
   };
 
@@ -1223,9 +1264,9 @@ test("窓の中に別プロジェクトの priority 0 が入っても globalLimi
     ".doctrine/workflows/feature.yaml":
       "name: feature\nsteps:\n  - id: review\n    type: approval\n    title: 見て\n",
   });
-  const project2 = (await h("workspace.add", { path: repo2 }, NOOP_CONN) as WorkspaceSummary)
+  const project2 = ((await h("workspace.add", { path: repo2 }, NOOP_CONN)) as WorkspaceSummary)
     .projects[0];
-  const a = await h("task.create", { project: repo, title: "A", prompt: "p" }, NOOP_CONN) as {
+  const a = (await h("task.create", { project: repo, title: "A", prompt: "p" }, NOOP_CONN)) as {
     id: string;
   };
 
@@ -1273,7 +1314,7 @@ test("tick が例外で抜けても再入ガードは解放され、次の周期
   ctx.db = await openDbOn(sqlite);
   const h = createHandler(ctx);
   await h("workspace.add", { path: repo }, NOOP_CONN);
-  const a = await h("task.create", { project: repo, title: "A", prompt: "p" }, NOOP_CONN) as {
+  const a = (await h("task.create", { project: repo, title: "A", prompt: "p" }, NOOP_CONN)) as {
     id: string;
   };
 
@@ -1311,7 +1352,7 @@ test("受付候補を読んだ後に cancel が届いたタスクは、running �
   ctx.db = await openDbOn(sqlite);
   const h = createHandler(ctx);
   await h("workspace.add", { path: repo }, NOOP_CONN);
-  const a = await h("task.create", { project: repo, title: "A", prompt: "p" }, NOOP_CONN) as {
+  const a = (await h("task.create", { project: repo, title: "A", prompt: "p" }, NOOP_CONN)) as {
     id: string;
   };
 
@@ -1356,7 +1397,7 @@ test("workspace.add: .doctrine が無ければ雛形を作り、そのままタ�
   const bare = await bareRepo("bare");
   const ctx = await context();
   const h = createHandler(ctx);
-  const p = await h("workspace.add", { path: bare }, NOOP_CONN) as WorkspaceSummary & {
+  const p = (await h("workspace.add", { path: bare }, NOOP_CONN)) as WorkspaceSummary & {
     created: string[];
   };
 
@@ -1374,7 +1415,11 @@ test("workspace.add: .doctrine が無ければ雛形を作り、そのままタ�
   assert.equal(p.projects[0].default_workflow, "default");
 
   // 雛形が検証を通らなければ、ここで落ちる
-  const t = await h("task.create", { project: bare, title: "T", prompt: "直して" }, NOOP_CONN) as {
+  const t = (await h(
+    "task.create",
+    { project: bare, title: "T", prompt: "直して" },
+    NOOP_CONN,
+  )) as {
     id: string;
   };
   assert.equal((await getTask(ctx.db, t.id))!.state, "queued");
@@ -1387,23 +1432,26 @@ test("workspace.add: 既定のワークフローは 4 章の手順（計画→�
   const { workflow } = parseWorkflow(
     await readFile(join(bare, ".doctrine", "workflows", "default.yaml"), "utf8"),
   );
-  assert.deepEqual(workflow.steps.map((s) => s.id), [
-    "plan",
-    "plan-review",
-    "plan-gate",
-    "implement",
-    "verify",
-    "agent-review",
-    "review-gate",
-    "guide",
-    "review",
-  ]);
+  assert.deepEqual(
+    workflow.steps.map((s) => s.id),
+    [
+      "plan",
+      "plan-review",
+      "plan-gate",
+      "implement",
+      "verify",
+      "agent-review",
+      "review-gate",
+      "guide",
+      "review",
+    ],
+  );
 });
 
 test("workspace.add: 雛形の project.yaml に setup を書かない（パッケージマネージャを強制しない）", async () => {
   const bare = await bareRepo("bare");
   const h = createHandler(await context());
-  const p = (await h("workspace.add", { path: bare }, NOOP_CONN) as WorkspaceSummary).projects[0];
+  const p = ((await h("workspace.add", { path: bare }, NOOP_CONN)) as WorkspaceSummary).projects[0];
   assert.equal(p.setup, null);
   const text = await readFile(join(bare, ".doctrine", "project.yaml"), "utf8");
   assert.equal(/^\s*setup\s*:/m.test(text), false, "setup キーが書かれていない");
@@ -1413,7 +1461,7 @@ test("workspace.add: ベースブランチは main 決め打ちではなく git 
   const bare = await bareRepo("bare");
   await run("git", ["-C", bare, "branch", "-m", "trunk"]);
   const h = createHandler(await context());
-  const p = (await h("workspace.add", { path: bare }, NOOP_CONN) as WorkspaceSummary).projects[0];
+  const p = ((await h("workspace.add", { path: bare }, NOOP_CONN)) as WorkspaceSummary).projects[0];
   assert.equal(p.base_branch, "trunk");
   assert.equal(
     baseBranchWrittenIn(await readFile(join(bare, ".doctrine", "project.yaml"), "utf8")),
@@ -1424,7 +1472,7 @@ test("workspace.add: ベースブランチは main 決め打ちではなく git 
 test("workspace.add: 既存の project.yaml は上書きしない", async () => {
   const before = await readFile(join(repo, ".doctrine", "project.yaml"), "utf8");
   const h = createHandler(await context());
-  const p = await h("workspace.add", { path: repo }, NOOP_CONN) as WorkspaceSummary & {
+  const p = (await h("workspace.add", { path: repo }, NOOP_CONN)) as WorkspaceSummary & {
     created: string[];
   };
   assert.equal(await readFile(join(repo, ".doctrine", "project.yaml"), "utf8"), before);
@@ -1452,7 +1500,7 @@ test("workspace.add: project.yaml が指すワークフローが無ければ、�
     false,
     "ユーザーが書いていないワークフローを勝手に作らない",
   );
-  assert.equal((await h("project.list", {}, NOOP_CONN) as unknown[]).length, 0);
+  assert.equal(((await h("project.list", {}, NOOP_CONN)) as unknown[]).length, 0);
 });
 
 test("workspace.add: git リポジトリでなければ .doctrine を作らずに失敗する", async () => {
@@ -1468,7 +1516,7 @@ test("workspace.add: リポジトリのサブディレクトリを指したら�
   const sub = join(bare, "packages", "app");
   await mkdir(sub, { recursive: true });
   const h = createHandler(await context());
-  const realRoot = await Deno.realPath(bare);
+  const realRoot = await realpath(bare);
   await assert.rejects(
     () => h("workspace.add", { path: sub }, NOOP_CONN),
     (e: unknown) => {
@@ -1488,13 +1536,13 @@ test("workspace.add: リポジトリのサブディレクトリを指したら�
 
 test("workspace.add: 同じパスで2回呼んでも失敗せず、登録済みとして同じ workspace を返す", async () => {
   const h = createHandler(await context());
-  const first = await h("workspace.add", { path: repo }, NOOP_CONN) as WorkspaceSummary;
-  const second = await h("workspace.add", { path: repo }, NOOP_CONN) as WorkspaceSummary & {
+  const first = (await h("workspace.add", { path: repo }, NOOP_CONN)) as WorkspaceSummary;
+  const second = (await h("workspace.add", { path: repo }, NOOP_CONN)) as WorkspaceSummary & {
     alreadyRegistered: boolean;
   };
   assert.equal(second.id, first.id);
   assert.equal(second.alreadyRegistered, true);
-  assert.equal((await h("project.list", {}, NOOP_CONN) as unknown[]).length, 1);
+  assert.equal(((await h("project.list", {}, NOOP_CONN)) as unknown[]).length, 1);
 });
 
 function baseBranchWrittenIn(text: string): string {
@@ -1510,7 +1558,7 @@ test("workspace.add: project.yaml が無くても、既にあるワークフロ�
     ".doctrine/workflows/default.yaml": custom,
   });
   const h = createHandler(await context());
-  const p = await h("workspace.add", { path: r }, NOOP_CONN) as { created: string[] };
+  const p = (await h("workspace.add", { path: r }, NOOP_CONN)) as { created: string[] };
   assert.equal(
     await readFile(join(r, ".doctrine", "workflows", "default.yaml"), "utf8"),
     custom,
@@ -1533,10 +1581,16 @@ test("workspace.list は workspace ごとにプロジェクトを返す", async 
   const h = createHandler(await context());
   await h("workspace.add", { path: repo }, NOOP_CONN);
   await h("workspace.add", { path: repo2 }, NOOP_CONN);
-  const list = await h("workspace.list", {}, NOOP_CONN) as WorkspaceSummary[];
+  const list = (await h("workspace.list", {}, NOOP_CONN)) as WorkspaceSummary[];
   assert.equal(list.length, 2);
-  assert.deepEqual(list.map((w) => w.projects.length), [1, 1]);
-  assert.deepEqual(list.map((w) => w.projects[0].path), [repo, repo2]);
+  assert.deepEqual(
+    list.map((w) => w.projects.length),
+    [1, 1],
+  );
+  assert.deepEqual(
+    list.map((w) => w.projects[0].path),
+    [repo, repo2],
+  );
 });
 
 test("workspace.list は各 workspace の workspace.yaml の tracker の設定か、読めない理由を返す", async () => {
@@ -1551,7 +1605,7 @@ test("workspace.list は各 workspace の workspace.yaml の tracker の設定�
   const broken = await makeRepo(join(root, "broken"), files);
   const h = createHandler(await context());
   await h("workspace.add", { path: repo }, NOOP_CONN);
-  const added = await h("workspace.add", { path: lin }, NOOP_CONN) as WorkspaceSummary;
+  const added = (await h("workspace.add", { path: lin }, NOOP_CONN)) as WorkspaceSummary;
   assert.deepEqual(added.tracker, { ok: true, config: { kind: "github" } });
   await h("workspace.add", { path: missing }, NOOP_CONN);
   await h("workspace.add", { path: broken }, NOOP_CONN);
@@ -1566,7 +1620,7 @@ test("workspace.list は各 workspace の workspace.yaml の tracker の設定�
     "projects:\n  repo: .\ntracker:\n  kind: jira\n",
   );
 
-  const list = await h("workspace.list", {}, NOOP_CONN) as WorkspaceSummary[];
+  const list = (await h("workspace.list", {}, NOOP_CONN)) as WorkspaceSummary[];
   assert.equal(list.length, 4);
   assert.deepEqual(list[0].tracker, { ok: true, config: { kind: "github" } });
   assert.deepEqual(list[1].tracker, {
@@ -1588,7 +1642,7 @@ test("project.add は未知のメソッドになった", async () => {
   await assert.rejects(() => h("project.add", { path: repo }, NOOP_CONN), /未知のメソッドです/);
 });
 
-/** keyof を鍵にすることで、型に欄を足したらこの表も直さないと deno task check が落ちる。
+/** keyof を鍵にすることで、型に欄を足したらこの表も直さないと tsc（pnpm run check）が落ちる。
  *  述語で実行時の型まで見るので、欄の名前替えと型替えの両方を捕まえる。 */
 const isString = (v: unknown) => typeof v === "string";
 const isNumber = (v: unknown) => typeof v === "number";
@@ -1641,13 +1695,13 @@ test("task.list / project.list / task.cancel の応答が protocol.ts の型を�
   const ctx = await context();
   const h = createHandler(ctx);
   await h("workspace.add", { path: repo }, NOOP_CONN);
-  const t = await h("task.create", { project: repo, title: "た", prompt: "p" }, NOOP_CONN) as {
+  const t = (await h("task.create", { project: repo, title: "た", prompt: "p" }, NOOP_CONN)) as {
     id: string;
   };
 
-  // keyof を鍵にした述語表で検証（型に欄を足したら deno task check が落ちる）。
-  const tasks = await h("task.list", {}, NOOP_CONN) as unknown as Record<string, unknown>[];
-  const projects = await h("project.list", {}, NOOP_CONN) as unknown as Record<string, unknown>[];
+  // keyof を鍵にした述語表で検証（型に欄を足したら tsc が落ちる）。
+  const tasks = (await h("task.list", {}, NOOP_CONN)) as unknown as Record<string, unknown>[];
+  const projects = (await h("project.list", {}, NOOP_CONN)) as unknown as Record<string, unknown>[];
 
   // TaskSummary の形を検証
   assert.ok(tasks.length > 0, "タスクが存在するはず");
@@ -1657,7 +1711,7 @@ test("task.list / project.list / task.cancel の応答が protocol.ts の型を�
   assert.ok(projects.length > 0, "プロジェクトが存在するはず");
   assertShape(projects[0], PROJECT_SHAPE, "project.list の結果");
 
-  const canceled = await h("task.cancel", { task_id: t.id }, NOOP_CONN) as unknown as Record<
+  const canceled = (await h("task.cancel", { task_id: t.id }, NOOP_CONN)) as unknown as Record<
     string,
     unknown
   >;
@@ -1668,7 +1722,7 @@ test("worktree を消すとそのタスクのレビュー参照も消える", as
   const ctx = await context();
   const h = createHandler(ctx);
   await h("workspace.add", { path: repo }, NOOP_CONN);
-  const t = await h("task.create", { project: repo, title: "T", prompt: "p" }, NOOP_CONN) as {
+  const t = (await h("task.create", { project: repo, title: "T", prompt: "p" }, NOOP_CONN)) as {
     id: string;
   };
   await tick(ctx);
@@ -1698,7 +1752,7 @@ test("削除を拒否されたら参照は残す", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
   await h("workspace.add", { path: repo }, NOOP_CONN);
-  const t = await h("task.create", { project: repo, title: "T", prompt: "p" }, NOOP_CONN) as {
+  const t = (await h("task.create", { project: repo, title: "T", prompt: "p" }, NOOP_CONN)) as {
     id: string;
   };
   await tick(ctx);
@@ -1834,10 +1888,7 @@ test("worktree.remove は git worktree list に出ないパスを拒否する", 
 test("worktree.remove は相対パスを拒否する", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
-  await assert.rejects(
-    () => h("worktree.remove", { path: "worktrees/x" }, NOOP_CONN),
-    /絶対パス/,
-  );
+  await assert.rejects(() => h("worktree.remove", { path: "worktrees/x" }, NOOP_CONN), /絶対パス/);
 });
 
 test("worktree.remove は task_id と path の両方、またはどちらも無いときは拒否する", async () => {
@@ -1876,7 +1927,7 @@ async function intakeWithWorktree(
   ctx: DaemonContext,
   h: ReturnType<typeof createHandler>,
 ): Promise<{ parent: string; child: string }> {
-  const project = (await h("workspace.add", { path: repo }, NOOP_CONN) as WorkspaceSummary)
+  const project = ((await h("workspace.add", { path: repo }, NOOP_CONN)) as WorkspaceSummary)
     .projects[0];
   await addIntake(ctx, project.workspace_id);
   const parent = await canonical(intakeWorktreePathFor("i1"));
@@ -1896,16 +1947,14 @@ async function intakeWithWorktree(
 async function intakeWithTwoWorktrees(
   ctx: DaemonContext,
   h: ReturnType<typeof createHandler>,
-): Promise<
-  {
-    parent: string;
-    repoChild: string;
-    otherChild: string;
-    otherRepo: string;
-    otherProjectId: number;
-  }
-> {
-  const project = (await h("workspace.add", { path: repo }, NOOP_CONN) as WorkspaceSummary)
+): Promise<{
+  parent: string;
+  repoChild: string;
+  otherChild: string;
+  otherRepo: string;
+  otherProjectId: number;
+}> {
+  const project = ((await h("workspace.add", { path: repo }, NOOP_CONN)) as WorkspaceSummary)
     .projects[0];
   const otherRepo = await makeRepo(join(root, "other"), { "README.md": "y\n" });
   const otherProjectId = await insertProject(ctx.db, {
@@ -1964,7 +2013,7 @@ test("worktree.list は 2 プロジェクトの Intake の子 worktree を Intak
   const h = createHandler(ctx);
   const { repoChild, otherChild, otherRepo } = await intakeWithTwoWorktrees(ctx, h);
 
-  const res = await h("worktree.list", {}, NOOP_CONN) as WorktreeEntry[];
+  const res = (await h("worktree.list", {}, NOOP_CONN)) as WorktreeEntry[];
 
   const pick = (e: WorktreeEntry) => ({
     project: e.project,
@@ -2110,7 +2159,7 @@ async function suspendedTask(
   h: ReturnType<typeof createHandler>,
 ): Promise<string> {
   await h("workspace.add", { path: repo }, NOOP_CONN);
-  const t = await h("task.create", { project: repo, title: "T", prompt: "p" }, NOOP_CONN) as {
+  const t = (await h("task.create", { project: repo, title: "T", prompt: "p" }, NOOP_CONN)) as {
     id: string;
   };
   await tick(ctx);
@@ -2182,7 +2231,7 @@ test("paused のタスクを resume しても、閉じるべき awaiting 行が�
   const ctx = await context();
   const h = createHandler(ctx);
   await h("workspace.add", { path: repo }, NOOP_CONN);
-  const t = await h("task.create", { project: repo, title: "T", prompt: "p" }, NOOP_CONN) as {
+  const t = (await h("task.create", { project: repo, title: "T", prompt: "p" }, NOOP_CONN)) as {
     id: string;
   };
   await h("task.pause", { task_id: t.id }, NOOP_CONN);
@@ -2197,15 +2246,15 @@ test("task.context は承認待ちのタスクの経緯を返す", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
   await h("workspace.add", { path: repo }, NOOP_CONN);
-  const t = await h(
+  const t = (await h(
     "task.create",
     { project: repo, title: "T", prompt: "在庫の引当を冪等にして" },
     NOOP_CONN,
-  ) as { id: string };
+  )) as { id: string };
   await tick(ctx);
   await until(async () => (await getTask(ctx.db, t.id))?.state === "suspended", 5000, "承認待ち");
 
-  const got = await h("task.context", { task_id: t.id }, NOOP_CONN) as {
+  const got = (await h("task.context", { task_id: t.id }, NOOP_CONN)) as {
     prompt: string;
     reviews: { status: string }[];
     reviewFiles: unknown[];
@@ -2220,13 +2269,13 @@ test("task.context は承認待ちでないタスクでも呼べる", async () =
   const ctx = await context();
   const h = createHandler(ctx);
   await h("workspace.add", { path: repo }, NOOP_CONN);
-  const t = await h(
+  const t = (await h(
     "task.create",
     { project: repo, title: "T", prompt: "やって" },
     NOOP_CONN,
-  ) as { id: string };
+  )) as { id: string };
 
-  const got = await h("task.context", { task_id: t.id }, NOOP_CONN) as {
+  const got = (await h("task.context", { task_id: t.id }, NOOP_CONN)) as {
     prompt: string;
     reviews: unknown[];
     lastCommand: unknown;
@@ -2242,11 +2291,11 @@ test("作成時の定義を持たないタスクは task.context はワークフ
   const ctx = await context();
   const h = createHandler(ctx);
   await h("workspace.add", { path: repo }, NOOP_CONN);
-  const t = await h(
+  const t = (await h(
     "task.create",
     { project: repo, title: "T", prompt: "やって" },
     NOOP_CONN,
-  ) as { id: string };
+  )) as { id: string };
   await tick(ctx);
   await until(async () => (await getTask(ctx.db, t.id))?.state === "suspended", 5000, "承認待ち");
 
@@ -2254,7 +2303,7 @@ test("作成時の定義を持たないタスクは task.context はワークフ
   await unpin(ctx, t.id);
   await rm(join(repo, ".doctrine", "workflows", "feature.yaml"));
 
-  const got = await h("task.context", { task_id: t.id }, NOOP_CONN) as {
+  const got = (await h("task.context", { task_id: t.id }, NOOP_CONN)) as {
     prompt: string;
     reviews: { status: string }[];
   };
@@ -2270,11 +2319,15 @@ test("task.get は setup を先頭に含む steps を返す", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
   await h("workspace.add", { path: repo }, NOOP_CONN);
-  const t = await h("task.create", { project: repo, title: "T", prompt: "やって" }, NOOP_CONN) as {
+  const t = (await h(
+    "task.create",
+    { project: repo, title: "T", prompt: "やって" },
+    NOOP_CONN,
+  )) as {
     id: string;
   };
 
-  const got = await h("task.get", { task_id: t.id }, NOOP_CONN) as {
+  const got = (await h("task.get", { task_id: t.id }, NOOP_CONN)) as {
     steps: { id: string; type: string; title?: string }[] | null;
   };
   // deepEqual で丸ごと比べると title: undefined のキーの有無で落ちるので、フィールド単位で見る。
@@ -2291,7 +2344,11 @@ test("作成時の定義を持たないタスクは task.get はワークフロ�
   const ctx = await context();
   const h = createHandler(ctx);
   await h("workspace.add", { path: repo }, NOOP_CONN);
-  const t = await h("task.create", { project: repo, title: "T", prompt: "やって" }, NOOP_CONN) as {
+  const t = (await h(
+    "task.create",
+    { project: repo, title: "T", prompt: "やって" },
+    NOOP_CONN,
+  )) as {
     id: string;
   };
   await tick(ctx);
@@ -2301,7 +2358,7 @@ test("作成時の定義を持たないタスクは task.get はワークフロ�
   await unpin(ctx, t.id);
   await rm(join(repo, ".doctrine", "workflows", "feature.yaml"));
 
-  const got = await h("task.get", { task_id: t.id }, NOOP_CONN) as {
+  const got = (await h("task.get", { task_id: t.id }, NOOP_CONN)) as {
     task: { id: string };
     stepRuns: unknown[];
     steps: unknown[] | null;
@@ -2323,7 +2380,11 @@ test("task.diff は worktree の未コミット・未追跡の変更を返す", 
   const ctx = await context();
   const h = createHandler(ctx);
   await h("workspace.add", { path: repo }, NOOP_CONN);
-  const t = await h("task.create", { project: repo, title: "T", prompt: "直して" }, NOOP_CONN) as {
+  const t = (await h(
+    "task.create",
+    { project: repo, title: "T", prompt: "直して" },
+    NOOP_CONN,
+  )) as {
     id: string;
   };
   await tick(ctx);
@@ -2337,7 +2398,7 @@ test("task.diff は worktree の未コミット・未追跡の変更を返す", 
   await writeFile(join(wt, "added.txt"), "brand new file\n");
   await writeFile(join(wt, "README.md"), "y\n");
 
-  const d = await h("task.diff", { task_id: t.id }, NOOP_CONN) as {
+  const d = (await h("task.diff", { task_id: t.id }, NOOP_CONN)) as {
     base: { branch: string; merge_base: string };
     since_step_run_id: number | null;
     files: { path: string; status: string }[];
@@ -2358,7 +2419,11 @@ test("worktree の無いタスクの task.diff は失敗する", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
   await h("workspace.add", { path: repo }, NOOP_CONN);
-  const t = await h("task.create", { project: repo, title: "T", prompt: "直して" }, NOOP_CONN) as {
+  const t = (await h(
+    "task.create",
+    { project: repo, title: "T", prompt: "直して" },
+    NOOP_CONN,
+  )) as {
     id: string;
   };
   await assert.rejects(
@@ -2372,7 +2437,11 @@ test("since に未知の値を渡すと失敗する", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
   await h("workspace.add", { path: repo }, NOOP_CONN);
-  const t = await h("task.create", { project: repo, title: "T", prompt: "直して" }, NOOP_CONN) as {
+  const t = (await h(
+    "task.create",
+    { project: repo, title: "T", prompt: "直して" },
+    NOOP_CONN,
+  )) as {
     id: string;
   };
   // このタスクには worktree が無いのに「worktree がありません」ではなく since のエラーで
@@ -2396,11 +2465,11 @@ test("差し戻し後、since: last_review は前回レビュー以降の差分�
   const ctx = await context();
   const h = createHandler(ctx);
   await h("workspace.add", { path: repo }, NOOP_CONN);
-  const t = await h(
+  const t = (await h(
     "task.create",
     { project: repo, title: "T", prompt: "直して", workflow: "loop" },
     NOOP_CONN,
-  ) as { id: string };
+  )) as { id: string };
   await tick(ctx);
   await until(
     async () => (await getTask(ctx.db, t.id))?.state === "suspended",
@@ -2440,7 +2509,7 @@ test("差し戻し後、since: last_review は前回レビュー以降の差分�
   // 3回目のレビュー時点より後に足した分。
   await writeFile(join(wt, "second.txt"), "2\n");
 
-  const all = await h("task.diff", { task_id: t.id }, NOOP_CONN) as {
+  const all = (await h("task.diff", { task_id: t.id }, NOOP_CONN)) as {
     since_step_run_id: number | null;
     files: { path: string }[];
   };
@@ -2451,15 +2520,20 @@ test("差し戻し後、since: last_review は前回レビュー以降の差分�
   );
   assert.equal(all.since_step_run_id, null);
 
-  const since = await h("task.diff", { task_id: t.id, since: "last_review" }, NOOP_CONN) as {
+  const since = (await h("task.diff", { task_id: t.id, since: "last_review" }, NOOP_CONN)) as {
     since_step_run_id: number | null;
     files: { path: string }[];
   };
   // 基準を1回目の差し戻し（古い方）に取り違えると mid.txt も出てしまう。
   // second.txt だけが出ることが「直近の」差し戻しを基準にできている証拠になる。
-  assert.deepEqual(since.files.map((f) => f.path), ["second.txt"], "前回レビュー以降だけ");
-  const rejected = (await listStepRuns(ctx.db, t.id))
-    .filter((r) => r.review_tree !== null && r.status === "bounced");
+  assert.deepEqual(
+    since.files.map((f) => f.path),
+    ["second.txt"],
+    "前回レビュー以降だけ",
+  );
+  const rejected = (await listStepRuns(ctx.db, t.id)).filter(
+    (r) => r.review_tree !== null && r.status === "bounced",
+  );
   assert.equal(rejected.length, 2, "差し戻しは2回起きている");
   assert.equal(since.since_step_run_id, rejected[1].id, "基準は直近（2回目）の差し戻し");
 });
@@ -2481,11 +2555,11 @@ test("差し戻し後に承認が挟まっても since: last_review の基準は
   const ctx = await context();
   const h = createHandler(ctx);
   await h("workspace.add", { path: repo }, NOOP_CONN);
-  const t = await h(
+  const t = (await h(
     "task.create",
     { project: repo, title: "T", prompt: "直して", workflow: "keep" },
     NOOP_CONN,
-  ) as { id: string };
+  )) as { id: string };
   await tick(ctx);
   await until(
     async () => (await getTask(ctx.db, t.id))?.state === "suspended",
@@ -2520,12 +2594,13 @@ test("差し戻し後に承認が挟まっても since: last_review の基準は
   );
   await until(() => ctx.running.size === 0);
 
-  const since = await h("task.diff", { task_id: t.id, since: "last_review" }, NOOP_CONN) as {
+  const since = (await h("task.diff", { task_id: t.id, since: "last_review" }, NOOP_CONN)) as {
     since_step_run_id: number | null;
     files: { path: string }[];
   };
-  const bounced = (await listStepRuns(ctx.db, t.id))
-    .filter((r) => r.review_tree !== null && r.status === "bounced");
+  const bounced = (await listStepRuns(ctx.db, t.id)).filter(
+    (r) => r.review_tree !== null && r.status === "bounced",
+  );
   assert.equal(bounced.length, 1, "差し戻しは1回だけ");
   assert.equal(since.since_step_run_id, bounced[0].id, "承認された回では基準が進まない");
   // extra.txt（承認された回の後に足したが、なお1回目の差し戻しの後）と
@@ -2542,7 +2617,11 @@ test("差し戻しの記録が無ければ since: last_review は全体に倒す
   const ctx = await context();
   const h = createHandler(ctx);
   await h("workspace.add", { path: repo }, NOOP_CONN);
-  const t = await h("task.create", { project: repo, title: "T", prompt: "直して" }, NOOP_CONN) as {
+  const t = (await h(
+    "task.create",
+    { project: repo, title: "T", prompt: "直して" },
+    NOOP_CONN,
+  )) as {
     id: string;
   };
   await tick(ctx);
@@ -2551,12 +2630,15 @@ test("差し戻しの記録が無ければ since: last_review は全体に倒す
   const wt = (await getTask(ctx.db, t.id))!.worktree_path!;
   await writeFile(join(wt, "only.txt"), "x\n");
 
-  const d = await h("task.diff", { task_id: t.id, since: "last_review" }, NOOP_CONN) as {
+  const d = (await h("task.diff", { task_id: t.id, since: "last_review" }, NOOP_CONN)) as {
     since_step_run_id: number | null;
     files: { path: string }[];
   };
   assert.equal(d.since_step_run_id, null, "承認済みの回は基準にしない");
-  assert.deepEqual(d.files.map((f) => f.path), ["only.txt"]);
+  assert.deepEqual(
+    d.files.map((f) => f.path),
+    ["only.txt"],
+  );
 });
 
 // --- task.cleanedUp / daemon.warnings / task.logs -------------------------
@@ -2578,11 +2660,11 @@ test("tick で完了したタスクは、stateChanged の後に task.cleanedUp �
     join(repo, ".doctrine", "workflows", "quick.yaml"),
     'name: quick\nsteps:\n  - id: a\n    type: command\n    run: "true"\n',
   );
-  const t = await h(
+  const t = (await h(
     "task.create",
     { project: repo, title: "T", prompt: "p", workflow: "quick" },
     NOOP_CONN,
-  ) as { id: string };
+  )) as { id: string };
   await tick(ctx);
   await until(() => events.some((e) => e.event === "task.cleanedUp"));
 
@@ -2605,7 +2687,7 @@ test("最終ステップが approval でも、stateChanged の後に task.cleane
   const h = createHandler(ctx);
   await h("workspace.add", { path: repo }, NOOP_CONN);
   // beforeEach の feature.yaml は approval 1ステップだけ。承認がそのまま完了になる。
-  const t = await h("task.create", { project: repo, title: "T", prompt: "p" }, NOOP_CONN) as {
+  const t = (await h("task.create", { project: repo, title: "T", prompt: "p" }, NOOP_CONN)) as {
     id: string;
   };
   await tick(ctx);
@@ -2629,11 +2711,11 @@ test("削除を拒否したら outcome: refused と理由を載せて届く", as
     join(repo, ".doctrine", "workflows", "dirty.yaml"),
     'name: dirty\nsteps:\n  - id: a\n    type: command\n    run: "touch leftover.txt"\n',
   );
-  const t = await h(
+  const t = (await h(
     "task.create",
     { project: repo, title: "T", prompt: "p", workflow: "dirty" },
     NOOP_CONN,
-  ) as { id: string };
+  )) as { id: string };
   await tick(ctx);
   await until(() => events.some((e) => e.event === "task.cleanedUp"));
 
@@ -2653,11 +2735,14 @@ test("daemon.warnings は溜まった警告を新しい順に返す", async () =
   ctx.warnings.push("古い");
   ctx.warnings.push("新しい", "task-1");
 
-  const warnings = await h("daemon.warnings", {}, NOOP_CONN) as {
+  const warnings = (await h("daemon.warnings", {}, NOOP_CONN)) as {
     message: string;
     task_id?: string;
   }[];
-  assert.deepEqual(warnings.map((w) => w.message), ["新しい", "古い"]);
+  assert.deepEqual(
+    warnings.map((w) => w.message),
+    ["新しい", "古い"],
+  );
   assert.equal(warnings[0].task_id, "task-1");
   assert.ok(
     events.some((e) => e.event === "daemon.warning"),
@@ -2675,13 +2760,13 @@ test("task.logs は step_run_id を省くと最新のステップ実行の末尾
       '  - id: a\n    type: command\n    run: "echo ichi"\n' +
       '  - id: b\n    type: command\n    run: "echo ni"\n',
   );
-  const t = await h(
+  const t = (await h(
     "task.create",
     { project: repo, title: "T", prompt: "p", workflow: "two" },
     NOOP_CONN,
-  ) as { id: string };
+  )) as { id: string };
 
-  const empty = await h("task.logs", { task_id: t.id }, NOOP_CONN) as {
+  const empty = (await h("task.logs", { task_id: t.id }, NOOP_CONN)) as {
     step_run_id: number | null;
     lines: string[];
   };
@@ -2692,18 +2777,17 @@ test("task.logs は step_run_id を省くと最新のステップ実行の末尾
   await until(() => ctx.running.size === 0);
 
   const runs = await listStepRuns(ctx.db, t.id);
-  const logs = await h("task.logs", { task_id: t.id }, NOOP_CONN) as {
+  const logs = (await h("task.logs", { task_id: t.id }, NOOP_CONN)) as {
     step_run_id: number | null;
     lines: string[];
   };
   assert.equal(logs.step_run_id, runs.at(-1)!.id, "最後に始まった実行を指す");
   assert.ok(logs.lines.join("\n").includes("ni"));
 
-  const first = await h(
-    "task.logs",
-    { task_id: t.id, step_run_id: runs[0].id },
-    NOOP_CONN,
-  ) as { step_run_id: number | null; lines: string[] };
+  const first = (await h("task.logs", { task_id: t.id, step_run_id: runs[0].id }, NOOP_CONN)) as {
+    step_run_id: number | null;
+    lines: string[];
+  };
   assert.equal(first.step_run_id, runs[0].id, "指定すればそのステップ実行を返す");
   assert.ok(first.lines.join("\n").includes("ichi"));
 });
@@ -2713,15 +2797,15 @@ test("task.logs の follow は接続の追従先を上書きし、false でや�
   const h = createHandler(ctx);
   let following: string | null = null;
   const conn = {
-    follow: (id: string) => following = id,
-    unfollow: () => following = null,
+    follow: (id: string) => (following = id),
+    unfollow: () => (following = null),
     isFollowing: (id: string) => following === id,
   };
   await h("workspace.add", { path: repo }, NOOP_CONN);
-  const a = await h("task.create", { project: repo, title: "A", prompt: "p" }, NOOP_CONN) as {
+  const a = (await h("task.create", { project: repo, title: "A", prompt: "p" }, NOOP_CONN)) as {
     id: string;
   };
-  const b = await h("task.create", { project: repo, title: "B", prompt: "p" }, NOOP_CONN) as {
+  const b = (await h("task.create", { project: repo, title: "B", prompt: "p" }, NOOP_CONN)) as {
     id: string;
   };
 
@@ -2743,12 +2827,18 @@ test("task.logs の follow は接続の追従先を上書きし、false でや�
 async function rateLimitedTask(ctx: DaemonContext, deadline: string): Promise<string> {
   const h = createHandler(ctx);
   await h("workspace.add", { path: repo }, NOOP_CONN);
-  const t = await h("task.create", { project: repo, title: "T", prompt: "直して" }, NOOP_CONN) as {
+  const t = (await h(
+    "task.create",
+    { project: repo, title: "T", prompt: "直して" },
+    NOOP_CONN,
+  )) as {
     id: string;
   };
-  await ctx.db.updateTable("tasks")
+  await ctx.db
+    .updateTable("tasks")
     .set({ state: "rate_limited", rate_limited_until: deadline })
-    .where("id", "=", t.id).execute();
+    .where("id", "=", t.id)
+    .execute();
   return t.id;
 }
 
@@ -2761,9 +2851,12 @@ test("tick は期限の来た上限待ちを queued に戻し、状態変化を�
 
   assert.notEqual((await getTask(ctx.db, id))?.state, "rate_limited");
   assert.ok(
-    events.some((e) =>
-      e.event === "task.stateChanged" && e.task_id === id && e.from === "rate_limited" &&
-      e.to === "queued"
+    events.some(
+      (e) =>
+        e.event === "task.stateChanged" &&
+        e.task_id === id &&
+        e.from === "rate_limited" &&
+        e.to === "queued",
     ),
     "配らないと、アプリは次の取り直しまで上限待ちのまま見える",
   );
@@ -2786,7 +2879,11 @@ test("上限待ちがいる間は新しいタスクを始めない", async () =>
     "defaultWorkflow: feature\nmaxConcurrent: 2\nbaseBranch: main\n",
   );
   const waiting = await rateLimitedTask(ctx, new Date(Date.now() + 60 * 60_000).toISOString());
-  const other = await h("task.create", { project: repo, title: "別", prompt: "p" }, NOOP_CONN) as {
+  const other = (await h(
+    "task.create",
+    { project: repo, title: "別", prompt: "p" },
+    NOOP_CONN,
+  )) as {
     id: string;
   };
 
@@ -2809,7 +2906,7 @@ test("task.resume は上限待ちのタスクを待たずに queued へ戻す", 
   const h = createHandler(ctx);
   const id = await rateLimitedTask(ctx, new Date(Date.now() + 60 * 60_000).toISOString());
 
-  const after = await h("task.resume", { task_id: id }, NOOP_CONN) as {
+  const after = (await h("task.resume", { task_id: id }, NOOP_CONN)) as {
     state: string;
     rate_limited_until: string | null;
   };
@@ -2860,7 +2957,10 @@ test("task.guide はガイドステップがあるのにファイルが無けれ
   const ctx = await context();
   const h = createHandler(ctx);
   const { id } = await guidableTask(ctx, h);
-  await ctx.db.updateTable("tasks").set({ workflow_yaml: GUIDE_WORKFLOW }).where("id", "=", id)
+  await ctx.db
+    .updateTable("tasks")
+    .set({ workflow_yaml: GUIDE_WORKFLOW })
+    .where("id", "=", id)
     .execute();
   assert.deepEqual(await h("task.guide", { task_id: id }, NOOP_CONN), { status: "missing" });
 });
@@ -2882,7 +2982,7 @@ test("task.guide は書かれたガイドをそのまま返す", async () => {
   const tree = await captureTree(wt);
   await writeEnvelope(wt, tree);
 
-  const res = await h("task.guide", { task_id: id }, NOOP_CONN) as TaskGuide;
+  const res = (await h("task.guide", { task_id: id }, NOOP_CONN)) as TaskGuide;
   assert.equal(res.status, "ok");
   if (res.status !== "ok") throw new Error("unreachable");
   assert.equal(res.stale, false);
@@ -2901,7 +3001,7 @@ test("ガイドの作成後に worktree を変えると古いと分かる", asyn
   await writeEnvelope(wt, tree);
   await writeFile(join(wt, "README.md"), "changed\n");
 
-  const res = await h("task.guide", { task_id: id }, NOOP_CONN) as TaskGuide;
+  const res = (await h("task.guide", { task_id: id }, NOOP_CONN)) as TaskGuide;
   assert.equal(res.status, "ok");
   if (res.status !== "ok") throw new Error("unreachable");
   assert.equal(res.stale, true);
@@ -2917,10 +3017,13 @@ test("壊れた guide.json でも task.guide は broken を返し、task.diff �
   await writeFile(join(wt, ".doctrine-out", "guide.json"), "{");
   await writeFile(join(wt, "README.md"), "y\n");
 
-  const res = await h("task.guide", { task_id: id }, NOOP_CONN) as TaskGuide;
+  const res = (await h("task.guide", { task_id: id }, NOOP_CONN)) as TaskGuide;
   assert.equal(res.status, "broken");
-  const d = await h("task.diff", { task_id: id }, NOOP_CONN) as { files: { path: string }[] };
-  assert.ok(d.files.some((f) => f.path === "README.md"), "diff は読める");
+  const d = (await h("task.diff", { task_id: id }, NOOP_CONN)) as { files: { path: string }[] };
+  assert.ok(
+    d.files.some((f) => f.path === "README.md"),
+    "diff は読める",
+  );
 });
 
 test("上限を超えた guide.json は too_large を返す", async () => {
@@ -2930,7 +3033,7 @@ test("上限を超えた guide.json は too_large を返す", async () => {
   await mkdir(join(wt, ".doctrine-out"), { recursive: true });
   await writeFile(join(wt, ".doctrine-out", "guide.json"), "x".repeat(300 * 1024));
 
-  const res = await h("task.guide", { task_id: id }, NOOP_CONN) as TaskGuide;
+  const res = (await h("task.guide", { task_id: id }, NOOP_CONN)) as TaskGuide;
   assert.equal(res.status, "too_large");
 });
 
@@ -2938,7 +3041,11 @@ test("worktree の無いタスクの task.guide は失敗する", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
   await h("workspace.add", { path: repo }, NOOP_CONN);
-  const t = await h("task.create", { project: repo, title: "T", prompt: "直して" }, NOOP_CONN) as {
+  const t = (await h(
+    "task.create",
+    { project: repo, title: "T", prompt: "直して" },
+    NOOP_CONN,
+  )) as {
     id: string;
   };
   await assert.rejects(
@@ -2950,10 +3057,7 @@ test("worktree の無いタスクの task.guide は失敗する", async () => {
 test("task.guide は無いタスクを名指しで断る", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
-  await assert.rejects(
-    () => h("task.guide", { task_id: "nope" }, NOOP_CONN),
-    /タスクがありません/,
-  );
+  await assert.rejects(() => h("task.guide", { task_id: "nope" }, NOOP_CONN), /タスクがありません/);
 });
 
 async function addIntake(ctx: DaemonContext, workspaceId: number): Promise<void> {
@@ -2971,11 +3075,11 @@ test("tick は Intake の実行をタスクより先に受け付ける", async (
   ctx.globalLimit = 1;
   ctx.adapter = createMockAdapter({ result: questionsOut([question("q1")]), delayMs: 100 });
   const h = createHandler(ctx);
-  const project = (await h("workspace.add", { path: repo }, NOOP_CONN) as WorkspaceSummary)
+  const project = ((await h("workspace.add", { path: repo }, NOOP_CONN)) as WorkspaceSummary)
     .projects[0];
   await addIntake(ctx, project.workspace_id);
   await enqueueIntakeRun(ctx.db, "i1", "investigate", { logRoot: ctx.logRoot, resume: false });
-  const t = await h("task.create", { project: repo, title: "T", prompt: "p" }, NOOP_CONN) as {
+  const t = (await h("task.create", { project: repo, title: "T", prompt: "p" }, NOOP_CONN)) as {
     id: string;
   };
 
@@ -2990,7 +3094,7 @@ test("tick は Intake の実行をタスクより先に受け付ける", async (
 test("Intake の実行が例外で落ちたら、行を failed・Intake を要確認にして警告に残す", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
-  const project = (await h("workspace.add", { path: repo }, NOOP_CONN) as WorkspaceSummary)
+  const project = ((await h("workspace.add", { path: repo }, NOOP_CONN)) as WorkspaceSummary)
     .projects[0];
   await addIntake(ctx, project.workspace_id);
   // 実行中に作業場所が消えていて、書き換えの検出（listIntakeWorktrees）が try の外で例外を投げる
@@ -3001,11 +3105,11 @@ test("Intake の実行が例外で落ちたら、行を failed・Intake を要�
   const inner = ctx.adapter;
   const removingAdapter: AgentAdapter = {
     start(prompt, o) {
-      Deno.removeSync(o.cwd, { recursive: true });
+      rmSync(o.cwd, { recursive: true, force: true });
       return inner.start(prompt, o);
     },
     resume(sessionId, prompt, o) {
-      Deno.removeSync(o.cwd, { recursive: true });
+      rmSync(o.cwd, { recursive: true, force: true });
       return inner.resume(sessionId, prompt, o);
     },
   };
@@ -3025,7 +3129,7 @@ test("Intake の実行が例外で落ちたら、行を failed・Intake を要�
 test("worktree.list は Intake の worktree を孤児にしない", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
-  const project = (await h("workspace.add", { path: repo }, NOOP_CONN) as WorkspaceSummary)
+  const project = ((await h("workspace.add", { path: repo }, NOOP_CONN)) as WorkspaceSummary)
     .projects[0];
   await addIntake(ctx, project.workspace_id);
   const worktree = await createDetachedWorktree({
@@ -3037,13 +3141,13 @@ test("worktree.list は Intake の worktree を孤児にしない", async () => 
   const pick = (res: WorktreeEntry[]) =>
     res.map((e) => ({ path: e.path, task_id: e.task_id, intake_id: e.intake_id }));
 
-  const before = await h("worktree.list", {}, NOOP_CONN) as WorktreeEntry[];
+  const before = (await h("worktree.list", {}, NOOP_CONN)) as WorktreeEntry[];
   assert.deepEqual(pick(before), [{ path: worktree, task_id: null, intake_id: null }]);
 
   await updateIntake(ctx.db, "i1", {
     worktree_path: await canonical(intakeWorktreePathFor("i1")),
   });
-  const after = await h("worktree.list", {}, NOOP_CONN) as WorktreeEntry[];
+  const after = (await h("worktree.list", {}, NOOP_CONN)) as WorktreeEntry[];
   assert.deepEqual(pick(after), [{ path: worktree, task_id: null, intake_id: "i1" }]);
 });
 
@@ -3085,26 +3189,33 @@ test("workflow.list: .doctrine/workflows の YAML を名前順に、検証の可
   await writeFile(join(repo, ".doctrine/workflows/broken.yaml"), BROKEN_SCHEMA);
   await writeFile(join(repo, ".doctrine/workflows/notes.txt"), "not a workflow");
 
-  const list = await h("workflow.list", { project: repo }, NOOP_CONN) as WorkflowListEntry[];
-  assert.deepEqual(list.map((e) => e.name), ["broken", "default", "feature"]);
-  assert.deepEqual(list.find((e) => e.name === "default"), {
-    name: "default",
-    default: false,
-    ok: true,
-    steps: DEFAULT_STEPS,
-  });
-  assert.deepEqual(list.find((e) => e.name === "feature"), {
-    name: "feature",
-    default: true,
-    ok: true,
-    steps: [{ id: "review", type: "approval", title: "見て" }],
-  });
+  const list = (await h("workflow.list", { project: repo }, NOOP_CONN)) as WorkflowListEntry[];
+  assert.deepEqual(
+    list.map((e) => e.name),
+    ["broken", "default", "feature"],
+  );
+  assert.deepEqual(
+    list.find((e) => e.name === "default"),
+    {
+      name: "default",
+      default: false,
+      ok: true,
+      steps: DEFAULT_STEPS,
+    },
+  );
+  assert.deepEqual(
+    list.find((e) => e.name === "feature"),
+    {
+      name: "feature",
+      default: true,
+      ok: true,
+      steps: [{ id: "review", type: "approval", title: "見て" }],
+    },
+  );
   const broken = list.find((e) => e.name === "broken");
   assert.equal(broken?.ok, false);
   assert.equal(broken?.default, false);
-  assert.ok(
-    !broken?.ok && broken.issues.some((i) => i.includes("次のいずれか")),
-  );
+  assert.ok(!broken?.ok && broken.issues.some((i) => i.includes("次のいずれか")));
 });
 
 test("workflow.list: project の setup を先頭に差し込んだ steps を返し、5 種のステップをすべて含む", async () => {
@@ -3117,7 +3228,7 @@ test("workflow.list: project の setup を先頭に差し込んだ steps を返�
   await h("workspace.add", { path: repo }, NOOP_CONN);
   await writeFile(join(repo, ".doctrine/workflows/default.yaml"), await repoDefaultYaml());
 
-  const list = await h("workflow.list", { project: repo }, NOOP_CONN) as WorkflowListEntry[];
+  const list = (await h("workflow.list", { project: repo }, NOOP_CONN)) as WorkflowListEntry[];
   const def = list.find((e) => e.name === "default");
   assert.ok(def?.ok);
   assert.equal(def.steps.length, 14);
@@ -3126,12 +3237,18 @@ test("workflow.list: project の setup を先頭に差し込んだ steps を返�
     new Set(def.steps.map((s) => s.type)),
     new Set(["command", "agent", "approval", "guide", "poll"]),
   );
-  assert.deepEqual(list.find((e) => e.name === "feature"), {
-    name: "feature",
-    default: true,
-    ok: true,
-    steps: [{ id: "setup", type: "command" }, { id: "review", type: "approval", title: "見て" }],
-  });
+  assert.deepEqual(
+    list.find((e) => e.name === "feature"),
+    {
+      name: "feature",
+      default: true,
+      ok: true,
+      steps: [
+        { id: "setup", type: "command" },
+        { id: "review", type: "approval", title: "見て" },
+      ],
+    },
+  );
 });
 
 test("workflow.list: 既定の印は DB の default_workflow で決め、project.yaml を読み直さない", async () => {
@@ -3144,7 +3261,7 @@ test("workflow.list: 既定の印は DB の default_workflow で決め、project
     "defaultWorkflow: default\nmaxConcurrent: 1\nbaseBranch: main\n",
   );
 
-  const list = await h("workflow.list", { project: repo }, NOOP_CONN) as WorkflowListEntry[];
+  const list = (await h("workflow.list", { project: repo }, NOOP_CONN)) as WorkflowListEntry[];
   assert.equal(list.find((e) => e.name === "feature")?.default, true);
   assert.equal(list.find((e) => e.name === "default")?.default, false);
 });
@@ -3155,7 +3272,7 @@ test("workflow.list: 不正な既定のワークフローも default: true と i
   await h("workspace.add", { path: repo }, NOOP_CONN);
   await writeFile(join(repo, ".doctrine/workflows/feature.yaml"), BROKEN_GOTO);
 
-  const list = await h("workflow.list", { project: repo }, NOOP_CONN) as WorkflowListEntry[];
+  const list = (await h("workflow.list", { project: repo }, NOOP_CONN)) as WorkflowListEntry[];
   const feature = list.find((e) => e.name === "feature");
   assert.ok(feature && !feature.ok);
   assert.equal(feature.default, true);
@@ -3169,7 +3286,7 @@ test("workflow.list: workflows ディレクトリが無ければ空を返す", a
   await h("workspace.add", { path: repo }, NOOP_CONN);
   await rm(join(repo, ".doctrine", "workflows"), { recursive: true });
 
-  const list = await h("workflow.list", { project: repo }, NOOP_CONN) as WorkflowListEntry[];
+  const list = (await h("workflow.list", { project: repo }, NOOP_CONN)) as WorkflowListEntry[];
   assert.deepEqual(list, []);
 });
 
@@ -3188,11 +3305,11 @@ test("workflow.get: default.yaml の 13 ステップの設定と分岐を返す"
   await h("workspace.add", { path: repo }, NOOP_CONN);
   await writeFile(join(repo, ".doctrine/workflows/default.yaml"), await repoDefaultYaml());
 
-  const detail = await h(
+  const detail = (await h(
     "workflow.get",
     { project: repo, name: "default" },
     NOOP_CONN,
-  ) as WorkflowDetail;
+  )) as WorkflowDetail;
   assert.ok(detail.ok);
   if (!detail.ok) return;
 
@@ -3297,11 +3414,11 @@ test("workflow.get: 書かれていない任意の欄は null で返す", async 
   const h = createHandler(ctx);
   await h("workspace.add", { path: repo }, NOOP_CONN);
 
-  const detail = await h(
+  const detail = (await h(
     "workflow.get",
     { project: repo, name: "feature" },
     NOOP_CONN,
-  ) as WorkflowDetail;
+  )) as WorkflowDetail;
   assert.ok(detail.ok);
   if (!detail.ok) return;
   assert.deepEqual(detail.steps[0], {
@@ -3321,31 +3438,29 @@ test("workflow.get: 壊れた YAML は検証エラーの内容を返す", async 
   await writeFile(join(repo, ".doctrine/workflows/schema.yaml"), BROKEN_SCHEMA);
   await writeFile(join(repo, ".doctrine/workflows/goto.yaml"), BROKEN_GOTO);
 
-  const syntax = await h(
+  const syntax = (await h(
     "workflow.get",
     { project: repo, name: "syntax" },
     NOOP_CONN,
-  ) as WorkflowDetail;
+  )) as WorkflowDetail;
   assert.equal(syntax.ok, false);
   if (!syntax.ok) assert.match(syntax.issues[0], /^YAMLとして読めません/);
 
-  const schema = await h(
+  const schema = (await h(
     "workflow.get",
     { project: repo, name: "schema" },
     NOOP_CONN,
-  ) as WorkflowDetail;
+  )) as WorkflowDetail;
   assert.equal(schema.ok, false);
   if (!schema.ok) {
-    assert.ok(
-      schema.issues.some((i) => i.includes("steps.0.type") && i.includes("次のいずれか")),
-    );
+    assert.ok(schema.issues.some((i) => i.includes("steps.0.type") && i.includes("次のいずれか")));
   }
 
-  const goto = await h(
+  const goto = (await h(
     "workflow.get",
     { project: repo, name: "goto" },
     NOOP_CONN,
-  ) as WorkflowDetail;
+  )) as WorkflowDetail;
   assert.equal(goto.ok, false);
   if (!goto.ok) {
     assert.deepEqual(goto.issues, [
@@ -3375,19 +3490,22 @@ test("workflow.get: 一覧に出た名前はそのまま引ける", async () => 
     "name: feature\nsteps:\n  - id: review\n    type: approval\n    title: 見て\n",
   );
 
-  const list = await h("workflow.list", { project: repo }, NOOP_CONN) as WorkflowListEntry[];
-  assert.deepEqual(list.find((e) => e.name === "my.flow"), {
-    name: "my.flow",
-    default: false,
-    ok: true,
-    steps: [{ id: "review", type: "approval", title: "見て" }],
-  });
+  const list = (await h("workflow.list", { project: repo }, NOOP_CONN)) as WorkflowListEntry[];
+  assert.deepEqual(
+    list.find((e) => e.name === "my.flow"),
+    {
+      name: "my.flow",
+      default: false,
+      ok: true,
+      steps: [{ id: "review", type: "approval", title: "見て" }],
+    },
+  );
 
-  const detail = await h(
+  const detail = (await h(
     "workflow.get",
     { project: repo, name: "my.flow" },
     NOOP_CONN,
-  ) as WorkflowDetail;
+  )) as WorkflowDetail;
   assert.ok(detail.ok);
 });
 
@@ -3397,27 +3515,26 @@ test("daemon.slots は全体の実行枠・使っている数・枠待ちを返�
   const ctx = await context();
   ctx.globalLimit = 2;
   const h = createHandler(ctx);
-  const project = (await h("workspace.add", { path: repo }, NOOP_CONN) as WorkspaceSummary)
+  const project = ((await h("workspace.add", { path: repo }, NOOP_CONN)) as WorkspaceSummary)
     .projects[0];
-  const a = await h(
-    "task.create",
-    { project: repo, title: "A", prompt: "p" },
-    NOOP_CONN,
-  ) as { id: string };
-  const b = await h(
-    "task.create",
-    { project: repo, title: "B", prompt: "p" },
-    NOOP_CONN,
-  ) as { id: string };
+  const a = (await h("task.create", { project: repo, title: "A", prompt: "p" }, NOOP_CONN)) as {
+    id: string;
+  };
+  const b = (await h("task.create", { project: repo, title: "B", prompt: "p" }, NOOP_CONN)) as {
+    id: string;
+  };
   await addIntake(ctx, project.workspace_id);
   await enqueueIntakeRun(ctx.db, "i1", "investigate", { logRoot: ctx.logRoot, resume: false });
   await ctx.db.updateTable("tasks").set({ state: "running" }).where("id", "=", a.id).execute();
 
-  const slots = await h("daemon.slots", {}, NOOP_CONN) as DaemonSlots;
+  const slots = (await h("daemon.slots", {}, NOOP_CONN)) as DaemonSlots;
 
   assert.equal(slots.global_limit, 2);
   assert.equal(slots.in_use, 1);
-  assert.deepEqual(slots.waiting_tasks.map((t) => t.id), [b.id]);
+  assert.deepEqual(
+    slots.waiting_tasks.map((t) => t.id),
+    [b.id],
+  );
   assert.equal(slots.waiting_intake_runs.length, 1);
   assert.equal(slots.waiting_intake_runs[0].intake_id, "i1");
   assert.equal(slots.waiting_intake_runs[0].issue_title, "T");
@@ -3428,31 +3545,34 @@ test("daemon.slots の枠待ちは受付順に並ぶ", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
   await h("workspace.add", { path: repo }, NOOP_CONN);
-  const x = await h(
+  const x = (await h(
     "task.create",
     { project: repo, title: "X", prompt: "p", priority: 2 },
     NOOP_CONN,
-  ) as { id: string };
-  const y = await h(
+  )) as { id: string };
+  const y = (await h(
     "task.create",
     { project: repo, title: "Y", prompt: "p", priority: 0 },
     NOOP_CONN,
-  ) as { id: string };
+  )) as { id: string };
 
-  const slots = await h("daemon.slots", {}, NOOP_CONN) as DaemonSlots;
-  assert.deepEqual(slots.waiting_tasks.map((t) => t.id), [y.id, x.id]);
+  const slots = (await h("daemon.slots", {}, NOOP_CONN)) as DaemonSlots;
+  assert.deepEqual(
+    slots.waiting_tasks.map((t) => t.id),
+    [y.id, x.id],
+  );
 });
 
 test("終わった Intake の queued の実行は枠待ちに出さない", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
-  const project = (await h("workspace.add", { path: repo }, NOOP_CONN) as WorkspaceSummary)
+  const project = ((await h("workspace.add", { path: repo }, NOOP_CONN)) as WorkspaceSummary)
     .projects[0];
   await addIntake(ctx, project.workspace_id);
   await enqueueIntakeRun(ctx.db, "i1", "investigate", { logRoot: ctx.logRoot, resume: false });
   await updateIntake(ctx.db, "i1", { state: "canceled" });
 
-  const slots = await h("daemon.slots", {}, NOOP_CONN) as DaemonSlots;
+  const slots = (await h("daemon.slots", {}, NOOP_CONN)) as DaemonSlots;
   assert.deepEqual(slots.waiting_intake_runs, []);
 });
 
@@ -3470,21 +3590,13 @@ test("daemon.setGlobalLimit で値を変えると次の tick でその数まで 
   const h = createHandler(ctx);
   await h("workspace.add", { path: repo }, NOOP_CONN);
   for (const title of ["A", "B", "C"]) {
-    await h(
-      "task.create",
-      { project: repo, title, prompt: "p", workflow: "slow" },
-      NOOP_CONN,
-    );
+    await h("task.create", { project: repo, title, prompt: "p", workflow: "slow" }, NOOP_CONN);
   }
 
   await tick(ctx);
   assert.equal((await listTasks(ctx.db, { state: "running" })).length, 1);
 
-  const slots = await h(
-    "daemon.setGlobalLimit",
-    { global_limit: 3 },
-    NOOP_CONN,
-  ) as DaemonSlots;
+  const slots = (await h("daemon.setGlobalLimit", { global_limit: 3 }, NOOP_CONN)) as DaemonSlots;
   assert.equal(slots.global_limit, 3);
   assert.equal(ctx.globalLimit, 3);
 
@@ -3526,11 +3638,11 @@ test("daemon.setGlobalLimit は 1 未満や整数でない値を拒み、何も�
 test("daemon.setGlobalLimit は上限を設けない", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
-  const slots = await h(
+  const slots = (await h(
     "daemon.setGlobalLimit",
     { global_limit: 1000 },
     NOOP_CONN,
-  ) as DaemonSlots;
+  )) as DaemonSlots;
   assert.equal(slots.global_limit, 1000);
 });
 

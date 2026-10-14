@@ -1,10 +1,14 @@
-import { afterEach, beforeEach, test } from "@std/testing/bdd";
+import { afterEach, beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
+import { once } from "node:events";
+import { syncBuiltinESMExports } from "node:module";
+import net from "node:net";
 import { connect, type Socket } from "node:net";
 import { mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer, resolveSocketPath } from "../../src/daemon/server.ts";
+import { call } from "../helpers/rpc.ts";
 
 let root: string;
 let sock: string;
@@ -230,6 +234,46 @@ const socketEnv = (o: Partial<import("../../src/daemon/server.ts").SocketEnv> = 
   uid: 501,
   os: "linux" as const,
   ...o,
+});
+
+test("応答前にクライアントが切断しても、サーバは落ちずに次の接続に応答する", async () => {
+  let release!: () => void;
+  const gate = new Promise<void>((r) => (release = r));
+  const server = createServer(async (method) => {
+    if (method === "slow") await gate;
+    return { method };
+  });
+  servers.push(server);
+  await server.listen(sock);
+
+  const early = connect(sock);
+  await once(early, "connect");
+  early.write(JSON.stringify({ id: 1, method: "slow", params: {} }) + "\n");
+  early.destroy();
+  release();
+  await new Promise((r) => setTimeout(r, 50));
+
+  assert.deepEqual(await call(sock, "ping", {}), { method: "ping" });
+});
+
+test("listen 後にサーバ自身が error を出しても（accept の EMFILE など）、プロセスは落ちない", async () => {
+  const originalCreateServer = net.createServer;
+  let captured: net.Server | undefined;
+  net.createServer = ((...args: Parameters<typeof net.createServer>) => {
+    captured = originalCreateServer(...args);
+    return captured;
+  }) as typeof net.createServer;
+  syncBuiltinESMExports();
+  try {
+    const server = createServer(async () => null);
+    servers.push(server);
+    await server.listen(sock);
+  } finally {
+    net.createServer = originalCreateServer;
+    syncBuiltinESMExports();
+  }
+  assert.ok(captured, "net.createServer を捉えられていない（テストの前提が崩れている）");
+  assert.doesNotThrow(() => captured!.emit("error", new Error("accept EMFILE")));
 });
 
 test("resolveSocketPath: DOCTRINE_SOCKET があればそれを使う", () => {
