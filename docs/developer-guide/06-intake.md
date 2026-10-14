@@ -243,7 +243,8 @@ worktree を切った時点で上流の成果物を持っている。
 6. Linear なら sub-issue の状態を進める
 7. goal が揃っていれば `completed`。親 Issue は閉じない（`intake.closeIssue` で人が閉じる）
 
-direct の Intake は承認を持たないので、2・6 の sub-issue の処理と投入は何もしない。3 の観測は同じく行い、
+direct の Intake は承認を持たないので、2 の sub-issue の同期と投入は何もしない。3 の観測は同じく行い、
+6 は Linear なら親 Issue だけを進める（`issueStateSync.ts:advanceParentIssue`。sub-issue が無いので sub-issue の分は動かない）。
 プロセス `main` が `merged` になれば `completed` にする（`watch.ts:reachedGoal`）。
 
 健康状態（`WatchHealth`: 最後に成功した時刻、連続失敗の回数、最後のエラー）はメモリだけに持ち、画面へ `IntakeSummary.watch` として渡る。
