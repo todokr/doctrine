@@ -112,24 +112,28 @@ localStorage を使わないのは、WebView を作り直すと消えるため�
 | `ratelimit.sample` | その枠の最新値 |
 | `intake.stateChanged` / `intake.updated` | 一覧の行を直し、詳細を捨てる |
 
+Intake に属するタスクの `task.stateChanged` / `stepRun.*` は `intakeStale` を増やし、Execution で開いている Intake の詳細を消さずに取り直す（古い応答は `refreshGate` で捨てる）。
+
 ## 7.4 画面とファイルと RPC
 
 骨格は `app/src/App.tsx`。左端のアイコン列（`Rail`）、サイドバー、本体、モーダル、トーストからなる。
-本体は `view`（`intake` / `execution` / `settings`）で振り分ける。Execution の本体（`ExecutionView`）は選んだ Intake の図を出し、
-図の下のスロットに、選んだ要素の欄と、開いたタスクの画面（`suspended` なら `ReviewView`、それ以外なら `TaskView`）を出す。
+本体は `view`（`intake` / `execution` / `settings`）で振り分ける。Execution の本体（`ExecutionView`）は選んだ Intake の図を出す。
+plan は承認された案、direct は `pfd.ts:directPfd` で組み立てた Issue → タスク → PR の図で、プロセスのノードにはいまのタスクのステップの帯が入る。
+ノードを選ぶと画面の下のパネル（`ExecDetail`、枠は `ExecPanel`）に、要素の欄・人の操作・タスク画面・レビュー画面のどれかを出す（`execution.ts:panelContentOf`）。
+パネルのタスクは `s.sel` が決め、ノードを選ぶと `task.open` で合わせる。
 
 | 画面 | ファイル | 使う RPC |
 | --- | --- | --- |
 | 接続バナー | `components/ConnectionBanner.tsx` | — |
 | サイドバー（Intake・Execution・設定） | `components/Sidebar.tsx`、`components/ExecutionSidebar.tsx` | —（store が取る） |
 | 利用上限 | `components/RateLimit.tsx` | —（store が取る） |
-| タスク画面 | `components/TaskView.tsx`、`WorkflowRail.tsx`、`LogBlock.tsx`、`RemoveWorktree.tsx` | `task.get`、`task.logs`、`task.pause` / `resume` / `cancel`、`worktree.remove` |
-| レビュー画面 | `components/ReviewView.tsx`、`ReadingFlow.tsx`、`Guide.tsx`、`DiffFileBlock.tsx`、`Diagrams.tsx` | `task.diff` / `task.context` / `task.guide`、`task.approve`、`task.reject`（`App.tsx:RejectModal`） |
+| タスク画面（Execution の下のパネルに開く） | `components/TaskView.tsx`、`WorkflowRail.tsx`、`LogBlock.tsx`、`RemoveWorktree.tsx` | `task.get`、`task.logs`、`task.pause` / `resume` / `cancel`、`worktree.remove` |
+| レビュー画面（Execution の下のパネルに開く） | `components/ReviewView.tsx`、`ReadingFlow.tsx`、`Guide.tsx`、`DiffFileBlock.tsx`、`Diagrams.tsx` | `task.diff` / `task.context` / `task.guide`、`task.approve`、`task.reject`（`App.tsx:RejectModal`） |
 | Intake の振り分け | `components/IntakeView.tsx` | `intake.abandonRevision`、`intake.cancel` |
 | Issue の選択 | `components/IssuePicker.tsx` | `tracker.status` / `tracker.issues` / `tracker.issue`、`intake.start` |
 | 質問に答える | `components/AnswerFace.tsx`、`QuestionForm.tsx`、`MaterialView.tsx`、`EvidenceView.tsx` | `intake.answer` |
 | 計画のレビュー | `components/PlanReview.tsx`、`PfdDiagram.tsx`、`PfdElementPanel.tsx`、`IntakeHistory.tsx` | `intake.processPrompt`、`intake.reject`、`intake.approve`、`intake.draft` |
-| Execution | `components/ExecutionView.tsx`、`IntakeProgress.tsx`（部品）、`StatusCounts.tsx` | `intake.completeHumanProcess`、`intake.redispatch`、`intake.refresh`、`intake.setDispatchPaused`、`intake.closeIssue`、`intake.revise` |
+| Execution | `components/ExecutionView.tsx`、`ExecDetail.tsx`、`ExecPanel.tsx`、`useCall.ts`、`PfdDiagram.tsx`、`PfdElementPanel.tsx`、`IntakeProgress.tsx`（部品）、`StatusCounts.tsx` | `intake.completeHumanProcess`、`intake.redispatch`、`intake.processPrompt`、`intake.refresh`、`intake.setDispatchPaused`、`intake.closeIssue`、`intake.revise` |
 | 改訂に入る | `components/ReviseFace.tsx` | `intake.revise` |
 | Intake のログ | `components/IntakeLog.tsx` | `intake.logs` |
 | 設定 | `components/SettingsView.tsx`、`ProjectConfigSection.tsx`、`WorkflowSettings.tsx` | `load_settings` / `save_settings`、`daemon.slots`、`daemon.setGlobalLimit`、`project.config.*`、`workflow.*` |
@@ -146,8 +150,8 @@ React も Tauri も持ち込まず、同名の `*.test.ts` で単体テストす
 | ファイル | 役割 |
 | --- | --- |
 | `intake.ts` | Intake 画面の導出（回答の正規化と検証、Intake の一覧の絞り込みと区分、どの面を出すか、コメントの操作、進行中の面の操作の出し分け） |
-| `execution.ts` | Execution の一覧に並ぶか・区切り・人の番・並び |
-| `pfd.ts` | PFD の図の配置。列は `diagram.ts:layoutGraph` の最長路に任せ、列の中の順は重心法で交差を減らす |
+| `execution.ts` | Execution の導出（一覧に並ぶか・区切り・並び、一覧の行とプロセスごとの人の番、下のパネルに出すもの `panelContentOf`、パネルの高さの記憶） |
+| `pfd.ts` | PFD の図の配置。列は `diagram.ts:layoutGraph` の最長路に任せ、列の中の順は重心法で交差を減らす。Execution の図のステップの区画（`railSegments`）と direct の図（`directPfd`）もここ |
 | `rail.ts` | 設定画面のワークフローの定義図。タスク画面の帯の組み立て（`buildRail`）は `shared/rail.ts` にあり、デーモンの `intake.get` も使う |
 | `workflowEdit.ts` / `projectConfig.ts` / `settings.ts` | 設定フォームの変換・検証・差分・エラーの欄への振り分け。`workflowEdit.ts:TEMPLATE_VARIABLES` は `core/src/workflow/template.ts` と一致することをテストで固定している |
 | `trackerCache.ts` | トラッカーの応答の stale-while-revalidate |
