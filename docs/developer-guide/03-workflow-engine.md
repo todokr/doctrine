@@ -314,7 +314,7 @@ pause から resume すると `current_step_id` は進んでいないので、�
 ## 3.13 worktree
 
 - **置き場**: `<stateRoot>/worktrees/<basename(projectPath)>/<taskId>`（`worktreePathFor`）。リポジトリの外に置く
-- **ブランチ**: `doctrine/<taskId>-<slug>`（`branchNameFor`）。slug はタイトルを NFKC 正規化し、ASCII の英数字以外を `-` にして小文字にし、40 文字で切ったもの。ASCII の英数字が 1 つも無いタイトルでは slug が空になり、ブランチは `doctrine/<taskId>` になる
+- **ブランチ**: タスク作成時は `doctrine/<taskId>-<slug>`（`branchNameFor`）を仮に `tasks.branch` へ入れる。slug はタイトルを NFKC 正規化し、ASCII の英数字以外を `-` にして小文字にし、40 文字で切ったもの。ASCII の英数字が 1 つも無いタイトルでは slug が空になり、`doctrine/<taskId>` になる。枠を取って worktree を作るとき、`branchNamer`（Claude、haiku、30 秒で打ち切り）がタイトルと本文から英語の slug を決め、`uniqueBranchName` が `doctrine/<slug>`（ぶつかれば `-2`〜`-9`）にして `tasks.branch` を書き換える。Claude が失敗した・空の slug を返した・候補が全部埋まっていたときは、作成時の名前のまま作る
 - **作成**: 枠を取ったときに `git worktree add -b <branch> <path> <base>`。続けて `ensureDoctrineOutExcluded` が `.doctrine-out/` を `.git/info/exclude` に追記する。これで中間成果物が `git status`（削除拒否の判定）にも diff にも混ざらない
 - **削除**: `completed` のときだけ `cleanupAfterRun` が `force: false` で消す。未コミットの変更があれば拒否し、警告と `task.cleanedUp { outcome: "refused" }` を出す。ブランチは残す
 - `failed` / `canceled` は残す。`worktree.remove` で手で消し、そのときレビュー参照も一緒に消す。終わっていないタスクの worktree は `force` でも消せない
