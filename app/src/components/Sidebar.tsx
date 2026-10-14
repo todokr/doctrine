@@ -264,7 +264,6 @@ export function Sidebar() {
         />
         <span className="count">{count}</span>
         <span className="grow" />
-        <button className="plus" title="新しいタスク" aria-label="新しいタスク" aria-pressed={s.composer !== null} onClick={() => dispatch({ type: "composer.open", init: {} })}>＋</button>
       </div>
       <div className="side-scroll">
         {isDone ? (

@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from "react";
-import { Composer } from "./components/Composer";
 import { ConnectionBanner } from "./components/ConnectionBanner";
 import { fileAnchor } from "./components/DiffFileBlock";
 import { IntakeView } from "./components/IntakeView";
@@ -134,7 +133,7 @@ export default function App() {
 
   useEffect(() => {
     mainRef.current?.scrollTo({ top: 0 });
-  }, [s.sel, s.intakeSel, s.composer?.opened]);
+  }, [s.sel, s.intakeSel]);
 
   const toast = s.toast && <div className="toast" role="status">{s.toast}</div>;
 
@@ -161,8 +160,6 @@ export default function App() {
             <SettingsView />
           ) : s.view === "intake" ? (
             <IntakeView />
-          ) : s.composer ? (
-            <Composer key={s.composer.opened} init={s.composer.init} />
           ) : !t ? (
             <div className="pad"><p className="hint">左からタスクを選んでください</p></div>
           ) : t.state === "suspended" ? (

@@ -1,8 +1,7 @@
-import { describe, expect, test, vi } from "vitest";
+import { describe, expect, test } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
-import { IntakeRetryHint, RetryButton, SetupDoneNotice, SetupRetryHint, TaskActions } from "./components/TaskView";
-import { retryInit } from "./composer";
-import { PROJECTS, seedTasks, setupTask } from "./fixtures";
+import { IntakeRetryHint, SetupDoneNotice, SetupRetryHint, TaskActions } from "./components/TaskView";
+import { seedTasks, setupTask } from "./fixtures";
 import type { Task } from "./types";
 
 const task = (id: string) => seedTasks().find((t) => t.id === id)!;
@@ -64,26 +63,6 @@ describe("TaskActions", () => {
     for (const id of ["t-91e0", "t-7f3a", "t-f22b", "t-d5e6", "t-2b91", "t-e812", "s-1105"]) {
       expect(html(task(id))).not.toContain("第2段階");
     }
-  });
-});
-
-describe("RetryButton", () => {
-  test("「同じ内容で投入し直す」のボタンを出す", () => {
-    const h = renderToStaticMarkup(<RetryButton init={retryInit(task("t-e812"), PROJECTS)} onOpen={noop} />);
-    expect(h).toContain("同じ内容で投入し直す");
-    expect(h).toContain('class="btn sm"');
-  });
-
-  test("押すと元のタスクの中身を渡してコンポーザを開く", () => {
-    const onOpen = vi.fn();
-    RetryButton({ init: retryInit(task("s-1105"), PROJECTS), onOpen }).props.onClick();
-    expect(onOpen).toHaveBeenCalledTimes(1);
-    expect(onOpen).toHaveBeenCalledWith({
-      project: "~/work/shop-api",
-      workflow: "shop-api/feature",
-      title: "決済 Webhook の署名検証",
-      prompt: "決済 Webhook の署名検証。詳細は issue を参照してください。",
-    });
   });
 });
 
