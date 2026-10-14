@@ -1,13 +1,17 @@
 import { describe, expect, test } from "vitest";
 import type { IntakeSummary } from "../../shared/protocol.ts";
 import {
+  attentionProcessIds,
   countExecutionAttention,
   executionOrder,
   executionSection,
+  firstAttentionKey,
   inExecution,
   isExecutionAttention,
+  railsOf,
 } from "./execution";
-import { INTAKES, seedTasks } from "./fixtures";
+import { INTAKE_ACTIVE, INTAKES, PFD_SAMPLE, seedTasks } from "./fixtures";
+import { buildPfdView } from "./pfd";
 import type { Task, TaskState } from "./types";
 
 const row = (id: string): IntakeSummary => INTAKES.find((i) => i.id === id)!;
@@ -91,5 +95,41 @@ describe("executionOrder", () => {
     const before = ids(INTAKES);
     executionOrder(INTAKES, [], "all", false);
     expect(ids(INTAKES)).toEqual(before);
+  });
+});
+
+describe("attentionProcessIds", () => {
+  test("your_turn と needs_attention のプロセス", () => {
+    // INTAKE_ACTIVE は approve が your_turn、design が needs_attention
+    expect(attentionProcessIds(INTAKE_ACTIVE.processes, [])).toEqual(new Set(["approve", "design"]));
+  });
+
+  test("いまのタスクが承認待ちのプロセス。古いタスクの承認待ちは数えない", () => {
+    const processes = [
+      { ...INTAKE_ACTIVE.processes[1], id: "build-api", state: "running" as const, taskId: "t9", task_ids: ["t9"] },
+      { ...INTAKE_ACTIVE.processes[1], id: "build-ui", state: "running" as const, taskId: "t8", task_ids: ["t7", "t8"] },
+    ];
+    const tasks = [task("t9", "suspended", "i2"), task("t7", "suspended", "i2"), task("t8", "running", "i2")];
+    expect(attentionProcessIds(processes, tasks)).toEqual(new Set(["build-api"]));
+  });
+
+  test("pr_open は人の番に入れない", () => {
+    const pr = { number: 1, url: "u", state: "OPEN" as const, baseRef: "develop", mergedAt: null, mergeCommit: null };
+    const processes = [{ ...INTAKE_ACTIVE.processes[0], state: "pr_open" as const, taskId: "t1", pr }];
+    expect(attentionProcessIds(processes, [task("t1", "waiting", "i2")]).size).toBe(0);
+  });
+});
+
+describe("firstAttentionKey", () => {
+  test("図のノードの順で最初の人の番", () => {
+    const view = buildPfdView(PFD_SAMPLE, { attention: new Set(["approve", "design"]) });
+    expect(firstAttentionKey(view)).toBe("p:design");
+    expect(firstAttentionKey(buildPfdView(PFD_SAMPLE))).toBeNull();
+  });
+});
+
+describe("railsOf", () => {
+  test("プロセスの id から帯", () => {
+    expect(railsOf([{ ...INTAKE_ACTIVE.processes[0], id: "x", rail: null }])).toEqual({ x: null });
   });
 });

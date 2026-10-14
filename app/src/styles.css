@@ -561,6 +561,8 @@ tr.wt-stale{background:var(--accent-soft)}
 .counts{display:flex;gap:18px;flex-wrap:wrap}
 .counts .count{display:grid;gap:3px;min-width:88px}
 .counts .count .v{font-family:var(--mono);font-size:12px}
+.counts .attn-jump{font:inherit;text-align:left;background:none;border:none;padding:0;cursor:pointer;color:inherit}
+.counts .attn-jump:disabled{cursor:default;opacity:.6}
 .counts .count .b{height:4px;border-radius:2px;background:var(--tone)}
 .counts .count.dashed .b{background:repeating-linear-gradient(90deg,var(--tone) 0 5px,transparent 5px 8px)}
 

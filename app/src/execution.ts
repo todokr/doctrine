@@ -1,6 +1,8 @@
 // Execution のビューの導出。副作用を持たない（テストは execution.test.ts）
-import type { IntakeSummary } from "../../shared/protocol.ts";
+import type { IntakeProcessView, IntakeSummary } from "../../shared/protocol.ts";
+import type { RailNode } from "../../shared/rail.ts";
 import { isClosedIntake, visibleIntakes } from "./intake";
+import type { PfdView } from "./pfd";
 import type { Task, WorkspaceFilter } from "./types";
 
 export type ExecutionSection = "active" | "closed";
@@ -42,4 +44,23 @@ export function executionOrder(
   if (closed) return rows.sort(recent);
   const rank = (i: IntakeSummary) => (isExecutionAttention(i, tasks) ? 0 : 1);
   return rows.sort((a, b) => rank(a) - rank(b) || recent(a, b));
+}
+
+/** 図のプロセスごとの人の番（spec 6.3）。task_ids は古い順なので、末尾がいまのタスク */
+export function attentionProcessIds(processes: readonly IntakeProcessView[], tasks: readonly Task[]): Set<string> {
+  const ids = new Set<string>();
+  for (const p of processes) {
+    if (p.state === "your_turn" || p.state === "needs_attention") ids.add(p.id);
+    const current = p.task_ids.at(-1);
+    if (current !== undefined && tasks.some((t) => t.id === current && t.state === "suspended")) ids.add(p.id);
+  }
+  return ids;
+}
+
+export function firstAttentionKey(view: PfdView): string | null {
+  return view.nodes.find((n) => n.attention)?.key ?? null;
+}
+
+export function railsOf(processes: readonly IntakeProcessView[]): Record<string, RailNode[] | null> {
+  return Object.fromEntries(processes.map((p) => [p.id, p.rail]));
 }
