@@ -16,9 +16,9 @@ export function setupWorkflowYaml(): string {
   return `# doctrine の同梱ワークフロー（Quick Start の setup のタスクが使う）
 # draft → validate → review → apply
 #
-# draft が .doctrine-out/default.yaml を書き、validate が dctl workflow-check と
-# git status で確かめ、人が承認したら apply が元のリポジトリの
-# .doctrine/workflows/default.yaml に置く。コミットはしない。
+# draft が .doctrine-out/default.yaml を書き、validate が git status で確かめ、
+# 人が承認したら apply が元のリポジトリの .doctrine/workflows/default.yaml に置く。
+# コミットはしない。
 name: ${SETUP_WORKFLOW_NAME}
 steps:
   - id: draft
@@ -64,7 +64,6 @@ ${tools}
 
       - 書き換えてよいのは .doctrine-out/ の中だけです。.doctrine/ を含め、リポジトリの他のファイルは
         書き換えも作成もしないでください。次のステップが git status で確かめ、変更があれば差し戻されます。
-      - 書いた default.yaml は次のステップで dctl workflow-check にかけられます。
       - ファイルは Write / Edit ツールで書きます。Bash に許可しているのは読み取り系のコマンドだけです。
       - 作業ディレクトリは worktree のルートです。Bash に渡すパスは worktree のルートからの相対で
         書いてください。コマンドは1つずつ実行します。&& や cd でつなぐと権限で拒否されます。
@@ -73,13 +72,11 @@ ${tools}
       差し戻されて再度呼ばれた場合は、検証のエラーか人の却下コメントが渡されます。
       それを読んで default.yaml と setup-notes.md を直してください。
 
-  # dctl はこのステップを走らせるシェルの PATH から探す。
+  # draft が .doctrine-out/ の外を書き換えていないことを確かめる。
   - id: validate
     type: command
     run: >-
-      command -v dctl >/dev/null || { echo "dctl が PATH にありません（doctrine の core で deno task install を実行してください）" >&2; exit 1; };
-      dctl workflow-check .doctrine-out/default.yaml &&
-      { test -z "$(git status --porcelain)" || { echo "worktree の .doctrine-out/ の外が書き換えられています:" >&2; git status --porcelain >&2; exit 1; }; }
+      test -z "$(git status --porcelain)" || { echo "worktree の .doctrine-out/ の外が書き換えられています:" >&2; git status --porcelain >&2; exit 1; }
     onFailure:
       goto: draft
       maxAttempts: 3
@@ -149,7 +146,7 @@ export function setupPrompt(policy: SetupPolicy, baseBranch: string): string {
     "",
     "## 出発点の雛形",
     "",
-    "dctl workspace-add が作る雛形です。テンプレート変数（{{ task.prompt }} など）は",
+    "workspace の登録時に doctrine が置く雛形です。テンプレート変数（{{ task.prompt }} など）は",
     "doctrine がそのワークフローの実行時に展開するので、そのまま残してください。",
     "",
     "```yaml",

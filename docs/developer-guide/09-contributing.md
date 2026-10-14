@@ -45,9 +45,8 @@ mise run app:build && mise run app:test
 
 1. `shared/protocol.ts` の `Methods` に params と result の型を足す
 2. `core/src/daemon/handlers.ts:createHandler` の `switch` に `case` を足す。引数は `req` / `reqNumber` / `reqProject` で検査する
-3. dctl から呼べるようにするなら `core/src/cli/dctl.ts:parseArgv` と `USAGE` に足す（人だけが行う操作は足さない）
-4. `core/test/daemon/` にテストを書く
-5. アプリから呼ぶなら `app/src/store.tsx` の該当するフックに足す。**Rust は変えない**
+3. `core/test/daemon/` にテストを書く
+4. アプリから呼ぶなら `app/src/store.tsx` の該当するフックに足す。**Rust は変えない**
 
 ### イベントを足す
 

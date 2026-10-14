@@ -38,13 +38,13 @@ mise install      # Deno / Node.js / pnpm / Rust
 mise run setup    # 依存を lock ファイルどおりに取る
 ```
 
-## 3. `dctl` と `dctld` を PATH に置く
+## 3. `dctld` を PATH に置く
 
 ```sh
 mise run core:install
 ```
 
-CLI の `dctl` とデーモンの `dctld` が `~/.deno/bin` に入ります。`~/.deno/bin` が PATH に無ければ、シェルの設定に足します。
+デーモンの `dctld` が `~/.deno/bin` に入ります。`~/.deno/bin` が PATH に無ければ、シェルの設定に足します。
 
 ```sh
 export PATH="$HOME/.deno/bin:$PATH"
@@ -75,7 +75,7 @@ setup のタスクを作るのは、今回ワークフローの雛形を置い�
 ## 6. setup のタスクを承認する
 
 登録が終わるとタスク一覧に移り、setup のタスク（「`<プロジェクト名>` のワークフローを作る」）が選ばれています。
-タスクではエージェントがリポジトリを調べて YAML を書き、`dctl workflow-check` で検証してから、承認の画面で止まります。
+タスクではエージェントがリポジトリを調べて YAML を書き、承認の画面で止まります。
 
 承認の画面では 2 つのファイルを読みます。
 

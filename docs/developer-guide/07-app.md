@@ -54,7 +54,7 @@ localStorage を使わないのは、WebView を作り直すと消えるため�
 
 ### 中継（`app/src-tauri/src/relay.rs`）
 
-- `Relay::call` は id を `AtomicU64` で振り、応答を `oneshot` で待つ。30 秒でタイムアウト（dctl と同じ）。未接続なら即「デーモンに接続していません」
+- `Relay::call` は id を `AtomicU64` で振り、応答を `oneshot` で待つ。30 秒でタイムアウト。未接続なら即「デーモンに接続していません」
 - `pump` が 1 本の接続を読み書きする。`event` キーのある行は `daemon-event` として中身を見ずに emit、`id` のある行は待っている呼び出しへ返す。壊れた行や知らない id は捨てて次へ
 - 接続が切れたら、書き込み口を閉じることと待っている要求をすべて「接続が切れました」で落とすことを、**同じロックの下で一度に**行う。分けると `call` と競合して要求がタイムアウトまで取り残される（`app/src-tauri/tests/relay.rs` が 300 ラウンド × 32 並列で固定している）
 - `supervise` が常駐して再接続する。backoff は 0.5 秒から倍々で最大 30 秒
@@ -89,7 +89,7 @@ localStorage を使わないのは、WebView を作り直すと消えるため�
 3. `refresh()` を呼び、以後 15 秒ごと（`REFRESH_MS`）に呼ぶ
 
 `refresh()` は `project.list`・`task.list`・`ratelimit.recent`・`intake.list` を取り、続けて `worktree.list`・`daemon.warnings` を取る。
-呼ばれる契機は、15 秒ごと（`dctl add` の `queued` はイベントが飛ばないため）、再接続したとき、知らないタスクや Intake のイベントが来たとき、Intake のイベントが来たとき（`needs_human` などはイベントに載らないため）など。
+呼ばれる契機は、15 秒ごと（アプリを通さずに RPC で作られた `queued` はイベントが飛ばないため）、再接続したとき、知らないタスクや Intake のイベントが来たとき、Intake のイベントが来たとき（`needs_human` などはイベントに載らないため）など。
 
 レビュー中のタスクの `task.diff` / `task.context` / `task.guide`、選んでいる Intake の `intake.get` は、選んだときにまだ持っていなければ取る。15 秒の取り直しには乗せない。
 

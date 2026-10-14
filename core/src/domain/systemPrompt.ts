@@ -2,7 +2,7 @@
  * stepRunner がすべての `agent` ステップに `--append-system-prompt` として常に渡す文面。
  *
  * 別ファイル（`.md`）にしないのは、`core/deno.json` の build が
- * `deno compile -A --output dist/dctl src/cli/dctl.ts` で `--include` を持たず、
+ * `deno compile -A --output dist/dctld src/daemon/main.ts` で `--include` を持たず、
  * 別ファイルは単一バイナリに同梱されないため。
  */
 export const BUILTIN_APPEND_SYSTEM_PROMPT =

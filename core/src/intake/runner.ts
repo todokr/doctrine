@@ -67,7 +67,7 @@ import { loadRevisionConstraints } from "./revision.ts";
 export { MAX_INVALID_OUTPUTS } from "./conversation.ts";
 
 /**
- * 読むだけの道具（spec 7 章）。Write・Edit・gh・dctl は含めない。
+ * 読むだけの道具（spec 7 章）。Write・Edit・gh は含めない。
  * cwd が git リポジトリでないので、git の許可はプロジェクトごとの git -C <名前> に展開する（workspace spec 5 章）。
  */
 export function intakeAllowedTools(projectNames: readonly string[]): string[] {

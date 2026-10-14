@@ -13,7 +13,7 @@ Tauri v2 + React + Vite で組んだもの。デーモンとの接続は
 ```bash
 mise install          # Deno / Node / pnpm / Rust（リポジトリ直下の mise.toml）
 mise run setup        # core と app の依存を取得
-mise run core:install # dctl / dctld を deno install する（~/.deno/bin に入る）
+mise run core:install # dctld を deno install する（~/.deno/bin に入る）
 mise run app:tauri    # ウィンドウで開く（起動時に dctld を自動で起こす）
 mise run app:dev      # ブラウザで開く（http://localhost:1420。Tauri の invoke が無いのでデーモンにはつながらない）
 mise run app:test     # 状態の更新と導出（src/model.ts など）の単体テスト

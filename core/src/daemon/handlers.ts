@@ -462,8 +462,8 @@ export function createHandler(ctx: DaemonContext): Handler {
         // タスク作成時だけがこの warnings の出口。以後 tick・承認は保存した
         // 作成時の中身を読み直すだけで、ディスクを読まないので警告は積まない。
         for (const w of loaded.warnings) ctx.warnings.push(`作成時の検証: ${w}`, task.id);
-        // dctl add はレスポンスをそのまま表示するCLIなので、ここに乗せておけば
-        // ログを探しに行かなくてもユーザーの目の前に出る。
+        // task.create の応答に乗せておけば、ログを探しに行かなくても
+        // タスクを作った人の目の前に出る。
         return { ...task, warnings: loaded.warnings };
       }
       case "workspace.setup": {
@@ -513,7 +513,7 @@ export function createHandler(ctx: DaemonContext): Handler {
       case "task.get": {
         const task = await getTask(ctx.db, req(params, "task_id"));
         if (!task) throw new Error("タスクがありません");
-        // dctl get の JSON に、エスケープされた文字列ではなく中身を出す。
+        // task.get の JSON に、エスケープされた文字列ではなく中身を出す。
         const stepRuns = (await listStepRuns(ctx.db, task.id)).map((r) => ({
           ...r,
           permission_denials: parseDenials(r.permission_denials),

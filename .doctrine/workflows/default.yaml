@@ -9,7 +9,7 @@
 # 差分だけを読んでガイドを書く。
 #
 # verify は型検査とテストを回すだけの command ステップ。通ったかどうかを
-# エージェントに確かめさせず、ここで機械的に落とす。core / app / pfd の3つとも流す。
+# エージェントに確かめさせず、ここで機械的に落とす。core / app の2つとも流す。
 # app は依存の取得（pnpm install --frozen-lockfile）から始めるので、
 # pnpm-lock.yaml が package.json と食い違っていればここで落ちる。
 #
@@ -187,9 +187,6 @@ steps:
       - "Bash(mise run app:deps:*)"
       - "Bash(mise run app:test:*)"
       - "Bash(mise run app:build:*)"
-      - "Bash(mise run pfd:deps:*)"
-      - "Bash(mise run pfd:test:*)"
-      - "Bash(mise run pfd:check:*)"
       - "Bash(pnpm -C app:*)"
       - "Bash(deno fmt:*)"
       - "Bash(deno lint:*)"
@@ -233,7 +230,6 @@ steps:
 
       - core/ と shared/: `mise run core:check` と `mise run core:test`
       - app/ と shared/: `mise run app:test` と `mise run app:build`
-      - pfd/: `mise run pfd:check` と `mise run pfd:test`
 
       作業ディレクトリは worktree のルートです。Bash に渡すパスは worktree のルートからの相対で書いてください。
       コマンドは1つずつ実行してください。`&&` や `cd` でつなぐと権限で拒否されます。
@@ -259,7 +255,7 @@ steps:
   # node_modules が pnpm-lock.yaml と揃った状態でテストを流すため。
   - id: verify
     type: command
-    run: "mise run core:check && mise run core:test && mise run app:deps && mise run app:test && mise run app:build && mise run pfd:check && mise run pfd:test"
+    run: "mise run core:check && mise run core:test && mise run app:deps && mise run app:test && mise run app:build"
     onFailure:
       goto: implement
       maxAttempts: 3
@@ -297,8 +293,8 @@ steps:
       - "Bash(gh issue list:*)"
     prompt: |
       直前の verify ステップで、core の型検査とテスト、app の依存の取得
-      （pnpm install --frozen-lockfile）・テスト・ビルド（tsc と vite build）、
-      pfd の型検査とテストが通っています。自分で回す必要はありません。
+      （pnpm install --frozen-lockfile）・テスト・ビルド（tsc と vite build）が
+      通っています。自分で回す必要はありません。
       deno fmt --check と deno lint、cargo は verify に含まれていません。
 
       implement が積んだコミットを毎回読み直して審査し、結果を
@@ -413,9 +409,6 @@ steps:
       - "Bash(mise run app:deps:*)"
       - "Bash(mise run app:test:*)"
       - "Bash(mise run app:build:*)"
-      - "Bash(mise run pfd:deps:*)"
-      - "Bash(mise run pfd:test:*)"
-      - "Bash(mise run pfd:check:*)"
       - "Bash(pnpm -C app:*)"
       - "Bash(grep:*)"
       - "Bash(sed -n:*)"
@@ -439,7 +432,7 @@ steps:
 
   - id: verify-sync
     type: command
-    run: "mise run core:check && mise run core:test && mise run app:deps && mise run app:test && mise run app:build && mise run pfd:check && mise run pfd:test"
+    run: "mise run core:check && mise run core:test && mise run app:deps && mise run app:test && mise run app:build"
     onFailure:
       goto: sync
       maxAttempts: 3
@@ -453,7 +446,7 @@ steps:
   # たびに頭から再実行されるので、既に PR があれば作らない形にしてある。push は同じ
   # コミットを送り直すだけなので、二度実行しても効果が変わらない。
   #
-  # gh pr create と git push は NON_IDEMPOTENT に引っかかり、dctl add のたびに警告が出る。
+  # gh pr create と git push は NON_IDEMPOTENT に引っかかり、タスクを作るたびに警告が出る。
   # 検出は文字列でしか見ないのでガードの有無を区別できない。警告は消さないでおく。
   # 正規表現にガードを理解させると、ガードを外したときに黙って通るようになる。
   #

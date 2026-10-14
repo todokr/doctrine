@@ -31,7 +31,7 @@ cd doctrine
 mise trust              # このリポジトリの mise.toml を信頼する
 mise install            # Deno / Node.js / pnpm / Rust
 mise run setup          # 依存を lock ファイルどおりに取る
-mise run core:install   # dctl / dctld を ~/.deno/bin に置く
+mise run core:install   # dctld を ~/.deno/bin に置く
 
 export PATH="$HOME/.deno/bin:$PATH"   # 未設定ならシェルの設定に足す
 mise run app:tauri      # アプリを起動する（dctld はアプリが自動で起こす）

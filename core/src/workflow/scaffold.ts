@@ -160,7 +160,7 @@ async function exists(p: string): Promise<boolean> {
 /** setup は書かない — doctrine はパッケージマネージャを強制しない（spec 3章） */
 function projectYamlFor(baseBranch: string | undefined): string {
   const lines = [
-    "# doctrine のプロジェクト設定（dctl workspace-add が雛形として作成したもの）",
+    "# doctrine のプロジェクト設定（doctrine が workspace の登録時に雛形として作成したもの）",
     "#",
     "# setup: 新しい worktree で最初に走らせるコマンド。例: pnpm install --frozen-lockfile",
     `defaultWorkflow: ${DEFAULT_WORKFLOW_NAME}`,
@@ -204,7 +204,7 @@ function toolLines(tools: string[]): string {
 export function defaultWorkflowYamlFor(baseBranch: string | undefined): string {
   const base = baseBranch ?? "main";
   const readOnly = toolLines(READ_ONLY_TOOLS);
-  return `# doctrine の既定ワークフロー（dctl workspace-add が雛形として作成したもの）
+  return `# doctrine の既定ワークフロー（doctrine が workspace の登録時に雛形として作成したもの）
 # plan → plan-review → plan-gate → implement → verify → agent-review → review-gate → guide → review
 #
 # エージェントを planner / plan-reviewer / implementer / code-reviewer / guide の5つの役割に分け、

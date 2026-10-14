@@ -619,7 +619,7 @@ test("差し戻しは task.get の stepRuns と stepRun.finished の両方から
     got.stepRuns.filter((r) => r.step_id === "plan-gate")
       .map((r) => [r.status, r.goto_step_id, r.attempt]),
     [["bounced", "plan", 1], ["failed", null, 2]],
-    "差し戻しと本当の失敗が dctl get から見分けられる",
+    "差し戻しと本当の失敗が task.get から見分けられる",
   );
 
   const finished = events.filter((e) =>

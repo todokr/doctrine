@@ -12,7 +12,7 @@ import { createMockAdapter } from "../../src/adapter/mock.ts";
 import type { DaemonContext } from "../../src/daemon/handlers.ts";
 import { constTrackerOf, fakeTracker } from "../helpers/tracker.ts";
 import { noopWatcher } from "../helpers/watcher.ts";
-import { call } from "../../src/cli/dctl.ts";
+import { call } from "../helpers/rpc.ts";
 import type { DaemonSlots, Warning } from "../../../shared/protocol.ts";
 
 let root: string;

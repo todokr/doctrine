@@ -95,10 +95,10 @@ test("(a) 調査が質問を返したら回答待ちになる", async () => {
   assert.equal(call.opts.permissionMode, undefined);
 });
 
-test("intakeAllowedTools は書き込みと gh・dctl を含まない", () => {
+test("intakeAllowedTools は書き込みと gh を含まない", () => {
   for (const t of intakeAllowedTools(["api", "web"])) {
     assert.ok(!/^(Write|Edit|NotebookEdit)/.test(t), t);
-    assert.ok(!/gh|dctl/.test(t), t);
+    assert.ok(!/gh/.test(t), t);
   }
 });
 

@@ -65,7 +65,7 @@ export function getAwaitingStepRun(
  * status に rejected は無く、approval の却下は exit_code 1 で閉じられる。前のステップへ
  * 戻せた却下は bounced、戻り先が無い（onReject が無い・maxAttempts を使い切った）却下は
  * failed である（engine.ts の applyApproval）。bounced だけに絞ると後者が落ち、
- * `dctl diff --since last_review` の範囲が今より狭くなるので、両方を条件にする。
+ * `task.diff` の `since: "last_review"` の範囲が今より狭くなるので、両方を条件にする。
  * review_tree が入るのは approval の awaiting 行だけなので、この2条件で却下だけが取れる。
  * 復旧が付ける interrupted は却下ではないので status の条件で外れる。
  *

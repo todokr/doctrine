@@ -87,7 +87,7 @@ export function workspaceYamlFor(
   };
   if (tracker) obj.tracker = tracker;
   const body = stringify(obj);
-  return `# doctrine の workspace 設定（dctl workspace-add が雛形として作成）\n${body}`;
+  return `# doctrine の workspace 設定（doctrine が workspace の登録時に雛形として作成）\n${body}`;
 }
 
 /** normalize は末尾の "/" を残すので、重複判定のために 1 つ落とす。 */

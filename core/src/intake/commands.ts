@@ -211,7 +211,7 @@ export async function rejectIntake(
 }
 
 /**
- * 承認は人だけが行う。runner にも dctl にもこの経路は無い（spec 6 章 R-9）。
+ * 承認は人だけが行う。runner にこの経路は無い（spec 6 章 R-9）。
  * 判定の正本は、トランザクションの中で読み直した最新の案と hash の照合である。
  *
  * 改訂中の再承認は、固定された部分を変えていないかをもう一度確かめ、intake_processes の行を
@@ -422,7 +422,7 @@ export async function cancelIntake(
 const describe = (e: unknown) => e instanceof Error ? e.message : String(e);
 
 /**
- * 人のプロセスの完了を記録する（H-2）。経路は RPC だけで、runner にも dctl にも無い（H-4）。
+ * 人のプロセスの完了を記録する（H-2）。経路は RPC だけで、runner には無い（H-4）。
  * sub-issue を閉じるのと下流の投入は見張りの周が行う。
  */
 export async function completeHumanProcess(

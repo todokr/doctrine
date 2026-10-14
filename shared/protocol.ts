@@ -677,7 +677,7 @@ export type Methods = {
     params: { intake_id: string; draft_id: number; comments: NewComment[] };
     result: IntakeSummary;
   };
-  /** hash はアプリが表示していた案の intake_drafts.hash。承認は人だけが行い、dctl にこの操作は無い（spec 6 章 R-9）。 */
+  /** hash はアプリが表示していた案の intake_drafts.hash。承認は人だけが行う（spec 6 章 R-9）。 */
   "intake.approve": {
     params: { intake_id: string; draft_id: number; hash: string };
     result: IntakeSummary;
@@ -699,7 +699,7 @@ export type Methods = {
     params: { intake_id: string; mode: "leave" | "stop" };
     result: IntakeSummary;
   };
-  /** 人のプロセスの完了の記録。note は必須。人だけが行い、dctl にこの操作は無い（spec 11.6 H-4）。 */
+  /** 人のプロセスの完了の記録。note は必須。人だけが行う（spec 11.6 H-4）。 */
   "intake.completeHumanProcess": {
     params: { intake_id: string; process_id: string; note: string };
     result: IntakeDetail;
