@@ -112,7 +112,7 @@ localStorage を使わないのは、WebView を作り直すと消えるため�
 | `ratelimit.sample` | その枠の最新値 |
 | `intake.stateChanged` / `intake.updated` | 一覧の行を直し、詳細を捨てる |
 
-Intake に属するタスクの `task.stateChanged` / `stepRun.*` は `intakeStale` を増やし、Execution で開いている Intake の詳細を消さずに取り直す（古い応答は `refreshGate` で捨てる）。
+Intake に属するタスクの `task.stateChanged` / `stepRun.*` は `intakeStale` を増やし、Execution で開いている Intake の詳細を消さずに取り直す（古い応答は `createRefreshGate` で作った `detailGate` で捨てる）。
 
 ## 7.4 画面とファイルと RPC
 
