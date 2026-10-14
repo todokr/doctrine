@@ -919,8 +919,16 @@ export function reduce(s: State, a: Action): State {
         editing: null,
       };
     }
-    case "intake.open":
-      return { ...s, view: "execution", execSel: a.id, editing: null };
+    case "intake.open": {
+      const row = intakeRowOf(s, a.id);
+      return {
+        ...s,
+        view: "execution",
+        execSel: a.id,
+        execClosed: row ? isClosedIntake(row.state) : s.execClosed,
+        editing: null,
+      };
+    }
     case "intake.reload":
       return { ...s, ...invalidateIntake(s, a.id) };
     case "diff":

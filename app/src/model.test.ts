@@ -1641,6 +1641,20 @@ describe("Execution のビュー", () => {
     expect(s.execSel).toBe("i2");
   });
 
+  test("intake.open は開く Intake が終了していれば終了を見る。一覧に無ければ取ってある詳細で決める", () => {
+    const closedRow = reduce(base({ intakes: INTAKES }), { type: "intake.open", id: "i7" });
+    expect(closedRow.execClosed).toBe(true);
+    const activeRow = reduce(base({ intakes: INTAKES, execClosed: true }), { type: "intake.open", id: "i2" });
+    expect(activeRow.execClosed).toBe(false);
+    const detailOnly = reduce(
+      base({ intakeDetails: { i9: { kind: "ok", value: { ...INTAKE_ACTIVE, id: "i9", state: "canceled" } } } }),
+      { type: "intake.open", id: "i9" },
+    );
+    expect(detailOnly.execClosed).toBe(true);
+    const unknown = reduce(base({ execClosed: true }), { type: "intake.open", id: "gone" });
+    expect(unknown.execClosed).toBe(true);
+  });
+
   test("承認・差し戻しの後は同じ Intake の次の承認待ちを選び、別の Intake には飛ばない", () => {
     const tasks = [
       withIntake("a1", "suspended", "i2"),
