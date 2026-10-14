@@ -1,8 +1,9 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test } from "vitest";
-import { PFD_SAMPLE, PFD_STATUSES_A } from "../fixtures";
+import type { RailNode } from "../../../shared/rail.ts";
+import { PFD_SAMPLE, PFD_STATUSES_A, PFD_STATUSES_B } from "../fixtures";
 import { buildPfdView, LOOK, type PfdView } from "../pfd";
-import { PROCESS_TONE, toneClass } from "../tone";
+import { PROCESS_TONE, RUN_TONE, toneClass } from "../tone";
 import { PfdDiagram } from "./PfdDiagram";
 
 const render = (view: PfdView, selected: string | null = null) =>
@@ -146,5 +147,51 @@ describe("PfdDiagram", () => {
     const html = render(buildPfdView(PFD_SAMPLE));
     const stages = [...html.matchAll(/<text[^>]*class="pfd-stage"[^>]*>(\d+)<\/text>/g)].map((m) => m[1]);
     expect(stages).toEqual(["1", "2", "2", "3", "4"]);
+  });
+});
+
+const step = (id: string, status: RailNode["status"], current = false): RailNode =>
+  ({ id, type: "agent", status, current, unknown: false });
+
+describe("PfdDiagram の帯と人の番", () => {
+  const rails = { "build-api": [step("impl", "success"), step("test", "running", true)] };
+
+  test("区画をステップの数だけ、状態の色で描き、今のステップに now を付ける", () => {
+    const html = render(buildPfdView(PFD_SAMPLE, { rails }));
+    const b = block(html, "プロセス", "API を作る");
+    const steps = b.match(/<rect class="pfd-step[^"]*"/g)!;
+    expect(steps).toHaveLength(2);
+    expect(steps[0]).toContain(toneClass(RUN_TONE.success));
+    expect(steps[1]).toContain(toneClass(RUN_TONE.running));
+    expect(steps[1]).toContain(" now");
+  });
+
+  test("タスクの無いプロセスは区画 1 本、人のプロセスは区画を描かず状態の文言を出す", () => {
+    const view = buildPfdView(PFD_SAMPLE, { rails, statuses: PFD_STATUSES_B });
+    const html = render(view);
+    expect(block(html, "プロセス", "スキーマを設計する").match(/class="pfd-step/g)).toHaveLength(1);
+    const human = block(html, "プロセス", "受け入れる");
+    expect(human).not.toContain("pfd-step");
+    expect(human).toContain('class="pfd-railword"');
+    expect(human).toContain(LOOK.your_turn.word);
+  });
+
+  test("rails を渡さない図は区画も文言も描かない", () => {
+    const html = render(buildPfdView(PFD_SAMPLE, { statuses: PFD_STATUSES_B }));
+    expect(html).not.toContain("pfd-step");
+    expect(html).not.toContain("pfd-railword");
+  });
+
+  test("人の番のノードに attention を付け、読み上げにも入れる", () => {
+    const html = render(buildPfdView(PFD_SAMPLE, { attention: new Set(["approve"]) }));
+    const human = block(html, "プロセス", "受け入れる");
+    expect(openTag(human)).toContain("attention");
+    expect(openTag(human)).toContain("人の番");
+    expect(openTag(block(html, "プロセス", "API を作る"))).not.toContain("attention");
+  });
+
+  test("箱の rect は pfd-box を持つ", () => {
+    const html = render(buildPfdView(PFD_SAMPLE));
+    expect(block(html, "成果物", "Issue")).toContain('class="pfd-box"');
   });
 });

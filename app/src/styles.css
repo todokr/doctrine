@@ -551,6 +551,12 @@ tr.wt-stale{background:var(--accent-soft)}
 /* PFD のプロセスの状態（spec 3.4） */
 .pfd-bar{stroke:var(--tone);stroke-width:4;stroke-linecap:round}
 .pfd-bar.dashed{stroke-dasharray:5 3;stroke-linecap:butt}
+/* Execution の図のステップの区画。.pfd-node rect の塗りと枠、選択の枠を区画には当てない */
+.pfd-node rect.pfd-step,.pfd-node.selected rect.pfd-step,.pfd-node:focus-visible rect.pfd-step{fill:var(--tone);stroke:none}
+.pfd-node rect.pfd-step.now{stroke:var(--ink);stroke-width:1}
+.pfd-railword{font-size:9.5px;fill:var(--human-text)}
+.pfd-node.attention rect.pfd-box{stroke:var(--human-text);stroke-width:3}
+.pfd-node.attention.selected rect.pfd-box,.pfd-node.attention:focus-visible rect.pfd-box{stroke:var(--accent)}
 /* Intake の状態ごとの件数（spec 3.5）。.count はサイドバーの既存の件数表示と名前が被るので .counts 配下だけに絞る */
 .counts{display:flex;gap:18px;flex-wrap:wrap}
 .counts .count{display:grid;gap:3px;min-width:88px}

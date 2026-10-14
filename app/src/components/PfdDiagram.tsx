@@ -1,6 +1,6 @@
 import { useId, type KeyboardEvent } from "react";
-import { LOOK, type PfdNode, type PfdView } from "../pfd";
-import { PROCESS_TONE, toneClass } from "../tone";
+import { LOOK, RAIL_BAR_H, railSegments, type PfdNode, type PfdView } from "../pfd";
+import { PROCESS_TONE, RUN_TONE, toneClass } from "../tone";
 
 /** `useId()` の記号（«r0» など）は url(#…) の中で WebKit が解決しないことがあるので、英数字だけにする */
 const useSvgId = (name: string) => `${name}-${useId().replace(/[^A-Za-z0-9_-]/g, "")}`;
@@ -15,6 +15,7 @@ const nodeClass = (n: PfdNode, selected: boolean) =>
     n.decision && "decision",
     n.available && "available",
     n.frozen && "frozen",
+    n.attention && "attention",
     selected && "selected",
   ]
     .filter(Boolean)
@@ -25,6 +26,8 @@ const nodeLabel = (n: PfdNode) =>
     `${n.kind === "artifact" ? "成果物" : "プロセス"} ${n.label}`,
     n.project && `プロジェクト ${n.project}`,
     n.look && LOOK[n.look].word,
+    n.attention && "人の番",
+    n.rail?.find((r) => r.current) && `ステップ ${n.rail.find((r) => r.current)!.id}`,
     n.comments > 0 && `コメント ${n.comments} 件`,
   ]
     .filter(Boolean)
@@ -64,7 +67,7 @@ export function PfdDiagram({ view, selected, onSelect }: { view: PfdView; select
               onKeyDown={onKey(n.key)}
             >
               <title>{n.label}</title>
-              <rect x={n.x} y={n.y} width={n.w} height={n.h} rx={rx} />
+              <rect className="pfd-box" x={n.x} y={n.y} width={n.w} height={n.h} rx={rx} />
               {n.human && <rect className="pfd-inner" x={n.x + 3} y={n.y + 3} width={n.w - 6} height={n.h - 6} rx={rx - 3} />}
               {n.look && (
                 <line
@@ -86,6 +89,20 @@ export function PfdDiagram({ view, selected, onSelect }: { view: PfdView; select
                   <tspan key={i} x={n.x + n.w / 2} dy={i === 0 ? 0 : 13}>{line}</tspan>
                 ))}
               </text>
+              {railSegments(n).map((seg, i) => (
+                <rect
+                  key={i}
+                  className={`pfd-step ${toneClass(RUN_TONE[seg.status])}${seg.current ? " now" : ""}`}
+                  x={seg.x}
+                  y={seg.y}
+                  width={seg.w}
+                  height={RAIL_BAR_H}
+                  rx={1.5}
+                />
+              ))}
+              {n.railRow && n.human && n.look && (
+                <text x={n.x + n.w / 2} y={n.y + n.h - 8} textAnchor="middle" className="pfd-railword">{LOOK[n.look].word}</text>
+              )}
               {n.stage !== null && (
                 <text x={n.x} y={n.y - 4} className="pfd-stage">{n.stage}</text>
               )}
