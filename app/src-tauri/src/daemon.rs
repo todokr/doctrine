@@ -105,7 +105,7 @@ pub fn find_dctld_in(explicit: Option<String>, path: Option<String>) -> Result<P
             return Ok(candidate);
         }
     }
-    Err("dctld が見つかりません（deno task install で入ります）".into())
+    Err("dctld が見つかりません（mise run core:install で入ります）".into())
 }
 
 pub fn find_dctld() -> Result<PathBuf, String> {
@@ -119,7 +119,7 @@ pub fn find_dctld() -> Result<PathBuf, String> {
 /// doctrine は TCP ポートを開かず、ファイルパーミッションがそのまま認可に
 /// なるので（core/src/daemon/server.ts）、DB・ログ・ソケットの置き場を
 /// 他人から読めるまま作ってはいけない。
-/// 既に存在するディレクトリのモードは（Deno 側と同様）変更しない。
+/// 既に存在するディレクトリのモードは（core 側と同様）変更しない。
 fn ensure_state_dir(root: &Path) -> Result<(), String> {
     std::fs::DirBuilder::new()
         .recursive(true)
@@ -273,7 +273,7 @@ mod tests {
     fn missing_dctld_says_how_to_install() {
         let dir = tempfile::tempdir().unwrap();
         let err = find_dctld_in(None, Some(dir.path().to_string_lossy().into_owned())).unwrap_err();
-        assert!(err.contains("deno task install"), "案内が無い: {err}");
+        assert!(err.contains("mise run core:install"), "案内が無い: {err}");
     }
 
     #[test]
