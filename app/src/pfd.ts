@@ -1,8 +1,9 @@
 // PFD の図の配置と見た目の導出。副作用を持たない（テストは pfd.test.ts）
 import { decisionTexts } from "../../shared/intake/answerText.ts";
 import type { Artifact, Pfd, Process } from "../../shared/intake/pfd.ts";
-import type { ProcessStatus } from "../../shared/intake/processStatus.ts";
+import { DIRECT_PROCESS_ID, type ProcessStatus } from "../../shared/intake/processStatus.ts";
 import type { IntakeProcessView, IntakeQuestionSet } from "../../shared/protocol.ts";
+import type { RailNode, RailStatus } from "../../shared/rail.ts";
 import { layoutGraph, type Change } from "./diagram";
 
 export type PfdNodeKind = "artifact" | "process";
@@ -44,6 +45,12 @@ export type PfdNode = {
   lines: string[];
   /** 種類の印（◎・既存・決定・人・🔒）。ラベルの上の小さな行に描く */
   marks: string[];
+  /** Execution の図のエージェントのプロセスだけが持つ、いまのタスクの帯。タスクが無ければ []。それ以外は null */
+  rail: RailNode[] | null;
+  /** 帯の行の高さを取った（Execution の図のプロセス） */
+  railRow: boolean;
+  /** 人の番（spec 6.3）。Execution の図だけが立てる */
+  attention: boolean;
 };
 /** from / to は PfdNode.key */
 export type PfdEdge = { from: string; to: string; d: string };
@@ -131,6 +138,10 @@ const ROW_GAP = 14;
 const PAD = 12;
 /** 段の数字（プロセスの上に出す）の分の上の余白 */
 const PAD_TOP = 22;
+/** 帯の行の高さ。区画の太さと、ラベルとの間 */
+const RAIL_ROW_H = 12;
+export const RAIL_BAR_H = 6;
+const RAIL_GAP = 2;
 
 /** ラベルの描画幅の見積もり（px）。10.5px の文字で、ASCII は 6、それ以外は 10.5 */
 export function textWidth(s: string): number {
@@ -182,6 +193,10 @@ export function buildPfdView(
     comments?: Record<string, number>;
     /** キーは PfdNode.key */
     frozen?: ReadonlySet<string>;
+    /** Execution の図だけ渡す。キーはプロセスの id。null はタスクがあるが帯が読めない */
+    rails?: Record<string, RailNode[] | null>;
+    /** 人の番のプロセスの id */
+    attention?: ReadonlySet<string>;
   } = {},
 ): PfdView {
   const goal = new Set(pfd.goal);
@@ -269,8 +284,9 @@ export function buildPfdView(
     const lines = wrap(s.name, w - BOX_PAD_X * 2);
     const marks = marksOf(s);
     // 印の行は、印が無くても取る。状態の印（承認）や 🔒（改訂）が付いたときに箱の高さが変わらないように
-    const h = BOX_PAD_Y * 2 + MARK_H + lines.length * LINE_H;
-    return [k, { w, h, lines, marks }];
+    const railRow = o.rails !== undefined && s.kind === "process";
+    const h = BOX_PAD_Y * 2 + MARK_H + lines.length * LINE_H + (railRow ? RAIL_ROW_H : 0);
+    return [k, { w, h, lines, marks, railRow }];
   }));
 
   const colW = columns.map((col) => Math.max(0, ...col.map((k) => sized.get(k)!.w)));
@@ -291,7 +307,7 @@ export function buildPfdView(
   const nodes: PfdNode[] = sources.map((s, i) => {
     const key = keys[i];
     const { x, y } = xy.get(key)!;
-    const { w, h, lines, marks } = sized.get(key)!;
+    const { w, h, lines, marks, railRow } = sized.get(key)!;
     return {
       key,
       id: s.id,
@@ -314,6 +330,9 @@ export function buildPfdView(
       frozen: o.frozen?.has(key) ?? false,
       lines,
       marks,
+      rail: railRow && !s.human ? o.rails?.[s.id] ?? [] : null,
+      railRow,
+      attention: s.kind === "process" && (o.attention?.has(s.id) ?? false),
     };
   });
 
@@ -333,6 +352,39 @@ export function buildPfdView(
       return { from: e.from, to: e.to, d: `M${x1},${y1} C${x1 + dx},${y1} ${x2 - dx},${y2} ${x2},${y2}` };
     }),
     removed: [],
+  };
+}
+
+export type RailSegment = { x: number; y: number; w: number; status: RailStatus; current: boolean };
+
+/**
+ * ノードの帯の区画。プロセスの両端は丸い（rx = 高さの半分）ので、左右に rx を空けて丸みの内側に収める。
+ * 空の帯はタスクが無い（か帯が読めない）ので灰色の 1 本にする
+ */
+export function railSegments(n: PfdNode): RailSegment[] {
+  if (n.rail === null) return [];
+  const inset = n.h / 2;
+  const x0 = n.x + inset;
+  const width = n.w - inset * 2;
+  const y = n.y + n.h - BOX_PAD_Y - RAIL_BAR_H;
+  if (n.rail.length === 0) return [{ x: x0, y, w: width, status: "pending", current: false }];
+  const count = n.rail.length;
+  // ステップが多いと隙間だけで幅を食い尽くすので、隙間も区画の半分までに詰める
+  const gap = Math.min(RAIL_GAP, width / (count * 2));
+  const w = (width - gap * (count - 1)) / count;
+  return n.rail.map((r, i) => ({ x: x0 + i * (w + gap), y, w, status: r.status, current: r.current }));
+}
+
+/** direct の Intake の図。PFD は保存しないので、Issue の題から組み立てる（spec 6.2） */
+export function directPfd(issueTitle: string): Pfd {
+  return {
+    title: issueTitle,
+    goal: ["pr"],
+    artifacts: [
+      { id: "issue", name: "Issue", given: true },
+      { id: "pr", name: "PR", given: false },
+    ],
+    processes: [{ id: DIRECT_PROCESS_ID, name: issueTitle, actor: "agent", inputs: ["issue"], outputs: ["pr"] }],
   };
 }
 

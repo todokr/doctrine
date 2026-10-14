@@ -1,9 +1,11 @@
 import { describe, expect, test } from "vitest";
 import type { Pfd } from "../../shared/intake/pfd.ts";
+import { DIRECT_PROCESS_ID } from "../../shared/intake/processStatus.ts";
+import type { RailNode } from "../../shared/rail.ts";
 import type { ProcessStatus } from "../../shared/intake/processStatus.ts";
 import type { IntakeProcessView } from "../../shared/protocol.ts";
 import { INTAKE_ACTIVE, INTAKE_REVIEWING, PFD_LONG_LABELS, PFD_SAMPLE, PFD_STATUSES_A, PFD_STATUSES_B } from "./fixtures";
-import { buildPfdView, frozenIds, LOOK, statusCounts, textWidth, parsePfdKey, pfdElement, pfdKey, processStages, type PfdView } from "./pfd";
+import { buildPfdView, directPfd, frozenIds, LOOK, RAIL_BAR_H, railSegments, statusCounts, textWidth, parsePfdKey, pfdElement, pfdKey, processStages, type PfdView } from "./pfd";
 
 /** 成果物 id の配列と、[id, 入力, 出力] の配列から PFD を作る。given は goal に無く、どのプロセスの出力でもない成果物 */
 const pfd = (artifacts: string[], processes: [string, string[], string[]][], goal: string[]): Pfd => {
@@ -376,5 +378,95 @@ describe("statusCounts", () => {
     const { counts, merged } = statusCounts(buildPfdView(PFD_SAMPLE));
     expect(counts.every((c) => c.count === 0)).toBe(true);
     expect(merged).toBe(0);
+  });
+});
+
+const step = (id: string, status: RailNode["status"], current = false): RailNode =>
+  ({ id, type: "agent", status, current, unknown: false });
+
+describe("buildPfdView の帯", () => {
+  const rails = { "build-api": [step("impl", "success"), step("test", "running", true), step("review", "pending")] };
+
+  test("rails を渡さない図は帯の行を取らず、高さも変わらない", () => {
+    const plain = buildPfdView(PFD_SAMPLE);
+    const withRails = buildPfdView(PFD_SAMPLE, { rails });
+    const p = node(plain, "p:build-api");
+    expect(p.rail).toBeNull();
+    expect(p.railRow).toBe(false);
+    expect(node(withRails, "p:build-api").h).toBeGreaterThan(p.h);
+    // 成果物の高さは変えない
+    expect(node(withRails, "a:api").h).toBe(node(plain, "a:api").h);
+  });
+
+  test("rails のキーに無いエージェントのプロセスは空の帯、人のプロセスは null", () => {
+    const view = buildPfdView(PFD_SAMPLE, { rails });
+    expect(node(view, "p:build-api").rail).toHaveLength(3);
+    expect(node(view, "p:design").rail).toEqual([]);
+    expect(node(view, "p:approve").rail).toBeNull();
+    expect(node(view, "p:approve").railRow).toBe(true);
+    expect(node(view, "a:api").rail).toBeNull();
+  });
+
+  test("rail が null のエージェントのプロセスは灰色の帯 1 本", () => {
+    const view = buildPfdView(PFD_SAMPLE, { rails: { "build-api": null } });
+    const segs = railSegments(node(view, "p:build-api"));
+    expect(segs).toHaveLength(1);
+    expect(segs[0].status).toBe("pending");
+  });
+
+  test("区画はステップの数だけ等分し、今のステップに印を付ける", () => {
+    const n = node(buildPfdView(PFD_SAMPLE, { rails }), "p:build-api");
+    const segs = railSegments(n);
+    expect(segs.map((x) => x.status)).toEqual(["success", "running", "pending"]);
+    expect(segs.map((x) => x.current)).toEqual([false, true, false]);
+    expect(new Set(segs.map((x) => x.w)).size).toBe(1);
+    expect(segs[0].x).toBeLessThan(segs[1].x);
+  });
+
+  test("100 ステップでも枠内に収まる", () => {
+    const many = Array.from({ length: 100 }, (_, i) => step(`s${i}`, "pending"));
+    const n = node(buildPfdView(PFD_SAMPLE, { rails: { "build-api": many } }), "p:build-api");
+    const segs = railSegments(n);
+    expect(segs).toHaveLength(100);
+    for (const s of segs) {
+      expect(s.w).toBeGreaterThan(0);
+      expect(s.x).toBeGreaterThanOrEqual(n.x);
+      expect(s.x + s.w).toBeLessThanOrEqual(n.x + n.w + 1e-9);
+      expect(s.y + RAIL_BAR_H).toBeLessThanOrEqual(n.y + n.h);
+    }
+  });
+
+  test("区画はラベルの行より下にある", () => {
+    const n = node(buildPfdView(PFD_SAMPLE, { rails }), "p:build-api");
+    // ラベルの最後の行のベースライン（PfdDiagram は y + 31 から 13 ずつ下げる）
+    const lastBaseline = n.y + 31 + (n.lines.length - 1) * 13;
+    expect(railSegments(n)[0].y).toBeGreaterThan(lastBaseline);
+  });
+
+  test("人のプロセスと成果物は区画を持たない", () => {
+    const view = buildPfdView(PFD_SAMPLE, { rails });
+    expect(railSegments(node(view, "p:approve"))).toEqual([]);
+    expect(railSegments(node(view, "a:api"))).toEqual([]);
+  });
+
+  test("attention のプロセスだけ印が立つ", () => {
+    const view = buildPfdView(PFD_SAMPLE, { attention: new Set(["approve"]) });
+    expect(node(view, "p:approve").attention).toBe(true);
+    expect(node(view, "p:design").attention).toBe(false);
+    expect(node(view, "a:api").attention).toBe(false);
+  });
+});
+
+describe("directPfd", () => {
+  test("Issue → main → PR の 3 要素", () => {
+    const pfd = directPfd("CSV を出す");
+    expect(pfd.goal).toEqual(["pr"]);
+    expect(pfd.processes).toEqual([
+      { id: DIRECT_PROCESS_ID, name: "CSV を出す", actor: "agent", inputs: ["issue"], outputs: ["pr"] },
+    ]);
+    const view = buildPfdView(pfd);
+    expect(view.nodes.map((n) => n.key)).toEqual(["a:issue", "a:pr", `p:${DIRECT_PROCESS_ID}`]);
+    expect(node(view, "a:issue").x).toBeLessThan(node(view, `p:${DIRECT_PROCESS_ID}`).x);
+    expect(node(view, `p:${DIRECT_PROCESS_ID}`).x).toBeLessThan(node(view, "a:pr").x);
   });
 });
