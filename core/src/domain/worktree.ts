@@ -39,6 +39,32 @@ export function branchNameFor(taskId: string, title: string): string {
   return slug ? `doctrine/${taskId}-${slug}` : `doctrine/${taskId}`;
 }
 
+/** refs/heads/<branch> か refs/remotes/origin/<branch> があるか。origin 側は手元に fetch 済みの分だけ。 */
+export async function branchExists(repoPath: string, branch: string): Promise<boolean> {
+  for (const ref of [`refs/heads/${branch}`, `refs/remotes/origin/${branch}`]) {
+    const child = await spawnChild(
+      "git",
+      ["-C", repoPath, "show-ref", "--verify", "--quiet", ref],
+      {},
+    );
+    child.stdout.resume();
+    child.stderr.resume();
+    if ((await child.status).code === 0) return true;
+  }
+  return false;
+}
+
+/**
+ * doctrine/<slug>、doctrine/<slug>-2 … doctrine/<slug>-9 の順に、まだ無い名前を返す。全部埋まっていれば null。
+ */
+export async function uniqueBranchName(repoPath: string, slug: string): Promise<string | null> {
+  for (let n = 1; n <= 9; n++) {
+    const candidate = n === 1 ? `doctrine/${slug}` : `doctrine/${slug}-${n}`;
+    if (!(await branchExists(repoPath, candidate))) return candidate;
+  }
+  return null;
+}
+
 /**
  * 前段のエージェントが worktree 内に書く中間成果物の置き場所。doctrine 自身は
  * この名前を強制しない（ワークフローの書き手がプロンプトで決める自由な文字列）が、

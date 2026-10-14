@@ -28,6 +28,7 @@ export type StepBoundary = {
       | "current_step_id"
       | "attempt_counts"
       | "worktree_path"
+      | "branch"
       | "claude_session_id"
       | "child_pid"
       | "child_started_at"

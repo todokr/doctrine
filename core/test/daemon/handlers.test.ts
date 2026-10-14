@@ -40,6 +40,7 @@ import type {
   WorktreeEntry,
 } from "../../../shared/protocol.ts";
 import { branchNameFor } from "../../src/domain/worktree.ts";
+import type { BranchNamer } from "../../src/domain/branchName.ts";
 import { randomUUID } from "node:crypto";
 import { makeRepo, tickWhenIdle, until } from "../helpers/repo.ts";
 import { constTrackerOf, fakeTracker } from "../helpers/tracker.ts";
@@ -85,11 +86,15 @@ afterEach(async () => {
   delete process.env.DOCTRINE_STATE_DIR;
 });
 
-async function context(events: ServerEvent[] = []): Promise<DaemonContext> {
+async function context(
+  events: ServerEvent[] = [],
+  o: { branchNamer?: BranchNamer } = {},
+): Promise<DaemonContext> {
   const db = await openDb(":memory:");
   const ctx: DaemonContext = {
     db,
     adapter: createMockAdapter({ result: { ok: true, text: "done" } }),
+    branchNamer: o.branchNamer ?? (async () => null),
     logRoot: join(root, "logs"),
     globalLimit: 4,
     configPath: join(root, "state", "config.json"),
@@ -1100,6 +1105,112 @@ test("最終ステップの approval でも未コミットの変更が残って�
     ctx.warnings.recent().some((w) => /未コミット/.test(w.message)),
     "警告として出す",
   );
+});
+
+// --- ブランチ名 -------------------------------------------------------------
+
+const JA_TITLE = "/healthz を clamd への PING で応答するように変える";
+
+async function headOf(worktreePath: string): Promise<string> {
+  const { stdout } = await run("git", ["-C", worktreePath, "rev-parse", "--abbrev-ref", "HEAD"]);
+  return stdout.trim();
+}
+
+test("枠を取ったとき branchNamer の slug でブランチを作り tasks.branch を書き換える", async () => {
+  const received: { title: string; prompt: string }[] = [];
+  const ctx = await context([], {
+    branchNamer: async (o) => {
+      received.push(o);
+      return "ping-clamd-healthz";
+    },
+  });
+  const h = createHandler(ctx);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
+  const t = (await h(
+    "task.create",
+    { project: repo, title: JA_TITLE, prompt: "clamd に PING を送る" },
+    NOOP_CONN,
+  )) as { id: string };
+  await tick(ctx);
+  await until(async () => (await getTask(ctx.db, t.id))?.worktree_path != null);
+  await until(() => ctx.running.size === 0);
+
+  const row = (await getTask(ctx.db, t.id))!;
+  assert.equal(row.branch, "doctrine/ping-clamd-healthz");
+  assert.equal(await headOf(row.worktree_path!), "doctrine/ping-clamd-healthz");
+  assert.deepEqual(received, [{ title: JA_TITLE, prompt: "clamd に PING を送る" }]);
+});
+
+test("branchNamer が null なら作成時のブランチ名のまま作る", async () => {
+  const ctx = await context([], { branchNamer: async () => null });
+  const h = createHandler(ctx);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
+  const t = (await h(
+    "task.create",
+    { project: repo, title: JA_TITLE, prompt: "p" },
+    NOOP_CONN,
+  )) as { id: string };
+  const created = (await getTask(ctx.db, t.id))!.branch;
+  assert.equal(created, `doctrine/${t.id}-healthz-clamd-ping`);
+  await tick(ctx);
+  await until(async () => (await getTask(ctx.db, t.id))?.worktree_path != null);
+  await until(() => ctx.running.size === 0);
+
+  const row = (await getTask(ctx.db, t.id))!;
+  assert.equal(row.branch, created);
+  assert.equal(await headOf(row.worktree_path!), created);
+});
+
+test("同じ slug のブランチが既にあれば -2 を付ける", async () => {
+  await run("git", ["-C", repo, "branch", "doctrine/ping-clamd-healthz"]);
+  const ctx = await context([], { branchNamer: async () => "ping-clamd-healthz" });
+  const h = createHandler(ctx);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
+  const t = (await h(
+    "task.create",
+    { project: repo, title: JA_TITLE, prompt: "p" },
+    NOOP_CONN,
+  )) as { id: string };
+  await tick(ctx);
+  await until(async () => (await getTask(ctx.db, t.id))?.worktree_path != null);
+  await until(() => ctx.running.size === 0);
+
+  assert.equal((await getTask(ctx.db, t.id))!.branch, "doctrine/ping-clamd-healthz-2");
+});
+
+test("worktree が既にあるタスクでは branchNamer を呼ばない", async () => {
+  let calls = 0;
+  const ctx = await context([], {
+    branchNamer: async () => {
+      calls++;
+      return "ping-clamd-healthz";
+    },
+  });
+  const h = createHandler(ctx);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
+  const t = (await h(
+    "task.create",
+    { project: repo, title: JA_TITLE, prompt: "p" },
+    NOOP_CONN,
+  )) as { id: string };
+  const created = (await getTask(ctx.db, t.id))!.branch;
+  const existing = await createWorktree({
+    repoPath: repo,
+    worktreePath: worktreePathFor(repo, t.id),
+    branch: created,
+    baseBranch: "main",
+  });
+  await ctx.db
+    .updateTable("tasks")
+    .set({ worktree_path: existing })
+    .where("id", "=", t.id)
+    .execute();
+  await tick(ctx);
+  await until(async () => (await getTask(ctx.db, t.id))?.state === "suspended");
+  await until(() => ctx.running.size === 0);
+
+  assert.equal(calls, 0);
+  assert.equal((await getTask(ctx.db, t.id))!.branch, created);
 });
 
 // --- tick の再入 ----------------------------------------------------------

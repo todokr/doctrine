@@ -86,6 +86,7 @@ async function context(events: ServerEvent[] = [], o: Options = {}): Promise<Dae
   const ctx: DaemonContext = {
     db,
     adapter: o.adapter ?? standardAdapter(),
+    branchNamer: async () => null,
     logRoot: join(root, "logs"),
     globalLimit: 4,
     configPath: join(root, "config.json"),

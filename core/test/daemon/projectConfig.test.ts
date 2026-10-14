@@ -49,6 +49,7 @@ async function context(events: ServerEvent[] = []): Promise<DaemonContext> {
   const ctx: DaemonContext = {
     db,
     adapter: createMockAdapter({ result: { ok: true, text: "done" } }),
+    branchNamer: async () => null,
     logRoot: join(root, "logs"),
     globalLimit: 4,
     configPath: join(root, "state", "config.json"),

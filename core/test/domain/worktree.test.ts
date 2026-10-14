@@ -25,6 +25,7 @@ import {
   slugify,
   stateDir,
   UncommittedChangesError,
+  uniqueBranchName,
   worktreePathFor,
 } from "../../src/domain/worktree.ts";
 
@@ -457,4 +458,30 @@ test("containsCommit: 含まれない・手元に無いコミットは false", a
     await containsCommit(repo, "main", "0123456789abcdef0123456789abcdef01234567"),
     false,
   );
+});
+
+test("uniqueBranchName は空いていれば doctrine/<slug> を返す", async () => {
+  assert.equal(await uniqueBranchName(repo, "ping-clamd"), "doctrine/ping-clamd");
+});
+
+test("uniqueBranchName は手元のブランチとぶつかれば -2 を付ける", async () => {
+  await run("git", ["-C", repo, "branch", "doctrine/ping-clamd"]);
+  assert.equal(await uniqueBranchName(repo, "ping-clamd"), "doctrine/ping-clamd-2");
+});
+
+test("uniqueBranchName は origin のブランチとぶつかっても避ける", async () => {
+  await run("git", ["-C", repo, "update-ref", "refs/remotes/origin/doctrine/ping-clamd", "HEAD"]);
+  assert.equal(await uniqueBranchName(repo, "ping-clamd"), "doctrine/ping-clamd-2");
+});
+
+test("uniqueBranchName は番号付きもぶつかれば次の番号にする", async () => {
+  await run("git", ["-C", repo, "branch", "doctrine/ping-clamd"]);
+  await run("git", ["-C", repo, "branch", "doctrine/ping-clamd-2"]);
+  assert.equal(await uniqueBranchName(repo, "ping-clamd"), "doctrine/ping-clamd-3");
+});
+
+test("uniqueBranchName は候補が全部埋まっていれば null", async () => {
+  await run("git", ["-C", repo, "branch", "doctrine/x"]);
+  for (let n = 2; n <= 9; n++) await run("git", ["-C", repo, "branch", `doctrine/x-${n}`]);
+  assert.equal(await uniqueBranchName(repo, "x"), null);
 });

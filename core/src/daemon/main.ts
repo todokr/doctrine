@@ -5,6 +5,7 @@ import { connect } from "node:net";
 import { dirname, join } from "node:path";
 import { openDb } from "../db/migrate.ts";
 import { createClaudeAdapter } from "../adapter/claude.ts";
+import { createClaudeBranchNamer } from "../domain/branchName.ts";
 import { defaultProbe, recoverOnStartup, type WorkflowLookup } from "../domain/recovery.ts";
 import { findOrphans } from "../domain/worktree.ts";
 import { getProject, listProjects, listTasks, type TaskRow } from "../db/tasks.ts";
@@ -144,9 +145,12 @@ export async function startDaemon(
   const { config, warning: configWarning } = await readDaemonConfig(configPath);
 
   const trackerOf = trackerFor({ linearApiKey: config.linearApiKey });
+  const adapter = createClaudeAdapter();
   const ctx: DaemonContext = {
     db,
-    adapter: createClaudeAdapter(),
+    adapter,
+    // プロジェクトを cwd にすると、その .mcp.json などが読まれて命名が遅くなる
+    branchNamer: createClaudeBranchNamer(adapter, { cwd: dirname(dbPath) }),
     logRoot: o.logRoot ?? join(stateRoot(), "logs"),
     globalLimit: config.globalLimit,
     configPath,

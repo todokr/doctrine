@@ -90,8 +90,10 @@ import {
   removeWorktree,
   repoOfWorktree,
   UncommittedChangesError,
+  uniqueBranchName,
   worktreePathFor,
 } from "../domain/worktree.ts";
+import type { BranchNamer } from "../domain/branchName.ts";
 import { cancelTask, closeAwaitingStepRun } from "../domain/cancelTask.ts";
 import { defaultProbe, killStaleChild } from "../domain/recovery.ts";
 import { buildTaskContext } from "../domain/taskContext.ts";
@@ -120,6 +122,8 @@ import type { WarningLog } from "./warnings.ts";
 export type DaemonContext = {
   db: Db;
   adapter: AgentAdapter;
+  /** 枠を取って worktree を作るときにブランチ名の slug を決める。null なら作成時の名前（branchNameFor）のまま。 */
+  branchNamer: BranchNamer;
   logRoot: string;
   globalLimit: number;
   broadcast(ev: ServerEvent, opts?: { followKey?: string; followersOnly?: boolean }): void;
@@ -1554,19 +1558,28 @@ async function tickOnce(ctx: DaemonContext): Promise<void> {
       workflow = await ctx.workflowOf(task, project);
 
       // worktree はタスク作成時ではなく、実行枠が取れた瞬間に作る
+      // ブランチ名もここで Claude に決めさせ、決められなければ作成時の名前を使う
       // DB には createWorktree が返す実パスを保存する（worktree.list が返す表記と揃える）
-      worktreePath =
-        task.worktree_path ??
-        (await createWorktree({
+      let branch: string | undefined;
+      if (task.worktree_path === null) {
+        const slug = await ctx.branchNamer({ title: task.title, prompt: task.prompt });
+        branch = (slug === null ? null : await uniqueBranchName(project.path, slug)) ?? task.branch;
+        worktreePath = await createWorktree({
           repoPath: project.path,
           worktreePath: worktreePathFor(project.path, task.id),
-          branch: task.branch,
+          branch,
           baseBranch: task.intake_id === null ? project.base_branch : await intakeBase(project),
-        }));
+        });
+      } else {
+        worktreePath = task.worktree_path;
+      }
 
       await commitStepBoundary(ctx.db, {
         taskId: task.id,
-        taskPatch: { worktree_path: worktreePath },
+        taskPatch:
+          branch === undefined
+            ? { worktree_path: worktreePath }
+            : { worktree_path: worktreePath, branch },
       });
     } catch (e) {
       // ワークフローが読めない・worktree が作れないなど、枠を取った後に
