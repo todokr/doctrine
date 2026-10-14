@@ -5,7 +5,7 @@ import { clampPanelHeight, panelContentOf, panelStorage, readPanelHeight, writeP
 import { actionNeeded, isClosedIntake } from "../intake";
 import { intakeDraftOf, type Loaded } from "../model";
 import { pfdElement, type PfdView } from "../pfd";
-import { useIntakeRpc, useStore } from "../store";
+import { useIntakeRpc, useRefresh, useStore } from "../store";
 import { ExecPanel } from "./ExecPanel";
 import { ActionNeeded, ProcessTrail } from "./IntakeProgress";
 import { PfdElementPanel } from "./PfdElementPanel";
@@ -29,6 +29,7 @@ export function ExecDetail(p: {
 }) {
   const { s, dispatch } = useStore();
   const api = useIntakeRpc();
+  const refresh = useRefresh();
   const { pending, call } = useCall();
   // 覚えた高さは前の窓の大きさのものなので、いまの領域に収め直す
   const [height, setHeight] = useState(() => clampPanelHeight(readPanelHeight(panelStorage()), p.room()));
@@ -66,6 +67,8 @@ export function ExecDetail(p: {
     void call(id, api.redispatch(p.detail.id, id), "再投入できませんでした", (d) => {
       dispatch({ type: "intake.fresh", id: p.detail.id, detail: d });
       dispatch({ type: "toast", message: "再投入しました" });
+      // 投入したタスクを次の取り直しを待たずに一覧へ載せる
+      void refresh();
     });
   const openPrompt = () => {
     if (processId === null || draftId === null || prompts[processId]) return;

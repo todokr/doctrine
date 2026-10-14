@@ -12,7 +12,7 @@ import {
   type IssueTarget,
 } from "../intake";
 import { type Action, clock, type Loaded } from "../model";
-import { useIntakeRpc, useStore } from "../store";
+import { useIntakeRpc, useRefresh, useStore } from "../store";
 import type { Workspace } from "../types";
 import { StatusDot } from "./StatusDot";
 import { Markdown } from "./text";
@@ -239,11 +239,17 @@ export async function startIntake(
   root: string,
   issueUrl: string,
   mode: IntakeMode,
-  deps: { start: ReturnType<typeof useIntakeRpc>["start"]; dispatch: Dispatch<Action> },
+  deps: {
+    start: ReturnType<typeof useIntakeRpc>["start"];
+    dispatch: Dispatch<Action>;
+    refresh: () => Promise<void>;
+  },
 ): Promise<void> {
   try {
     const { alreadyActive: _, ...intake } = await deps.start(root, issueUrl, mode);
     deps.dispatch({ type: "intake.started", intake });
+    // direct は開始と同時にタスクを投入する。次の取り直しを待たずに一覧へ載せる
+    if (intake.mode === "direct") void deps.refresh();
   } catch (e) {
     deps.dispatch({ type: "toast", message: `Intake を始められませんでした（${errorMessage(e)}）` });
   }
@@ -268,6 +274,7 @@ export function WorkspacePick(props: {
 export function IssuePicker() {
   const { s, dispatch } = useStore();
   const api = useIntakeRpc();
+  const refresh = useRefresh();
   const [chosen, setChosen] = useState<number | undefined>(() => s.workspace === "all" ? undefined : s.workspace);
   const workspace = pickerWorkspace(s.workspaces, chosen);
   const root = workspace?.path;
@@ -399,7 +406,7 @@ export function IssuePicker() {
             onStart={async (mode) => {
               setPending(true);
               try {
-                await startIntake(workspace.path, picked.url, mode, { start: api.start, dispatch });
+                await startIntake(workspace.path, picked.url, mode, { start: api.start, dispatch, refresh });
               } finally {
                 setPending(false);
               }
