@@ -1,5 +1,5 @@
 import { useId, type KeyboardEvent } from "react";
-import { LOOK, RAIL_BAR_H, railSegments, type PfdNode, type PfdView } from "../pfd";
+import { LOOK, RAIL_BAR_H, railSegments, STATUS_DOT, type PfdNode, type PfdView } from "../pfd";
 import { PROCESS_TONE, RUN_TONE, TASK_TONE, toneClass } from "../tone";
 
 /** `useId()` の記号（«r0» など）は url(#…) の中で WebKit が解決しないことがあるので、英数字だけにする */
@@ -22,7 +22,7 @@ const nodeClass = (n: PfdNode, selected: boolean) =>
     .join(" ");
 
 const statusWords = (n: PfdNode) =>
-  n.status ? [n.status.word, n.status.detail].filter(Boolean).join(" · ") : n.look && LOOK[n.look].word;
+  n.status ? (n.status.text === n.status.word ? n.status.word : `${n.status.word} · ${n.status.text}`) : n.look && LOOK[n.look].word;
 
 const nodeLabel = (n: PfdNode, exec: boolean) =>
   [
@@ -84,7 +84,7 @@ export function PfdDiagram({ view, selected, onSelect }: { view: PfdView; select
                   y2={n.y + 4}
                 />
               )}
-              {n.marks.length > 0 && (
+              {n.badge === null && n.marks.length > 0 && (
                 <text x={n.x + 8} y={n.y + 16} className="pfd-mark">
                   {n.marks.join(" ")}
                 </text>
@@ -99,8 +99,8 @@ export function PfdDiagram({ view, selected, onSelect }: { view: PfdView; select
               </text>
               {n.status && n.look && (
                 <text x={n.x + n.w / 2} y={n.status.y} textAnchor="middle" className="pfd-status">
-                  <tspan className={`pfd-status-word ${toneClass(n.status.awaiting ? TASK_TONE.suspended : PROCESS_TONE[n.look].tone)}`}>{n.status.word}</tspan>
-                  {n.status.detail !== null && <tspan className="pfd-status-detail">{` · ${n.status.detail}`}</tspan>}
+                  <tspan className={`pfd-status-dot ${toneClass(n.status.awaiting ? TASK_TONE.suspended : PROCESS_TONE[n.look].tone)}`}>{STATUS_DOT}</tspan>
+                  <tspan className="pfd-status-text">{` ${n.status.text}`}</tspan>
                 </text>
               )}
               {railSegments(n).map((seg, i) => (
@@ -116,6 +116,14 @@ export function PfdDiagram({ view, selected, onSelect }: { view: PfdView; select
               ))}
               {!exec && n.stage !== null && (
                 <text x={n.x} y={n.y - 4} className="pfd-stage">{n.stage}</text>
+              )}
+              {n.badge !== null && (
+                <g className="pfd-badge">
+                  <rect x={n.badge.x} y={n.badge.y} width={n.badge.w} height={n.badge.h} rx={n.badge.h / 2} />
+                  <text x={n.badge.x + n.badge.w / 2} y={n.badge.y + n.badge.h / 2} textAnchor="middle" dominantBaseline="central">
+                    {n.marks.join(" ")}
+                  </text>
+                </g>
               )}
               {n.comments > 0 && (
                 <g className="pfd-comments">

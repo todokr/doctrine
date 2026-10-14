@@ -275,6 +275,9 @@ th{color:var(--ink-3);font-size:11px;font-weight:500;border-top:0;background:var
 .pfd-comments text{fill:var(--accent-ink);font-size:9px;font-weight:500}
 /* 選択は状態の枠より後に書き、選んだ要素の枠が状態の枠に負けないようにする */
 .pfd-node:focus-visible rect,.pfd-node.selected rect{stroke:var(--accent);stroke-width:2.5}
+/* 成果物の印の札。箱の塗り・枠・選択の枠を札には当てない */
+.pfd-node .pfd-badge rect,.pfd-node.selected .pfd-badge rect,.pfd-node:focus-visible .pfd-badge rect{fill:var(--ink-3);stroke:none;opacity:1}
+.pfd-badge text{fill:var(--surface);font-size:9px;font-weight:500}
 /* ワークフローの定義の図（設定画面）。タスク画面の帯は .wf */
 .wr{display:block}
 .wr-edge{stroke:var(--line);stroke-width:1.4}
@@ -552,10 +555,10 @@ tr.wt-stale{background:var(--accent-soft)}
 .pfd-node rect.pfd-step,.pfd-node.selected rect.pfd-step,.pfd-node:focus-visible rect.pfd-step{fill:var(--tone);stroke:none}
 /* いまのステップはタスク画面の帯（.wf-step.now .bar）と同じ薄い縁取り。区画の名前は状態の文言にある */
 .pfd-node rect.pfd-step.now,.pfd-node.selected rect.pfd-step.now,.pfd-node:focus-visible rect.pfd-step.now{stroke:var(--tone-soft);stroke-width:3;paint-order:stroke}
-/* Execution の図の状態の文言。状態の色は言葉の文字だけに使う */
+/* Execution の図の状態の文言。状態の色は点だけに使う */
 .pfd-status{font-size:10px}
-.pfd-status-word{fill:var(--tone-text);font-weight:500}
-.pfd-status-detail{fill:var(--ink-2)}
+.pfd-status-dot{fill:var(--tone-text)}
+.pfd-status-text{fill:var(--ink-2)}
 /* 人の番は地の塗りだけで示す（spec 6.3）。枠は選択の枠のまま */
 .pfd-node.attention rect.pfd-box{fill:var(--accent-soft)}
 /* Intake の状態ごとの件数（spec 3.5）。.count はサイドバーの既存の件数表示と名前が被るので .counts 配下だけに絞る */

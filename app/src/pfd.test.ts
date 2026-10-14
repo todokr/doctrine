@@ -94,6 +94,38 @@ describe("buildPfdView", () => {
     expect(node(view, "p:approve").marks).toEqual(["人"]);
   });
 
+  test("成果物の種類の印は箱の左上の角にまたがる札にし、ラベルを箱の上下の中央に置く", () => {
+    for (const view of [buildPfdView(PFD_SAMPLE), buildPfdView(PFD_SAMPLE, { statuses: PFD_STATUSES_B, exec: { rails: {} } })]) {
+      for (const n of view.nodes.filter((x) => x.kind === "artifact")) {
+        // 行の上端はベースラインから 12 上、行の高さは 13
+        const above = n.labelY - 12 - n.y;
+        const below = n.y + n.h - (n.labelY - 12 + n.lines.length * 13);
+        expect(above).toBe(below);
+        if (n.marks.length === 0) {
+          expect(n.badge).toBeNull();
+          continue;
+        }
+        const b = n.badge!;
+        expect(b.x).toBeLessThan(n.x);
+        expect(b.x + b.w).toBeGreaterThan(n.x);
+        expect(b.y).toBeLessThan(n.y);
+        expect(b.y + b.h).toBeGreaterThan(n.y);
+        expect(b.x).toBeGreaterThanOrEqual(0);
+        expect(b.y).toBeGreaterThanOrEqual(0);
+      }
+      for (const n of view.nodes.filter((x) => x.kind === "process")) expect(n.badge).toBeNull();
+    }
+  });
+
+  test("札は同じ列の上の箱に重ならない", () => {
+    const view = buildPfdView(PFD_SAMPLE);
+    for (const n of view.nodes.filter((x) => x.badge !== null)) {
+      for (const m of view.nodes.filter((x) => x !== n && x.x < n.badge!.x + n.badge!.w && n.badge!.x < x.x + x.w)) {
+        if (m.y < n.y) expect(m.y + m.h).toBeLessThanOrEqual(n.badge!.y);
+      }
+    }
+  });
+
   test("辺は key でノードを指す", () => {
     const view = buildPfdView(PFD_SAMPLE);
     const keys = new Set(view.nodes.map((n) => n.key));
@@ -450,13 +482,14 @@ describe("buildPfdView の帯", () => {
     }
   });
 
-  test("Execution の図のプロセスは種類の印の行を取らない。成果物は取る", () => {
+  test("Execution の図のプロセスは種類の印の行を取らない。成果物は図によらず同じ形", () => {
     const plain = buildPfdView(PFD_SAMPLE);
     const exec = buildPfdView(PFD_SAMPLE, { statuses: PFD_STATUSES_B, exec: { rails } });
     expect(node(exec, "p:approve").marks).toEqual([]);
     expect(node(exec, "p:build-api").labelY).toBeLessThan(node(exec, "p:build-api").y + (node(plain, "p:build-api").labelY - node(plain, "p:build-api").y));
     expect(node(exec, "a:issue").marks).toEqual(node(plain, "a:issue").marks);
     expect(node(exec, "a:issue").labelY - node(exec, "a:issue").y).toBe(node(plain, "a:issue").labelY - node(plain, "a:issue").y);
+    expect(node(exec, "a:issue").badge!.x - node(exec, "a:issue").x).toBe(node(plain, "a:issue").badge!.x - node(plain, "a:issue").x);
   });
 
   test("人のプロセスは帯の分だけ低い", () => {
@@ -488,8 +521,8 @@ describe("buildPfdView の帯", () => {
 
   test("状態の文言は Execution の図のプロセスだけが持つ", () => {
     const exec = buildPfdView(PFD_SAMPLE, { statuses: PFD_STATUSES_B, exec: { rails } });
-    expect(node(exec, "p:design").status).toMatchObject({ word: "要確認", detail: "タスクが止まった" });
-    expect(node(exec, "p:approve").status).toMatchObject({ word: "あなたの番", detail: null });
+    expect(node(exec, "p:design").status).toMatchObject({ word: "要確認", text: "タスクが止まった" });
+    expect(node(exec, "p:approve").status).toMatchObject({ word: "あなたの番", text: "あなたの番" });
     expect(node(exec, "a:api").status).toBeNull();
     for (const n of buildPfdView(PFD_SAMPLE, { statuses: PFD_STATUSES_B }).nodes) expect(n.status).toBeNull();
   });
@@ -500,37 +533,37 @@ describe("statusLine", () => {
   const pr = { number: 41, url: "u", state: "OPEN" as const, baseRef: "develop", mergedAt: null, mergeCommit: null };
 
   test("実行中はいまのステップの名前を添える", () => {
-    expect(statusLine({ state: "running", taskId: "t" }, rail, 200)).toEqual({ word: "実行中", detail: "implement", awaiting: false });
-    expect(statusLine({ state: "running", taskId: "t" }, [step("plan", "success")], 200)).toEqual({ word: "実行中", detail: null, awaiting: false });
-    expect(statusLine({ state: "running", taskId: "t" }, null, 200)).toEqual({ word: "実行中", detail: null, awaiting: false });
+    expect(statusLine({ state: "running", taskId: "t" }, rail, 200)).toEqual({ word: "実行中", text: "implement", awaiting: false });
+    expect(statusLine({ state: "running", taskId: "t" }, [step("plan", "success")], 200)).toEqual({ word: "実行中", text: "実行中", awaiting: false });
+    expect(statusLine({ state: "running", taskId: "t" }, null, 200)).toEqual({ word: "実行中", text: "実行中", awaiting: false });
   });
 
   test("要確認は理由、着手可能は止めている理由を添える", () => {
-    expect(statusLine({ state: "needs_attention", taskId: "t", reason: "pr_closed" }, rail, 200)).toEqual({ word: "要確認", detail: "PR が閉じられた", awaiting: false });
-    expect(statusLine({ state: "ready", blockedBy: "paused" }, null, 200)).toEqual({ word: "着手可能", detail: "一時停止中", awaiting: false });
-    expect(statusLine({ state: "ready", blockedBy: null }, null, 200)).toEqual({ word: "着手可能", detail: null, awaiting: false });
+    expect(statusLine({ state: "needs_attention", taskId: "t", reason: "pr_closed" }, rail, 200)).toEqual({ word: "要確認", text: "PR が閉じられた", awaiting: false });
+    expect(statusLine({ state: "ready", blockedBy: "paused" }, null, 200)).toEqual({ word: "着手可能", text: "一時停止中", awaiting: false });
+    expect(statusLine({ state: "ready", blockedBy: null }, null, 200)).toEqual({ word: "着手可能", text: "着手可能", awaiting: false });
   });
 
-  test("ステップの無い状態は状態の言葉だけ", () => {
-    expect(statusLine({ state: "waiting", missing: ["x"] }, null, 200)).toEqual({ word: "入力待ち", detail: null, awaiting: false });
-    expect(statusLine({ state: "your_turn" }, null, 200)).toEqual({ word: "あなたの番", detail: null, awaiting: false });
-    expect(statusLine({ state: "done", note: "n", at: "a" }, null, 200)).toEqual({ word: "完了（人）", detail: null, awaiting: false });
+  test("添える語が無ければ、点の後ろに状態の言葉を出す", () => {
+    expect(statusLine({ state: "waiting", missing: ["x"] }, null, 200)).toEqual({ word: "入力待ち", text: "入力待ち", awaiting: false });
+    expect(statusLine({ state: "your_turn" }, null, 200)).toEqual({ word: "あなたの番", text: "あなたの番", awaiting: false });
+    expect(statusLine({ state: "done", note: "n", at: "a" }, null, 200)).toEqual({ word: "完了（人）", text: "完了（人）", awaiting: false });
     // PR の段では帯は終わっているので、いまのステップがあっても添えない
-    expect(statusLine({ state: "pr_open", taskId: "t", pr }, rail, 200)).toEqual({ word: "PR レビュー中", detail: null, awaiting: false });
-    expect(statusLine({ state: "merged", taskId: "t", pr: { ...pr, state: "MERGED" } }, rail, 200)).toEqual({ word: "マージ済み", detail: null, awaiting: false });
+    expect(statusLine({ state: "pr_open", taskId: "t", pr }, rail, 200)).toEqual({ word: "PR レビュー中", text: "PR レビュー中", awaiting: false });
+    expect(statusLine({ state: "merged", taskId: "t", pr: { ...pr, state: "MERGED" } }, rail, 200)).toEqual({ word: "マージ済み", text: "マージ済み", awaiting: false });
   });
 
   test("いまのタスクが承認待ちなら、レビュー待ちといまのステップの名前", () => {
     const gate = [step("implement", "success"), step("review", "awaiting", true)];
-    expect(statusLine({ state: "running", taskId: "t" }, gate, 200, true)).toEqual({ word: "レビュー待ち", detail: "review", awaiting: true });
+    expect(statusLine({ state: "running", taskId: "t" }, gate, 200, true)).toEqual({ word: "レビュー待ち", text: "review", awaiting: true });
     expect(statusLine({ state: "running", taskId: "t" }, gate, 200)).toMatchObject({ word: "実行中", awaiting: false });
   });
 
   test("幅に収まらない補足は … で切る", () => {
     const long = [step("a-very-long-step-name-that-does-not-fit-anywhere", "running", true)];
     const line = statusLine({ state: "running", taskId: "t" }, long, 120);
-    expect(line.detail!.endsWith("…")).toBe(true);
-    expect(textWidth(`${line.word} · ${line.detail}`)).toBeLessThanOrEqual(120);
+    expect(line.text.endsWith("…")).toBe(true);
+    expect(textWidth(`● ${line.text}`)).toBeLessThanOrEqual(120);
   });
 });
 
