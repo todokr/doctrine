@@ -15,9 +15,9 @@
 ```bash
 # core: 1 ファイル / テスト名の部分一致 / 正規表現
 cd core
-deno test --allow-all test/domain/states.test.ts
-deno test --allow-all test/domain/states.test.ts --filter "waiting"
-deno test --allow-all test/ --filter "/open-pr/"
+node --test test/domain/states.test.ts
+node --test --test-name-pattern "waiting" test/domain/states.test.ts
+node --test --test-name-pattern "open-pr" "test/**/*.test.ts"
 
 # app: 1 ファイル / テスト名の部分一致
 pnpm -C app exec vitest run src/model.test.ts
@@ -30,9 +30,9 @@ cargo test --test relay 応答が逆順
 cargo test --lib relay::
 ```
 
-- core のテストは `--allow-all` が要る。実際に `git init` や `git worktree` を作り、git・sh・偽の gh を子プロセスで起動し、`DOCTRINE_STATE_DIR` を書き換える
+- core のテストは実際に `git init` や `git worktree` を作り、git・sh・偽の gh を子プロセスで起動し、`DOCTRINE_STATE_DIR` を書き換える
 - `startDaemon` を呼ぶテストは `configPath` を必ず渡す。渡さないと `DOCTRINE_STATE_DIR` を向けていても本物の `~/.config/doctrine/config.json` を読み書きする
-- CI は `TZ=UTC` と `TZ=Asia/Tokyo` の 2 通りで回す。時刻を扱う変更は手元でも `TZ=UTC deno task test` を試す
+- CI は `TZ=UTC` と `TZ=Asia/Tokyo` の 2 通りで回す。時刻を扱う変更は手元でも `TZ=UTC pnpm -C core test` を試す
 - テスト名・コメント・エラーメッセージは日本語で書く
 
 ## 8.2 core のヘルパー（`core/test/helpers/`）
@@ -123,7 +123,7 @@ test("setup → agent → command → approval → 承認 → 完了まで通る
 ## 8.4 スナップショットとリポジトリのファイルを読むテスト
 
 - スナップショットは core に 1 つだけある。`core/test/guide/jsonSchema.test.ts` が Review Guide の JSON Schema を固定する。
-  スキーマを意図して変えたら `deno test --allow-all test/guide/jsonSchema.test.ts -- --update` で更新し、差分を確かめてからコミットする
+  スキーマを意図して変えたら `pnpm -C core run test:update-snapshots` で更新し、差分を確かめてからコミットする
 - `core/test/workflow/defaultWorkflow.test.ts` はリポジトリの `.doctrine/workflows/default.yaml` を読み、`open-pr` と `wait-merge` のシェルスクリプトを偽の gh で実際に実行する。
   このファイルを変えると core のテストが落ちうる
 - `core/test/guide/example.test.ts` は `shared/guide/examples/` の見本（patch と guide.json）が検証を通ることを確かめる。

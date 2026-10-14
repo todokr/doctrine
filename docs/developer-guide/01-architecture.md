@@ -11,7 +11,7 @@ flowchart LR
     Rust["Rust 中継<br/>app/src-tauri"]
     React -- "invoke('rpc')<br/>listen('daemon-event')" --> Rust
   end
-  subgraph Daemon["dctld（常駐デーモン, Deno）"]
+  subgraph Daemon["dctld（常駐デーモン, Node）"]
     Server["server.ts<br/>ソケット・NDJSON"]
     Handlers["handlers.ts<br/>RPC・tick"]
     Engine["domain/*<br/>engine・scheduler"]
@@ -39,7 +39,7 @@ Rust の中継は型を知らず、`method` の中身も見ない（4 章・7 �
 
 | ディレクトリ | 言語・実行環境 | 中身 |
 | --- | --- | --- |
-| `core/` | Deno + TypeScript | デーモン、ワークフローエンジン、永続化、Intake、トラッカー |
+| `core/` | Node + TypeScript | デーモン、ワークフローエンジン、永続化、Intake、トラッカー |
 | `shared/` | TypeScript（設定ファイルなし） | core と app の両方が import する契約（RPC の型、Review Guide と PFD と質問のスキーマ）と純関数（hunk id、移動検出） |
 | `app/` | React 19 + Vite + Vitest、Rust（Tauri v2） | デスクトップアプリ |
 

@@ -37,7 +37,6 @@
 | `intake/runner.ts` | 改訂のとき worktree を local の baseBranch に進めるので、人が pull していなければ古い base を読む |
 | `.doctrine/workflows/default.yaml` | `verify` が fmt・lint・cargo を流さないので、通っても CI で落ちうる。`agent-review` のプロンプトが `CLAUDE.md` を見るよう指示しているが、リポジトリに `CLAUDE.md` は無い |
 | `.github/workflows/ci.yml` | `.doctrine/` の変更で core のテストが流れない（`defaultWorkflow.test.ts` がそのファイルを読むのに） |
-| `core/deno.json` | `zod` の範囲が `^3.24.0` だが、`shared/` が使う `zod/v4` は 3.25 以降にしか無い。lock で救われている |
 
 ## 10.3 app/README.md との食い違い
 

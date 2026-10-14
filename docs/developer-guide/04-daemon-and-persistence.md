@@ -15,7 +15,7 @@
 7. **クラッシュ復帰**（[3.12](03-workflow-engine.md)）。listen の後に行うので復帰中にも RPC が届きうる。そのため復帰の書き込みも `requireState` 付き
 8. プロジェクトごとに孤児の worktree を探して警告する
 9. Intake の見張りを 1 周回す
-10. タイマーを張る。`tick` を 1 秒ごと、見張りを 120 秒ごと（`WATCH_INTERVAL_MS`）。どちらも `Deno.unrefTimer` 済みで、プロセスを生かしているのはソケットのリスナーだけ
+10. タイマーを張る。`tick` を 1 秒ごと、見張りを 120 秒ごと（`WATCH_INTERVAL_MS`）。どちらも `unref()` 済みで、プロセスを生かしているのはソケットのリスナーだけ
 
 `startDaemon` は `{ stop() }` を返すが、呼ぶのはテストだけである。**シグナル処理は無い。** SIGINT / SIGTERM では即座に終わり、
 後始末は次の起動に任せる（残ったソケットは `assertSocketNotLive` が消し、書きかけのトランザクションは WAL が捨て、生き残った `claude` は復帰処理が殺す）。

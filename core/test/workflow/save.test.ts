@@ -39,7 +39,7 @@ test("implement のモデルとプロンプトを変えると、その2か所だ
   const promptStart = originalWithModel.indexOf(
     "      {{ worktree.path }}/.doctrine-out/plan.md を読んでから実装してください。",
   );
-  const promptEnd = originalWithModel.indexOf("\n  # deno test は失敗の詳細", promptStart);
+  const promptEnd = originalWithModel.indexOf("\n  # node --test と tsc は失敗の詳細", promptStart);
   const expected = originalWithModel.slice(0, promptStart) +
     "      新しいプロンプト\n" +
     originalWithModel.slice(promptEnd);

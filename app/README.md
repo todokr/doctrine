@@ -11,9 +11,9 @@ Tauri v2 + React + Vite で組んだもの。デーモンとの接続は
 `src/fixtures.ts` はテストと開発用のプレビュー（`src/dev/`）専用のフィクスチャで、アプリの画面は import しない。
 
 ```bash
-mise install          # Deno / Node / pnpm / Rust（リポジトリ直下の mise.toml）
+mise install          # Node / pnpm / Rust（リポジトリ直下の mise.toml）
 mise run setup        # core と app の依存を取得
-mise run core:install # dctld を deno install する（~/.deno/bin に入る）
+mise run core:install # dctld の起動スクリプトを ~/.local/bin に置く
 mise run app:tauri    # ウィンドウで開く（起動時に dctld を自動で起こす）
 mise run app:dev      # ブラウザで開く（http://localhost:1420。Tauri の invoke が無いのでデーモンにはつながらない）
 mise run app:test     # 状態の更新と導出（src/model.ts など）の単体テスト
@@ -21,8 +21,8 @@ mise run app:test     # 状態の更新と導出（src/model.ts など）の単�
 
 PFD の図の目視: `mise run app:dev` で開発サーバーを起こし、`http://localhost:1420/pfd-preview.html` を開く。
 
-`~/.deno/bin` が PATH に無いと `mise run app:tauri` が `dctld` を見つけられない。
-`export PATH="$HOME/.deno/bin:$PATH"` を通してから起動する（`mise run core:install` の出力にも同じ案内が出る）。
+`~/.local/bin` が PATH に無いと `mise run app:tauri` が `dctld` を見つけられない。
+`export PATH="$HOME/.local/bin:$PATH"` を通してから起動する（`mise run core:install` の出力にも同じ案内が出る）。
 ビルド済み `.app` を Finder などから直接起こす場合はシェルの PATH を継承しないため、
 `DOCTRINE_DCTLD` に `dctld` の絶対パスを設定する。
 
@@ -69,7 +69,7 @@ Linux では WebKitGTK 4.1 などが要る（[Tauri の前提](https://tauri.app
   ソケットファイルが残っているだけで中身の `dctld` が居ない（`ECONNREFUSED` になる）場合も同じ
   扱いで起こす。ファイル自体は消さない（生きているデーモンを誤って切り離す危険があるため）
 - `dctld` は `DOCTRINE_DCTLD`（絶対パス指定）→ PATH の `dctld` の順で探す。
-  `mise run core:install` で `~/.deno/bin` に入る
+  `mise run core:install` で `~/.local/bin` に入る
 - `dctld` の起動そのものに失敗した場合（見つからない・起動できない）も、起動には成功したがすぐに
   終了した場合（クラッシュループ）も、バナーに理由が出る。後者は「dctld が起動直後に終了しました。
   状態ディレクトリの dctld.log を確認してください」という案内になる（respawn 自体は backoff を

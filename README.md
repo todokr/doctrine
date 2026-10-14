@@ -16,7 +16,7 @@
 | ツール | 用途 |
 | --- | --- |
 | [Git](https://git-scm.com/) | リポジトリの取得。doctrine はタスクごとに git worktree を作る |
-| [mise](https://mise.jdx.dev/) | Deno・Node.js・pnpm・Rust を [`mise.toml`](mise.toml) の版で入れる。シェルで activate しておく |
+| [mise](https://mise.jdx.dev/) | Node.js・pnpm・Rust を [`mise.toml`](mise.toml) の版で入れる。シェルで activate しておく |
 | [Claude Code](https://docs.claude.com/en/docs/claude-code/overview)（`claude`） | ワークフローの各ステップを実行するエージェント。ログインまで済ませておく |
 | [GitHub CLI](https://cli.github.com/)（`gh`） | Issue の取り込みと PR の作成・マージの見張り。`gh auth login` を済ませておく |
 
@@ -29,11 +29,11 @@ git clone https://github.com/todokr/doctrine.git
 cd doctrine
 
 mise trust              # このリポジトリの mise.toml を信頼する
-mise install            # Deno / Node.js / pnpm / Rust
+mise install            # Node.js / pnpm / Rust
 mise run setup          # 依存を lock ファイルどおりに取る
-mise run core:install   # dctld を ~/.deno/bin に置く
+mise run core:install   # dctld を ~/.local/bin に置く
 
-export PATH="$HOME/.deno/bin:$PATH"   # 未設定ならシェルの設定に足す
+export PATH="$HOME/.local/bin:$PATH"  # 未設定ならシェルの設定に足す
 mise run app:tauri      # アプリを起動する（dctld はアプリが自動で起こす）
 ```
 

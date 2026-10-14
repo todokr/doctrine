@@ -155,7 +155,7 @@ React も Tauri も持ち込まず、同名の `*.test.ts` で単体テストす
 
 ## 7.6 開発の仕方
 
-- `mise run app:tauri` — ウィンドウで開く。dctld が居なければ起こす。`~/.deno/bin` を PATH に通しておく（`mise run core:install` で入る）
+- `mise run app:tauri` — ウィンドウで開く。dctld が居なければ起こす。`~/.local/bin` を PATH に通しておく（`mise run core:install` で入る）
 - `mise run app:dev` — ブラウザで開く。Tauri の `invoke` が無いのでデーモンには繋がらない
 - PFD の図の目視: `mise run app:dev` の上で http://localhost:1420/pfd-preview.html（`app/src/dev/pfdPreview.tsx`）
 - [`app/src/fixtures.ts`](../../app/src/fixtures.ts) はテストと開発用プレビュー専用で、**画面から import しない**。デモモードは無く、画面のデータは必ずデーモンから来る

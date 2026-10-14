@@ -348,7 +348,7 @@ resume: claude -p --resume <sessionId> <prompt> --output-format stream-json --ve
 `systemPrompt.ts:BUILTIN_APPEND_SYSTEM_PROMPT` を agent と guide の両方に `--append-system-prompt` で付ける。
 内容は「Bash は 1 回 1 コマンドにし、`;` `&&` `|` などで繋がない」「`git -C` を使わない」の 2 つ。
 `allowedTools` の許可は先頭一致なので、繋いだ形や `git -C` 始まりは許可に合わず拒否されるためである。
-ワークフロー側から変えることはできない。文面を別ファイルにしないのは、`deno compile` の単一バイナリに同梱できないため（`guidePrompt.ts` と `intake/prompt.ts` も同じ理由）。
+ワークフロー側から変えることはできない。文面を別ファイルにしないのは、単一バイナリ（esbuild + SEA）に同梱されないため（`guidePrompt.ts` と `intake/prompt.ts` も同じ理由）。
 
 ## 3.15 エンジンのコールバックとイベント
 

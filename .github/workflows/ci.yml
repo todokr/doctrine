@@ -74,7 +74,7 @@ jobs:
           common='^(\.github/|mise\.toml$)'
 
           core=false
-          if matches "$common" || matches '^(core/|shared/)'; then
+          if matches "$common" || matches '^(core/|shared/|package\.json$|pnpm-lock\.yaml$|pnpm-workspace\.yaml$|tsconfig\.base\.json$)'; then
             core=true
           fi
 
@@ -96,7 +96,7 @@ jobs:
   # 整形・lint・型検査・バイナリのビルド。テストと違って OS・TZ に依存しないので
   # 1 回だけ流す。
   core-check:
-    name: コア（整形・型・ビルド）
+    name: コア（型・ビルド）
     needs: changes
     if: needs.changes.outputs.core == 'true'
     runs-on: ubuntu-latest
@@ -109,25 +109,29 @@ jobs:
       - uses: jdx/mise-action@v4
         with:
           # ツールの版は mise.toml が正。ここには書かない。
-          install_args: deno
+          install_args: node npm:pnpm
 
-      - name: Deno の依存をキャッシュ
+      - name: pnpm store の場所を得る
+        id: pnpm-store
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - name: pnpm の依存をキャッシュ
         uses: actions/cache@v6
         with:
-          path: ~/.cache/deno
-          key: deno-${{ runner.os }}-${{ hashFiles('core/deno.lock') }}
-          restore-keys: deno-${{ runner.os }}-
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-root-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: pnpm-root-${{ runner.os }}-
 
-      # --frozen は deno.lock と実際の依存の食い違いをここで落とす
+      # core と shared はリポジトリ直下の pnpm workspace なので、ルートで入れる。
+      # --frozen-lockfile は pnpm-lock.yaml と package.json の食い違いをここで落とす
       # （lock の更新を忘れた PR が develop に入らないようにするため）。
-      - run: deno install --frozen
+      - run: pnpm install --frozen-lockfile
+        working-directory: .
 
-      - run: deno fmt --check
-      - run: deno lint
-      - run: deno task check
+      - run: pnpm run check
 
-      # deno compile が通ることまで見る。アプリに dctld を同梱する段階で要る。
-      - run: deno task build
+      # 単一バイナリが作れて、ソケットで応答することまで見る。アプリに dctld を同梱する段階で要る。
+      - run: pnpm run test:binary
 
   core-test:
     # TZ は UTC 以外でも流す。ランナーの既定が UTC なので、#39 のような
@@ -150,21 +154,30 @@ jobs:
 
       - uses: jdx/mise-action@v4
         with:
-          install_args: deno
+          # ツールの版は mise.toml が正。ここには書かない。
+          install_args: node npm:pnpm
 
-      - name: Deno の依存をキャッシュ
+      - name: pnpm store の場所を得る
+        id: pnpm-store
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - name: pnpm の依存をキャッシュ
         uses: actions/cache@v6
         with:
-          path: ~/.cache/deno
-          key: deno-${{ runner.os }}-${{ hashFiles('core/deno.lock') }}
-          restore-keys: deno-${{ runner.os }}-
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-root-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: pnpm-root-${{ runner.os }}-
 
-      - run: deno install --frozen
+      # core と shared はリポジトリ直下の pnpm workspace なので、ルートで入れる。
+      # --frozen-lockfile は pnpm-lock.yaml と package.json の食い違いをここで落とす
+      # （lock の更新を忘れた PR が develop に入らないようにするため）。
+      - run: pnpm install --frozen-lockfile
+        working-directory: .
 
       # テストは実際に git worktree を作り、子プロセスを起動する。
       # リポジトリと author はテスト側（test/helpers/repo.ts）が毎回作る
       # 使い捨てのものを使うので、ランナー側の git config は要らない。
-      - run: deno task test
+      - run: pnpm test
 
   app:
     name: アプリ（Web と Tauri）

@@ -4,7 +4,7 @@
 
 | パス | 責務 |
 | --- | --- |
-| `core/` | デーモン `dctld`。`deno.json` / `deno.lock` を持つ独立したパッケージ |
+| `core/` | デーモン `dctld`。リポジトリ直下の pnpm workspace（`pnpm-workspace.yaml` / `pnpm-lock.yaml`）のパッケージ |
 | `app/` | デスクトップアプリ。`package.json` / `pnpm-lock.yaml` と、Rust 側の `src-tauri/`（`Cargo.toml` / `Cargo.lock`） |
 | `shared/` | core と app の両方が import する契約と純関数。自前の設定ファイルを持たない |
 | `prototype/` | 画面設計を確かめるための使い捨て HTML モック 2 枚。ビルド・テスト・CI のどれにも入らない |
@@ -35,31 +35,31 @@
 - 中身は `protocol.ts`（RPC とイベントの型）、`toolInput.ts`、`diff/`（移動検出とパスの解釈）、`guide/`（Review Guide のスキーマ・検証・JSON Schema・hunk id、`examples/` に見本）、`intake/`（PFD・質問・回答・トラッカー・プロセス状態の型と純関数）
 - 外部依存は `zod/v4` だけ。core も app も import しない
 - import は相対パス＋`.ts` 拡張子で、エイリアスは無い（例: core からは `../../../shared/protocol.ts`）。app は `allowImportingTsExtensions` で `.ts` 付き import を許している
-- 型検査は 2 か所から掛かる。`core/deno.json` の `check`（`deno check src test ../shared`）と fmt / lint、`app/tsconfig.json` の `include: ["src", "../shared"]`
-- `zod/v4` の解決は core と app で経路が違う。core は `deno.json` の import map、app は `shared/` の上に `node_modules` が無いので `tsconfig.json` の `paths` と `vite.config.ts` の `resolve.alias` で `app/node_modules/zod/v4` へ向けている（両方を揃える）
+- 型検査は 2 か所から掛かる。`core/tsconfig.json` の `include: ["src", "test", "scripts", "../shared"]`（`pnpm run check`）と、`app/tsconfig.json` の `include: ["src", "../shared"]`
+- `zod/v4` の解決は core と app で経路が違う。core は `shared/package.json` の依存（pnpm workspace で core と同じ実体に解決される）、app は `shared/` の上に `node_modules` が無いので `tsconfig.json` の `paths` と `vite.config.ts` の `resolve.alias` で `app/node_modules/zod/v4` へ向けている（両方を揃える）
 
 ## 2.4 ツールチェーン
 
-版は [`mise.toml`](../../mise.toml) だけが決める（deno / node / pnpm / rust）。CI も `jdx/mise-action` でこの表を読む。
+版は [`mise.toml`](../../mise.toml) だけが決める（node / pnpm / rust）。CI も `jdx/mise-action` でこの表を読む。
 `latest` のような動く別名は置かない。pnpm は `npm:pnpm` 経由で入れ、`app/package.json` の `packageManager` と一致させる。
 
 ```bash
-mise install      # Deno / Node / pnpm / Rust
+mise install      # Node / pnpm / Rust
 mise trust        # 新しい worktree では最初の 1 回だけ要る
 mise run setup    # core・app・site の依存を lock 固定で取る
 ```
 
-mise のタスクはすべて `core/deno.json` と `app/package.json` への 1 行の委譲である（実体を書き写すと二重管理になるため）。
+mise のタスクはすべて `core/package.json` と `app/package.json` と `site/package.json` への 1 行の委譲である（実体を書き写すと二重管理になるため）。
 
 | やりたいこと | コマンド |
 | --- | --- |
 | core の型検査 / テスト | `mise run core:check` / `mise run core:test` |
-| core の整形・lint（CI と同じ） | `cd core && deno fmt --check && deno lint` |
-| dctld を PATH に置く | `mise run core:install`（`~/.deno/bin` に、このチェックアウトのソースを実行するラッパーを置く。依存を変えたらやり直す） |
-| 単一バイナリを作る | `mise run core:build`（`core/dist/` に `deno compile` の結果。約 100MB） |
-| インストールせずに動かす | `deno run -A core/src/daemon/main.ts` |
+| 整形・lint（CI と同じ） | `pnpm exec biome check`（直すときは `--write`） |
+| dctld を PATH に置く | `mise run core:install`（`~/.local/bin` に、このチェックアウトのソースを node で実行する起動スクリプトを置く） |
+| 単一バイナリを作る | `mise run core:build`（`core/dist/dctld` に esbuild でまとめて `node --build-sea` で埋め込んだもの。約 150MB。Homebrew の node は SEA を無効にしてビルドされているので mise の node で作る） |
+| インストールせずに動かす | `node core/src/daemon/main.ts` |
 | アプリのテスト / ビルド | `mise run app:test` / `mise run app:build`（`tsc` で shared も含めて型検査） |
-| アプリをウィンドウで開く | `mise run app:tauri`（dctld が居なければ起こす。`~/.deno/bin` を PATH に通しておく） |
+| アプリをウィンドウで開く | `mise run app:tauri`（dctld が居なければ起こす。`~/.local/bin` を PATH に通しておく） |
 | アプリをブラウザで開く | `mise run app:dev`（http://localhost:1420。Tauri の `invoke` が無いのでデーモンには繋がらない） |
 | Rust のテスト | `cd app/src-tauri && cargo test --locked`（mise タスクは無い） |
 
@@ -72,8 +72,8 @@ mise のタスクはすべて `core/deno.json` と `app/package.json` への 1 �
 | ジョブ | 条件 | 中身 |
 | --- | --- | --- |
 | `changes` | 常に | 変更されたパスから `core` / `app` / `site` のどれを流すか決める |
-| `core-check` | core | `deno install --frozen` → `deno fmt --check` → `deno lint` → `deno task check` → `deno task build` |
-| `core-test` | core | `deno task test` を `TZ=UTC` と `TZ=Asia/Tokyo` の 2 通りで回す（タイムゾーン依存のバグを拾うため） |
+| `core-check` | core | `pnpm install --frozen-lockfile` → `biome check` → `pnpm run check`（tsc）→ `pnpm run test:binary`（単一バイナリを作ってソケットで応答するか） |
+| `core-test` | core | `pnpm test`（`node --test`）を `TZ=UTC` と `TZ=Asia/Tokyo` の 2 通りで回す（タイムゾーン依存のバグを拾うため） |
 | `app` | app | Tauri の Linux 依存を apt で入れ、`pnpm install --frozen-lockfile` → `pnpm build` → `pnpm test` → `cargo check --locked --all-targets` → `cargo test --locked` |
 | `ci` | 常に（`if: always()`） | 他のジョブがすべて `success` か `skipped` なら緑。**ブランチ保護の必須チェックはこれ 1 つ** |
 
