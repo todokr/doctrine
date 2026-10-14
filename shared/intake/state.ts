@@ -18,3 +18,6 @@ export type IntakeRunStatus =
   | "failed"
   | "rate_limited"
   | "interrupted";
+
+/** 取り込みの種類（spec 2026-10-14-intake-execution-design.md 4.2）。direct は PFD を作らずタスクを 1 本流す。 */
+export type IntakeMode = "plan" | "direct";

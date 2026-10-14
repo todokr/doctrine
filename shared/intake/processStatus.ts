@@ -29,3 +29,6 @@ export type ProcessStatus =
 
 /** プロセスの id と状態の組。IntakeDetail.processes の元になる。 */
 export type ProcessStatusEntry = { id: string } & ProcessStatus;
+
+/** direct の Intake がただ 1 つ持つプロセスの id。 */
+export const DIRECT_PROCESS_ID = "main";

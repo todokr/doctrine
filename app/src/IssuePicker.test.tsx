@@ -34,7 +34,7 @@ describe("startIntake", () => {
     return {
       actions,
       deps: {
-        start: (w: string, u: string) => rpc("intake.start", { workspace: w, issue_url: u }),
+        start: (w: string, u: string) => rpc("intake.start", { workspace: w, issue_url: u, mode: "plan" }),
         dispatch: (a: Action) => {
           actions.push(a);
         },
@@ -48,7 +48,7 @@ describe("startIntake", () => {
     await startIntake(pickerWorkspace(WORKSPACES, 2)!.path, "https://github.com/o/r/issues/8", deps);
     expect(invoke).toHaveBeenCalledWith("rpc", {
       method: "intake.start",
-      params: { workspace: "~/work/shop-api", issue_url: "https://github.com/o/r/issues/8" },
+      params: { workspace: "~/work/shop-api", issue_url: "https://github.com/o/r/issues/8", mode: "plan" },
     });
     expect(actions).toEqual([{ type: "intake.started", intake: INTAKES[0] }]);
   });

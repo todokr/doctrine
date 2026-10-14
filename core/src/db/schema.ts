@@ -1,5 +1,6 @@
 import type { Generated, Kysely, Selectable } from "kysely";
 import type {
+  IntakeMode,
   IntakeRunPurpose,
   IntakeRunStatus,
   IntakeState,
@@ -40,7 +41,7 @@ export type StepRunStatus =
   /** 非0で終わった（却下された）が onFailure / onReject の goto で前のステップへ戻った。 */
   | "bounced";
 
-export type { IntakeRunPurpose, IntakeRunStatus, IntakeState };
+export type { IntakeMode, IntakeRunPurpose, IntakeRunStatus, IntakeState };
 
 export type IntakeCommentTarget = "artifact" | "process" | "whole";
 
@@ -165,6 +166,8 @@ export interface IntakesTable {
   issue_url: string;
   issue_node_id: string;
   issue_title: string;
+  /** 0017 で足した。既定は plan。 */
+  mode: Generated<IntakeMode>;
   state: IntakeState;
   /** 0/1。1 は承認済みの計画があり、改訂の中にいること。 */
   revising: Generated<number>;

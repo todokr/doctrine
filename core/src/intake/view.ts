@@ -101,6 +101,7 @@ function summaryOf(
     workspace_id: row.workspace_id,
     issue_url: row.issue_url,
     issue_title: row.issue_title,
+    mode: row.mode,
     state: row.state,
     revising: row.revising === 1,
     attention_reason: row.attention_reason === null

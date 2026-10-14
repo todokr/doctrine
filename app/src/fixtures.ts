@@ -403,6 +403,7 @@ function intake(n: number, o: Partial<IntakeSummary>): IntakeSummary {
     workspace_id: 1,
     issue_url: `https://github.com/o/r/issues/${n}`,
     issue_title: `Issue ${n} のタイトル`,
+    mode: "plan",
     state: "investigating",
     revising: false,
     attention_reason: null,

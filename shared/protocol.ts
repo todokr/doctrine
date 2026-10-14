@@ -11,7 +11,9 @@ import type { Pfd } from "./intake/pfd.ts";
 import type { ProcessStatus } from "./intake/processStatus.ts";
 import type { Answer, AssumptionResponse } from "./intake/question.ts";
 import type { QuestionSetContent, QuestionSetReply } from "./intake/validateQuestion.ts";
-import type { IntakeRunPurpose, IntakeRunStatus, IntakeState } from "./intake/state.ts";
+import type { IntakeMode, IntakeRunPurpose, IntakeRunStatus, IntakeState } from "./intake/state.ts";
+
+export type { IntakeMode };
 
 export type Request = { id: number; method: string; params?: Record<string, unknown> };
 
@@ -489,6 +491,7 @@ export type IntakeSummary = {
   workspace_id: number;
   issue_url: string;
   issue_title: string;
+  mode: IntakeMode;
   state: IntakeState;
   revising: boolean;
   attention_reason: AttentionReason | null;
@@ -656,7 +659,7 @@ export type Methods = {
   };
   "tracker.issue": { params: { workspace: string; url: string }; result: IssueDetail };
   "intake.start": {
-    params: { workspace: string; issue_url: string };
+    params: { workspace: string; issue_url: string; mode: IntakeMode };
     result: IntakeSummary & { alreadyActive: boolean };
   };
   "intake.list": {

@@ -543,6 +543,7 @@ export function summaryOf(d: IntakeDetail): IntakeSummary {
     workspace_id: d.workspace_id,
     issue_url: d.issue_url,
     issue_title: d.issue_title,
+    mode: d.mode,
     state: d.state,
     revising: d.revising,
     attention_reason: d.attention_reason,

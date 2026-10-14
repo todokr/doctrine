@@ -1,4 +1,5 @@
 import type { IntakeRunPurpose, IntakeState } from "../db/intakes.ts";
+import type { IntakeMode } from "../../../shared/intake/state.ts";
 
 /**
  * 2026-09-21-intake-core-design.md 5 章の遷移表のうち、`revising` に関係しない辺。
@@ -67,6 +68,14 @@ export function assertIntakeTransition(
   if (!canIntakeTransition(from, to, revising)) {
     throw new InvalidIntakeTransitionError(from, to, revising);
   }
+}
+
+/**
+ * 作ったときの状態（spec 5.2 の [*] からの辺）。direct は調査・分解・承認を持たず、
+ * 作るのと同じトランザクションでタスクを持つので active から始まる。
+ */
+export function initialIntakeState(mode: IntakeMode): "investigating" | "active" {
+  return mode === "direct" ? "active" : "investigating";
 }
 
 export function isIntakeTerminal(s: IntakeState): boolean {

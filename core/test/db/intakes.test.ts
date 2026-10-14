@@ -470,3 +470,24 @@ test("PR の観測は task_id ごとに最新で上書きされる", async () =>
     "行は増えない",
   );
 });
+
+test("insertIntake: mode を省くと plan・investigating、direct なら active で作る", async () => {
+  const db = await openDb(":memory:");
+  const p = await seedProject(db, { path: "/repo" });
+  const base = { workspace_id: p.workspace_id, issue_node_id: "I", issue_title: "T" };
+  const plan = await insertIntake(db, {
+    ...base,
+    id: "a",
+    issue_url: "https://github.com/o/r/issues/1",
+  });
+  assert.equal(plan.mode, "plan");
+  assert.equal(plan.state, "investigating");
+  const direct = await insertIntake(db, {
+    ...base,
+    id: "b",
+    issue_url: "https://github.com/o/r/issues/2",
+    mode: "direct",
+  });
+  assert.equal(direct.mode, "direct");
+  assert.equal(direct.state, "active");
+});

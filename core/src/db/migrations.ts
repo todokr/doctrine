@@ -949,6 +949,20 @@ const migrations: Record<string, Migration> = {
       }
     },
   },
+
+  /** Intake の取り込みの種類（spec 2026-10-14-intake-execution-design.md 5.1）。既存の行は plan。 */
+  "0017_intake_mode": {
+    // deno-lint-ignore no-explicit-any
+    async up(db: Kysely<any>) {
+      await db.schema.alterTable("intakes")
+        .addColumn(
+          "mode",
+          "text",
+          (c) => c.notNull().defaultTo("plan").check(sql`mode IN ('plan', 'direct')`),
+        )
+        .execute();
+    },
+  },
 };
 
 /** 名前を [a-z0-9-]+ に丸める。空になれば "project"。 */

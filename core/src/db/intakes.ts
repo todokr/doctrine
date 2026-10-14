@@ -1,10 +1,12 @@
 import { sql } from "kysely";
+import { initialIntakeState } from "../domain/intakeStates.ts";
 import type {
   Db,
   IntakeApprovalRow,
   IntakeCommentRow,
   IntakeCommentTarget,
   IntakeDraftRow,
+  IntakeMode,
   IntakeProcessRow,
   IntakeQuestionSetRow,
   IntakeRow,
@@ -44,13 +46,18 @@ export type NewIntake = {
   issue_url: string;
   issue_node_id: string;
   issue_title: string;
+  mode?: IntakeMode;
 };
 
-/** state は investigating で作る（PRD 8 章の開始）。同じ Issue の終わっていない Intake があれば例外。 */
+/**
+ * mode を省くと plan。状態は initialIntakeState で決める（plan は investigating、direct は active）。
+ * 同じ Issue の終わっていない Intake があれば例外。
+ */
 export async function insertIntake(db: Db, i: NewIntake): Promise<IntakeRow> {
   const now = new Date().toISOString();
+  const mode = i.mode ?? "plan";
   await db.insertInto("intakes")
-    .values({ ...i, state: "investigating", created_at: now, updated_at: now })
+    .values({ ...i, mode, state: initialIntakeState(mode), created_at: now, updated_at: now })
     .execute();
   return (await getIntake(db, i.id))!;
 }

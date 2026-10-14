@@ -248,6 +248,7 @@ const COLUMNS = {
     id: true,
     workspace_id: true,
     issue_url: true,
+    mode: true,
     issue_node_id: true,
     issue_title: true,
     state: true,
@@ -518,6 +519,7 @@ test("開き直してもマイグレーションは二度流れず、データ�
     "0014_issue_phase",
     "0015_workspace",
     "0016_intake_workspace",
+    "0017_intake_mode",
   ]);
   await first.destroy();
 
@@ -540,6 +542,7 @@ test("開き直してもマイグレーションは二度流れず、データ�
       "0014_issue_phase",
       "0015_workspace",
       "0016_intake_workspace",
+      "0017_intake_mode",
     ]);
     assert.equal((await second.selectFrom("projects").selectAll().execute()).length, 1);
   } finally {
@@ -582,6 +585,7 @@ test("pending_feed を足す前に作られたDBファイルは、行を保っ�
       "0014_issue_phase",
       "0015_workspace",
       "0016_intake_workspace",
+      "0017_intake_mode",
     ]);
     const old = await getTask(d, "old");
     assert.equal(old?.state, "suspended", "既存の行は残る");
@@ -1450,4 +1454,21 @@ test("0016: Intake をプロジェクトの workspace に付け替え、終わ�
     SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'uq_intakes_open_issue'
   `.execute(d);
   assert.equal(idx.length, 1);
+});
+
+test("0017: 既存の Intake は plan になり、mode には plan と direct しか入らない", async () => {
+  const sqlite = new DatabaseSync(":memory:");
+  const d = await openDbOn(sqlite, "0016_intake_workspace");
+  sqlite.exec(`
+    INSERT INTO workspaces (id, path, name) VALUES (1, '/w/a', 'a');
+    INSERT INTO intakes (id, workspace_id, issue_url, issue_node_id, issue_title, state,
+                         created_at, updated_at)
+      VALUES ('i1', 1, 'https://github.com/o/r/issues/1', 'I_1', 'T', 'active',
+              '2026-10-14', '2026-10-14');
+  `);
+  await migrateToLatest(d);
+  const i1 = await d.selectFrom("intakes").select("mode").where("id", "=", "i1")
+    .executeTakeFirstOrThrow();
+  assert.equal(i1.mode, "plan");
+  assert.throws(() => sqlite.exec(`UPDATE intakes SET mode = 'other' WHERE id = 'i1'`), /CHECK/);
 });
