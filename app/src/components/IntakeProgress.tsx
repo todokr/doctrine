@@ -28,12 +28,14 @@ export function ActionNeeded(p: {
   onComplete: (processId: string) => void;
   onRedispatch: (processId: string) => void;
   onOpenTask: (taskId: string) => void;
+  /** 中止・完了した Intake。状態と理由だけ出し、決めた内容の欄と完了・再投入は出さない */
+  readOnly: boolean;
 }) {
   const { yourTurn, needsAttention } = p.items;
   if (yourTurn.length === 0 && needsAttention.length === 0) return null;
   return (
     <section className="box attn">
-      <h2>操作が必要</h2>
+      {!p.readOnly && <h2>操作が必要</h2>}
       {yourTurn.map(({ process }) => {
         const note = p.notes[process.id] ?? "";
         return (
@@ -44,21 +46,25 @@ export function ActionNeeded(p: {
             </div>
             {process.purpose && <Markdown src={process.purpose} />}
             {process.done_when && <Markdown src={process.done_when} />}
-            <textarea
-              placeholder="決めた内容"
-              aria-label="決めた内容"
-              value={note}
-              onChange={(e) => p.onNote(process.id, e.target.value)}
-            />
-            <div className="actions">
-              <button
-                className="btn primary"
-                disabled={!canCompleteHuman(note) || p.pending === process.id}
-                onClick={() => p.onComplete(process.id)}
-              >
-                完了を記録する
-              </button>
-            </div>
+            {!p.readOnly && (
+              <>
+                <textarea
+                  placeholder="決めた内容"
+                  aria-label="決めた内容"
+                  value={note}
+                  onChange={(e) => p.onNote(process.id, e.target.value)}
+                />
+                <div className="actions">
+                  <button
+                    className="btn primary"
+                    disabled={!canCompleteHuman(note) || p.pending === process.id}
+                    onClick={() => p.onComplete(process.id)}
+                  >
+                    完了を記録する
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         );
       })}
@@ -69,11 +75,13 @@ export function ActionNeeded(p: {
             <StatusDot tone="danger" word={statusText(view)} />
             <button className="el-link mono" onClick={() => p.onOpenTask(view.taskId)}>{view.taskId}</button>
           </div>
-          <div className="actions">
-            <button className="btn" disabled={p.pending === process.id} onClick={() => p.onRedispatch(process.id)}>
-              再投入する
-            </button>
-          </div>
+          {!p.readOnly && (
+            <div className="actions">
+              <button className="btn" disabled={p.pending === process.id} onClick={() => p.onRedispatch(process.id)}>
+                再投入する
+              </button>
+            </div>
+          )}
         </div>
       ))}
     </section>

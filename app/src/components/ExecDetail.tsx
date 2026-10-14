@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { Pfd } from "../../../shared/intake/pfd.ts";
 import type { IntakeDetail } from "../../../shared/protocol.ts";
 import { clampPanelHeight, panelContentOf, panelStorage, readPanelHeight, writePanelHeight } from "../execution";
-import { actionNeeded } from "../intake";
+import { actionNeeded, isClosedIntake } from "../intake";
 import { intakeDraftOf, type Loaded } from "../model";
 import { pfdElement, type PfdView } from "../pfd";
 import { useIntakeRpc, useStore } from "../store";
@@ -90,6 +90,7 @@ export function ExecDetail(p: {
       onComplete={complete}
       onRedispatch={redispatch}
       onOpenTask={openTask}
+      readOnly={isClosedIntake(p.detail.state)}
     />
   );
   const element = (

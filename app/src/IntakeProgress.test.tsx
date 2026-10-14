@@ -10,7 +10,7 @@ import {
   WatchAlert,
 } from "./components/IntakeProgress";
 import { INTAKE_ACTIVE, NOW, PFD_SAMPLE, PFD_STATUSES_A } from "./fixtures";
-import { actionNeeded, progressOps, summaryOf } from "./intake";
+import { actionNeeded, isClosedIntake, progressOps, summaryOf } from "./intake";
 
 const noop = () => {};
 const disabled = (label: string) => new RegExp(`<button[^>]*disabled=""[^>]*>${label}</button>`);
@@ -26,6 +26,7 @@ function needed(o: Partial<Parameters<typeof ActionNeeded>[0]> = {}) {
       onComplete={noop}
       onRedispatch={noop}
       onOpenTask={noop}
+      readOnly={false}
       {...o}
     />,
   );
@@ -47,6 +48,13 @@ describe("ActionNeeded", () => {
 
   test("どちらも無ければ何も出さない", () => {
     expect(needed({ items: { yourTurn: [], needsAttention: [] } })).toBe("");
+  });
+
+  test("中止した Intake では理由を読むだけで、決めた内容の欄・完了・再投入は出さない", () => {
+    const canceled = { ...INTAKE_ACTIVE, state: "canceled" as const };
+    const html = needed({ items: actionNeeded(canceled, PFD_SAMPLE), readOnly: isClosedIntake(canceled.state) });
+    for (const text of ["受け入れる", "要確認（タスクが止まった）", "t1"]) expect(html).toContain(text);
+    for (const text of ["決めた内容", "完了を記録する", "再投入する", "<textarea"]) expect(html).not.toContain(text);
   });
 });
 
