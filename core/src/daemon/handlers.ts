@@ -14,7 +14,6 @@ import {
 import { applyWorkflowChanges, writeWorkflowYaml } from "../workflow/save.ts";
 import type { TrackerConfig } from "../workflow/workspace.ts";
 import { pinOf, toStepViews, type WorkflowLoader, type WorkflowPin } from "../workflow/load.ts";
-import { SETUP_WORKFLOW_NAME, setupPrompt, setupWorkflowYaml } from "../workflow/setupWorkflow.ts";
 import {
   getProject,
   getProjectByPath,
@@ -26,12 +25,7 @@ import {
   type TaskRow,
   type TaskState,
 } from "../db/tasks.ts";
-import {
-  getWorkspaceByPath,
-  listProjectsOf,
-  listWorkspaces,
-  workspaceRefOf,
-} from "../db/workspaces.ts";
+import { getWorkspaceByPath, listWorkspaces, workspaceRefOf } from "../db/workspaces.ts";
 import {
   addWorkspace,
   syncProjectRow,
@@ -111,7 +105,6 @@ import type {
   IntakeLogs,
   RateLimitSample,
   ServerEvent,
-  SetupPolicy,
   StepRunDenials,
   TaskGuide,
   TaskLogs,
@@ -466,42 +459,6 @@ export function createHandler(ctx: DaemonContext): Handler {
         // task.create の応答に乗せておけば、ログを探しに行かなくても
         // タスクを作った人の目の前に出る。
         return { ...task, warnings: loaded.warnings };
-      }
-      case "workspace.setup": {
-        const workspace = reqNumber(params, "workspace");
-        const names = params.projects;
-        if (!Array.isArray(names) || names.some((n) => typeof n !== "string")) {
-          throw new Error("projects は文字列の配列で渡してください");
-        }
-        const policy = params.policy as SetupPolicy | undefined;
-        if (!policy || typeof policy !== "object") throw new Error("policy は必須です");
-        if (policy.pr === "branch_only" && policy.sync) {
-          throw new Error("PR を開かない方針（pr: branch_only）では sync を true にできません");
-        }
-        const projects = await listProjectsOf(ctx.db, workspace);
-        const targets = (names as string[]).map((name) => {
-          const project = projects.find((p) => p.name === name);
-          if (!project) {
-            throw new Error(`workspace ${workspace} にプロジェクト ${name} はありません`);
-          }
-          return project;
-        });
-        const workflowYaml = setupWorkflowYaml();
-        return await ctx.db.transaction().execute(async (trx) => {
-          const tasks: TaskRow[] = [];
-          for (const project of targets) {
-            tasks.push(
-              await createTaskRow(trx, project, {
-                title: `${project.name} のワークフローを作る`,
-                prompt: setupPrompt(policy, project.base_branch),
-                workflowName: SETUP_WORKFLOW_NAME,
-                // 依存のインストールなどの setup は、YAML を書くだけのこのタスクには要らない
-                pin: { workflow_yaml: workflowYaml, workflow_setup: null },
-              }),
-            );
-          }
-          return tasks;
-        });
       }
       case "task.list": {
         const filter: { projectId?: number; state?: TaskState } = {};

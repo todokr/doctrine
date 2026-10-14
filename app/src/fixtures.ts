@@ -724,22 +724,3 @@ export const ADDED_WORKSPACE: WorkspaceSummary & { created: string[]; alreadyReg
   ],
   alreadyRegistered: false,
 };
-
-/** 同梱の setup ワークフローで走るタスク（workflow_name は setup） */
-export function setupTask(state: Task["state"]): Task {
-  return {
-    id: "t-5e70",
-    wf: "setup",
-    project: "shop-api",
-    title: "shop-api のワークフローを作る",
-    prompt: "",
-    branch: "doctrine/t-5e70",
-    worktree: null,
-    state,
-    step: "apply",
-    attempt: 1,
-    prio: 2,
-    since: NOW - 5 * MIN,
-    intake: null,
-  };
-}

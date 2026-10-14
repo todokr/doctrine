@@ -129,8 +129,7 @@ describe("初回ウィザード", () => {
   test("2 回目以降の workspaces.checked では開き直さない", () => {
     const done = reduce(reduce(unchecked(), { type: "workspaces.checked", count: 0 }), {
       type: "wizard.done",
-      id: null,
-      toast: null,
+      toast: "workspace を登録しました",
     });
     expect(reduce(done, { type: "workspaces.checked", count: 0 }).wizard).toBeNull();
   });
@@ -143,25 +142,10 @@ describe("初回ウィザード", () => {
     expect(s.wizard).toEqual({ closable: true });
     expect(reduce(s, { type: "wizard.close" }).wizard).toBeNull();
   });
-  test("wizard.done は閉じてタスク一覧に移り、作った setup のタスクを選ぶ", () => {
-    const s = reduce(base({ view: "settings", wizard: { closable: false } }), {
-      type: "wizard.done",
-      id: "t-5e70",
-      toast: null,
-    });
+  test("wizard.done は閉じてトーストを出す", () => {
+    const s = reduce(base({ wizard: { closable: true } }), { type: "wizard.done", toast: "workspace を登録しました" });
     expect(s.wizard).toBeNull();
-    expect(s.view).toBe("tasks");
-    expect(s.sel).toBe("t-5e70");
-  });
-  test("setup のタスクが無ければ選ぶものは変えず、トーストを出す", () => {
-    const s = reduce(base({ wizard: { closable: true } }), {
-      type: "wizard.done",
-      id: null,
-      toast: "ワークフローは既存のものを使います",
-    });
-    expect(s.wizard).toBeNull();
-    expect(s.sel).toBe("t-2b91");
-    expect(s.toast).toBe("ワークフローは既存のものを使います");
+    expect(s.toast).toBe("workspace を登録しました");
   });
 });
 

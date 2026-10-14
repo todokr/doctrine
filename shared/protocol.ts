@@ -311,18 +311,6 @@ export type ProjectSummary = {
   setup: string | null;
 };
 
-/** Quick Start で選んだワークフローの方針。setup のタスクの draft が読む。 */
-export type SetupPolicy = {
-  plan: boolean;
-  agentReview: boolean;
-  guide: boolean;
-  approval: "after_implement" | "after_plan_and_implement";
-  pr: "open_and_wait" | "branch_only";
-  /** pr が branch_only なら false */
-  sync: boolean;
-  models: { plan: string; implement: string; review: string; guide: string };
-};
-
 export type WorkspaceSummary = {
   id: number;
   path: string;
@@ -598,15 +586,6 @@ export type Methods = {
   "workspace.update": { params: { path: string }; result: WorkspaceSummary };
   /** ウィザードの「このディレクトリを選ぶ」ボタンが呼ぶ。ファイルは書かない。 */
   "workspace.detect": { params: { path: string }; result: WorkspaceDetection };
-  /**
-   * 対象プロジェクトごとに、方針に沿って .doctrine/workflows/default.yaml を作るタスクを 1 つ作る。
-   * タスクは同梱の setup ワークフローを pin し、project.yaml の setup は差し込まない。
-   * workspace に無い名前が 1 つでもあれば何も作らない。
-   */
-  "workspace.setup": {
-    params: { workspace: number; projects: string[]; policy: SetupPolicy };
-    result: TaskSummary[];
-  };
   /**
    * <project>/.doctrine/workflows/*.yaml を名前の昇順で。検証に落ちたものも issues とともに返す。
    * 既定の印と、setup を差し込んだ後のステップの列を添える。

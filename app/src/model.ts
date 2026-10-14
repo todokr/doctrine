@@ -718,8 +718,8 @@ export type Action =
   | { type: "workspaces.checked"; count: number }
   | { type: "wizard.open" }
   | { type: "wizard.close" }
-  /** 登録を終えた後の後片付け。id は最初の setup のタスク（無ければ null） */
-  | { type: "wizard.done"; id: string | null; toast: string | null };
+  /** 登録を終えた後の後片付け */
+  | { type: "wizard.done"; toast: string };
 
 /**
  * 流れてきた1行を足す。step_run_id が持っているものと違えば、別のステップの
@@ -828,15 +828,7 @@ export function reduce(s: State, a: Action): State {
     case "wizard.close":
       return s.wizard?.closable ? { ...s, wizard: null } : s;
     case "wizard.done":
-      // 一覧に無くても sel は先に決める。後から来る sync が残す
-      return {
-        ...s,
-        wizard: null,
-        view: "tasks",
-        editing: null,
-        ...(a.id !== null ? { sel: a.id } : {}),
-        toast: a.toast,
-      };
+      return { ...s, wizard: null, editing: null, toast: a.toast };
     case "move": {
       if (s.view === "settings") return s;
       if (s.view === "intake") {
