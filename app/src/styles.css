@@ -573,3 +573,15 @@ tr.wt-stale{background:var(--accent-soft)}
 .prompt.clamp{display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}
 .toggle{justify-self:start !important;border:0;background:transparent;padding:0;color:var(--human-text);font-size:12px;text-decoration:underline;text-underline-offset:3px;cursor:pointer}
 .feedback{border-left:3px solid var(--accent);background:var(--accent-soft);border-radius:0 7px 7px 0;padding:10px 12px;line-height:1.65;white-space:pre-wrap;overflow-wrap:anywhere}
+
+/* Execution: 図の領域と下のパネル（spec 6.5）。外枠が main の高さを埋め、図とパネルがそれぞれスクロールする */
+.exec{display:flex;flex-direction:column;flex:1;min-height:0}
+.exec-top{flex:1;min-height:0;overflow:auto}
+.exec.maximized .exec-top{display:none}
+.exec-panel{display:flex;flex-direction:column;min-height:0;border-top:1px solid var(--line);background:var(--surface);position:relative}
+.exec-panel.max{flex:1}
+.exec-split{position:absolute;top:-4px;left:0;right:0;height:8px;cursor:row-resize;touch-action:none}
+.exec-panel-head{display:flex;align-items:center;gap:8px;padding:6px 14px;border-bottom:1px solid var(--line)}
+.exec-panel-title{font-weight:500;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.exec-panel-body{flex:1;min-height:0;overflow:auto}
+.exec-trail{display:flex;gap:18px;flex-wrap:wrap;padding:10px 24px 0}

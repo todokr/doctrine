@@ -1,15 +1,20 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import type { IntakeSummary } from "../../shared/protocol.ts";
 import {
   attentionProcessIds,
+  clampPanelHeight,
   countExecutionAttention,
   executionOrder,
   executionSection,
   firstAttentionKey,
   inExecution,
   isExecutionAttention,
+  PANEL_DEFAULT,
+  PANEL_MIN,
   panelContentOf,
   railsOf,
+  readPanelHeight,
+  writePanelHeight,
 } from "./execution";
 import { INTAKE_ACTIVE, INTAKES, PFD_SAMPLE, seedTasks } from "./fixtures";
 import { buildPfdView } from "./pfd";
@@ -192,5 +197,33 @@ describe("panelContentOf", () => {
   test("タスクが一覧に無ければ要素の欄に倒す", () => {
     const processes = [running("build-api", ["t-new"])];
     expect(panelContentOf({ ...base, processes, key: "p:build-api" })).toEqual({ kind: "element", key: "p:build-api" });
+  });
+});
+
+describe("パネルの高さ", () => {
+  test("下限と、図の分を残した上限に収める", () => {
+    expect(clampPanelHeight(10, 800)).toBe(PANEL_MIN);
+    expect(clampPanelHeight(5000, 800)).toBe(680);
+    expect(clampPanelHeight(400.4, 800)).toBe(400);
+    // 領域が狭くても下限は守る
+    expect(clampPanelHeight(400, 200)).toBe(PANEL_MIN);
+  });
+
+  test("覚えた値を読む。無い・壊れている・投げるなら既定", () => {
+    const of = (v: string | null) => ({ getItem: () => v });
+    expect(readPanelHeight(of("420"))).toBe(420);
+    expect(readPanelHeight(of(null))).toBe(PANEL_DEFAULT);
+    expect(readPanelHeight(of("abc"))).toBe(PANEL_DEFAULT);
+    expect(readPanelHeight(of("-3"))).toBe(PANEL_DEFAULT);
+    expect(readPanelHeight(null)).toBe(PANEL_DEFAULT);
+    expect(readPanelHeight({ getItem: () => { throw new Error("denied"); } })).toBe(PANEL_DEFAULT);
+  });
+
+  test("書き込みが投げても止まらない", () => {
+    const set = vi.fn();
+    writePanelHeight({ setItem: set }, 333.7);
+    expect(set).toHaveBeenCalledWith(expect.any(String), "334");
+    expect(() => writePanelHeight({ setItem: () => { throw new Error("quota"); } }, 300)).not.toThrow();
+    expect(() => writePanelHeight(null, 300)).not.toThrow();
   });
 });

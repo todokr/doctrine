@@ -97,3 +97,40 @@ export function panelContentOf(o: {
   if (task.state === "suspended") return { kind: "review", key, processId: view.id, taskId: task.id };
   return { kind: "task", key, processId: view.id, taskId: task.id, attention: view.state === "needs_attention" && task.id === current };
 }
+
+export const PANEL_MIN = 160;
+export const PANEL_DEFAULT = 360;
+/** 図の分として、パネルの上に残す高さ */
+const PANEL_ROOM_TOP = 120;
+const PANEL_KEY = "doctrine.execution.panelHeight";
+
+export function clampPanelHeight(h: number, room: number): number {
+  const max = Math.max(PANEL_MIN, room - PANEL_ROOM_TOP);
+  return Math.min(max, Math.max(PANEL_MIN, Math.round(h)));
+}
+
+/** プライベートウィンドウなどでは localStorage に触るだけで投げる */
+export function panelStorage(): Pick<Storage, "getItem" | "setItem"> | null {
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
+  }
+}
+
+export function readPanelHeight(storage: Pick<Storage, "getItem"> | null): number {
+  try {
+    const v = Number(storage?.getItem(PANEL_KEY) ?? Number.NaN);
+    return Number.isFinite(v) && v > 0 ? v : PANEL_DEFAULT;
+  } catch {
+    return PANEL_DEFAULT;
+  }
+}
+
+export function writePanelHeight(storage: Pick<Storage, "setItem"> | null, h: number): void {
+  try {
+    storage?.setItem(PANEL_KEY, String(Math.round(h)));
+  } catch {
+    // 覚えられなくても、いまの高さは効いている
+  }
+}
