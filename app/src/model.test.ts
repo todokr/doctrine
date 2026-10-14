@@ -3,6 +3,7 @@ import {
   INTAKE_ACTIVE,
   INTAKES,
   NOW,
+  PFD_SAMPLE,
   PROJECTS,
   RATELIMIT_NEAR_SATURATION,
   RATELIMIT_NORMAL,
@@ -54,6 +55,8 @@ import {
   type State,
 } from "./model";
 import { RUN_TONE } from "./tone";
+import { panelContentOf, processKeyOfTask } from "./execution";
+import { buildPfdView } from "./pfd";
 import type { GuideView } from "./guide";
 import { EMPTY_INTAKE_DRAFT, type IntakeDraft, intakeOrder } from "./intake";
 import { buildDiff } from "./patch";
@@ -1653,6 +1656,41 @@ describe("Execution のビュー", () => {
     expect(detailOnly.execClosed).toBe(true);
     const unknown = reduce(base({ execClosed: true }), { type: "intake.open", id: "gone" });
     expect(unknown.execClosed).toBe(true);
+  });
+
+  test("図とパネルの選択が s.sel を介して揃う（GraphBody と ExecDetail の effect をなぞる）", () => {
+    const keys = new Set(buildPfdView(PFD_SAMPLE).nodes.map((n) => n.key));
+    const running = (id: string, taskId: string) =>
+      ({ ...INTAKE_ACTIVE.processes[0], id, state: "running" as const, taskId, task_ids: [taskId] });
+    const processes = [running("build-api", "a1"), running("build-ui", "a2")];
+    const review = (id: string, processId: string): Task => ({
+      ...withIntake(id, "suspended", "i2"),
+      intake: { id: "i2", processId, issueUrl: null, parentIssueUrl: null },
+    });
+    // ExecDetail: 選んだノードのパネルのタスクを s.sel に合わせる
+    const panel = (s: State, key: string) => {
+      const content = panelContentOf({ key, keys, processes, tasks: s.tasks, chosenTaskId: s.sel });
+      const taskId = content?.kind === "review" || content?.kind === "task" ? content.taskId : null;
+      const next = taskId !== null && s.sel !== taskId ? reduce(s, { type: "task.open", id: taskId }) : s;
+      return { content, next };
+    };
+
+    let s = base({ intakes: INTAKES, execSel: "i2", sel: null, tasks: [review("a1", "build-api"), review("a2", "build-ui")] });
+    const first = panel(s, "p:build-api");
+    expect(first.content).toMatchObject({ kind: "review", taskId: "a1" });
+    s = first.next;
+    expect(s.sel).toBe("a1");
+    // GraphBody: s.sel のタスクのノードを選ぶ。いま選んでいるノードと同じなので動かない
+    expect(processKeyOfTask(s.tasks, s.sel, "i2")).toBe("p:build-api");
+
+    s = reduce(s, { type: "approve" });
+    expect(s.sel).toBe("a2");
+    const follow = processKeyOfTask(s.tasks, s.sel, "i2");
+    expect(follow).toBe("p:build-ui");
+    const second = panel(s, follow!);
+    expect(second.content).toMatchObject({ kind: "review", taskId: "a2" });
+    // パネルは s.sel をもう動かさない
+    expect(second.next).toBe(s);
   });
 
   test("承認・差し戻しの後は同じ Intake の次の承認待ちを選び、別の Intake には飛ばない", () => {
