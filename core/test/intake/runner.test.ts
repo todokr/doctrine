@@ -1,5 +1,5 @@
 import { writeFileSync } from "node:fs";
-import { mkdir, stat } from "node:fs/promises";
+import { mkdir, readFile, stat } from "node:fs/promises";
 import { afterEach, beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
 import { join } from "node:path";

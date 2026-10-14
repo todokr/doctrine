@@ -956,7 +956,7 @@ function nameFrom(dirName: string): string {
   return dirName.toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "") || "project";
 }
 
-/** ファイルを動的 import しない（権限も要らず、deno check で型検査される）。 */
+/** ファイルを動的 import しない（単一バイナリに同梱され、tsc で型検査される）。 */
 const provider: MigrationProvider = {
   getMigrations: () => Promise.resolve(migrations),
 };

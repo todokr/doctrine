@@ -23,13 +23,13 @@ function withEnv(vars: Record<string, string | undefined>, fn: () => void) {
 test("stateRoot: DOCTRINE_STATE_DIR が空文字なら未設定として扱う", () => {
   // 設定し忘れ（`export DOCTRINE_STATE_DIR=` のように空文字を代入してしまう）で
   // 状態ディレクトリが相対パスになると、起動した場所で DB とソケットの位置が変わる
-  const prev = process.env["DOCTRINE_STATE_DIR"];
-  process.env["DOCTRINE_STATE_DIR"] = "";
+  const prev = process.env.DOCTRINE_STATE_DIR;
+  process.env.DOCTRINE_STATE_DIR = "";
   try {
     assert.ok(stateRoot().endsWith("/.local/state/doctrine"));
   } finally {
-    if (prev === undefined) delete process.env["DOCTRINE_STATE_DIR"];
-    else process.env["DOCTRINE_STATE_DIR"] = prev;
+    if (prev === undefined) delete process.env.DOCTRINE_STATE_DIR;
+    else process.env.DOCTRINE_STATE_DIR = prev;
   }
 });
 
@@ -53,7 +53,7 @@ test("configRoot: どちらも無ければ ~/.config/doctrine", () => {
     () =>
       assert.equal(
         configRoot(),
-        join(process.env["HOME"]!, ".config", "doctrine"),
+        join(process.env.HOME!, ".config", "doctrine"),
       ),
   );
 });

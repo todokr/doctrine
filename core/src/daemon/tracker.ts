@@ -1,3 +1,5 @@
+import { isNotFound } from "../util/fsError.ts";
+import { readFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { ghTracker } from "../github/ghTracker.ts";
 import { linearTracker } from "../linear/linearTracker.ts";
@@ -39,9 +41,9 @@ export async function readTrackerConfig(workspacePath: string): Promise<TrackerC
   const path = join(workspacePath, WORKSPACE_YAML);
   let text: string;
   try {
-    text = await Deno.readTextFile(path);
+    text = await readFile(path, "utf8");
   } catch (e) {
-    if (e instanceof Deno.errors.NotFound) {
+    if (isNotFound(e)) {
       throw new WorkspaceConfigError(
         "workspace_config_missing",
         `workspace.yaml がありません: ${path}`,

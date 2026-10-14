@@ -47,8 +47,8 @@ ${items}
  * `{{ ... }}` が含まれていると TemplateError になるうえ、タスク指示からテンプレート変数を
  * 注入する経路になる。ここでは文字列を直接組み立てて返し、展開はしない。
  *
- * 文面を別ファイル（.md）に出さないのは、core/deno.json の build が deno compile に
- * --include を持たず、別ファイルは単一バイナリに同梱されないため（systemPrompt.ts と同じ）。
+ * 文面を別ファイル（.md）に出さないのは、単一バイナリ（core/scripts/build.ts の esbuild + SEA）に
+ * 別ファイルが同梱されないため（systemPrompt.ts と同じ）。
  */
 export function buildGuidePrompt(input: GuidePromptInput): string {
   const { ctx, mergeBase, tree, lastCommand, rejections } = input;

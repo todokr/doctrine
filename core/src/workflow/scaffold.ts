@@ -1,3 +1,5 @@
+import { isNotFound } from "../util/fsError.ts";
+import { mkdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { runCommand } from "../util/exec.ts";
 import { projectNameFrom } from "../db/workspaces.ts";
@@ -27,7 +29,7 @@ export async function ensureProjectScaffold(path: string): Promise<{ created: st
   const created: string[] = [];
 
   if (await exists(projectYaml)) {
-    const cfg = parseProjectConfig(await Deno.readTextFile(projectYaml));
+    const cfg = parseProjectConfig(await readFile(projectYaml, "utf8"));
     const workflow = join(dir, "workflows", `${cfg.defaultWorkflow}.yaml`);
     if (!(await exists(workflow))) {
       throw new Error(
@@ -39,13 +41,13 @@ export async function ensureProjectScaffold(path: string): Promise<{ created: st
   }
 
   const base = await detectBaseBranch(path);
-  await Deno.mkdir(join(dir, "workflows"), { recursive: true });
+  await mkdir(join(dir, "workflows"), { recursive: true });
   const workflowYaml = join(dir, "workflows", `${DEFAULT_WORKFLOW_NAME}.yaml`);
   if (!(await exists(workflowYaml))) {
-    await Deno.writeTextFile(workflowYaml, defaultWorkflowYamlFor(base), { createNew: true });
+    await writeFile(workflowYaml, defaultWorkflowYamlFor(base), { flag: "wx" });
     created.push(workflowYaml);
   }
-  await Deno.writeTextFile(projectYaml, projectYamlFor(base), { createNew: true });
+  await writeFile(projectYaml, projectYamlFor(base), { flag: "wx" });
   created.push(projectYaml);
   return { created };
 }
@@ -67,14 +69,12 @@ export async function ensureWorkspaceScaffold(
 
   if (init) {
     const projects = Object.entries(init.projects).map(([name, path]) => ({ name, path }));
-    await Deno.mkdir(dirname(yamlPath), { recursive: true });
-    await Deno.writeTextFile(yamlPath, workspaceYamlFor(projects, init.tracker), {
-      createNew: true,
-    });
+    await mkdir(dirname(yamlPath), { recursive: true });
+    await writeFile(yamlPath, workspaceYamlFor(projects, init.tracker), { flag: "wx" });
     return { created: [yamlPath] };
   }
 
-  const realRoot = await Deno.realPath(root);
+  const realRoot = await realpath(root);
   const top = await requireNotSubdirectory(realRoot);
   if (top === null) {
     throw new Error(
@@ -82,9 +82,9 @@ export async function ensureWorkspaceScaffold(
         `（${root} は git リポジトリではありません。束ねるリポジトリを projects に書いてください）`,
     );
   }
-  await Deno.mkdir(dirname(yamlPath), { recursive: true });
+  await mkdir(dirname(yamlPath), { recursive: true });
   const text = workspaceYamlFor([{ name: projectNameFrom(basename(realRoot)), path: "." }]);
-  await Deno.writeTextFile(yamlPath, text, { createNew: true });
+  await writeFile(yamlPath, text, { flag: "wx" });
   return { created: [yamlPath] };
 }
 
@@ -113,7 +113,7 @@ export async function requireNotSubdirectory(root: string): Promise<string | nul
 }
 
 async function assertRepoRoot(path: string): Promise<void> {
-  const real = await Deno.realPath(path);
+  const real = await realpath(path);
   const top = await requireNotSubdirectory(real);
   if (top === null) {
     throw new Error(
@@ -149,10 +149,10 @@ async function detectBaseBranch(root: string): Promise<string | undefined> {
 
 async function exists(p: string): Promise<boolean> {
   try {
-    await Deno.stat(p);
+    await stat(p);
     return true;
   } catch (e) {
-    if (e instanceof Deno.errors.NotFound) return false;
+    if (isNotFound(e)) return false;
     throw e;
   }
 }

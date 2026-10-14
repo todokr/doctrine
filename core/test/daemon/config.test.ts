@@ -150,16 +150,16 @@ test("saveGlobalLimit はファイルが無ければ globalLimit だけを書く
 });
 
 test("defaultConfigPath は状態ディレクトリではなく設定ディレクトリの config.json", () => {
-  const prevState = process.env["DOCTRINE_STATE_DIR"];
-  const prevConfig = process.env["DOCTRINE_CONFIG_DIR"];
-  process.env["DOCTRINE_STATE_DIR"] = join(root, "state");
-  process.env["DOCTRINE_CONFIG_DIR"] = join(root, "config");
+  const prevState = process.env.DOCTRINE_STATE_DIR;
+  const prevConfig = process.env.DOCTRINE_CONFIG_DIR;
+  process.env.DOCTRINE_STATE_DIR = join(root, "state");
+  process.env.DOCTRINE_CONFIG_DIR = join(root, "config");
   try {
     assert.equal(defaultConfigPath(), join(root, "config", "config.json"));
   } finally {
-    if (prevState === undefined) delete process.env["DOCTRINE_STATE_DIR"];
-    else process.env["DOCTRINE_STATE_DIR"] = prevState;
-    if (prevConfig === undefined) delete process.env["DOCTRINE_CONFIG_DIR"];
-    else process.env["DOCTRINE_CONFIG_DIR"] = prevConfig;
+    if (prevState === undefined) delete process.env.DOCTRINE_STATE_DIR;
+    else process.env.DOCTRINE_STATE_DIR = prevState;
+    if (prevConfig === undefined) delete process.env.DOCTRINE_CONFIG_DIR;
+    else process.env.DOCTRINE_CONFIG_DIR = prevConfig;
   }
 });

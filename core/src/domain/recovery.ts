@@ -58,7 +58,7 @@ export function psLstartCommand(
   return {
     cmd: "ps",
     args: ["-o", "lstart=", "-p", String(pid)],
-    env: { ...Deno.env.toObject(), LC_ALL: "C", TZ: "UTC" },
+    env: { LC_ALL: "C", TZ: "UTC" },
   };
 }
 
@@ -83,7 +83,7 @@ export function defaultProbe(): ProcessProbe {
     },
     kill(pid, signal) {
       try {
-        Deno.kill(pid, signal);
+        process.kill(pid, signal);
       } catch { /* 既に消えている */ }
     },
   };

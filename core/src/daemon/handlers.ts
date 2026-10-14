@@ -1,3 +1,6 @@
+import { isNotFound } from "../util/fsError.ts";
+import type { Stats } from "node:fs";
+import { readdir, readFile, rm, stat } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join } from "node:path";
 import { computeDiff, mergeBase, type TaskDiff } from "../domain/diff.ts";
 import { branchOf, type Step, type Workflow, WorkflowValidationError } from "../workflow/schema.ts";
@@ -367,14 +370,15 @@ export function createHandler(ctx: DaemonContext): Handler {
       case "project.config.get": {
         const project = await reqProject(ctx, params);
         return parseProjectConfig(
-          await Deno.readTextFile(join(project.path, ".doctrine", "project.yaml")),
+          await readFile(join(project.path, ".doctrine", "project.yaml"), "utf8"),
         );
       }
       case "project.config.save": {
         const project = await reqProject(ctx, params);
         const input = readProjectConfigInput(params);
-        const yamlText = await Deno.readTextFile(
+        const yamlText = await readFile(
           join(project.path, ".doctrine", "project.yaml"),
+          "utf8",
         );
         const { text, config } = applyProjectConfig(yamlText, input);
         await ctx.loadWorkflow(project.path, config.defaultWorkflow).catch((e) => {
@@ -431,7 +435,7 @@ export function createHandler(ctx: DaemonContext): Handler {
         const name = reqWorkflowName(params);
         const changes = readWorkflowChanges(params);
         const path = join(project.path, ".doctrine", "workflows", `${name}.yaml`);
-        const yamlText = await Deno.readTextFile(path).catch(() => {
+        const yamlText = await readFile(path, "utf8").catch(() => {
           throw new Error(`ワークフローがありません: ${path}`);
         });
         const result = applyWorkflowChanges(yamlText, changes);
@@ -1068,7 +1072,7 @@ async function createTaskRow(
 
 /** ログファイルの末尾 tail 行（既定 200）。まだファイルが無い実行は空で返す。 */
 async function readLogTail(path: string, tail: unknown): Promise<string[]> {
-  const text = await Deno.readTextFile(path).catch(() => "");
+  const text = await readFile(path, "utf8").catch(() => "");
   return text.split("\n").slice(-(typeof tail === "number" ? tail : 200));
 }
 
@@ -1077,13 +1081,13 @@ async function workflowNames(projectPath: string): Promise<string[]> {
   const dir = join(projectPath, ".doctrine", "workflows");
   const names: string[] = [];
   try {
-    for await (const entry of Deno.readDir(dir)) {
-      if (entry.isFile && entry.name.endsWith(".yaml")) {
+    for (const entry of await readdir(dir, { withFileTypes: true })) {
+      if (entry.isFile() && entry.name.endsWith(".yaml")) {
         names.push(entry.name.slice(0, -".yaml".length));
       }
     }
   } catch (e) {
-    if (e instanceof Deno.errors.NotFound) return [];
+    if (isNotFound(e)) return [];
     throw e;
   }
   return names.sort();
@@ -1116,19 +1120,19 @@ async function worktreeEntries(db: Db): Promise<WorktreeEntry[]> {
     }
     const entries = await Promise.all(
       (await listWorktrees(project.path)).map(async (w): Promise<WorktreeEntry | null> => {
-        let stat: Deno.FileInfo;
+        let info: Stats;
         try {
-          stat = await Deno.stat(w.path);
+          info = await stat(w.path);
         } catch (e) {
           // git は実体の無い worktree も（prunable として）列挙する
-          if (e instanceof Deno.errors.NotFound) return null;
+          if (isNotFound(e)) return null;
           throw e;
         }
         const key = await canonical(w.path);
         const task = tasks.get(key);
         const intake = task ? undefined : intakes.get(dirname(key));
         const age = task?.updated_at ?? intake?.updated_at ??
-          (stat.mtime ?? stat.birthtime ?? new Date()).toISOString();
+          info.mtime.toISOString();
         return {
           project: project.path,
           path: w.path,
@@ -1244,7 +1248,7 @@ async function hasIntakeChild(parentPath: string, name: string): Promise<boolean
   try {
     return (await listIntakeWorktrees(parentPath)).some((w) => w.name === name);
   } catch (e) {
-    if (e instanceof Deno.errors.NotFound) return false;
+    if (isNotFound(e)) return false;
     throw e;
   }
 }
@@ -1264,7 +1268,7 @@ async function removeIntakeWorktrees(
   try {
     children = await listIntakeWorktrees(parentPath);
   } catch (e) {
-    if (!(e instanceof Deno.errors.NotFound)) throw e;
+    if (!isNotFound(e)) throw e;
   }
 
   const repoOf = new Map<string, string>();
@@ -1289,9 +1293,7 @@ async function removeIntakeWorktrees(
     }
   }
   for (const t of targets) await removeWorktree({ ...t, force });
-  await Deno.remove(parentPath, { recursive: true }).catch((e) => {
-    if (!(e instanceof Deno.errors.NotFound)) throw e;
-  });
+  await rm(parentPath, { recursive: true, force: true });
 }
 
 /**

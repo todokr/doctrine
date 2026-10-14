@@ -1,4 +1,4 @@
-#!/usr/bin/env -S deno run --allow-all
+#!/usr/bin/env node
 import { once } from "node:events";
 import { mkdir, rm, stat } from "node:fs/promises";
 import { connect } from "node:net";

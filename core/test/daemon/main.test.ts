@@ -136,8 +136,8 @@ test("ソケットに繋げるか判定できない（権限拒否など）な�
 
 test("状態ディレクトリが存在しなくても、0o700 で作って起動できる", async () => {
   const state = join(root, "nested", "state");
-  const prev = process.env["DOCTRINE_STATE_DIR"];
-  process.env["DOCTRINE_STATE_DIR"] = state;
+  const prev = process.env.DOCTRINE_STATE_DIR;
+  process.env.DOCTRINE_STATE_DIR = state;
   try {
     const d = await startDaemon({
       socketPath: join(root, "dctld.sock"),
@@ -151,8 +151,8 @@ test("状態ディレクトリが存在しなくても、0o700 で作って起�
     assert.equal(s.mode & 0o777, 0o700, "DBを置くディレクトリは本人以外に見せない");
     await stat(join(state, "doctrine.db"));
   } finally {
-    if (prev === undefined) delete process.env["DOCTRINE_STATE_DIR"];
-    else process.env["DOCTRINE_STATE_DIR"] = prev;
+    if (prev === undefined) delete process.env.DOCTRINE_STATE_DIR;
+    else process.env.DOCTRINE_STATE_DIR = prev;
   }
 });
 
@@ -304,10 +304,10 @@ test("configPath を渡さなければ全体の実行枠は設定ディレクト
   const sock = join(root, "dctld.sock");
   const state = join(root, "state");
   const configDir = join(root, "nested", "config");
-  const prevState = process.env["DOCTRINE_STATE_DIR"];
-  const prevConfig = process.env["DOCTRINE_CONFIG_DIR"];
-  process.env["DOCTRINE_STATE_DIR"] = state;
-  process.env["DOCTRINE_CONFIG_DIR"] = configDir;
+  const prevState = process.env.DOCTRINE_STATE_DIR;
+  const prevConfig = process.env.DOCTRINE_CONFIG_DIR;
+  process.env.DOCTRINE_STATE_DIR = state;
+  process.env.DOCTRINE_CONFIG_DIR = configDir;
   try {
     const d1 = await startDaemon({ socketPath: sock, tickMs: 1_000_000 });
     daemons.push(d1);
@@ -324,9 +324,9 @@ test("configPath を渡さなければ全体の実行枠は設定ディレクト
     const slots = await call(sock, "daemon.slots", {}) as DaemonSlots;
     assert.equal(slots.global_limit, 6);
   } finally {
-    if (prevState === undefined) delete process.env["DOCTRINE_STATE_DIR"];
-    else process.env["DOCTRINE_STATE_DIR"] = prevState;
-    if (prevConfig === undefined) delete process.env["DOCTRINE_CONFIG_DIR"];
-    else process.env["DOCTRINE_CONFIG_DIR"] = prevConfig;
+    if (prevState === undefined) delete process.env.DOCTRINE_STATE_DIR;
+    else process.env.DOCTRINE_STATE_DIR = prevState;
+    if (prevConfig === undefined) delete process.env.DOCTRINE_CONFIG_DIR;
+    else process.env.DOCTRINE_CONFIG_DIR = prevConfig;
   }
 });

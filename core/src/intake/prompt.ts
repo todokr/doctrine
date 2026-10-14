@@ -6,7 +6,7 @@ import type { FrozenPart } from "./pfd/validate.ts";
 /**
  * 調査・分解エージェントへ送る文面。guidePrompt.ts と同じく expand() に通さず、
  * テンプレートリテラルで直接組む（Issue 本文の {{ }} をテンプレートとして読まないため）。
- * 文面を別ファイルに出さない（deno compile が別ファイルを同梱しない）。
+ * 文面を別ファイルに出さない（単一バイナリに別ファイルが同梱されない）。
  */
 
 /** 分解のプロンプトに載せるプロジェクト。repo は GitHub の owner/name で、GitHub でないか引けなければ null。 */

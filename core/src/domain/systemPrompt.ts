@@ -1,9 +1,8 @@
 /**
  * stepRunner がすべての `agent` ステップに `--append-system-prompt` として常に渡す文面。
  *
- * 別ファイル（`.md`）にしないのは、`core/deno.json` の build が
- * `deno compile -A --output dist/dctld src/daemon/main.ts` で `--include` を持たず、
- * 別ファイルは単一バイナリに同梱されないため。
+ * 別ファイル（`.md`）にしないのは、単一バイナリ（`core/scripts/build.ts` の esbuild + SEA）に
+ * 別ファイルが同梱されないため。
  */
 export const BUILTIN_APPEND_SYSTEM_PROMPT =
   `Bash ツールは1回の呼び出しにつき1コマンドだけ実行すること。

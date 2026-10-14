@@ -63,8 +63,8 @@ index 5474b22..d15cf20 100644
 --- a/src/core/worktree.ts
 +++ b/src/core/worktree.ts
 @@ -1,4 +1,4 @@
--import { basename, join, resolve } from "node:path";
-+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
+-import { basename, join, resolve } from "@std/path";
++import { basename, dirname, isAbsolute, join, resolve } from "@std/path";
  import { runCommand } from "../util/exec.ts";
  import { homeDir } from "../util/home.ts";
  

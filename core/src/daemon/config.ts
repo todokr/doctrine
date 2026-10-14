@@ -1,3 +1,5 @@
+import { isNotFound } from "../util/fsError.ts";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { z } from "zod";
 import { formatZodIssues } from "../workflow/schema.ts";
@@ -29,9 +31,9 @@ export async function readDaemonConfig(
 ): Promise<{ config: DaemonConfig; warning: string | null }> {
   let text: string;
   try {
-    text = await Deno.readTextFile(path);
+    text = await readFile(path, "utf8");
   } catch (e) {
-    if (e instanceof Deno.errors.NotFound) {
+    if (isNotFound(e)) {
       return { config: { globalLimit: DEFAULT_GLOBAL_LIMIT }, warning: null };
     }
     return {
@@ -73,13 +75,13 @@ export async function readDaemonConfig(
 }
 
 export async function writeDaemonConfig(path: string, config: DaemonConfig): Promise<void> {
-  await Deno.mkdir(dirname(path), { recursive: true, mode: 0o700 });
+  await mkdir(dirname(path), { recursive: true, mode: 0o700 });
   const tmp = `${path}.${crypto.randomUUID()}.tmp`;
-  await Deno.writeTextFile(tmp, JSON.stringify(config, null, 2) + "\n", { mode: 0o600 });
+  await writeFile(tmp, JSON.stringify(config, null, 2) + "\n", { mode: 0o600 });
   try {
-    await Deno.rename(tmp, path);
+    await rename(tmp, path);
   } catch (e) {
-    await Deno.remove(tmp).catch(() => {});
+    await rm(tmp, { force: true }).catch(() => {});
     throw e;
   }
 }

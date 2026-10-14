@@ -1,3 +1,5 @@
+import { tmpdir } from "node:os";
+import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { runCommand } from "../util/exec.ts";
 
@@ -47,17 +49,16 @@ async function hasHead(
 }
 
 export async function captureTree(worktreePath: string): Promise<string> {
-  const dir = await Deno.makeTempDir({ prefix: "doctrine-index-" });
+  const dir = await mkdtemp(join(tmpdir(), "doctrine-index-"));
   try {
     // デーモンの環境に GIT_DIR / GIT_WORK_TREE が入っていると、-C worktreePath が
     // 効かなくなって**別のリポジトリ**のツリーを記録してしまう。env に渡したものだけを
     // 環境にして（clearEnv）、この2つを確実に落とす。
-    const env: Record<string, string> = {
-      ...Deno.env.toObject(),
-      GIT_INDEX_FILE: join(dir, "index"),
-    };
-    delete env.GIT_DIR;
-    delete env.GIT_WORK_TREE;
+    const env: Record<string, string> = {};
+    for (const [k, v] of Object.entries(process.env)) {
+      if (v !== undefined && k !== "GIT_DIR" && k !== "GIT_WORK_TREE") env[k] = v;
+    }
+    env.GIT_INDEX_FILE = join(dir, "index");
     const opts = { env, clearEnv: true };
 
     // 空のインデックスに対する `git add -A` は「ignore されていないファイルを足す」
@@ -76,7 +77,7 @@ export async function captureTree(worktreePath: string): Promise<string> {
     const { stdout } = await runCommand("git", ["-C", worktreePath, "write-tree"], opts);
     return stdout.trim();
   } finally {
-    await Deno.remove(dir, { recursive: true }).catch(() => {});
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
   }
 }
 
@@ -106,7 +107,7 @@ export async function retainTree(o: {
       "-m",
       `doctrine review ${o.taskId}#${o.stepRunId}`,
     ],
-    { env: { ...Deno.env.toObject(), ...IDENTITY } },
+    { env: IDENTITY },
   );
   await runCommand("git", [
     "-C",

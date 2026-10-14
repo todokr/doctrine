@@ -1588,7 +1588,7 @@ test("project.add は未知のメソッドになった", async () => {
   await assert.rejects(() => h("project.add", { path: repo }, NOOP_CONN), /未知のメソッドです/);
 });
 
-/** keyof を鍵にすることで、型に欄を足したらこの表も直さないと deno task check が落ちる。
+/** keyof を鍵にすることで、型に欄を足したらこの表も直さないと tsc（pnpm run check）が落ちる。
  *  述語で実行時の型まで見るので、欄の名前替えと型替えの両方を捕まえる。 */
 const isString = (v: unknown) => typeof v === "string";
 const isNumber = (v: unknown) => typeof v === "number";
@@ -1645,7 +1645,7 @@ test("task.list / project.list / task.cancel の応答が protocol.ts の型を�
     id: string;
   };
 
-  // keyof を鍵にした述語表で検証（型に欄を足したら deno task check が落ちる）。
+  // keyof を鍵にした述語表で検証（型に欄を足したら tsc が落ちる）。
   const tasks = await h("task.list", {}, NOOP_CONN) as unknown as Record<string, unknown>[];
   const projects = await h("project.list", {}, NOOP_CONN) as unknown as Record<string, unknown>[];
 

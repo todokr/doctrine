@@ -1,5 +1,7 @@
+import { isNotFound } from "../util/fsError.ts";
+import { mkdir, readdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
-import { runCommand } from "../util/exec.ts";
+import { runCommand, spawnChild } from "../util/exec.ts";
 import { homeDir } from "../util/home.ts";
 
 export class UncommittedChangesError extends Error {
@@ -14,7 +16,7 @@ export class UncommittedChangesError extends Error {
 
 /** テストから差し替えられるよう環境変数を見る。 */
 export function stateDir(): string {
-  return Deno.env.get("DOCTRINE_STATE_DIR") ?? join(homeDir(), ".local", "state", "doctrine");
+  return process.env.DOCTRINE_STATE_DIR ?? join(homeDir(), ".local", "state", "doctrine");
 }
 
 export function worktreePathFor(projectPath: string, taskId: string): string {
@@ -70,17 +72,17 @@ export async function ensureDoctrineOutExcluded(repoPath: string): Promise<void>
 
   let content = "";
   try {
-    content = await Deno.readTextFile(excludePath);
+    content = await readFile(excludePath, "utf8");
   } catch (e) {
-    if (!(e instanceof Deno.errors.NotFound)) throw e;
+    if (!(isNotFound(e))) throw e;
   }
   if (content.split("\n").some((l) => l.trim() === DOCTRINE_OUT_EXCLUDE_LINE)) return;
 
   const withTrailingNewline = content.length > 0 && !content.endsWith("\n")
     ? content + "\n"
     : content;
-  await Deno.mkdir(dirname(excludePath), { recursive: true });
-  await Deno.writeTextFile(excludePath, withTrailingNewline + DOCTRINE_OUT_EXCLUDE_LINE + "\n");
+  await mkdir(dirname(excludePath), { recursive: true });
+  await writeFile(excludePath, withTrailingNewline + DOCTRINE_OUT_EXCLUDE_LINE + "\n");
 }
 
 /**
@@ -124,13 +126,14 @@ export async function containsCommit(
   ref: string,
   commit: string,
 ): Promise<boolean> {
-  const out = await new Deno.Command("git", {
-    args: ["-C", repoPath, "merge-base", "--is-ancestor", commit, ref],
-    stdin: "null",
-    stdout: "null",
-    stderr: "null",
-  }).output();
-  return out.success;
+  const child = await spawnChild(
+    "git",
+    ["-C", repoPath, "merge-base", "--is-ancestor", commit, ref],
+    {},
+  );
+  child.stdout.resume();
+  child.stderr.resume();
+  return (await child.status).code === 0;
 }
 
 /** Intake の worktree を並べる親ディレクトリ。子は <親>/<プロジェクト名>（workspace spec 5 章）。 */
@@ -143,13 +146,13 @@ export type IntakeWorktree = { name: string; path: string };
 /** 親の直下で .git を持つエントリ（子 worktree）を名前順で返す。path は join(parentPath, name)。 */
 export async function listIntakeWorktrees(parentPath: string): Promise<IntakeWorktree[]> {
   const result: IntakeWorktree[] = [];
-  for await (const entry of Deno.readDir(parentPath)) {
-    if (!entry.isDirectory) continue;
+  for (const entry of await readdir(parentPath, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
     const path = join(parentPath, entry.name);
     try {
-      await Deno.stat(join(path, ".git"));
+      await stat(join(path, ".git"));
     } catch (e) {
-      if (e instanceof Deno.errors.NotFound) continue;
+      if (isNotFound(e)) continue;
       throw e;
     }
     result.push({ name: entry.name, path });
@@ -249,7 +252,7 @@ export async function repoOfWorktree(worktreePath: string): Promise<string> {
  */
 export async function canonical(p: string): Promise<string> {
   try {
-    return await Deno.realPath(p);
+    return await realpath(p);
   } catch {
     return resolve(p);
   }
