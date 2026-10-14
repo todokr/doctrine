@@ -73,7 +73,7 @@ localStorage を使わないのは、WebView を作り直すと消えるため�
 
 ### `model.ts` と `store.tsx`
 
-- [`app/src/model.ts`](../../app/src/model.ts): `State` と `Action` の型、純関数の `reduce`、画面の導出（Intake の一覧の絞り込みと区分、差し戻し文の組み立て、利用上限の表示、デーモンの形から画面の形への変換）。副作用を持たない
+- [`app/src/model.ts`](../../app/src/model.ts): `State` と `Action` の型、純関数の `reduce`、画面の導出（サイドバーの区分、差し戻し文の組み立て、利用上限の表示、デーモンの形から画面の形への変換）。副作用を持たない
 - [`app/src/store.tsx`](../../app/src/store.tsx): `StoreProvider` と副作用のすべて（購読、取り直し、下書きと設定の読み書き、レビュー中のタスクの diff / context / guide の取得、Intake の詳細の取得）。
   RPC を束ねるフック（`useDecide` / `useIntakeRpc` / `useSettingsRpc` / `useProjectConfigRpc` / `useWorkflowRpc` / `useSlotsRpc`）を export する
 - 送信のフックは catch しない。呼び出し側が `app/src/decision.ts:sendDecision` で `{ ok }` / `{ ok: false, message }` に変え、成功したときだけ後片付けの action を dispatch する（失敗したときに下書きを消さないため）
@@ -145,7 +145,7 @@ React も Tauri も持ち込まず、同名の `*.test.ts` で単体テストす
 
 | ファイル | 役割 |
 | --- | --- |
-| `intake.ts` | Intake 画面の導出（回答の正規化と検証、サイドバーの区分、どの面を出すか、コメントの操作、進行中の面の操作の出し分け） |
+| `intake.ts` | Intake 画面の導出（回答の正規化と検証、Intake の一覧の絞り込みと区分、どの面を出すか、コメントの操作、進行中の面の操作の出し分け） |
 | `execution.ts` | Execution の一覧に並ぶか・区切り・人の番・並び |
 | `pfd.ts` | PFD の図の配置。列は `diagram.ts:layoutGraph` の最長路に任せ、列の中の順は重心法で交差を減らす |
 | `rail.ts` | 設定画面のワークフローの定義図。タスク画面の帯の組み立て（`buildRail`）は `shared/rail.ts` にあり、デーモンの `intake.get` も使う |
