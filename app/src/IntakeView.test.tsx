@@ -68,10 +68,15 @@ describe("IssuePreview", () => {
     expect(html).not.toContain("Intake を開始");
   });
 
-  test("Intake の無い Issue は開始ボタンを出す", () => {
-    const html = preview({});
-    expect(html).toMatch(/<button(?![^>]*disabled)[^>]*>Intake を開始<\/button>/);
-    expect(preview({ pending: true })).toMatch(/<button[^>]*disabled=""[^>]*>Intake を開始<\/button>/);
+  test("Intake の無い Issue は、計画して進めるとすぐ実行するの 2 つのボタンを出し、どちらも主ボタンにしない", () => {
+    const html = preview({ target: { kind: "start", url: "https://github.com/o/r/issues/8" } });
+    expect(html).toContain("計画して進める");
+    expect(html).toContain("複数の PR に分ける");
+    expect(html).toContain("すぐ実行する");
+    expect(html).toContain("1 本の PR で済ませる");
+    expect(html).not.toContain("btn primary");
+    expect(html).not.toContain("Intake を開始");
+    expect(preview({ pending: true })).toMatch(/<button[^>]*disabled=""[^>]*>計画して進める/);
   });
 
   test("本文は読み込み中・失敗・取れたときで出し分ける", () => {

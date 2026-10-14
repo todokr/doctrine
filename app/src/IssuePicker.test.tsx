@@ -43,7 +43,7 @@ describe("startIntake", () => {
     };
   };
 
-  test("選んだ workspace の root で intake.start を呼ぶ", async () => {
+  test("選んだ workspace の root と種類で intake.start を呼ぶ", async () => {
     invoke.mockResolvedValue({ ...INTAKES[0], alreadyActive: false });
     const { actions, deps } = setup();
     await startIntake(pickerWorkspace(WORKSPACES, 2)!.path, "https://github.com/o/r/issues/8", "direct", deps);
@@ -57,7 +57,7 @@ describe("startIntake", () => {
   test("失敗したらトーストを出す", async () => {
     invoke.mockRejectedValue(new Error("x"));
     const { actions, deps } = setup();
-    await startIntake("~/work/shop-api", "https://github.com/o/r/issues/8", "direct", deps);
+    await startIntake("~/work/shop-api", "https://github.com/o/r/issues/8", "plan", deps);
     expect(actions).toEqual([{ type: "toast", message: "Intake を始められませんでした（x）" }]);
   });
 });

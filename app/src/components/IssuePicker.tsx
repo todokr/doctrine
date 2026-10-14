@@ -4,7 +4,9 @@ import type { IntakeMode, IntakeSummary, TrackerIssue } from "../../../shared/pr
 import { type Cached, revalidate, trackerCache, trackerCacheKey } from "../trackerCache";
 import {
   issueIdentifier,
+  inIntakeList,
   issueTarget,
+  MODE_WORD,
   parseIssueInput,
   trackerGuidance,
   type IssueTarget,
@@ -101,7 +103,7 @@ export function IssuePreview(
     detail: Loaded<IssueDetail> | undefined;
     target: IssueTarget;
     pending: boolean;
-    onStart: () => void;
+    onStart: (mode: IntakeMode) => void;
     onOpen: (intakeId: string) => void;
   },
 ) {
@@ -129,7 +131,12 @@ export function IssuePreview(
       <div className="actions">
         {target.kind === "open"
           ? <button className="btn" onClick={() => onOpen(target.intakeId)}>進行中の Intake を開く</button>
-          : <button className="btn primary" disabled={pending} onClick={onStart}>Intake を開始</button>}
+          : (["plan", "direct"] as const).map((mode) => (
+            <button key={mode} className="btn" disabled={pending} onClick={() => onStart(mode)}>
+              {MODE_WORD[mode].name}
+              <span className="hint">（{MODE_WORD[mode].hint}）</span>
+            </button>
+          ))}
       </div>
     </div>
   );
@@ -384,11 +391,15 @@ export function IssuePicker() {
             detail={detail}
             target={issueTarget(picked.url, s.intakes)}
             pending={pending}
-            onOpen={(id) => dispatch({ type: "intake.select", id })}
-            onStart={async () => {
+            onOpen={(id) => {
+              // 承認済みの Intake は Intake の一覧に無いので、Execution で開く
+              const row = s.intakes.find((i) => i.id === id);
+              dispatch(row && !inIntakeList(row, s.intakeRevise) ? { type: "intake.open", id } : { type: "intake.select", id });
+            }}
+            onStart={async (mode) => {
               setPending(true);
               try {
-                await startIntake(workspace.path, picked.url, "plan", { start: api.start, dispatch });
+                await startIntake(workspace.path, picked.url, mode, { start: api.start, dispatch });
               } finally {
                 setPending(false);
               }
