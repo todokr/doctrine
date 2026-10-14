@@ -91,6 +91,7 @@ const base = (overrides: Partial<State> = {}): State => ({
   intakeDetails: {},
   intakeLogs: {},
   intakeGen: {},
+  intakeStale: {},
   intakeRevise: null,
   drafts: {},
   intakeDrafts: {},
@@ -1839,5 +1840,27 @@ describe("feedbackOf", () => {
     const got = feedbackOf(ctx([rejected(1), { stepRunId: 2, stepId: "review", status: "approved", endedAt: "x" }, rejected(3), rejected(5)]));
     expect(got.latest?.stepRunId).toBe(5);
     expect(got.earlier.map((r) => r.stepRunId)).toEqual([3, 1]);
+  });
+});
+
+describe("Intake に属するタスクのイベントで帯を取り直す", () => {
+  const owned = { ...seedTasks()[0], id: "t-x", intake: { id: "a", processId: "p1", issueUrl: null, parentIssueUrl: null } };
+  const loose = { ...seedTasks()[0], id: "t-y", intake: null };
+  const withDetail = () => base({ tasks: [owned, loose], intakeDetails: { a: detailOk("a") }, intakeStale: {} });
+
+  test.each([
+    { event: "task.stateChanged", task_id: "t-x", from: "running", to: "suspended" },
+    { event: "stepRun.started", task_id: "t-x", step_run_id: 1, step_id: "impl" },
+    { event: "stepRun.finished", task_id: "t-x", step_run_id: 1, step_id: "impl", status: "success", attempt: 1, goto_step_id: null },
+  ] as ServerEvent[])("$event は詳細を残したまま取り直しを頼む", (ev) => {
+    const after = intakeEv(ev, withDetail());
+    expect(after.intakeStale.a).toBe(1);
+    expect(after.intakeDetails.a).toEqual(detailOk("a"));
+  });
+
+  test("Intake に属さないタスクと、詳細を持っていない Intake は頼まない", () => {
+    expect(intakeEv({ event: "stepRun.started", task_id: "t-y", step_run_id: 1, step_id: "impl" }, withDetail()).intakeStale).toEqual({});
+    const s = base({ tasks: [owned], intakeDetails: {}, intakeStale: {} });
+    expect(intakeEv({ event: "stepRun.started", task_id: "t-x", step_run_id: 1, step_id: "impl" }, s).intakeStale).toEqual({});
   });
 });

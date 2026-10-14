@@ -89,6 +89,7 @@ function initialState(): State {
     intakeDetails: {},
     intakeLogs: {},
     intakeGen: {},
+    intakeStale: {},
     intakeRevise: null,
     drafts: {},
     intakeDrafts: {},
@@ -116,6 +117,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   // 新しい応答の後に届くと、画面が一度古い状態に巻き戻る。
   // 最後に始めた1本だけが反映してよい（ロジック自体は refreshGate.ts でテスト済み）
   const [refreshGate] = useState(() => createRefreshGate());
+  // 帯の取り直しは詳細を消さずに何本も走る。最後に始めた 1 本だけを反映する
+  const [detailGate] = useState(() => createRefreshGate());
   // 購読の effect の中で作る refresh を、外の effect からも呼べるようにする
   const refreshRef = useRef<(() => Promise<void>) | null>(null);
 
@@ -387,6 +390,22 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         })
       );
   }, [intakeId, needIntake, intakeGen]);
+
+  // Execution で開いている Intake のタスクが動いたら、詳細を残したまま取り直す（spec 7.2）
+  const execId = s.view === "execution" ? s.execSel : null;
+  const stale = execId === null ? 0 : s.intakeStale[execId] ?? 0;
+  useEffect(() => {
+    if (execId === null || stale === 0) return;
+    const id = execId;
+    const gen = intakeGenOf(latest.current, id);
+    const token = detailGate.begin();
+    void rpc("intake.get", { intake_id: id })
+      .then((value) => {
+        if (detailGate.isLatest(token)) dispatch({ type: "intake.detail", id, gen, loaded: { kind: "ok", value } });
+      })
+      // 落ちたら前の詳細を残す。次のイベントか 15 秒の取り直しで追いつく
+      .catch(() => {});
+  }, [execId, stale]);
 
   useEffect(() => {
     if (!s.toast) return;

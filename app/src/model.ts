@@ -542,6 +542,8 @@ export type State = {
   intakeDetails: Record<string, Loaded<IntakeDetail>>;
   intakeLogs: Record<string, IntakeLogView>;
   intakeGen: Record<string, number>;
+  /** Intake の詳細を消さずに取り直したい回数。その Intake のタスクのステップと状態が動くたびに増える（spec 7.2） */
+  intakeStale: Record<string, number>;
   /** 進行中の面で改訂に入るモードにしている Intake の id。詳細を捨てても消えないよう、面の外に持つ */
   intakeRevise: string | null;
   /** データディレクトリから下書きを読み終えたか。読む前に書くと空で上書きしてしまう */
@@ -738,6 +740,13 @@ function invalidate(s: State, id: string): Pick<State, "diffs" | "contexts" | "g
 function invalidateIntake(s: State, id: string): Pick<State, "intakeDetails" | "intakeGen"> {
   const { [id]: _, ...intakeDetails } = s.intakeDetails;
   return { intakeDetails, intakeGen: { ...s.intakeGen, [id]: intakeGenOf(s, id) + 1 } };
+}
+
+/** タスクが動いたら、詳細を持っている Intake の帯を取り直す。消すと取り直しの間パネルが外れる */
+function touchIntakeOfTask(s: State, taskId: string): Partial<Pick<State, "intakeStale">> {
+  const id = s.tasks.find((x) => x.id === taskId)?.intake?.id;
+  if (id === undefined || s.intakeDetails[id]?.kind !== "ok") return {};
+  return { intakeStale: { ...s.intakeStale, [id]: (s.intakeStale[id] ?? 0) + 1 } };
 }
 
 const setIntakeDraft = (s: State, id: string, patch: Partial<IntakeDraft>): Record<string, IntakeDraft> => ({
@@ -1054,6 +1063,7 @@ export function reduce(s: State, a: Action): State {
           }),
           // 状態が動いた ＝ worktree が動いた。取ってある diff と経緯はもう古い
           ...invalidate(s, ev.task_id),
+          ...touchIntakeOfTask(s, ev.task_id),
         };
       }
       if (ev.event === "intake.stateChanged") {
@@ -1077,7 +1087,7 @@ export function reduce(s: State, a: Action): State {
       }
       if (ev.event === "stepRun.started") {
         if (!s.tasks.some((x) => x.id === ev.task_id)) return s;
-        return { ...s, now: a.now, tasks: updateTask(s, ev.task_id, { step: ev.step_id }) };
+        return { ...s, now: a.now, tasks: updateTask(s, ev.task_id, { step: ev.step_id }), ...touchIntakeOfTask(s, ev.task_id) };
       }
       if (ev.event === "stepRun.finished") {
         const target = s.tasks.find((x) => x.id === ev.task_id);
@@ -1091,8 +1101,8 @@ export function reduce(s: State, a: Action): State {
           // 落とさないと、この通知がワークフローの残り全部の間ずっと出たままになる
           patch.bounce = undefined;
         }
-        if (Object.keys(patch).length === 0) return s;
-        return { ...s, now: a.now, tasks: updateTask(s, ev.task_id, patch) };
+        if (Object.keys(patch).length === 0) return { ...s, ...touchIntakeOfTask(s, ev.task_id) };
+        return { ...s, now: a.now, tasks: updateTask(s, ev.task_id, patch), ...touchIntakeOfTask(s, ev.task_id) };
       }
       if (ev.event === "log.line") {
         if (!s.tasks.some((x) => x.id === ev.task_id)) return s;
