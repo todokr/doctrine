@@ -1,4 +1,7 @@
+import { once } from "node:events";
+import { connect as netConnect, type Socket } from "node:net";
 import type { Response, ServerEvent } from "../../../shared/protocol.ts";
+import { isNotFound } from "../../src/util/fsError.ts";
 
 /** テストからデーモンに 1 回だけ RPC を投げるクライアント。応答を待つ上限。 */
 const REQUEST_TIMEOUT_MS = 30_000;
@@ -9,41 +12,42 @@ function isEvent(msg: Response | ServerEvent): msg is ServerEvent {
 }
 
 /** ソケットに繋ぐ。無ければデーモン未起動のメッセージで投げる。 */
-async function connect(path: string): Promise<Deno.UnixConn> {
+async function connect(path: string): Promise<Socket> {
+  const sock = netConnect(path);
   try {
-    return await Deno.connect({ transport: "unix", path });
+    await once(sock, "connect");
   } catch (err) {
-    if (err instanceof Deno.errors.NotFound) {
+    sock.destroy();
+    if (isNotFound(err)) {
       throw new Error(`デーモンが起動していないようです（ソケットが見つかりません: ${path}）`);
     }
     throw err;
   }
+  // 接続後の EPIPE / ECONNRESET は readMessages の終わりとして扱う。
+  sock.on("error", () => {});
+  return sock;
 }
 
 /** リクエストを 1 行 JSON で書き切る。 */
 async function send(
-  conn: Deno.UnixConn,
+  conn: Socket,
   id: number,
   method: string,
   params: Record<string, unknown>,
 ): Promise<void> {
-  const request = new TextEncoder().encode(JSON.stringify({ id, method, params }) + "\n");
-  let offset = 0;
-  while (offset < request.length) offset += await conn.write(request.subarray(offset));
+  const line = JSON.stringify({ id, method, params }) + "\n";
+  await new Promise<void>((resolve, reject) => conn.write(line, (e) => (e ? reject(e) : resolve())));
 }
 
 /**
  * 受信バイト列を改行で切って JSON.parse し、1 件ずつ返す。
- * 相手が閉じたら（read が null）終わる。JSON として読めない行は抜粋付きで投げる。
+ * 相手が閉じたら終わる。JSON として読めない行は抜粋付きで投げる。
  */
-async function* readMessages(conn: Deno.UnixConn): AsyncGenerator<Response | ServerEvent> {
+async function* readMessages(conn: Socket): AsyncGenerator<Response | ServerEvent> {
   const decoder = new TextDecoder();
-  const bytes = new Uint8Array(64 * 1024);
   let buf = "";
-  while (true) {
-    const n = await conn.read(bytes);
-    if (n === null) return;
-    buf += decoder.decode(bytes.subarray(0, n), { stream: true });
+  for await (const chunk of conn) {
+    buf += decoder.decode(chunk as Buffer, { stream: true });
     let i: number;
     while ((i = buf.indexOf("\n")) !== -1) {
       const line = buf.slice(0, i);
@@ -70,7 +74,7 @@ export async function call(
 ): Promise<unknown> {
   const requestId = 1;
   // タイムアウト時に読み取り待ちの接続を閉じるため、接続は外から触れる場所に置く。
-  const state: { conn?: Deno.UnixConn } = {};
+  const state: { conn?: Socket } = {};
   let timer: ReturnType<typeof setTimeout> | undefined;
 
   const timeout = new Promise<never>((_, reject) => {
@@ -105,8 +109,6 @@ export async function call(
     return await Promise.race([exchange, timeout]);
   } finally {
     clearTimeout(timer);
-    try {
-      state.conn?.close();
-    } catch { /* 既に閉じている */ }
+    state.conn?.destroy();
   }
 }

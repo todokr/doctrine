@@ -1,10 +1,12 @@
 import { afterEach, beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
+import { once } from "node:events";
 import { connect, type Socket } from "node:net";
 import { mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer, resolveSocketPath } from "../../src/daemon/server.ts";
+import { call } from "../helpers/rpc.ts";
 
 let root: string;
 let sock: string;
@@ -230,6 +232,26 @@ const socketEnv = (o: Partial<import("../../src/daemon/server.ts").SocketEnv> = 
   uid: 501,
   os: "linux" as const,
   ...o,
+});
+
+test("応答前にクライアントが切断しても、サーバは落ちずに次の接続に応答する", async () => {
+  let release!: () => void;
+  const gate = new Promise<void>((r) => (release = r));
+  const server = createServer(async (method) => {
+    if (method === "slow") await gate;
+    return { method };
+  });
+  servers.push(server);
+  await server.listen(sock);
+
+  const early = connect(sock);
+  await once(early, "connect");
+  early.write(JSON.stringify({ id: 1, method: "slow", params: {} }) + "\n");
+  early.destroy();
+  release();
+  await new Promise((r) => setTimeout(r, 50));
+
+  assert.deepEqual(await call(sock, "ping", {}), { method: "ping" });
 });
 
 test("resolveSocketPath: DOCTRINE_SOCKET があればそれを使う", () => {

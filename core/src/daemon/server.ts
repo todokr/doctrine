@@ -1,3 +1,5 @@
+import { mkdir, rm } from "node:fs/promises";
+import { createServer as createNetServer, type Server, type Socket } from "node:net";
 import { dirname, join } from "node:path";
 import type { Request, Response, ServerEvent } from "../../../shared/protocol.ts";
 import { stateRoot } from "../util/home.ts";
@@ -45,28 +47,24 @@ export function resolveSocketPath(env: SocketEnv): string {
 /** TCPポートは開かない。ファイルパーミッションがそのまま認可になる。 */
 export function socketPath(): string {
   return resolveSocketPath({
-    doctrineSocket: Deno.env.get("DOCTRINE_SOCKET"),
-    xdgRuntimeDir: Deno.env.get("XDG_RUNTIME_DIR"),
+    doctrineSocket: process.env.DOCTRINE_SOCKET,
+    xdgRuntimeDir: process.env.XDG_RUNTIME_DIR,
     stateRoot,
-    uid: Deno.uid() ?? 1000,
-    os: Deno.build.os === "darwin" ? "darwin" : "linux",
+    uid: process.getuid?.() ?? 1000,
+    os: process.platform === "darwin" ? "darwin" : "linux",
   });
 }
 
 type Client = {
-  conn: Deno.UnixConn;
+  conn: Socket;
   following: string | null;
   closed: boolean;
-  /** 書き込みは非同期なので、応答とイベントの順序を保つために直列につなぐ。 */
-  writing: Promise<void>;
 };
 
 export function createServer(handler: Handler) {
   const clients = new Set<Client>();
   const serving = new Set<Promise<void>>();
-  const encoder = new TextEncoder();
-  let listener: Deno.UnixListener | null = null;
-  let accepting: Promise<void> = Promise.resolve();
+  let server: Server | null = null;
 
   async function serve(client: Client): Promise<void> {
     const conn: Connection = {
@@ -75,13 +73,10 @@ export function createServer(handler: Handler) {
       isFollowing: (id) => client.following === id,
     };
     const decoder = new TextDecoder();
-    const bytes = new Uint8Array(64 * 1024);
     let buf = "";
     try {
-      while (true) {
-        const n = await client.conn.read(bytes);
-        if (n === null) break;
-        buf += decoder.decode(bytes.subarray(0, n), { stream: true });
+      for await (const chunk of client.conn) {
+        buf += decoder.decode(chunk as Buffer, { stream: true });
         let i: number;
         while ((i = buf.indexOf("\n")) !== -1) {
           const line = buf.slice(0, i);
@@ -113,52 +108,40 @@ export function createServer(handler: Handler) {
     }
   }
 
+  /** Socket.write は書き切れなかった分を内部に溜め、呼んだ順に書く。応答とイベントの順序はそれで保たれる。 */
   function write(client: Client, payload: Response | ServerEvent) {
     if (client.closed) return;
-    const data = encoder.encode(JSON.stringify(payload) + "\n");
-    client.writing = client.writing
-      .then(async () => {
-        let offset = 0;
-        while (offset < data.length && !client.closed) {
-          offset += await client.conn.write(data.subarray(offset));
-        }
-      })
-      .catch(() => closeClient(client));
+    client.conn.write(JSON.stringify(payload) + "\n");
   }
 
   function closeClient(client: Client) {
     if (client.closed) return;
     client.closed = true;
     clients.delete(client);
-    try {
-      client.conn.close();
-    } catch { /* 既に閉じている */ }
+    client.conn.destroy();
   }
 
   return {
     async listen(path: string): Promise<void> {
-      await Deno.mkdir(dirname(path), { recursive: true, mode: 0o700 });
-      await Deno.remove(path).catch(() => {});
-      const l = Deno.listen({ transport: "unix", path });
-      listener = l;
-      accepting = (async () => {
-        try {
-          for await (const conn of l) {
-            const client: Client = {
-              conn,
-              following: null,
-              closed: false,
-              writing: Promise.resolve(),
-            };
-            clients.add(client);
-            const p = serve(client);
-            serving.add(p);
-            void p.finally(() => serving.delete(p));
-          }
-        } catch {
-          // close() でリスナーを閉じた
-        }
-      })();
+      await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+      await rm(path, { force: true });
+      const s = createNetServer((conn) => {
+        // 相手が先に切れたときの EPIPE / ECONNRESET。聞かないとデーモンごと落ちる。
+        conn.on("error", () => {});
+        const client: Client = { conn, following: null, closed: false };
+        clients.add(client);
+        const p = serve(client);
+        serving.add(p);
+        void p.finally(() => serving.delete(p));
+      });
+      await new Promise<void>((resolve, reject) => {
+        s.once("error", reject);
+        s.listen(path, () => {
+          s.off("error", reject);
+          resolve();
+        });
+      });
+      server = s;
     },
     broadcast(ev: ServerEvent, opts: { followKey?: string; followersOnly?: boolean } = {}): void {
       const key = opts.followKey ?? ("task_id" in ev ? ev.task_id : undefined);
@@ -167,16 +150,14 @@ export function createServer(handler: Handler) {
         write(client, ev);
       }
     },
-    /** リスナーを閉じるとソケットファイルも消える（Deno がパスを unlink する）。 */
+    /** サーバを閉じるとソケットファイルも消える（libuv がパスを unlink する）。 */
     async close(): Promise<void> {
       for (const client of [...clients]) closeClient(client);
-      if (listener) {
-        try {
-          listener.close();
-        } catch { /* 既に閉じている */ }
-        listener = null;
+      if (server) {
+        const s = server;
+        server = null;
+        await new Promise<void>((resolve) => s.close(() => resolve()));
       }
-      await accepting;
       await Promise.allSettled([...serving]);
     },
   };
