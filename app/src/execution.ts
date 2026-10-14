@@ -2,7 +2,7 @@
 import type { IntakeProcessView, IntakeSummary } from "../../shared/protocol.ts";
 import type { RailNode } from "../../shared/rail.ts";
 import { isClosedIntake, visibleIntakes } from "./intake";
-import { type PfdView, parsePfdKey } from "./pfd";
+import { type PfdView, parsePfdKey, pfdKey } from "./pfd";
 import type { Task, WorkspaceFilter } from "./types";
 
 export type ExecutionSection = "active" | "closed";
@@ -63,6 +63,12 @@ export function firstAttentionKey(view: PfdView): string | null {
 
 export function railsOf(processes: readonly IntakeProcessView[]): Record<string, RailNode[] | null> {
   return Object.fromEntries(processes.map((p) => [p.id, p.rail]));
+}
+
+/** s.sel のタスクがこの Intake のものなら、そのプロセスの図のキー。パネルの外から開いたタスクのノードを選び直すのに使う */
+export function processKeyOfTask(tasks: readonly Task[], sel: string | null, intakeId: string): string | null {
+  const t = sel === null ? undefined : tasks.find((x) => x.id === sel);
+  return t?.intake?.id === intakeId ? pfdKey("process", t.intake.processId) : null;
 }
 
 export type PanelContent =

@@ -62,11 +62,11 @@ function RejectModal() {
 }
 
 /**
- * main の上端に最も近い selector の要素から delta だけ離れた要素へスクロールする。
+ * パネルの上端に最も近い selector の要素から delta だけ離れた要素へスクロールする。
  * 上端をまたいでいる要素（今読んでいるもの）を基準にする
  */
 function moveBy(selector: string, delta: 1 | -1) {
-  const main = document.querySelector("main.main");
+  const main = document.querySelector(".exec-panel-body");
   if (!main) return;
   const els = [...main.querySelectorAll<HTMLElement>(selector)];
   if (!els.length) return;

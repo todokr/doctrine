@@ -62,7 +62,6 @@ h1,h2,h3,h4,h5,h6,b,strong{font-weight:500}
 .ib svg{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
 .ib .pip{position:absolute;top:6px;right:6px;width:7px;height:7px;border-radius:50%;background:var(--accent);border:2px solid var(--side)}
 .it .row-pip{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--accent)}
-.exec-panel-slot{display:flex;flex-direction:column;gap:16px;margin-top:16px}
 
 /* sidebar */
 .side{background:var(--side);border-right:1px solid var(--line);display:flex;flex-direction:column;min-height:0}

@@ -35,12 +35,12 @@ import { WorkflowRail } from "./WorkflowRail";
 import { Markdown } from "./text";
 
 /**
- * 並べ方を切り替える直前に、読んでいる hunk（main の上端をまたいでいる、または最初に見えている
+ * 並べ方を切り替える直前に、読んでいる hunk（パネルの上端をまたいでいる、または最初に見えている
  * hunk）を覚える。どちらの並びでも hunk はちょうど 1 回出るので、切り替え後の飛び先は 1 つに決まる。
  * 返すのは切り替え後に querySelector で引ける CSS セレクタ
  */
 function rememberPosition(): string | null {
-  const main = document.querySelector("main.main");
+  const main = document.querySelector(".exec-panel-body");
   if (!main) return null;
   const top = main.getBoundingClientRect().top + 8;
   const anchors = [...main.querySelectorAll<HTMLElement>("[data-anchor]")];

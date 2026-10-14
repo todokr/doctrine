@@ -12,6 +12,7 @@ import {
   PANEL_DEFAULT,
   PANEL_MIN,
   panelContentOf,
+  processKeyOfTask,
   railsOf,
   readPanelHeight,
   writePanelHeight,
@@ -225,5 +226,17 @@ describe("パネルの高さ", () => {
     expect(set).toHaveBeenCalledWith(expect.any(String), "334");
     expect(() => writePanelHeight({ setItem: () => { throw new Error("quota"); } }, 300)).not.toThrow();
     expect(() => writePanelHeight(null, 300)).not.toThrow();
+  });
+});
+
+describe("processKeyOfTask", () => {
+  test("選んでいるタスクがこの Intake のものなら、そのプロセスのキー", () => {
+    const tasks = [task("t1", "running", "i2"), task("t2", "running", "i5"), task("t3", "running", null)];
+    // task() の intake.processId は p1
+    expect(processKeyOfTask(tasks, "t1", "i2")).toBe("p:p1");
+    expect(processKeyOfTask(tasks, "t2", "i2")).toBeNull();
+    expect(processKeyOfTask(tasks, "t3", "i2")).toBeNull();
+    expect(processKeyOfTask(tasks, "gone", "i2")).toBeNull();
+    expect(processKeyOfTask(tasks, null, "i2")).toBeNull();
   });
 });
