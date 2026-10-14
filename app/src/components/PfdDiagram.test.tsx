@@ -185,11 +185,11 @@ describe("PfdDiagram の Execution の図", () => {
     expect(block(html, "プロセス", "受け入れる")).not.toContain("pfd-status-detail");
   });
 
-  test("承認待ちの言葉はタスクの承認待ちの色で描く", () => {
+  test("レビュー待ちの言葉はタスクの承認待ちの色で描く", () => {
     const html = render(buildPfdView(PFD_SAMPLE, { statuses: PFD_STATUSES_A, exec: { rails, suspended: new Set(["build-ui"]) } }));
     const b = block(html, "プロセス", "ボタンを作る");
-    expect(b).toContain(`<tspan class="pfd-status-word ${toneClass(TASK_TONE.suspended)}">承認待ち</tspan>`);
-    expect(openTag(b)).toContain("承認待ち");
+    expect(b).toContain(`<tspan class="pfd-status-word ${toneClass(TASK_TONE.suspended)}">レビュー待ち</tspan>`);
+    expect(openTag(b)).toContain("レビュー待ち");
   });
 
   test("状態の線・段の数字・プロジェクト名・人の印を描かず、成果物の種類の印は描く", () => {

@@ -154,12 +154,12 @@ export type StatusLine = { word: string; detail: string | null; awaiting: boolea
 
 /**
  * 状態の言葉と、添える語（spec 6.2）。実行中はいまのステップの名前、要確認と着手可能は statusNote。
- * 実行中でいまのタスクが承認待ち（suspended）なら、言葉を「承認待ち」にする（プロセスの状態は running のまま）。
+ * 実行中でいまのタスクが承認待ち（suspended）なら、言葉をタスク画面と同じ「レビュー待ち」にする（プロセスの状態は running のまま）。
  * 1 行が max に収まらなければ添える語を … で切る
  */
 export function statusLine(status: ProcessStatus, rail: readonly RailNode[] | null, max: number, suspended = false): StatusLine {
   const awaiting = suspended && status.state === "running";
-  const word = awaiting ? "承認待ち" : LOOK[status.state].word;
+  const word = awaiting ? "レビュー待ち" : LOOK[status.state].word;
   const detail = status.state === "running" ? rail?.find((r) => r.current)?.id ?? null : statusNote(status);
   if (detail === null) return { word, detail, awaiting };
   const fits = (d: string) => textWidth(`${word} · ${d}`) <= max;

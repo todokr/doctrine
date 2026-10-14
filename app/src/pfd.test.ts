@@ -480,9 +480,9 @@ describe("buildPfdView の帯", () => {
     expect(node(view, "a:api").attention).toBe(false);
   });
 
-  test("exec の suspended のプロセスは承認待ちの文言", () => {
+  test("exec の suspended のプロセスはレビュー待ちの文言", () => {
     const view = buildPfdView(PFD_SAMPLE, { statuses: PFD_STATUSES_A, exec: { rails, suspended: new Set(["build-ui"]) } });
-    expect(node(view, "p:build-ui").status).toMatchObject({ word: "承認待ち", awaiting: true });
+    expect(node(view, "p:build-ui").status).toMatchObject({ word: "レビュー待ち", awaiting: true });
     expect(node(view, "p:build-api").status).toMatchObject({ awaiting: false });
   });
 
@@ -520,9 +520,9 @@ describe("statusLine", () => {
     expect(statusLine({ state: "merged", taskId: "t", pr: { ...pr, state: "MERGED" } }, rail, 200)).toEqual({ word: "マージ済み", detail: null, awaiting: false });
   });
 
-  test("いまのタスクが承認待ちなら、承認待ちといまのステップの名前", () => {
+  test("いまのタスクが承認待ちなら、レビュー待ちといまのステップの名前", () => {
     const gate = [step("implement", "success"), step("review", "awaiting", true)];
-    expect(statusLine({ state: "running", taskId: "t" }, gate, 200, true)).toEqual({ word: "承認待ち", detail: "review", awaiting: true });
+    expect(statusLine({ state: "running", taskId: "t" }, gate, 200, true)).toEqual({ word: "レビュー待ち", detail: "review", awaiting: true });
     expect(statusLine({ state: "running", taskId: "t" }, gate, 200)).toMatchObject({ word: "実行中", awaiting: false });
   });
 
