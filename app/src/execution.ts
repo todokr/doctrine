@@ -2,7 +2,7 @@
 import type { IntakeProcessView, IntakeSummary } from "../../shared/protocol.ts";
 import type { RailNode } from "../../shared/rail.ts";
 import { isClosedIntake, visibleIntakes } from "./intake";
-import type { PfdView } from "./pfd";
+import { type PfdView, parsePfdKey } from "./pfd";
 import type { Task, WorkspaceFilter } from "./types";
 
 export type ExecutionSection = "active" | "closed";
@@ -63,4 +63,37 @@ export function firstAttentionKey(view: PfdView): string | null {
 
 export function railsOf(processes: readonly IntakeProcessView[]): Record<string, RailNode[] | null> {
   return Object.fromEntries(processes.map((p) => [p.id, p.rail]));
+}
+
+export type PanelContent =
+  /** 成果物・タスクの無いプロセス・完了した人のプロセス・一覧にまだ無いタスクのプロセス */
+  | { kind: "element"; key: string }
+  | { kind: "human"; key: string; processId: string }
+  | { kind: "review"; key: string; processId: string; taskId: string }
+  /** attention はいまのタスクを見ていて、プロセスが needs_attention（理由と再投入を上に出す） */
+  | { kind: "task"; key: string; processId: string; taskId: string; attention: boolean };
+
+/** 下のパネルに出すもの（spec 6.5）。key が図に無ければ（改訂で消えた・Intake を切り替えた）null で閉じる */
+export function panelContentOf(o: {
+  key: string | null;
+  keys: ReadonlySet<string>;
+  processes: readonly IntakeProcessView[];
+  tasks: readonly Task[];
+  /** いま選んでいるタスク（s.sel）。そのプロセスの task_ids に無ければ使わない */
+  chosenTaskId: string | null;
+}): PanelContent | null {
+  if (o.key === null || !o.keys.has(o.key)) return null;
+  const key = o.key;
+  const parsed = parsePfdKey(key);
+  if (parsed?.kind !== "process") return { kind: "element", key };
+  const view = o.processes.find((p) => p.id === parsed.id);
+  if (!view) return { kind: "element", key };
+  if (view.state === "your_turn") return { kind: "human", key, processId: view.id };
+  const current = view.task_ids.at(-1);
+  const taskId = o.chosenTaskId !== null && view.task_ids.includes(o.chosenTaskId) ? o.chosenTaskId : current;
+  const task = taskId === undefined ? undefined : o.tasks.find((t) => t.id === taskId);
+  // 投入の直後は task.list の取り直しがまだで、タスクが一覧に無いことがある
+  if (!task) return { kind: "element", key };
+  if (task.state === "suspended") return { kind: "review", key, processId: view.id, taskId: task.id };
+  return { kind: "task", key, processId: view.id, taskId: task.id, attention: view.state === "needs_attention" && task.id === current };
 }

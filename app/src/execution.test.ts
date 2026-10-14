@@ -8,6 +8,7 @@ import {
   firstAttentionKey,
   inExecution,
   isExecutionAttention,
+  panelContentOf,
   railsOf,
 } from "./execution";
 import { INTAKE_ACTIVE, INTAKES, PFD_SAMPLE, seedTasks } from "./fixtures";
@@ -131,5 +132,65 @@ describe("firstAttentionKey", () => {
 describe("railsOf", () => {
   test("プロセスの id から帯", () => {
     expect(railsOf([{ ...INTAKE_ACTIVE.processes[0], id: "x", rail: null }])).toEqual({ x: null });
+  });
+});
+
+describe("panelContentOf", () => {
+  const keys = new Set(buildPfdView(PFD_SAMPLE).nodes.map((n) => n.key));
+  const running = (id: string, task_ids: string[]) =>
+    ({ ...INTAKE_ACTIVE.processes[0], id, state: "running" as const, taskId: task_ids.at(-1)!, task_ids });
+  const base = { keys, processes: INTAKE_ACTIVE.processes, tasks: [] as Task[], chosenTaskId: null };
+
+  test("何も選んでいない、または図に無いキーなら null（パネルを閉じる）", () => {
+    expect(panelContentOf({ ...base, key: null })).toBeNull();
+    expect(panelContentOf({ ...base, key: "p:retired" })).toBeNull();
+  });
+
+  test("成果物は要素の欄", () => {
+    expect(panelContentOf({ ...base, key: "a:api" })).toEqual({ kind: "element", key: "a:api" });
+  });
+
+  test("your_turn は人の操作", () => {
+    expect(panelContentOf({ ...base, key: "p:approve" })).toEqual({ kind: "human", key: "p:approve", processId: "approve" });
+  });
+
+  test("タスクの無いプロセスは要素の欄", () => {
+    expect(panelContentOf({ ...base, key: "p:build-api" })).toEqual({ kind: "element", key: "p:build-api" });
+  });
+
+  test("いまのタスクが承認待ちならレビュー画面", () => {
+    const processes = [running("build-api", ["t9"])];
+    const r = panelContentOf({ ...base, processes, tasks: [task("t9", "suspended", "i2")], key: "p:build-api" });
+    expect(r).toEqual({ kind: "review", key: "p:build-api", processId: "build-api", taskId: "t9" });
+  });
+
+  test("承認待ち以外ならタスク画面", () => {
+    const processes = [running("build-api", ["t9"])];
+    const r = panelContentOf({ ...base, processes, tasks: [task("t9", "running", "i2")], key: "p:build-api" });
+    expect(r).toEqual({ kind: "task", key: "p:build-api", processId: "build-api", taskId: "t9", attention: false });
+  });
+
+  test("needs_attention はいまのタスクに理由と再投入を添える", () => {
+    // INTAKE_ACTIVE の design は needs_attention で、task_ids は t-old, t1
+    const tasks = [task("t1", "failed", "i2"), task("t-old", "canceled", "i2")];
+    const r = panelContentOf({ ...base, tasks, key: "p:design" });
+    expect(r).toEqual({ kind: "task", key: "p:design", processId: "design", taskId: "t1", attention: true });
+  });
+
+  test("s.sel がそのプロセスの過去のタスクならそれを開き、再投入は添えない", () => {
+    const tasks = [task("t1", "failed", "i2"), task("t-old", "canceled", "i2")];
+    const r = panelContentOf({ ...base, tasks, key: "p:design", chosenTaskId: "t-old" });
+    expect(r).toEqual({ kind: "task", key: "p:design", processId: "design", taskId: "t-old", attention: false });
+  });
+
+  test("s.sel が別のプロセスのタスクなら、このプロセスのいまのタスクを開く", () => {
+    const tasks = [task("t1", "failed", "i2")];
+    const r = panelContentOf({ ...base, tasks, key: "p:design", chosenTaskId: "other" });
+    expect(r).toMatchObject({ kind: "task", taskId: "t1" });
+  });
+
+  test("タスクが一覧に無ければ要素の欄に倒す", () => {
+    const processes = [running("build-api", ["t-new"])];
+    expect(panelContentOf({ ...base, processes, key: "p:build-api" })).toEqual({ kind: "element", key: "p:build-api" });
   });
 });
