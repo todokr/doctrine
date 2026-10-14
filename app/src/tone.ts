@@ -4,7 +4,7 @@ import type { IntakeSummary } from "../../shared/protocol.ts";
 import type { IntakeSection } from "./intake";
 import type { Group } from "./model";
 import type { PfdLook } from "./pfd";
-import type { RailStatus } from "./rail";
+import type { RailStatus } from "../../shared/rail.ts";
 import type { Task, TaskState } from "./types";
 
 export type Tone = "ok" | "run" | "danger" | "human" | "idle";

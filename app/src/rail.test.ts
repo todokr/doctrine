@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { StepRun, StepView } from "../../shared/protocol.ts";
 import { WORKFLOW_DEFAULT } from "./fixtures";
-import { buildDefinitionRail, buildRail, GAP, NODE_W } from "./rail";
+import { buildDefinitionRail, GAP, NODE_W } from "./rail";
+import { buildRail } from "../../shared/rail.ts";
 
 // .doctrine/workflows/default.yaml と同じ並び。app から core / YAML を読まないので、ここに手書きする。
 const cmd = (id: string): StepView => ({ id, type: "command" });

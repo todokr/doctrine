@@ -227,7 +227,7 @@ describe("countIntakeAttention", () => {
 });
 
 const view = (id: string, s: ProcessStatus, o: Partial<IntakeProcessView> = {}): IntakeProcessView =>
-  ({ id, ...s, sub_issue_url: null, task_ids: [], ...o }) as IntakeProcessView;
+  ({ id, ...s, sub_issue_url: null, task_ids: [], rail: null, ...o }) as IntakeProcessView;
 
 describe("processStatuses", () => {
   test("id をキーにして buildPfdView の塗りに渡せる", () => {

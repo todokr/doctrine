@@ -73,7 +73,7 @@ describe("ProcessTrail", () => {
   });
 
   test("PR の番号と状態", () => {
-    const view = { ...PFD_STATUSES_A["build-api"], id: "build-api", sub_issue_url: null, task_ids: ["t2"] } as IntakeProcessView;
+    const view = { ...PFD_STATUSES_A["build-api"], id: "build-api", sub_issue_url: null, task_ids: ["t2"], rail: null } as IntakeProcessView;
     const html = trail(view);
     expect(html).toContain("#42");
     expect(html).toContain("レビュー中");
@@ -81,7 +81,7 @@ describe("ProcessTrail", () => {
   });
 
   test("人の完了は記録した内容を出す", () => {
-    const view = { ...PFD_STATUSES_A.approve, id: "approve", sub_issue_url: null, task_ids: [] } as IntakeProcessView;
+    const view = { ...PFD_STATUSES_A.approve, id: "approve", sub_issue_url: null, task_ids: [], rail: null } as IntakeProcessView;
     const html = trail(view);
     expect(html).toContain("完了（人）");
     expect(html).toContain("確認した");

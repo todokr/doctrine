@@ -322,7 +322,7 @@ describe("pfdElement", () => {
 
 describe("frozenIds", () => {
   const view = (id: string, extra: Partial<IntakeProcessView>): IntakeProcessView =>
-    ({ id, state: "waiting", missing: [], sub_issue_url: null, task_ids: [], ...extra }) as IntakeProcessView;
+    ({ id, state: "waiting", missing: [], sub_issue_url: null, task_ids: [], rail: null, ...extra }) as IntakeProcessView;
   const waiting = (ids: string[]) => ids.map((id) => view(id, {}));
 
   test("投入済みのプロセスと入出力", () => {

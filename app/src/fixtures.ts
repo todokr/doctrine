@@ -643,6 +643,7 @@ export const INTAKE_ACTIVE: IntakeDetail = {
     ...status,
     sub_issue_url: `https://github.com/o/r/issues/10${i}`,
     task_ids: id === "design" ? ["t-old", "t1"] : [],
+    rail: null,
   })),
 };
 

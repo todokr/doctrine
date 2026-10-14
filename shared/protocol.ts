@@ -12,6 +12,7 @@ import type { ProcessStatus } from "./intake/processStatus.ts";
 import type { Answer, AssumptionResponse } from "./intake/question.ts";
 import type { QuestionSetContent, QuestionSetReply } from "./intake/validateQuestion.ts";
 import type { IntakeMode, IntakeRunPurpose, IntakeRunStatus, IntakeState } from "./intake/state.ts";
+import type { RailNode } from "./rail.ts";
 
 export type { IntakeMode };
 
@@ -544,7 +545,7 @@ export type IntakeRun = {
 export type IntakeProcessView =
   & { id: string }
   & ProcessStatus
-  & { sub_issue_url: string | null; task_ids: string[] };
+  & { sub_issue_url: string | null; task_ids: string[]; rail: RailNode[] | null };
 
 /**
  * intake.get の応答。drafts は全部の案の見出しだけを持つ。中身は最新の案（latest_draft）だけに

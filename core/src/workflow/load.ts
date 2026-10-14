@@ -1,12 +1,20 @@
 import { join } from "@std/path";
+import type { StepView } from "../../../shared/protocol.ts";
 import type { ProjectRow, TaskRow } from "../db/schema.ts";
 import { parseWorkflow, type Workflow } from "./schema.ts";
 import { withSetupStep } from "./project.ts";
 
 /** ディスクから読んだワークフロー。text は検証を通った YAML の中身そのまま。 */
-export type LoadedWorkflow = { text: string; workflow: Workflow; warnings: string[] };
+export type LoadedWorkflow = {
+  text: string;
+  workflow: Workflow;
+  warnings: string[];
+};
 
-export type WorkflowLoader = (projectPath: string, name: string) => Promise<LoadedWorkflow>;
+export type WorkflowLoader = (
+  projectPath: string,
+  name: string,
+) => Promise<LoadedWorkflow>;
 
 export async function loadWorkflowFromDisk(
   projectPath: string,
@@ -21,9 +29,15 @@ export async function loadWorkflowFromDisk(
 }
 
 /** tasks に保存する作成時の定義。 */
-export type WorkflowPin = { workflow_yaml: string; workflow_setup: string | null };
+export type WorkflowPin = {
+  workflow_yaml: string;
+  workflow_setup: string | null;
+};
 
-export function pinOf(loaded: LoadedWorkflow, project: Pick<ProjectRow, "setup">): WorkflowPin {
+export function pinOf(
+  loaded: LoadedWorkflow,
+  project: Pick<ProjectRow, "setup">,
+): WorkflowPin {
   return { workflow_yaml: loaded.text, workflow_setup: project.setup };
 }
 
@@ -43,4 +57,13 @@ export async function taskWorkflow(
   }
   const { workflow } = await load(project.path, task.workflow_name);
   return withSetupStep(workflow, project.setup ?? undefined);
+}
+
+/** 帯が描く分だけを残す。title は approval だけが持つ。 */
+export function toStepViews(workflow: Workflow): StepView[] {
+  return workflow.steps.map((step) => {
+    const view: StepView = { id: step.id, type: step.type };
+    if (step.type === "approval") view.title = step.title;
+    return view;
+  });
 }

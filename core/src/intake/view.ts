@@ -10,11 +10,24 @@ import {
 } from "../db/intakes.ts";
 import { loadQuestionSets } from "./questionSet.ts";
 import type { Db, IntakeDraftRow, IntakeRow } from "../db/schema.ts";
-import { getTask } from "../db/tasks.ts";
+import { getProject, getTask } from "../db/tasks.ts";
+import { listStepRuns } from "../db/stepRuns.ts";
+import {
+  taskWorkflow,
+  toStepViews,
+  type WorkflowLoader,
+} from "../workflow/load.ts";
+import { buildRail, type RailNode } from "../../../shared/rail.ts";
 import { baseBranchesOf, projectsOfProcesses } from "./processProject.ts";
-import type { AttentionReason, CommentReply } from "../../../shared/intake/decomposer.ts";
+import type {
+  AttentionReason,
+  CommentReply,
+} from "../../../shared/intake/decomposer.ts";
 import type { Pfd } from "../../../shared/intake/pfd.ts";
-import type { PrFact, ProcessStatus } from "../../../shared/intake/processStatus.ts";
+import type {
+  PrFact,
+  ProcessStatus,
+} from "../../../shared/intake/processStatus.ts";
 import type { IntakeState } from "../../../shared/intake/state.ts";
 import type {
   IntakeDetail,
@@ -27,13 +40,25 @@ import type {
 import { computeProcessStatuses, type ProcessProgress } from "./pfd/status.ts";
 
 /** 人の手が要る状態か（spec 5 章）。active は、あなたの番か要確認のプロセスがあるときだけ。 */
-export function needsHuman(state: IntakeState, statuses: readonly ProcessStatus[]): boolean {
-  if (state === "answering" || state === "reviewing" || state === "needs_attention") return true;
+export function needsHuman(
+  state: IntakeState,
+  statuses: readonly ProcessStatus[],
+): boolean {
+  if (
+    state === "answering" || state === "reviewing" ||
+    state === "needs_attention"
+  ) return true;
   if (state !== "active") return false;
-  return statuses.some((s) => s.state === "your_turn" || s.state === "needs_attention");
+  return statuses.some((s) =>
+    s.state === "your_turn" || s.state === "needs_attention"
+  );
 }
 
-type ProcessFacts = { id: string; status: ProcessStatus; subIssueUrl: string | null };
+type ProcessFacts = {
+  id: string;
+  status: ProcessStatus;
+  subIssueUrl: string | null;
+};
 
 /** intake_processes の生きた行（retired を除く）から、現在のタスク・観測した PR・sub-issue・人の完了を集める。 */
 export async function processProgressOf(
@@ -43,7 +68,9 @@ export async function processProgressOf(
   const progress = new Map<string, ProcessProgress>();
   for (const p of await listProcesses(db, intakeId)) {
     if (p.retired_at !== null) continue;
-    const task = p.current_task_id === null ? undefined : await getTask(db, p.current_task_id);
+    const task = p.current_task_id === null
+      ? undefined
+      : await getTask(db, p.current_task_id);
     const obs = p.current_task_id === null
       ? undefined
       : await getPrObservation(db, p.current_task_id);
@@ -70,12 +97,17 @@ export async function processProgressOf(
 }
 
 /** 承認の前は空配列。承認後は、承認された案と DB の進み具合から組む。 */
-async function processStatusesOf(db: Db, row: IntakeRow): Promise<ProcessFacts[]> {
+async function processStatusesOf(
+  db: Db,
+  row: IntakeRow,
+): Promise<ProcessFacts[]> {
   const approval = await latestApproval(db, row.id);
   if (!approval) return [];
   const pfd = JSON.parse((await getDraft(db, approval.draft_id))!.pfd) as Pfd;
   const progress = await processProgressOf(db, row.id);
-  const baseBranches = baseBranchesOf(await projectsOfProcesses(db, row.workspace_id, pfd));
+  const baseBranches = baseBranchesOf(
+    await projectsOfProcesses(db, row.workspace_id, pfd),
+  );
 
   return computeProcessStatuses({
     pfd,
@@ -110,7 +142,8 @@ function summaryOf(
     dispatch_paused: row.dispatch_paused === 1,
     rate_limited_until: row.rate_limited_until,
     progress: {
-      done: statuses.filter((s) => s.state === "merged" || s.state === "done").length,
+      done: statuses.filter((s) => s.state === "merged" || s.state === "done")
+        .length,
       total: statuses.length,
     },
     needs_human: needsHuman(row.state, statuses),
@@ -140,27 +173,66 @@ export function toPfdDraft(row: IntakeDraftRow): PfdDraft {
 }
 
 /** 案 1 件を中身込みで読む。別の Intake の案は「案がありません」にする。 */
-export async function intakeDraft(db: Db, intakeId: string, draftId: number): Promise<PfdDraft> {
+export async function intakeDraft(
+  db: Db,
+  intakeId: string,
+  draftId: number,
+): Promise<PfdDraft> {
   const row = await getDraft(db, draftId);
-  if (!row || row.intake_id !== intakeId) throw new Error(`案がありません: ${draftId}`);
+  if (!row || row.intake_id !== intakeId) {
+    throw new Error(`案がありません: ${draftId}`);
+  }
   return toPfdDraft(row);
+}
+
+/** プロセス id → いまのタスクの帯。タスクが無いプロセスは入らない。 */
+async function railsOf(
+  db: Db,
+  intakeId: string,
+  loadWorkflow: WorkflowLoader,
+): Promise<Map<string, RailNode[] | null>> {
+  const rails = new Map<string, RailNode[] | null>();
+  for (const p of await listProcesses(db, intakeId)) {
+    if (p.retired_at !== null || p.current_task_id === null) continue;
+    const task = (await getTask(db, p.current_task_id))!;
+    const project = (await getProject(db, task.project_id))!;
+    // task.get と同じく、ワークフローが読めないことで intake.get を失敗させない
+    const workflow = await taskWorkflow(task, project, loadWorkflow).catch(() =>
+      null
+    );
+    rails.set(
+      p.process_id,
+      buildRail(
+        workflow && toStepViews(workflow),
+        await listStepRuns(db, task.id),
+        task,
+      ),
+    );
+  }
+  return rails;
 }
 
 export async function toIntakeDetail(
   db: Db,
   row: IntakeRow,
   watch: WatchHealth,
+  loadWorkflow: WorkflowLoader,
 ): Promise<IntakeDetail> {
+  const rails = await railsOf(db, row.id, loadWorkflow);
   const facts = await processStatusesOf(db, row);
   const latest = await latestDraft(db, row.id);
   const approval = await latestApproval(db, row.id);
 
   const taskIds = new Map<string, string[]>();
   const tasks = await db.selectFrom("tasks").select(["id", "intake_process_id"])
-    .where("intake_id", "=", row.id).orderBy("created_at").orderBy("id").execute();
+    .where("intake_id", "=", row.id).orderBy("created_at").orderBy("id")
+    .execute();
   for (const t of tasks) {
     if (t.intake_process_id === null) continue;
-    taskIds.set(t.intake_process_id, [...(taskIds.get(t.intake_process_id) ?? []), t.id]);
+    taskIds.set(t.intake_process_id, [
+      ...(taskIds.get(t.intake_process_id) ?? []),
+      t.id,
+    ]);
   }
 
   return {
@@ -193,6 +265,7 @@ export async function toIntakeDetail(
       ...f.status,
       sub_issue_url: f.subIssueUrl,
       task_ids: taskIds.get(f.id) ?? [],
+      rail: rails.get(f.id) ?? null,
     })),
     runs: (await listIntakeRuns(db, row.id)).map((r) => ({
       id: r.id,
