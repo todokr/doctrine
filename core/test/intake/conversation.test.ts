@@ -158,7 +158,7 @@ test("continuationMessage: 回答が無いまま続きを求めたら投げる",
       questionSets: [questionSet(1, false)],
       drafts: [],
       comments: [],
-    })
+    }),
   );
 });
 

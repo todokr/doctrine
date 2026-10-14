@@ -37,7 +37,8 @@ export function listProjects(db: Db): Promise<ProjectRow[]> {
 
 export async function insertTask(db: Db, t: NewTask): Promise<TaskRow> {
   const now = new Date().toISOString();
-  await db.insertInto("tasks")
+  await db
+    .insertInto("tasks")
     .values({ ...t, state: "queued", created_at: now, updated_at: now })
     .execute();
   return (await getTask(db, t.id))!;
@@ -51,10 +52,13 @@ export function listTasks(
   db: Db,
   filter: { projectId?: number; state?: TaskState } = {},
 ): Promise<TaskRow[]> {
-  return db.selectFrom("tasks").selectAll()
+  return db
+    .selectFrom("tasks")
+    .selectAll()
     .$if(filter.projectId !== undefined, (q) => q.where("project_id", "=", filter.projectId!))
     .$if(filter.state !== undefined, (q) => q.where("state", "=", filter.state!))
-    .orderBy("created_at").orderBy("id")
+    .orderBy("created_at")
+    .orderBy("id")
     .execute();
 }
 

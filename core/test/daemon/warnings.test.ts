@@ -20,7 +20,10 @@ test("push した警告は新しい順に返る", () => {
   const { warnings } = log();
   warnings.push("古い");
   warnings.push("新しい");
-  assert.deepEqual(warnings.recent().map((w) => w.message), ["新しい", "古い"]);
+  assert.deepEqual(
+    warnings.recent().map((w) => w.message),
+    ["新しい", "古い"],
+  );
 });
 
 test("直近 WARNING_CAPACITY 件だけを保つ", () => {

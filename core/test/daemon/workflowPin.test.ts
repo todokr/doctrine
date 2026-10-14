@@ -24,17 +24,20 @@ let root: string;
 let repo: string;
 const contexts: DaemonContext[] = [];
 
-const LOOP = "name: feature\nsteps:\n" +
+const LOOP =
+  "name: feature\nsteps:\n" +
   '  - id: noop\n    type: command\n    run: "echo hi"\n' +
   "  - id: review\n    type: approval\n    title: 見て\n" +
   "    onReject:\n      goto: noop\n      maxAttempts: 5\n" +
   '  - id: after\n    type: command\n    run: "true"\n';
 
-const CHANGED = "name: feature\nsteps:\n" +
+const CHANGED =
+  "name: feature\nsteps:\n" +
   '  - id: other\n    type: command\n    run: "false"\n' +
   "  - id: review\n    type: approval\n    title: 見て\n";
 
-const GUIDE_CHANGED = "name: feature\nsteps:\n" +
+const GUIDE_CHANGED =
+  "name: feature\nsteps:\n" +
   "  - id: write-guide\n    type: guide\n    session: guide\n" +
   "  - id: review\n    type: approval\n    title: 見て\n";
 
@@ -49,9 +52,9 @@ beforeEach(async () => {
 });
 afterEach(async () => {
   await until(() =>
-    contexts.every((c) =>
-      c.running.size === 0 && c.runningIntakeRuns.size === 0 && c.intakeWatcher.idle()
-    )
+    contexts.every(
+      (c) => c.running.size === 0 && c.runningIntakeRuns.size === 0 && c.intakeWatcher.idle(),
+    ),
   );
   contexts.length = 0;
   await rm(root, { recursive: true, force: true });
@@ -93,11 +96,9 @@ test("作成後に YAML と setup を変えても、tick は作成時の定義�
   const ctx = await context();
   const h = createHandler(ctx);
   await h("workspace.add", { path: repo }, NOOP_CONN);
-  const t = await h(
-    "task.create",
-    { project: repo, title: "T", prompt: "p" },
-    NOOP_CONN,
-  ) as { id: string };
+  const t = (await h("task.create", { project: repo, title: "T", prompt: "p" }, NOOP_CONN)) as {
+    id: string;
+  };
   await changeDefinition(h);
 
   await tick(ctx);
@@ -107,18 +108,19 @@ test("作成後に YAML と setup を変えても、tick は作成時の定義�
   const task = (await getTask(ctx.db, t.id))!;
   assert.equal(task.current_step_id, "review");
   const runs = await listStepRuns(ctx.db, t.id);
-  assert.deepEqual(runs.map((r) => r.step_id), ["noop", "review"]);
+  assert.deepEqual(
+    runs.map((r) => r.step_id),
+    ["noop", "review"],
+  );
 });
 
 test("作成後に goto を消しても、却下は作成時の onReject で noop へ戻る", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
   await h("workspace.add", { path: repo }, NOOP_CONN);
-  const t = await h(
-    "task.create",
-    { project: repo, title: "T", prompt: "p" },
-    NOOP_CONN,
-  ) as { id: string };
+  const t = (await h("task.create", { project: repo, title: "T", prompt: "p" }, NOOP_CONN)) as {
+    id: string;
+  };
   await tick(ctx);
   await until(async () => (await getTask(ctx.db, t.id))?.state === "suspended");
   await until(() => ctx.running.size === 0);
@@ -135,11 +137,9 @@ test("作成後にステップを消しても、承認は作成時の定義の�
   const ctx = await context();
   const h = createHandler(ctx);
   await h("workspace.add", { path: repo }, NOOP_CONN);
-  const t = await h(
-    "task.create",
-    { project: repo, title: "T", prompt: "p" },
-    NOOP_CONN,
-  ) as { id: string };
+  const t = (await h("task.create", { project: repo, title: "T", prompt: "p" }, NOOP_CONN)) as {
+    id: string;
+  };
   await tick(ctx);
   await until(async () => (await getTask(ctx.db, t.id))?.state === "suspended");
   await until(() => ctx.running.size === 0);
@@ -158,11 +158,9 @@ test("承認待ちからの再開でも作成時の定義で進む", async () =>
   const ctx = await context();
   const h = createHandler(ctx);
   await h("workspace.add", { path: repo }, NOOP_CONN);
-  const t = await h(
-    "task.create",
-    { project: repo, title: "T", prompt: "p" },
-    NOOP_CONN,
-  ) as { id: string };
+  const t = (await h("task.create", { project: repo, title: "T", prompt: "p" }, NOOP_CONN)) as {
+    id: string;
+  };
   await tick(ctx);
   await until(async () => (await getTask(ctx.db, t.id))?.state === "suspended");
   await until(() => ctx.running.size === 0);
@@ -176,7 +174,10 @@ test("承認待ちからの再開でも作成時の定義で進む", async () =>
   const task = (await getTask(ctx.db, t.id))!;
   assert.equal(task.current_step_id, "review");
   const runs = await listStepRuns(ctx.db, t.id);
-  assert.deepEqual(runs.map((r) => r.step_id), ["noop", "review", "review"]);
+  assert.deepEqual(
+    runs.map((r) => r.step_id),
+    ["noop", "review", "review"],
+  );
 
   await h("task.approve", { task_id: t.id }, NOOP_CONN);
   assert.equal((await getTask(ctx.db, t.id))!.current_step_id, "after");
@@ -192,11 +193,9 @@ test("起動時の復帰は作成時の定義でステップの種別を決め�
       "  - id: review\n    type: approval\n    title: 見て\n",
   );
   await h("workspace.add", { path: repo }, NOOP_CONN);
-  const t = await h(
-    "task.create",
-    { project: repo, title: "T", prompt: "p" },
-    NOOP_CONN,
-  ) as { id: string };
+  const t = (await h("task.create", { project: repo, title: "T", prompt: "p" }, NOOP_CONN)) as {
+    id: string;
+  };
 
   // ディスクの定義を、impl を command にしたものへ書き換える。
   await writeFile(
@@ -222,34 +221,33 @@ test("task.get は作成時の定義の steps を返す", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
   await h("workspace.add", { path: repo }, NOOP_CONN);
-  const t = await h(
-    "task.create",
-    { project: repo, title: "T", prompt: "p" },
-    NOOP_CONN,
-  ) as { id: string };
+  const t = (await h("task.create", { project: repo, title: "T", prompt: "p" }, NOOP_CONN)) as {
+    id: string;
+  };
   await changeDefinition(h);
 
-  const got = await h("task.get", { task_id: t.id }, NOOP_CONN) as {
+  const got = (await h("task.get", { task_id: t.id }, NOOP_CONN)) as {
     steps: { id: string }[] | null;
   };
-  assert.deepEqual(got.steps?.map((s) => s.id), ["noop", "review", "after"]);
+  assert.deepEqual(
+    got.steps?.map((s) => s.id),
+    ["noop", "review", "after"],
+  );
 });
 
 test("task.context は作成時の定義でステップの種別を読む", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
   await h("workspace.add", { path: repo }, NOOP_CONN);
-  const t = await h(
-    "task.create",
-    { project: repo, title: "T", prompt: "p" },
-    NOOP_CONN,
-  ) as { id: string };
+  const t = (await h("task.create", { project: repo, title: "T", prompt: "p" }, NOOP_CONN)) as {
+    id: string;
+  };
   await tick(ctx);
   await until(async () => (await getTask(ctx.db, t.id))?.state === "suspended");
   await until(() => ctx.running.size === 0);
   await changeDefinition(h);
 
-  const got = await h("task.context", { task_id: t.id }, NOOP_CONN) as {
+  const got = (await h("task.context", { task_id: t.id }, NOOP_CONN)) as {
     lastCommand: { stepId: string; stdout: string } | null;
     reviews: unknown[];
   };
@@ -262,17 +260,15 @@ test("task.guide は作成時の定義にガイドステップが無ければ、
   const ctx = await context();
   const h = createHandler(ctx);
   await h("workspace.add", { path: repo }, NOOP_CONN);
-  const t = await h(
-    "task.create",
-    { project: repo, title: "T", prompt: "p" },
-    NOOP_CONN,
-  ) as { id: string };
+  const t = (await h("task.create", { project: repo, title: "T", prompt: "p" }, NOOP_CONN)) as {
+    id: string;
+  };
   await tick(ctx);
   await until(async () => (await getTask(ctx.db, t.id))?.state === "suspended");
   await until(() => ctx.running.size === 0);
   await writeFile(join(repo, ".doctrine", "workflows", "feature.yaml"), GUIDE_CHANGED);
 
-  const res = await h("task.guide", { task_id: t.id }, NOOP_CONN) as TaskGuide;
+  const res = (await h("task.guide", { task_id: t.id }, NOOP_CONN)) as TaskGuide;
   assert.deepEqual(res, { status: "none" });
 });
 
@@ -280,26 +276,28 @@ test("新しく作るタスクは書き換えた後の定義と setup を使う"
   const ctx = await context();
   const h = createHandler(ctx);
   await h("workspace.add", { path: repo }, NOOP_CONN);
-  const a = await h(
-    "task.create",
-    { project: repo, title: "A", prompt: "p" },
-    NOOP_CONN,
-  ) as { id: string };
+  const a = (await h("task.create", { project: repo, title: "A", prompt: "p" }, NOOP_CONN)) as {
+    id: string;
+  };
   await changeDefinition(h);
-  const b = await h(
-    "task.create",
-    { project: repo, title: "B", prompt: "p" },
-    NOOP_CONN,
-  ) as { id: string };
+  const b = (await h("task.create", { project: repo, title: "B", prompt: "p" }, NOOP_CONN)) as {
+    id: string;
+  };
 
-  const gotA = await h("task.get", { task_id: a.id }, NOOP_CONN) as {
+  const gotA = (await h("task.get", { task_id: a.id }, NOOP_CONN)) as {
     steps: { id: string }[] | null;
   };
-  const gotB = await h("task.get", { task_id: b.id }, NOOP_CONN) as {
+  const gotB = (await h("task.get", { task_id: b.id }, NOOP_CONN)) as {
     steps: { id: string }[] | null;
   };
-  assert.deepEqual(gotA.steps?.map((s) => s.id), ["noop", "review", "after"]);
-  assert.deepEqual(gotB.steps?.map((s) => s.id), ["setup", "other", "review"]);
+  assert.deepEqual(
+    gotA.steps?.map((s) => s.id),
+    ["noop", "review", "after"],
+  );
+  assert.deepEqual(
+    gotB.steps?.map((s) => s.id),
+    ["setup", "other", "review"],
+  );
 
   const bRow = (await getTask(ctx.db, b.id))!;
   assert.equal(bRow.workflow_yaml, CHANGED);
@@ -314,11 +312,9 @@ test("task.create は検証した YAML の中身と project の setup を保存�
   const ctx = await context();
   const h = createHandler(ctx);
   await h("workspace.add", { path: repo }, NOOP_CONN);
-  const t = await h(
-    "task.create",
-    { project: repo, title: "T", prompt: "p" },
-    NOOP_CONN,
-  ) as { id: string };
+  const t = (await h("task.create", { project: repo, title: "T", prompt: "p" }, NOOP_CONN)) as {
+    id: string;
+  };
 
   const row = (await getTask(ctx.db, t.id))!;
   assert.equal(row.workflow_yaml, LOOP);

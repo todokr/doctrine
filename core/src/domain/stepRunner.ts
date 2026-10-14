@@ -156,7 +156,9 @@ export async function openLog(path: string): Promise<Log> {
       await pending;
       try {
         await file.close();
-      } catch { /* 既に閉じている */ }
+      } catch {
+        /* 既に閉じている */
+      }
     },
   };
 }

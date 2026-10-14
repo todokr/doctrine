@@ -60,19 +60,28 @@ test("GitHub の一覧は全プロジェクトを updatedAt の降順で合わ�
   const { tracker } = fakeGhTracker();
   const wt = workspaceTracker(withProjects(["a", "b"]), tracker);
   const issues = await wt.listIssues({ assignee: "any" });
-  assert.deepEqual(issues.map((i) => i.url), [
-    "https://github.com/o/b/issues/2",
-    "https://github.com/o/a/issues/1",
-  ]);
-  assert.deepEqual(issues.map((i) => i.identifier), ["b#2", "a#1"]);
-  assert.deepEqual(issues.map((i) => i.assignees), [["me"], []]);
+  assert.deepEqual(
+    issues.map((i) => i.url),
+    ["https://github.com/o/b/issues/2", "https://github.com/o/a/issues/1"],
+  );
+  assert.deepEqual(
+    issues.map((i) => i.identifier),
+    ["b#2", "a#1"],
+  );
+  assert.deepEqual(
+    issues.map((i) => i.assignees),
+    [["me"], []],
+  );
 });
 
 test("3 つのうち 1 つのリポジトリが落ちても一覧は残りを返し、status にその 1 つの失敗が出る", async () => {
   const { tracker } = fakeGhTracker();
   const wt = workspaceTracker(WS, tracker);
   const issues = await wt.listIssues({ assignee: "any" });
-  assert.deepEqual(issues.map((i) => i.identifier), ["b#2", "a#1"]);
+  assert.deepEqual(
+    issues.map((i) => i.identifier),
+    ["b#2", "a#1"],
+  );
   const status = await wt.status();
   assert.deepEqual(status, [
     { ok: true, target: { id: "R_a", name: "o/a" }, project: "a" },
@@ -126,29 +135,37 @@ test("プロジェクト 1 つの workspace では識別子がいまと同じ #<
   const { tracker } = fakeGhTracker();
   const wt = workspaceTracker(withProjects(["a"]), tracker);
   const issues = await wt.listIssues({ assignee: "any" });
-  assert.deepEqual(issues.map((i) => i.identifier), ["#1"]);
+  assert.deepEqual(
+    issues.map((i) => i.identifier),
+    ["#1"],
+  );
 });
 
 test("Linear は先頭のプロジェクトで 1 回だけ引き、status の project は先頭の名前", async () => {
-  const ft = fakeTracker({}, {
-    kind: "linear",
-    status: { ok: true, target: { id: "T1", name: "Eng" } },
-    issues: [
-      {
-        url: "https://linear.app/acme/issue/ENG-1/x",
-        identifier: "ENG-1",
-        title: "X",
-        assignees: [],
-        updatedAt: "2026-09-20T00:00:00Z",
-      },
-    ],
-  });
+  const ft = fakeTracker(
+    {},
+    {
+      kind: "linear",
+      status: { ok: true, target: { id: "T1", name: "Eng" } },
+      issues: [
+        {
+          url: "https://linear.app/acme/issue/ENG-1/x",
+          identifier: "ENG-1",
+          title: "X",
+          assignees: [],
+          updatedAt: "2026-09-20T00:00:00Z",
+        },
+      ],
+    },
+  );
   const wt = workspaceTracker(withProjects(["a", "b"]), ft);
-  assert.deepEqual(await wt.status(), [{
-    ok: true,
-    target: { id: "T1", name: "Eng" },
-    project: "a",
-  }]);
+  assert.deepEqual(await wt.status(), [
+    {
+      ok: true,
+      target: { id: "T1", name: "Eng" },
+      project: "a",
+    },
+  ]);
   await wt.listIssues({ assignee: "any" });
   assert.equal(ft.listCalls.length, 1);
   assert.equal(await wt.projectPathFor("https://linear.app/acme/issue/ENG-1/x"), "/ws/a");

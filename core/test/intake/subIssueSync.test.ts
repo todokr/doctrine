@@ -107,14 +107,12 @@ test("偽の gh: ghTracker を通して初回の sub-issue を作る", async () 
 test("初回: 人のプロセスを含む全プロセスの sub-issue を作って記録する", async () => {
   const { d, ft, input } = await fixture();
   const result = await syncSubIssues(d, ft.tracker, input());
-  assert.deepEqual(ft.calls.map((c) => c.op), [
-    "findSubIssues",
-    "createSubIssue",
-    "createSubIssue",
-    "createSubIssue",
-    "createSubIssue",
-  ]);
-  const order = ft.calls.filter((c) => c.op === "createSubIssue")
+  assert.deepEqual(
+    ft.calls.map((c) => c.op),
+    ["findSubIssues", "createSubIssue", "createSubIssue", "createSubIssue", "createSubIssue"],
+  );
+  const order = ft.calls
+    .filter((c) => c.op === "createSubIssue")
     .map((c) => parseSubIssueMarker((c as { body: string }).body)!.processId);
   assert.ok(order.indexOf("1") < order.indexOf("2"));
   assert.ok(order.indexOf("3") < order.indexOf("2"));
@@ -157,7 +155,10 @@ test("作成の後で落ちても、やり直しで重複を作らない", async
   const { d, ft, input } = await fixture();
   ft.loseCreateResponseWhen((c) => c.title === "API を実装する");
   const first = await syncSubIssues(d, ft.tracker, input());
-  assert.deepEqual(first.failures.map((f) => [f.processId, f.op]), [["2", "create"]]);
+  assert.deepEqual(
+    first.failures.map((f) => [f.processId, f.op]),
+    [["2", "create"]],
+  );
   assert.equal((await row(d, "2")).sub_issue_url, null);
   for (const id of ["1", "3", "4"]) assert.notEqual((await row(d, id)).sub_issue_url, null);
   const registered = ft.issues.find((i) => i.title === "API を実装する")!;
@@ -319,7 +320,10 @@ test("更新に失敗したら、次の回でやり直す", async () => {
 
   ft.failWhen((c) => c.op === "updateIssue");
   const second = await syncSubIssues(d, ft.tracker, input(pfd));
-  assert.deepEqual(second.failures.map((f) => [f.processId, f.op]), [["2", "update"]]);
+  assert.deepEqual(
+    second.failures.map((f) => [f.processId, f.op]),
+    [["2", "update"]],
+  );
   assert.equal((await row(d, "2")).sub_issue_hash, hash);
 
   ft.heal();
@@ -339,7 +343,10 @@ test("閉じるのに失敗しても他は進み、次の回でやり直す", as
 
   ft.failWhen((c) => c.op === "closeIssue");
   const second = await syncSubIssues(d, ft.tracker, input(pfd));
-  assert.deepEqual(second.failures.map((f) => [f.processId, f.op]), [["4", "close"]]);
+  assert.deepEqual(
+    second.failures.map((f) => [f.processId, f.op]),
+    [["4", "close"]],
+  );
   assert.equal((await row(d, "4")).sub_issue_closed, 0);
   assert.deepEqual(second.updated, ["2"]);
 
@@ -383,7 +390,10 @@ test("人のプロセスの sub-issue を閉じられなければ、次の回で
 
   ft.failWhen((c) => c.op === "closeIssue");
   const second = await syncSubIssues(d, ft.tracker, input());
-  assert.deepEqual(second.failures.map((f) => [f.processId, f.op]), [["3", "close"]]);
+  assert.deepEqual(
+    second.failures.map((f) => [f.processId, f.op]),
+    [["3", "close"]],
+  );
   assert.equal((await row(d, "3")).sub_issue_closed, 0);
 
   ft.heal();
@@ -395,7 +405,10 @@ test("人のプロセスの sub-issue を閉じられなければ、次の回で
 test("行の無いプロセスは失敗として扱い、残りを進める", async () => {
   const { d, ft, input } = await fixture(["1", "2", "3"]);
   const result = await syncSubIssues(d, ft.tracker, input());
-  assert.deepEqual(result.failures.map((f) => [f.processId, f.op]), [["4", "record"]]);
+  assert.deepEqual(
+    result.failures.map((f) => [f.processId, f.op]),
+    [["4", "record"]],
+  );
   assert.deepEqual(result.created.toSorted(), ["1", "2", "3"]);
 });
 
@@ -407,12 +420,16 @@ test("作成: プロセスの project のリポジトリに作り、project の�
   pfd.processes[3].project = "web";
   const result = await syncSubIssues(d, ft.tracker, {
     ...input(pfd),
-    projectPaths: new Map([["repo", "/repo"], ["api", "/api"], ["web", "/web"]]),
+    projectPaths: new Map([
+      ["repo", "/repo"],
+      ["api", "/api"],
+      ["web", "/web"],
+    ]),
   });
   assert.deepEqual(result.failures, []);
   assert.equal(result.created.length, 4);
-  const creates = ft.calls.filter((c): c is TrackerCall & { op: "createSubIssue" } =>
-    c.op === "createSubIssue"
+  const creates = ft.calls.filter(
+    (c): c is TrackerCall & { op: "createSubIssue" } => c.op === "createSubIssue",
   );
   const pathOf = (processId: string) =>
     creates.find((c) => parseSubIssueMarker(c.body)!.processId === processId)!.projectPath;
@@ -428,10 +445,10 @@ test("作成: workspace に無いプロジェクトのプロセスは失敗と�
   const pfd = withProject(example(), "gone");
   pfd.processes[0].project = "repo";
   const result = await syncSubIssues(d, ft.tracker, input(pfd));
-  assert.deepEqual(
-    result.failures.map((f) => [f.processId, f.op]).toSorted(),
-    [["2", "create"], ["4", "create"]],
-  );
+  assert.deepEqual(result.failures.map((f) => [f.processId, f.op]).toSorted(), [
+    ["2", "create"],
+    ["4", "create"],
+  ]);
   for (const f of result.failures) assert.ok(f.message.includes("gone"));
   assert.deepEqual(result.created.toSorted(), ["1", "3"]);
   assert.equal((await row(d, "2")).sub_issue_url, null);

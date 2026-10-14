@@ -68,8 +68,8 @@ export function createServer(handler: Handler) {
 
   async function serve(client: Client): Promise<void> {
     const conn: Connection = {
-      follow: (id) => client.following = id,
-      unfollow: () => client.following = null,
+      follow: (id) => (client.following = id),
+      unfollow: () => (client.following = null),
       isFollowing: (id) => client.following === id,
     };
     const decoder = new TextDecoder();

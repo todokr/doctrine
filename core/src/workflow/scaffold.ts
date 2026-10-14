@@ -130,16 +130,17 @@ async function assertRepoRoot(path: string): Promise<void> {
  */
 async function detectBaseBranch(root: string): Promise<string | undefined> {
   try {
-    const ref =
-      (await runCommand("git", ["-C", root, "symbolic-ref", "--short", "refs/remotes/origin/HEAD"]))
-        .stdout.trim();
+    const ref = (
+      await runCommand("git", ["-C", root, "symbolic-ref", "--short", "refs/remotes/origin/HEAD"])
+    ).stdout.trim();
     if (ref.startsWith("origin/")) return ref.slice("origin/".length);
   } catch {
     // origin が無い、または origin/HEAD が設定されていない
   }
   try {
-    const current = (await runCommand("git", ["-C", root, "branch", "--show-current"])).stdout
-      .trim();
+    const current = (
+      await runCommand("git", ["-C", root, "branch", "--show-current"])
+    ).stdout.trim();
     if (current) return current;
   } catch {
     // 取れなければ既定値に任せる

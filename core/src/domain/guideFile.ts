@@ -46,10 +46,10 @@ export function checkGuideLocations(
   };
 
   guide.readingOrder.forEach((g, i) =>
-    g.locations.forEach((loc, j) => check(`readingOrder.${i}.locations.${j}`, loc))
+    g.locations.forEach((loc, j) => check(`readingOrder.${i}.locations.${j}`, loc)),
   );
   guide.risks.forEach((r, i) =>
-    r.locations.forEach((loc, j) => check(`risks.${i}.locations.${j}`, loc))
+    r.locations.forEach((loc, j) => check(`risks.${i}.locations.${j}`, loc)),
   );
   return issues;
 }

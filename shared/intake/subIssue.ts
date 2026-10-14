@@ -62,25 +62,29 @@ export function buildSubIssue(input: {
     sections.push("このプロセスは人が行う。完了は Intake の画面で記録する。");
   }
   sections.push(["## 入力", ...process.inputs.map((id) => artifactLine(artifact(id)))].join("\n"));
-  sections.push([
-    "## 出力",
-    ...process.outputs.flatMap((id) => {
-      const a = artifact(id);
-      return a.verify ? [artifactLine(a), `  確かめ方: ${a.verify}`] : [artifactLine(a)];
-    }),
-  ].join("\n"));
+  sections.push(
+    [
+      "## 出力",
+      ...process.outputs.flatMap((id) => {
+        const a = artifact(id);
+        return a.verify ? [artifactLine(a), `  確かめ方: ${a.verify}`] : [artifactLine(a)];
+      }),
+    ].join("\n"),
+  );
   sections.push(["## 完了条件", process.done_when ?? ""].join("\n"));
 
   const upstream = upstreamProcessIds(pfd, processId);
   if (upstream.length > 0) {
-    sections.push([
-      "## 先に終わっている必要があるもの",
-      ...upstream.map((id) => {
-        const name = pfd.processes.find((p) => p.id === id)!.name;
-        const url = upstreamUrls.get(id);
-        return url ? `- ${url} ${name}` : `- ${name}（sub-issue 未作成）`;
-      }),
-    ].join("\n"));
+    sections.push(
+      [
+        "## 先に終わっている必要があるもの",
+        ...upstream.map((id) => {
+          const name = pfd.processes.find((p) => p.id === id)!.name;
+          const url = upstreamUrls.get(id);
+          return url ? `- ${url} ${name}` : `- ${name}（sub-issue 未作成）`;
+        }),
+      ].join("\n"),
+    );
   }
   sections.push(subIssueMarker(intakeId, processId));
   return { title: process.name, body: sections.join("\n\n") };

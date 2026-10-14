@@ -31,11 +31,8 @@ export type RateLimitVerdict =
  * 読めないものは null を返し、呼び出し側が「待てない」に倒す。
  */
 export function parseResetsAt(v: unknown): number | null {
-  const n = typeof v === "number"
-    ? v
-    : typeof v === "string" && /^\d+(\.\d+)?$/.test(v)
-    ? Number(v)
-    : null;
+  const n =
+    typeof v === "number" ? v : typeof v === "string" && /^\d+(\.\d+)?$/.test(v) ? Number(v) : null;
   // 1e12 ミリ秒は 2001 年。これより小さい数は秒として読むほかない。
   if (n !== null) return Number.isFinite(n) ? (n < 1e12 ? n * 1000 : n) : null;
   if (typeof v !== "string") return null;

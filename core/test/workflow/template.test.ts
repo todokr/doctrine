@@ -51,14 +51,17 @@ test("URL として読めない issue.url でも issue.closes は投げずに Cl
 
 test("issue の未知のフィールドは落とす", () => {
   for (const expr of ["{{ issue.number }}", "{{ issue }}"]) {
-    assert.throws(() => expand(expr, ctx), (e: unknown) => {
-      assert.ok(e instanceof TemplateError);
-      assert.match(
-        (e as Error).message,
-        /issue のフィールドは url \/ parent_url \/ closes のみです/,
-      );
-      return true;
-    });
+    assert.throws(
+      () => expand(expr, ctx),
+      (e: unknown) => {
+        assert.ok(e instanceof TemplateError);
+        assert.match(
+          (e as Error).message,
+          /issue のフィールドは url \/ parent_url \/ closes のみです/,
+        );
+        return true;
+      },
+    );
   }
 });
 
@@ -74,11 +77,14 @@ test("1つの文字列に複数個埋められる", () => {
 });
 
 test("未知の系統は落とす", () => {
-  assert.throws(() => expand("{{ env.HOME }}", ctx), (e: unknown) => {
-    assert.ok(e instanceof TemplateError);
-    assert.match((e as Error).message, /env\.HOME/);
-    return true;
-  });
+  assert.throws(
+    () => expand("{{ env.HOME }}", ctx),
+    (e: unknown) => {
+      assert.ok(e instanceof TemplateError);
+      assert.match((e as Error).message, /env\.HOME/);
+      return true;
+    },
+  );
 });
 
 test("未実行のステップを参照したら落とす", () => {
@@ -94,35 +100,47 @@ test("変数を含まない文字列はそのまま返す", () => {
 });
 
 test("閉じられていないプレースホルダーは落とす", () => {
-  assert.throws(() => expand("{{ task.prompt", ctx), (e: unknown) => {
-    assert.ok(e instanceof TemplateError);
-    assert.match((e as Error).message, /不正なプレースホルダー/);
-    return true;
-  });
+  assert.throws(
+    () => expand("{{ task.prompt", ctx),
+    (e: unknown) => {
+      assert.ok(e instanceof TemplateError);
+      assert.match((e as Error).message, /不正なプレースホルダー/);
+      return true;
+    },
+  );
 });
 
 test("空のプレースホルダーは落とす", () => {
-  assert.throws(() => expand("{{}}", ctx), (e: unknown) => {
-    assert.ok(e instanceof TemplateError);
-    assert.match((e as Error).message, /不正なプレースホルダー/);
-    return true;
-  });
+  assert.throws(
+    () => expand("{{}}", ctx),
+    (e: unknown) => {
+      assert.ok(e instanceof TemplateError);
+      assert.match((e as Error).message, /不正なプレースホルダー/);
+      return true;
+    },
+  );
 });
 
 test("空白のみのプレースホルダーは落とす", () => {
-  assert.throws(() => expand("{{ }}", ctx), (e: unknown) => {
-    assert.ok(e instanceof TemplateError);
-    assert.match((e as Error).message, /不正なプレースホルダー/);
-    return true;
-  });
+  assert.throws(
+    () => expand("{{ }}", ctx),
+    (e: unknown) => {
+      assert.ok(e instanceof TemplateError);
+      assert.match((e as Error).message, /不正なプレースホルダー/);
+      return true;
+    },
+  );
 });
 
 test("プレースホルダー内に中括弧を含むと落とす", () => {
-  assert.throws(() => expand("{{{{ task.id }}", ctx), (e: unknown) => {
-    assert.ok(e instanceof TemplateError);
-    assert.match((e as Error).message, /不正なプレースホルダー/);
-    return true;
-  });
+  assert.throws(
+    () => expand("{{{{ task.id }}", ctx),
+    (e: unknown) => {
+      assert.ok(e instanceof TemplateError);
+      assert.match((e as Error).message, /不正なプレースホルダー/);
+      return true;
+    },
+  );
 });
 
 test("代入された値に{{ }}を含むテンプレートは展開してもスルーする（再展開しない）", () => {
@@ -140,19 +158,25 @@ test("代入された値に{{ }}を含むテンプレートは展開してもス
 });
 
 test("ステップidにドットを含めるとエラーメッセージで指摘する", () => {
-  assert.throws(() => expand("{{ steps.my.step.last_stdout }}", ctx), (e: unknown) => {
-    assert.ok(e instanceof TemplateError);
-    assert.match((e as Error).message, /ステップidには . を含められません/);
-    return true;
-  });
+  assert.throws(
+    () => expand("{{ steps.my.step.last_stdout }}", ctx),
+    (e: unknown) => {
+      assert.ok(e instanceof TemplateError);
+      assert.match((e as Error).message, /ステップidには . を含められません/);
+      return true;
+    },
+  );
 });
 
 test("ステップにフィールドがないと落とす", () => {
-  assert.throws(() => expand("{{ steps.test }}", ctx), (e: unknown) => {
-    assert.ok(e instanceof TemplateError);
-    assert.match((e as Error).message, /ステップ出力を参照するにはフィールドが必要です/);
-    return true;
-  });
+  assert.throws(
+    () => expand("{{ steps.test }}", ctx),
+    (e: unknown) => {
+      assert.ok(e instanceof TemplateError);
+      assert.match((e as Error).message, /ステップ出力を参照するにはフィールドが必要です/);
+      return true;
+    },
+  );
 });
 
 test("改名前のフィールド名 stdout/stderr はもう使えない（リネームの安全網）", () => {
@@ -161,13 +185,16 @@ test("改名前のフィールド名 stdout/stderr はもう使えない（リ�
   // 意図的なテストコードまで拾われてしまう。組み立てて避ける。
   const oldField = (field: "stdout" | "stderr") => `{{ steps.test.${field} }}`;
   for (const field of ["stdout", "stderr"] as const) {
-    assert.throws(() => expand(oldField(field), ctx), (e: unknown) => {
-      assert.ok(e instanceof TemplateError);
-      assert.match(
-        (e as Error).message,
-        /ステップ出力のフィールドは last_stdout \/ last_stderr \/ exitCode のみです/,
-      );
-      return true;
-    });
+    assert.throws(
+      () => expand(oldField(field), ctx),
+      (e: unknown) => {
+        assert.ok(e instanceof TemplateError);
+        assert.match(
+          (e as Error).message,
+          /ステップ出力のフィールドは last_stdout \/ last_stderr \/ exitCode のみです/,
+        );
+        return true;
+      },
+    );
   }
 });

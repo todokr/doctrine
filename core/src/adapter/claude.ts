@@ -77,7 +77,7 @@ type ContentBlock = {
 
 function blocksOf(o: Record<string, unknown>): ContentBlock[] {
   const content = (o.message as { content?: unknown } | undefined)?.content;
-  return Array.isArray(content) ? content as ContentBlock[] : [];
+  return Array.isArray(content) ? (content as ContentBlock[]) : [];
 }
 
 /**
@@ -94,9 +94,10 @@ function assistantEvents(o: Record<string, unknown>): AgentEvent[] {
       out.push({
         kind: "toolUse",
         name: typeof b.name === "string" ? b.name : "",
-        input: typeof b.input === "object" && b.input !== null && !Array.isArray(b.input)
-          ? b.input as Record<string, unknown>
-          : {},
+        input:
+          typeof b.input === "object" && b.input !== null && !Array.isArray(b.input)
+            ? (b.input as Record<string, unknown>)
+            : {},
       });
     }
   }
@@ -172,14 +173,15 @@ export function resultFrom(
  */
 function denialsFrom(raw: unknown[]): PermissionDenial[] {
   return raw.map((e) => {
-    const d = typeof e === "object" && e !== null ? e as Record<string, unknown> : {};
+    const d = typeof e === "object" && e !== null ? (e as Record<string, unknown>) : {};
     const input = d.tool_input;
     return {
       tool_name: typeof d.tool_name === "string" ? d.tool_name : "",
       tool_use_id: typeof d.tool_use_id === "string" ? d.tool_use_id : null,
-      input: typeof input === "object" && input !== null && !Array.isArray(input)
-        ? input as Record<string, unknown>
-        : {},
+      input:
+        typeof input === "object" && input !== null && !Array.isArray(input)
+          ? (input as Record<string, unknown>)
+          : {},
     };
   });
 }
@@ -194,7 +196,7 @@ function denialsFrom(raw: unknown[]): PermissionDenial[] {
 function structuredOutputOf(o: Record<string, unknown>): Record<string, unknown> | null {
   const v = o.structured_output;
   return typeof v === "object" && v !== null && !Array.isArray(v)
-    ? v as Record<string, unknown>
+    ? (v as Record<string, unknown>)
     : null;
 }
 
@@ -257,8 +259,9 @@ export function createClaudeAdapter(bin = "claude"): AgentAdapter {
 
     // 終了ステータスだけでなく stdout / stderr を読み切るまで待つ。
     // 先に確定させると、パイプに残った result 行や stderr の末尾を取りこぼす。
-    const result: Promise<AgentResult> = Promise.all([child.status, pump, stderrDone])
-      .then(([status]) => resultFrom(resultLine, exitCodeOf(status), stderrTail));
+    const result: Promise<AgentResult> = Promise.all([child.status, pump, stderrDone]).then(
+      ([status]) => resultFrom(resultLine, exitCodeOf(status), stderrTail),
+    );
 
     return {
       sessionId: runSessionId,
@@ -269,7 +272,9 @@ export function createClaudeAdapter(bin = "claude"): AgentAdapter {
       kill: () => {
         try {
           child.kill("SIGTERM");
-        } catch { /* 既に終了している */ }
+        } catch {
+          /* 既に終了している */
+        }
       },
     };
   }

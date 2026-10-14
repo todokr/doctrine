@@ -132,7 +132,10 @@ export async function releaseTrees(repoPath: string, taskId: string): Promise<vo
     "--format=%(refname)",
     `refs/doctrine/reviews/${taskId}`,
   ]);
-  for (const ref of stdout.split("\n").map((l) => l.trim()).filter((l) => l.length > 0)) {
+  for (const ref of stdout
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0)) {
     await runCommand("git", ["-C", repoPath, "update-ref", "-d", ref]);
   }
 }

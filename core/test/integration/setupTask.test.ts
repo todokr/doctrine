@@ -101,12 +101,12 @@ async function startSetupTask(adapter: MockAdapter, dir = "ws") {
     ".doctrine/workflows/default.yaml": defaultWorkflowYamlFor("main"),
   });
   const { ctx, handler } = await context(adapter);
-  const w = await handler("workspace.add", { path: repo }, NOOP_CONN) as { id: number };
-  const [t] = await handler(
+  const w = (await handler("workspace.add", { path: repo }, NOOP_CONN)) as { id: number };
+  const [t] = (await handler(
     "workspace.setup",
     { workspace: w.id, projects: ["app"], policy: POLICY },
     NOOP_CONN,
-  ) as TaskSummary[];
+  )) as TaskSummary[];
   await tick(ctx);
   return { repo, ctx, handler, taskId: t.id };
 }
@@ -120,11 +120,11 @@ async function approveToCompletion(
   handler: ReturnType<typeof createHandler>,
   taskId: string,
 ): Promise<void> {
-  await until(async () => await stateOf(ctx, taskId) === "suspended", WAIT_MS, "承認待ち");
+  await until(async () => (await stateOf(ctx, taskId)) === "suspended", WAIT_MS, "承認待ち");
   assert.equal((await getTask(ctx.db, taskId))?.current_step_id, "review");
   await handler("task.approve", { task_id: taskId }, NOOP_CONN);
   await tickWhenIdle(ctx);
-  await until(async () => await stateOf(ctx, taskId) === "completed", WAIT_MS, "completed");
+  await until(async () => (await stateOf(ctx, taskId)) === "completed", WAIT_MS, "completed");
   await until(
     async () => (await getTask(ctx.db, taskId))?.worktree_path === null,
     WAIT_MS,
@@ -153,7 +153,7 @@ test("draft が .doctrine-out/ の外を書き換えると validate が落ち、
   });
   const { ctx, taskId } = await startSetupTask(adapter);
 
-  await until(async () => await stateOf(ctx, taskId) === "suspended", WAIT_MS, "承認待ち");
+  await until(async () => (await stateOf(ctx, taskId)) === "suspended", WAIT_MS, "承認待ち");
   assert.equal(adapter.calls.length, 2);
   assert.match(adapter.calls[1].prompt, /\.doctrine-out\/ の外が書き換えられています/);
   assert.match(adapter.calls[1].prompt, /README\.md/);
@@ -176,28 +176,33 @@ test("ウィザードの流れ: .doctrine/ の無いリポジトリで init 付�
   // ウィザードが置いた .doctrine/ は未追跡なので、コミット済みの main から切った worktree には無い
   const inWorktree: boolean[] = [];
   const adapter = draftingAdapter(async (cwd) => {
-    inWorktree.push(await access(join(cwd, ".doctrine")).then(() => true, () => false));
+    inWorktree.push(
+      await access(join(cwd, ".doctrine")).then(
+        () => true,
+        () => false,
+      ),
+    );
     await writeOut(cwd, DRAFTED);
   });
   const repo = await makeRepo(join(root, "fresh"), { "README.md": "x\n" });
   const { ctx, handler } = await context(adapter);
 
-  const added = await handler(
+  const added = (await handler(
     "workspace.add",
     { path: repo, projects: { app: "." }, tracker: { kind: "github" } },
     NOOP_CONN,
-  ) as { id: number; projects: { name: string; path: string }[]; created: string[] };
+  )) as { id: number; projects: { name: string; path: string }[]; created: string[] };
   // app の setupTargets と同じ突き合わせ
   const targets = added.projects
     .filter((p) => added.created.includes(`${p.path}/.doctrine/workflows/default.yaml`))
     .map((p) => p.name);
   assert.deepEqual(targets, ["app"]);
 
-  const [t] = await handler(
+  const [t] = (await handler(
     "workspace.setup",
     { workspace: added.id, projects: targets, policy: POLICY },
     NOOP_CONN,
-  ) as TaskSummary[];
+  )) as TaskSummary[];
   await tick(ctx);
   await approveToCompletion(ctx, handler, t.id);
 

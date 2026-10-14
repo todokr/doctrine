@@ -22,11 +22,10 @@ test("runCommand は env を親の環境に重ねる", async () => {
 test("runCommand は clearEnv のとき env に渡したものだけを環境にする", async () => {
   process.env.DOCTRINE_EXEC_PARENT = "p";
   try {
-    const { stdout } = await runCommand(
-      "/bin/sh",
-      ["-c", 'echo "[$DOCTRINE_EXEC_PARENT]-$X"'],
-      { env: { X: "x" }, clearEnv: true },
-    );
+    const { stdout } = await runCommand("/bin/sh", ["-c", 'echo "[$DOCTRINE_EXEC_PARENT]-$X"'], {
+      env: { X: "x" },
+      clearEnv: true,
+    });
     assert.equal(stdout.trim(), "[]-x");
   } finally {
     delete process.env.DOCTRINE_EXEC_PARENT;

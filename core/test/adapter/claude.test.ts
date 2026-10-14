@@ -69,11 +69,15 @@ test("allowedTools は末尾に1要素ずつ argv として並ぶ", () => {
 });
 
 test("再開時も allowedTools が末尾に付く", () => {
-  const args = buildArgs("追加で直して", {
-    cwd: "/wt",
-    sessionId: "s1",
-    allowedTools: ["Bash(grep:*)", "Bash(git diff:*)"],
-  }, "s1");
+  const args = buildArgs(
+    "追加で直して",
+    {
+      cwd: "/wt",
+      sessionId: "s1",
+      allowedTools: ["Bash(grep:*)", "Bash(git diff:*)"],
+    },
+    "s1",
+  );
   assert.deepEqual(args.slice(-3), ["--allowedTools", "Bash(grep:*)", "Bash(git diff:*)"]);
 });
 
@@ -94,11 +98,15 @@ test("appendSystemPrompt を渡すと --append-system-prompt が値1引数で付
 });
 
 test("再開時も --append-system-prompt が付く", () => {
-  const args = buildArgs("追加で直して", {
-    cwd: "/wt",
-    sessionId: "s1",
-    appendSystemPrompt: "1コマンドずつ",
-  }, "s1");
+  const args = buildArgs(
+    "追加で直して",
+    {
+      cwd: "/wt",
+      sessionId: "s1",
+      appendSystemPrompt: "1コマンドずつ",
+    },
+    "s1",
+  );
   const i = args.indexOf("--append-system-prompt");
   assert.notEqual(i, -1);
   assert.equal(args[i + 1], "1コマンドずつ");
@@ -209,17 +217,20 @@ test("rate_limit_event を正規化する", () => {
 });
 
 test("result 行から成否・テキスト・コストを取る", () => {
-  const r = resultFrom({
-    type: "result",
-    subtype: "success",
-    is_error: false,
-    result: "できました",
-    total_cost_usd: 0.42,
-    num_turns: 7,
-    duration_ms: 12000,
-    permission_denials: [],
-    terminal_reason: "completed",
-  }, 0);
+  const r = resultFrom(
+    {
+      type: "result",
+      subtype: "success",
+      is_error: false,
+      result: "できました",
+      total_cost_usd: 0.42,
+      num_turns: 7,
+      duration_ms: 12000,
+      permission_denials: [],
+      terminal_reason: "completed",
+    },
+    0,
+  );
   assert.equal(r.ok, true);
   assert.deepEqual(r.permissionDenials, []);
   assert.equal(r.text, "できました");
@@ -229,40 +240,58 @@ test("result 行から成否・テキスト・コストを取る", () => {
 });
 
 test("権限で拒否されても成功は成功で、拒否の中身だけが残る", () => {
-  const r = resultFrom({
-    type: "result",
-    subtype: "success",
-    is_error: false,
-    result: "やれませんでした",
-    permission_denials: [{ tool_name: "Bash" }],
-  }, 0);
+  const r = resultFrom(
+    {
+      type: "result",
+      subtype: "success",
+      is_error: false,
+      result: "やれませんでした",
+      permission_denials: [{ tool_name: "Bash" }],
+    },
+    0,
+  );
   assert.equal(r.ok, true, "ワークフローは止めない");
   assert.equal(r.permissionDenials.length, 1, "何が拒否されたかは残す");
 });
 
 test("permission_denials の中身を構造化して返す", () => {
-  const r = resultFrom({
-    type: "result",
-    is_error: false,
-    permission_denials: [
-      { tool_name: "Bash", tool_use_id: "tu_1", tool_input: { command: "git push" } },
-    ],
-  }, 0);
+  const r = resultFrom(
+    {
+      type: "result",
+      is_error: false,
+      permission_denials: [
+        { tool_name: "Bash", tool_use_id: "tu_1", tool_input: { command: "git push" } },
+      ],
+    },
+    0,
+  );
   assert.deepEqual(r.permissionDenials, [
     { tool_name: "Bash", tool_use_id: "tu_1", input: { command: "git push" } },
   ]);
 });
 
 test("形の崩れた permission_denials でも件数は減らない", () => {
-  const r = resultFrom({
-    type: "result",
-    is_error: false,
-    permission_denials: [{ tool_name: "Bash" }, "こわれている", {}],
-  }, 0);
+  const r = resultFrom(
+    {
+      type: "result",
+      is_error: false,
+      permission_denials: [{ tool_name: "Bash" }, "こわれている", {}],
+    },
+    0,
+  );
   assert.equal(r.permissionDenials.length, 3);
-  assert.deepEqual(r.permissionDenials.map((d) => d.tool_name), ["Bash", "", ""]);
-  assert.deepEqual(r.permissionDenials.map((d) => d.input), [{}, {}, {}]);
-  assert.deepEqual(r.permissionDenials.map((d) => d.tool_use_id), [null, null, null]);
+  assert.deepEqual(
+    r.permissionDenials.map((d) => d.tool_name),
+    ["Bash", "", ""],
+  );
+  assert.deepEqual(
+    r.permissionDenials.map((d) => d.input),
+    [{}, {}, {}],
+  );
+  assert.deepEqual(
+    r.permissionDenials.map((d) => d.tool_use_id),
+    [null, null, null],
+  );
 });
 
 test("result 行が来なければ失敗とみなす", () => {
@@ -277,13 +306,16 @@ test("is_error が true なら失敗", () => {
 });
 
 test("result 行から構造化出力を取り出す", () => {
-  const r = resultFrom({
-    type: "result",
-    subtype: "success",
-    is_error: false,
-    result: "できました",
-    structured_output: { title: "ガイド", steps: ["a", "b"] },
-  }, 0);
+  const r = resultFrom(
+    {
+      type: "result",
+      subtype: "success",
+      is_error: false,
+      result: "できました",
+      structured_output: { title: "ガイド", steps: ["a", "b"] },
+    },
+    0,
+  );
   assert.deepEqual(r.structuredOutput, { title: "ガイド", steps: ["a", "b"] });
   assert.equal(r.ok, true);
   assert.equal(r.text, "できました");
@@ -300,13 +332,16 @@ test("構造化出力が無い result 行は null にする", () => {
 
 test("構造化出力がオブジェクトでなければ null にして例外を投げない", () => {
   for (const bad of ['{"a":1}', null, [1, 2, 3], 42]) {
-    const r = resultFrom({
-      type: "result",
-      subtype: "success",
-      is_error: false,
-      result: "できました",
-      structured_output: bad,
-    }, 0);
+    const r = resultFrom(
+      {
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        result: "できました",
+        structured_output: bad,
+      },
+      0,
+    );
     assert.equal(r.structuredOutput, null, `${JSON.stringify(bad)} は null になるはず`);
     assert.equal(r.ok, true);
   }
@@ -374,12 +409,14 @@ test("assistant の tool_use をイベントにする", () => {
   const ev = normalize({
     type: "assistant",
     message: {
-      content: [{
-        type: "tool_use",
-        id: "toolu_1",
-        name: "Bash",
-        input: { command: "ls -A /wt", description: "List files" },
-      }],
+      content: [
+        {
+          type: "tool_use",
+          id: "toolu_1",
+          name: "Bash",
+          input: { command: "ls -A /wt", description: "List files" },
+        },
+      ],
     },
   });
   assert.deepEqual(ev, [
@@ -407,29 +444,31 @@ test("tool_result を運ぶ user 行をイベントにする", () => {
   const ev = normalize({
     type: "user",
     message: {
-      content: [{
-        tool_use_id: "toolu_1",
-        type: "tool_result",
-        content: "err.txt\nraw.ndjson",
-        is_error: false,
-      }],
+      content: [
+        {
+          tool_use_id: "toolu_1",
+          type: "tool_result",
+          content: "err.txt\nraw.ndjson",
+          is_error: false,
+        },
+      ],
     },
   });
-  assert.deepEqual(ev, [
-    { kind: "toolResult", isError: false, content: "err.txt\nraw.ndjson" },
-  ]);
+  assert.deepEqual(ev, [{ kind: "toolResult", isError: false, content: "err.txt\nraw.ndjson" }]);
 });
 
 test("tool_result の content がブロック配列でも文字列にまとめる", () => {
   const ev = normalize({
     type: "user",
     message: {
-      content: [{
-        tool_use_id: "toolu_1",
-        type: "tool_result",
-        content: [{ type: "text", text: "No matches found" }],
-        is_error: true,
-      }],
+      content: [
+        {
+          tool_use_id: "toolu_1",
+          type: "tool_result",
+          content: [{ type: "text", text: "No matches found" }],
+          is_error: true,
+        },
+      ],
     },
   });
   assert.deepEqual(ev, [{ kind: "toolResult", isError: true, content: "No matches found" }]);

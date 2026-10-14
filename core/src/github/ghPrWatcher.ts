@@ -23,8 +23,9 @@ function buildQuery(count: number): string {
   const idx = Array.from({ length: count }, (_, i) => i);
   const decls = idx.map((i) => `, $h${i}: String!`).join("");
   const aliases = idx
-    .map((i) =>
-      `b${i}: pullRequests(headRefName: $h${i}, states: [OPEN, MERGED, CLOSED], first: 20) { nodes { ${PR_COLUMNS} } }`
+    .map(
+      (i) =>
+        `b${i}: pullRequests(headRefName: $h${i}, states: [OPEN, MERGED, CLOSED], first: 20) { nodes { ${PR_COLUMNS} } }`,
     )
     .join(" ");
   return `query($owner: String!, $name: String!${decls}) { repository(owner: $owner, name: $name) { ${aliases} } }`;
@@ -39,13 +40,11 @@ export function ghPrWatcher(run: GhRun = defaultGhRun): PrWatcher {
       for (let from = 0; from < unique.length; from += PR_ALIASES_PER_QUERY) {
         const chunk = unique.slice(from, from + PR_ALIASES_PER_QUERY);
         const vars: Record<string, string> = {};
-        chunk.forEach((b, i) => vars[`h${i}`] = b);
+        chunk.forEach((b, i) => (vars[`h${i}`] = b));
         const args = graphqlArgs(buildQuery(chunk.length), vars, { repoVars: true });
         const schema = z.object({
           data: z.object({
-            repository: z.object(
-              Object.fromEntries(chunk.map((_, i) => [`b${i}`, aliasResult])),
-            ),
+            repository: z.object(Object.fromEntries(chunk.map((_, i) => [`b${i}`, aliasResult]))),
           }),
         });
         const res = parseGhJson(
@@ -57,14 +56,16 @@ export function ghPrWatcher(run: GhRun = defaultGhRun): PrWatcher {
         chunk.forEach((b, i) => {
           result.set(
             b,
-            repository[`b${i}`].nodes.map((n): PrFact => ({
-              number: n.number,
-              url: n.url,
-              state: n.state,
-              baseRef: n.baseRefName,
-              mergedAt: n.mergedAt,
-              mergeCommit: n.mergeCommit?.oid ?? null,
-            })),
+            repository[`b${i}`].nodes.map(
+              (n): PrFact => ({
+                number: n.number,
+                url: n.url,
+                state: n.state,
+                baseRef: n.baseRefName,
+                mergedAt: n.mergedAt,
+                mergeCommit: n.mergeCommit?.oid ?? null,
+              }),
+            ),
           );
         });
       }

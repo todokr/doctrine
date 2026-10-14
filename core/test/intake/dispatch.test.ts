@@ -83,8 +83,11 @@ test("二重投入: 同じ期待値で 2 回コミットすると 2 回目は巻
   assert.equal(await commitDispatch(db, { ...args, task: a }), true);
   assert.equal(await commitDispatch(db, { ...args, task: b }), false);
   assert.equal(await getTask(db, b.id), undefined);
-  const row = await db.selectFrom("intake_processes").select("current_task_id")
-    .where("process_id", "=", "1").executeTakeFirstOrThrow();
+  const row = await db
+    .selectFrom("intake_processes")
+    .select("current_task_id")
+    .where("process_id", "=", "1")
+    .executeTakeFirstOrThrow();
   assert.equal(row.current_task_id, a.id);
 });
 
@@ -92,7 +95,10 @@ test("投入の直後に落ちた想定で dispatchIntake を再実行しても�
   const { db } = await seedActive();
   await giveSubIssues(db);
   const first = await dispatchIntake(db, "i1", DEPS);
-  assert.deepEqual(first.created.map((c) => c.processId), ["1"]);
+  assert.deepEqual(
+    first.created.map((c) => c.processId),
+    ["1"],
+  );
   const second = await dispatchIntake(db, "i1", DEPS);
   assert.deepEqual(second.created, []);
   const tasks = (await listTasks(db)).filter((t) => t.intake_process_id === "1");
@@ -136,7 +142,10 @@ test("決定の成果物の回答を prompt に載せる", async () => {
   });
   await makeProcess2Ready(db, projectId);
   const report = await dispatchIntake(db, "i1", DEPS);
-  assert.deepEqual(report.created.map((c) => c.processId), ["2"]);
+  assert.deepEqual(
+    report.created.map((c) => c.processId),
+    ["2"],
+  );
   const task = (await getTask(db, report.created[0].taskId))!;
   assert.match(task.prompt, /集計の方針: 選んだ選択肢: 案A（a）/);
 });
@@ -145,7 +154,10 @@ test("prompt を組めないプロセスは見送り、ほかのプロセスは�
   const { db, projectId } = await seedActive(withDecision());
   await makeProcess2Ready(db, projectId);
   const report = await dispatchIntake(db, "i1", DEPS);
-  assert.equal(report.created.some((c) => c.processId === "2"), false);
+  assert.equal(
+    report.created.some((c) => c.processId === "2"),
+    false,
+  );
   assert.equal(report.errors.length, 1);
   assert.equal(report.errors[0].processId, "2");
   assert.match(report.errors[0].message, /決定/);
@@ -155,7 +167,10 @@ test("example() の分解では、承認直後に投入できるのはプロセ�
   const { db } = await seedActive(example());
   await giveSubIssues(db);
   const report = await dispatchIntake(db, "i1", DEPS);
-  assert.deepEqual(report.created.map((c) => c.processId), ["1"]);
+  assert.deepEqual(
+    report.created.map((c) => c.processId),
+    ["1"],
+  );
 });
 
 /** プロセス 1 を投入して、そのタスクを failed にする。 */
@@ -179,8 +194,11 @@ test("要確認のプロセスを再投入すると、同じプロセスと sub-
     assert.equal(t.intake_process_id, "1");
     assert.equal(t.issue_url, SUB(1));
   }
-  const row = await db.selectFrom("intake_processes").select("current_task_id")
-    .where("process_id", "=", "1").executeTakeFirstOrThrow();
+  const row = await db
+    .selectFrom("intake_processes")
+    .select("current_task_id")
+    .where("process_id", "=", "1")
+    .executeTakeFirstOrThrow();
   assert.equal(row.current_task_id, taskId);
   assert.notEqual(taskId, oldId);
   assert.equal((await getTask(db, oldId))!.state, "failed");
@@ -230,7 +248,10 @@ test("投入したタスクは既定のワークフローの YAML の中身と p
   }
   {
     const { db, projectId } = await seedActive();
-    await db.updateTable("projects").set({ setup: "echo hi" }).where("id", "=", projectId)
+    await db
+      .updateTable("projects")
+      .set({ setup: "echo hi" })
+      .where("id", "=", projectId)
       .execute();
     await giveSubIssues(db);
     const report = await dispatchIntake(db, "i1", { loadWorkflow: fakeWorkflowLoader(Y) });
@@ -243,9 +264,13 @@ test("再投入したタスクも作成時の定義を保存する", async () =>
   const { db } = await seedActive();
   const oldId = await failProcess1(db);
   const Y2 = 'name: y2\nsteps:\n  - id: b\n    type: command\n    run: "true"\n';
-  const { taskId } = await redispatchProcess(db, { intakeId: "i1", processId: "1" }, {
-    loadWorkflow: fakeWorkflowLoader(Y2),
-  });
+  const { taskId } = await redispatchProcess(
+    db,
+    { intakeId: "i1", processId: "1" },
+    {
+      loadWorkflow: fakeWorkflowLoader(Y2),
+    },
+  );
   assert.equal((await getTask(db, taskId))!.workflow_yaml, Y2);
   assert.notEqual((await getTask(db, oldId))!.workflow_yaml, Y2);
 });
@@ -280,7 +305,10 @@ test("ready なプロセスを、それぞれの project のプロジェクト�
   assert.equal(apiTask.workflow_yaml, loader.API_YAML);
   assert.deepEqual(
     loader.calls.sort((a, b) => a[0].localeCompare(b[0])),
-    [["/api", "api-flow"], ["/repo", "feature"]],
+    [
+      ["/api", "api-flow"],
+      ["/repo", "feature"],
+    ],
   );
   assert.equal(loader.calls.length, 2);
 });
@@ -292,7 +320,10 @@ test("上流が自分のプロジェクトの baseBranch にマージされる�
   await addApi(db, workspaceId);
   await makeProcess2Ready(db, projectId);
   const report = await dispatchIntake(db, "i1", DEPS);
-  assert.deepEqual(report.created.map((c) => c.processId), ["2"]);
+  assert.deepEqual(
+    report.created.map((c) => c.processId),
+    ["2"],
+  );
   const task = (await getTask(db, report.created[0].taskId))!;
   assert.equal(task.workflow_name, "api-flow");
 });
@@ -304,7 +335,10 @@ test("project の無い agent のプロセスは errors に入れて見送り、
   await addApi(db, workspaceId);
   await giveSubIssues(db, ["1", "5"]);
   const report = await dispatchIntake(db, "i1", DEPS);
-  assert.deepEqual(report.created.map((c) => c.processId), ["5"]);
+  assert.deepEqual(
+    report.created.map((c) => c.processId),
+    ["5"],
+  );
   assert.equal(report.errors.length, 1);
   assert.equal(report.errors[0].processId, "1");
   assert.match(report.errors[0].message, /project がありません/);
@@ -318,10 +352,12 @@ test("workspace から外されたプロジェクトのプロセスは errors �
   await giveSubIssues(db);
   const report = await dispatchIntake(db, "i1", DEPS);
   assert.deepEqual(report.created, []);
-  assert.deepEqual(report.errors, [{
-    processId: "1",
-    message: "プロジェクト repo は workspace にありません",
-  }]);
+  assert.deepEqual(report.errors, [
+    {
+      processId: "1",
+      message: "プロジェクト repo は workspace にありません",
+    },
+  ]);
   assert.equal((await listTasks(db)).length, 0);
 });
 
@@ -339,10 +375,18 @@ test("skipProjects のプロジェクトのプロセスは作らず、errors に
   const apiId = await addApi(db, workspaceId);
   await giveSubIssues(db, ["1", "5"]);
   const loader = recordingLoader();
-  const report = await dispatchIntake(db, "i1", { loadWorkflow: loader.loadWorkflow }, {
-    skipProjects: new Set([apiId]),
-  });
-  assert.deepEqual(report.created.map((c) => c.processId), ["1"]);
+  const report = await dispatchIntake(
+    db,
+    "i1",
+    { loadWorkflow: loader.loadWorkflow },
+    {
+      skipProjects: new Set([apiId]),
+    },
+  );
+  assert.deepEqual(
+    report.created.map((c) => c.processId),
+    ["1"],
+  );
   assert.deepEqual(report.errors, []);
   assert.deepEqual(loader.calls, [["/repo", "feature"]]);
   const tasks = (await listTasks(db)).filter((t) => t.intake_process_id === "5");
@@ -356,9 +400,13 @@ test("再投入のタスクもプロセスのプロジェクトに作る", async
   await addApi(db, workspaceId);
   const oldId = await failProcess1(db);
   const loader = recordingLoader();
-  const { taskId } = await redispatchProcess(db, { intakeId: "i1", processId: "1" }, {
-    loadWorkflow: loader.loadWorkflow,
-  });
+  const { taskId } = await redispatchProcess(
+    db,
+    { intakeId: "i1", processId: "1" },
+    {
+      loadWorkflow: loader.loadWorkflow,
+    },
+  );
   const task = (await getTask(db, taskId))!;
   assert.equal(task.workflow_yaml, loader.API_YAML);
   assert.deepEqual(loader.calls, [["/api", "api-flow"]]);

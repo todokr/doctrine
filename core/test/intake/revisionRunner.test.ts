@@ -85,7 +85,11 @@ async function seedApproved(): Promise<string> {
     replies: "[]",
   });
   await insertApproval(f.db, { intake_id: "i1", draft_id: draft.id, hash: draft.hash });
-  await insertProcesses(f.db, "i1", pfd.processes.map((p) => p.id));
+  await insertProcesses(
+    f.db,
+    "i1",
+    pfd.processes.map((p) => p.id),
+  );
   for (const p of pfd.processes) {
     await updateProcess(f.db, "i1", p.id, {
       sub_issue_url: `https://github.com/o/r/issues/${p.id}0`,
@@ -97,7 +101,10 @@ async function seedApproved(): Promise<string> {
     claude_session_id: "old",
   });
   const report = await dispatchIntake(f.db, "i1", { loadWorkflow: fakeWorkflowLoader() });
-  assert.deepEqual(report.created.map((c) => c.processId), ["1"]);
+  assert.deepEqual(
+    report.created.map((c) => c.processId),
+    ["1"],
+  );
   return worktree;
 }
 
@@ -109,8 +116,12 @@ const revise = (comments: unknown = startComments) =>
 /** queued の行を先頭から n 個だけ走らせる（drive は queued が尽きるまで走る）。 */
 async function driveN(deps: ReturnType<typeof depsOf>, n: number): Promise<void> {
   for (let i = 0; i < n; i++) {
-    const next = await f.db.selectFrom("intake_runs").selectAll()
-      .where("status", "=", "queued").orderBy("id").executeTakeFirstOrThrow();
+    const next = await f.db
+      .selectFrom("intake_runs")
+      .selectAll()
+      .where("status", "=", "queued")
+      .orderBy("id")
+      .executeTakeFirstOrThrow();
     assert.ok(await claimIntakeRun(f.db, next.id));
     await runIntakeRun(f.db, next.id, deps);
   }
@@ -199,7 +210,10 @@ test("改訂中の差し戻しは revise の実行を立てる", async () => {
     logRoot: f.logRoot,
   });
   const queued = (await listIntakeRuns(f.db, "i1")).filter((r) => r.status === "queued");
-  assert.deepEqual(queued.map((r) => r.purpose), ["revise"]);
+  assert.deepEqual(
+    queued.map((r) => r.purpose),
+    ["revise"],
+  );
 
   await drive(f.db, deps);
   const draft = (await latestDraft(f.db, "i1"))!;
@@ -212,10 +226,7 @@ test("改訂中の回答は revise の実行を立てる", async () => {
   await seedApproved();
   const adapter = createMockAdapter({
     result: {},
-    sequence: [
-      questionsOut([question("q2")]),
-      pfdOut(revised(), [{ commentId: 1, reply: "x" }]),
-    ],
+    sequence: [questionsOut([question("q2")]), pfdOut(revised(), [{ commentId: 1, reply: "x" }])],
   });
   const deps = depsOf(f, adapter);
   await revise();
@@ -231,7 +242,10 @@ test("改訂中の回答は revise の実行を立てる", async () => {
     logRoot: f.logRoot,
   });
   const queued = (await listIntakeRuns(f.db, "i1")).filter((r) => r.status === "queued");
-  assert.deepEqual(queued.map((r) => r.purpose), ["revise"]);
+  assert.deepEqual(
+    queued.map((r) => r.purpose),
+    ["revise"],
+  );
 
   await drive(f.db, deps);
   assert.equal((await getIntake(f.db, "i1"))!.state, "reviewing");

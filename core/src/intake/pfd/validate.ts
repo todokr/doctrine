@@ -156,7 +156,10 @@ export function validatePfd(pfd: Pfd, ctx: ValidateContext): Violation[] {
   // プロセス A の出力をプロセス B が入力に取るとき、A → B の辺を張る
   const next = new Map<string, string[]>();
   for (const p of pfd.processes) {
-    next.set(p.id, p.outputs.flatMap((o) => consumers.get(o) ?? []));
+    next.set(
+      p.id,
+      p.outputs.flatMap((o) => consumers.get(o) ?? []),
+    );
   }
   const color = new Map<string, "visiting" | "done">();
   const visit = (id: string): boolean => {

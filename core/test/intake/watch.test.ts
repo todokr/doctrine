@@ -167,8 +167,9 @@ test("投入したタスクはプロセス名・既定のワークフロー・�
   const { db, workspaceId, watcher } = await setup();
   await watcher.request(workspaceId);
   const [task] = await listTasks(db);
-  const subIssueUrl = (await listProcesses(db, "i1")).find((r) => r.process_id === "1")!
-    .sub_issue_url;
+  const subIssueUrl = (await listProcesses(db, "i1")).find(
+    (r) => r.process_id === "1",
+  )!.sub_issue_url;
   assert.equal(task.title, "マイグレーションを書く");
   assert.equal(task.workflow_name, "feature");
   assert.equal(task.priority, 2);
@@ -235,7 +236,7 @@ test("見張りは workspace で Tracker を引く", async () => {
 
 test("Tracker を引けない周も baseBranch の取り込みは続け、失敗を健康状態に出す", async () => {
   const { db, workspaceId, base, watcher } = await setupWith(() =>
-    Promise.reject(new Error("workspace.yaml がありません"))
+    Promise.reject(new Error("workspace.yaml がありません")),
   );
   await watcher.request(workspaceId);
   assert.equal(base.fetches, 1);
@@ -275,7 +276,10 @@ test("baseBranch へのマージを検知すると下流を投入する", async 
   assert.equal(task2.length, 1);
   assert.match(task2[0].prompt, /人が決めたこと:/);
   assert.match(task2[0].prompt, /ログイン 1 回を 1 利用と数える/);
-  assert.equal(tasks.some((t) => t.intake_process_id === "4"), false);
+  assert.equal(
+    tasks.some((t) => t.intake_process_id === "4"),
+    false,
+  );
 });
 
 test("origin の baseBranch を取り込めなかった周は投入せず、失敗を健康状態に出す", async () => {
@@ -298,7 +302,10 @@ test("上流のマージのコミットが origin の baseBranch に入るまで
   await mergeOf(pw, db, "1");
   base.missing.add("c11");
   await watcher.request(workspaceId);
-  assert.equal((await listTasks(db)).some((t) => t.intake_process_id === "2"), false);
+  assert.equal(
+    (await listTasks(db)).some((t) => t.intake_process_id === "2"),
+    false,
+  );
   assert.equal(watcher.health(workspaceId).consecutiveFailures, 0, "取り込みの遅れは失敗ではない");
 
   base.missing.delete("c11");
@@ -346,7 +353,10 @@ test("片方のプロジェクトの origin を取り込めなくても、もう
   s.base.fetchErrorFor.set("/api", new Error("Could not resolve host: api.example"));
   await s.watcher.request(s.workspaceId);
   const tasks = await listTasks(s.db);
-  assert.deepEqual(tasks.map((t) => t.intake_process_id), ["1"]);
+  assert.deepEqual(
+    tasks.map((t) => t.intake_process_id),
+    ["1"],
+  );
   assert.deepEqual(s.base.fetched, ["/repo", "/api"]);
   assert.equal(s.watcher.health(s.workspaceId).consecutiveFailures, 1);
   assert.match(s.watcher.health(s.workspaceId).lastError!, /origin の develop の取り込み（api）/);
@@ -433,7 +443,10 @@ test("末端の成果物が揃うと完了にし、親 Issue は閉じない", a
     transitions.map((t) => [t.from, t.to]),
     [["active", "completed"]],
   );
-  assert.equal(ft.calls.some((c) => c.op === "closeIssue" && c.url === PARENT_URL), false);
+  assert.equal(
+    ft.calls.some((c) => c.op === "closeIssue" && c.url === PARENT_URL),
+    false,
+  );
 
   const before = pw.calls.length;
   await watcher.request(workspaceId);
@@ -493,9 +506,9 @@ test("改訂中の Intake の sub-issue は触らない", async () => {
 
   await watcher.request(workspaceId);
 
-  const sub = ft.calls.slice(before).filter((c) =>
-    c.op === "createSubIssue" || c.op === "updateIssue" || c.op === "closeIssue"
-  );
+  const sub = ft.calls
+    .slice(before)
+    .filter((c) => c.op === "createSubIssue" || c.op === "updateIssue" || c.op === "closeIssue");
   assert.deepEqual(sub, []);
 });
 
@@ -505,7 +518,7 @@ test("走っている周の最中に届いた要求は、その周が終わっ�
   assert.equal(pw.calls.length, 0);
 
   let release: () => void = () => {};
-  const gate = new Promise<void>((resolve) => release = resolve);
+  const gate = new Promise<void>((resolve) => (release = resolve));
   const inner = pw.prWatcher.pullRequests;
   pw.prWatcher.pullRequests = async (path, branches) => {
     const result = await inner(path, branches);
@@ -534,14 +547,16 @@ test("偽の gh: ghTracker と ghPrWatcher を通して、承認直後の投入�
     const g = parseGraphqlArgs(a);
     if (/pullRequests/.test(g.query)) {
       const found = mergedBranch
-        ? [{
-          number: 7,
-          url: "https://github.com/o/r/pull/7",
-          state: "MERGED",
-          baseRefName: "main",
-          mergedAt: "2026-09-21T00:00:00Z",
-          mergeCommit: { oid: "abc" },
-        }]
+        ? [
+            {
+              number: 7,
+              url: "https://github.com/o/r/pull/7",
+              state: "MERGED",
+              baseRefName: "main",
+              mergedAt: "2026-09-21T00:00:00Z",
+              mergeCommit: { oid: "abc" },
+            },
+          ]
         : [];
       return JSON.stringify({ data: { repository: { b0: { nodes: found } } } });
     }
@@ -590,8 +605,9 @@ async function closesOfProcess1(db: Db, ft: ReturnType<typeof fakeTracker>) {
 }
 
 async function subIssueOf(db: Db, ft: ReturnType<typeof fakeTracker>, processId: string) {
-  const url = (await listProcesses(db, "i1")).find((r) => r.process_id === processId)!
-    .sub_issue_url;
+  const url = (await listProcesses(db, "i1")).find(
+    (r) => r.process_id === processId,
+  )!.sub_issue_url;
   return ft.issues.find((i) => i.ref.url === url)!;
 }
 
@@ -605,7 +621,11 @@ async function observeMerge1(s: Awaited<ReturnType<typeof setup>>): Promise<void
 const CANCEL = {
   projectPath: "/repo",
   intakeId: "i1",
-  baseBranches: new Map([["1", "main"], ["2", "main"], ["4", "main"]]),
+  baseBranches: new Map([
+    ["1", "main"],
+    ["2", "main"],
+    ["4", "main"],
+  ]),
 };
 
 test("中止: PR の Closes で閉じないトラッカーでは、マージ済みのプロセスの sub-issue も completed で閉じる", async () => {
@@ -666,7 +686,10 @@ test("GitHub のプロジェクトでは、マージを検知しても sub-issue
   await s.watcher.request(s.workspaceId);
   await mergeOf(s.pw, s.db, "1");
   await s.watcher.request(s.workspaceId);
-  assert.deepEqual(s.ft.calls.filter((c) => c.op === "closeIssue"), []);
+  assert.deepEqual(
+    s.ft.calls.filter((c) => c.op === "closeIssue"),
+    [],
+  );
   const p1 = (await listProcesses(s.db, "i1")).find((r) => r.process_id === "1")!;
   assert.equal(p1.sub_issue_closed, 0);
 });
@@ -676,7 +699,10 @@ test("Linear のプロジェクトでも、baseBranch 以外へのマージで�
   await s.watcher.request(s.workspaceId);
   await mergeOf(s.pw, s.db, "1", "release");
   await s.watcher.request(s.workspaceId);
-  assert.deepEqual(s.ft.calls.filter((c) => c.op === "closeIssue"), []);
+  assert.deepEqual(
+    s.ft.calls.filter((c) => c.op === "closeIssue"),
+    [],
+  );
   const p1 = (await listProcesses(s.db, "i1")).find((r) => r.process_id === "1")!;
   assert.equal(p1.sub_issue_closed, 0);
 });
@@ -704,7 +730,7 @@ test("マージした sub-issue を閉じられなければ失敗を健康状態
 // Linear の状態（対応表の出来事ごとの呼び出し）
 const setupLinear = (pfd: Pfd = example()) => setup(pfd, "linear");
 const advancesOf = (ft: ReturnType<typeof fakeTracker>) =>
-  ft.calls.flatMap((c) => c.op === "advanceIssue" ? [{ url: c.url, phase: c.phase }] : []);
+  ft.calls.flatMap((c) => (c.op === "advanceIssue" ? [{ url: c.url, phase: c.phase }] : []));
 async function subIssueUrl(db: Db, processId: string): Promise<string> {
   return (await listProcesses(db, "i1")).find((r) => r.process_id === processId)!.sub_issue_url!;
 }

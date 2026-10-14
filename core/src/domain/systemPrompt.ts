@@ -4,8 +4,7 @@
  * 別ファイル（`.md`）にしないのは、単一バイナリ（`core/scripts/build.ts` の esbuild + SEA）に
  * 別ファイルが同梱されないため。
  */
-export const BUILTIN_APPEND_SYSTEM_PROMPT =
-  `Bash ツールは1回の呼び出しにつき1コマンドだけ実行すること。
+export const BUILTIN_APPEND_SYSTEM_PROMPT = `Bash ツールは1回の呼び出しにつき1コマンドだけ実行すること。
 - \`;\` \`&&\` \`||\` \`|\` でコマンドを繋がない。
 - リダイレクト（\`>\` \`>>\`）、\`for\` などのループ、コマンド置換で複数のことをまとめない。
 - 複数のことをしたいときは、Bash を複数回に分けて呼ぶ。

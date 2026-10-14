@@ -25,13 +25,14 @@ export function trackerFor(o: {
   // workspace.yaml を書き換えたらデーモンの再起動なしで効くよう、呼ぶたびに読む
   return async (ws) => {
     const config = await readTrackerConfig(ws.path);
-    const tracker = config.kind === "linear"
-      ? linear({
-        apiKey: o.linearApiKey,
-        team: config.team,
-        ...(config.states ? { states: config.states } : {}),
-      })
-      : github;
+    const tracker =
+      config.kind === "linear"
+        ? linear({
+            apiKey: o.linearApiKey,
+            team: config.team,
+            ...(config.states ? { states: config.states } : {}),
+          })
+        : github;
     return workspaceTracker(ws, tracker);
   };
 }

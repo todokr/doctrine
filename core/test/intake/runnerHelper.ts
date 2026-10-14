@@ -80,10 +80,14 @@ export function depsOf(f: Fixture, adapter: AgentAdapter): IntakeRunnerDeps {
 /** queued の行を id 順に 1 つ取り、claim して走らせる。queued が無くなるまで繰り返す。 */
 export async function drive(db: Db, deps: IntakeRunnerDeps): Promise<void> {
   for (;;) {
-    const next = await db.selectFrom("intake_runs").selectAll()
-      .where("status", "=", "queued").orderBy("id").executeTakeFirst();
+    const next = await db
+      .selectFrom("intake_runs")
+      .selectAll()
+      .where("status", "=", "queued")
+      .orderBy("id")
+      .executeTakeFirst();
     if (next === undefined) return;
-    if (!await claimIntakeRun(db, next.id)) throw new Error("claim できませんでした");
+    if (!(await claimIntakeRun(db, next.id))) throw new Error("claim できませんでした");
     await runIntakeRun(db, next.id, deps);
   }
 }

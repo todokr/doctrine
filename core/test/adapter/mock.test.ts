@@ -16,7 +16,10 @@ test("start/resume の呼び出しを kind 付きで記録する", async () => {
 test("sequence は通算呼び出し回数で結果を切り替える", async () => {
   const adapter = createMockAdapter({
     result: { ok: true },
-    sequence: [{ ok: true, text: "1回目" }, { ok: false, text: "2回目" }],
+    sequence: [
+      { ok: true, text: "1回目" },
+      { ok: false, text: "2回目" },
+    ],
   });
   const r1 = await adapter.start("a", { cwd: "/wt", sessionId: "s1" }).result;
   const r2 = await adapter.start("b", { cwd: "/wt", sessionId: "s2" }).result;
@@ -39,12 +42,14 @@ test("eventsSequence は呼び出しごとに違うイベントを流す", async
     events: [{ kind: "result" }],
     result: {},
     eventsSequence: [
-      [{
-        kind: "rateLimit",
-        window: "five_hour",
-        utilization: 1,
-        resetsAt: "2026-09-19T03:20:00Z",
-      }],
+      [
+        {
+          kind: "rateLimit",
+          window: "five_hour",
+          utilization: 1,
+          resetsAt: "2026-09-19T03:20:00Z",
+        },
+      ],
       [{ kind: "assistant", text: "2回目" }],
     ],
   });

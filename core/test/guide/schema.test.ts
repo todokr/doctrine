@@ -40,12 +40,14 @@ test("version が 1 以外なら落ちる", () => {
 test("読む箇所は hunk を省ける", () => {
   const guide = {
     ...minimalGuide(),
-    readingOrder: [{
-      title: "入口",
-      body: "ここから読む",
-      locations: [{ path: "a.ts" }, { path: "b.ts", hunk: "h1" }],
-      refs: { decisions: [], risks: [], tests: [], diagrams: [] },
-    }],
+    readingOrder: [
+      {
+        title: "入口",
+        body: "ここから読む",
+        locations: [{ path: "a.ts" }, { path: "b.ts", hunk: "h1" }],
+        refs: { decisions: [], risks: [], tests: [], diagrams: [] },
+      },
+    ],
   };
   const parsed = guideSchema.parse(guide);
   assert.equal(parsed.readingOrder[0].locations[0].hunk, undefined);
@@ -64,13 +66,15 @@ test("risk の kind は 4 つだけ", () => {
 test("risk の impact は high / medium / low だけで、省けない", () => {
   const withImpact = (impact?: string) => ({
     ...minimalGuide(),
-    risks: [{
-      id: "r1",
-      kind: "breaks",
-      ...(impact === undefined ? {} : { impact }),
-      body: "壊れうる",
-      locations: [],
-    }],
+    risks: [
+      {
+        id: "r1",
+        kind: "breaks",
+        ...(impact === undefined ? {} : { impact }),
+        body: "壊れうる",
+        locations: [],
+      },
+    ],
   });
   for (const impact of ["high", "medium", "low"]) {
     assert.equal(guideSchema.safeParse(withImpact(impact)).success, true, impact);

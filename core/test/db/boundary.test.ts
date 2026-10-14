@@ -66,7 +66,7 @@ test("ステップ実行の挿入が失敗したらタスク更新も巻き戻�
         ended_at: "b",
         log_path: "/l",
       },
-    })
+    }),
   );
   assert.equal((await getTask(d, "t1"))?.state, "queued");
 });
@@ -86,7 +86,7 @@ test("実タスクの更新もステップ実行の失敗で巻き戻る", async
         ended_at: "b",
         log_path: "/l",
       },
-    })
+    }),
   );
   assert.equal((await getTask(d, "t1"))?.state, "queued");
   assert.equal((await getTask(d, "t1"))?.current_step_id, null);
@@ -171,9 +171,16 @@ test("{{ steps.<id> }} は最新の実行の出力を指し、過去の実行の
   });
   assert.equal((await getStepOutputs(d, "t1")).test.last_stdout, "2回目");
   assert.equal((await listStepRuns(d, "t1")).length, 2);
-  const outputs = await d.selectFrom("step_outputs").select("last_stdout").orderBy("step_run_id")
+  const outputs = await d
+    .selectFrom("step_outputs")
+    .select("last_stdout")
+    .orderBy("step_run_id")
     .execute();
-  assert.deepEqual(outputs.map((o) => o.last_stdout), ["1回目", "2回目"], "1回目の出力も残る");
+  assert.deepEqual(
+    outputs.map((o) => o.last_stdout),
+    ["1回目", "2回目"],
+    "1回目の出力も残る",
+  );
 });
 
 test("巨大な出力は末尾だけ保存する", async () => {
@@ -406,9 +413,7 @@ test("長い入力は先頭を残して切られる", async () => {
 test("入力のネストした値は切らない", async () => {
   const nested = { a: { b: "y".repeat(DENIAL_VALUE_CHARS + 100) } };
   const saved = JSON.parse(
-    (await closeWithDenials([
-      { tool_name: "T", tool_use_id: null, input: nested },
-    ]))!,
+    (await closeWithDenials([{ tool_name: "T", tool_use_id: null, input: nested }]))!,
   );
   assert.deepEqual(saved.denials[0].input, nested);
 });

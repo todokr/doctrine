@@ -37,7 +37,10 @@ test("作成時の定義を持つタスクはディスクではなく保存し�
     throw new Error("呼ばれてはいけない");
   };
   const workflow = await taskWorkflow(task, project, load);
-  assert.deepEqual(workflow.steps.map((s) => s.id), ["review"]);
+  assert.deepEqual(
+    workflow.steps.map((s) => s.id),
+    ["review"],
+  );
 });
 
 test("作成時の setup を差し込み、project の今の setup は見ない", async () => {
@@ -51,7 +54,10 @@ test("作成時に setup が無ければ、project に後から足した setup �
   const task = { workflow_name: "feature", workflow_yaml: A, workflow_setup: null };
   const project = { path: root, setup: "echo now" };
   const workflow = await taskWorkflow(task, project, loadWorkflowFromDisk);
-  assert.deepEqual(workflow.steps.map((s) => s.id), ["review"]);
+  assert.deepEqual(
+    workflow.steps.map((s) => s.id),
+    ["review"],
+  );
 });
 
 test("作成時の定義を持たないタスクはディスクの YAML と project の setup で解決する", async () => {
@@ -59,7 +65,10 @@ test("作成時の定義を持たないタスクはディスクの YAML と proj
   const task = { workflow_name: "feature", workflow_yaml: null, workflow_setup: null };
   const project = { path: root, setup: "echo now" };
   const workflow = await taskWorkflow(task, project, loadWorkflowFromDisk);
-  assert.deepEqual(workflow.steps.map((s) => s.id), ["setup", "other"]);
+  assert.deepEqual(
+    workflow.steps.map((s) => s.id),
+    ["setup", "other"],
+  );
 });
 
 test("pinOf は YAML の中身と project の setup を写す", async () => {

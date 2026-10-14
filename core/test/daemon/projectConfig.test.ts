@@ -68,7 +68,7 @@ test("project.config.get は project.yaml の設定を返す", async () => {
   const ctx = await context();
   const h = createHandler(ctx);
   await h("workspace.add", { path: repo }, NOOP_CONN);
-  const cfg = await h("project.config.get", { project: repo }, NOOP_CONN) as ProjectConfig;
+  const cfg = (await h("project.config.get", { project: repo }, NOOP_CONN)) as ProjectConfig;
   assert.deepEqual(cfg, {
     defaultWorkflow: "feature",
     maxConcurrent: 1,
@@ -81,17 +81,26 @@ test("project.config.save は project.yaml と projects の行の両方を変え
   const h = createHandler(ctx);
   await h("workspace.add", { path: repo }, NOOP_CONN);
 
-  const result = await h("project.config.save", {
-    project: repo,
-    config: { defaultWorkflow: "other", maxConcurrent: 3, baseBranch: "develop", setup: "pnpm i" },
-  }, NOOP_CONN) as ProjectSummary;
+  const result = (await h(
+    "project.config.save",
+    {
+      project: repo,
+      config: {
+        defaultWorkflow: "other",
+        maxConcurrent: 3,
+        baseBranch: "develop",
+        setup: "pnpm i",
+      },
+    },
+    NOOP_CONN,
+  )) as ProjectSummary;
 
   assert.equal(result.default_workflow, "other");
   assert.equal(result.max_concurrent, 3);
   assert.equal(result.base_branch, "develop");
   assert.equal(result.setup, "pnpm i");
 
-  const list = await h("project.list", {}, NOOP_CONN) as ProjectSummary[];
+  const list = (await h("project.list", {}, NOOP_CONN)) as ProjectSummary[];
   assert.equal(list[0].default_workflow, "other");
   assert.equal(list[0].max_concurrent, 3);
   assert.equal(list[0].base_branch, "develop");
@@ -110,10 +119,7 @@ test("project.config.save は project.yaml と projects の行の両方を変え
   const entries = await readdir(join(repo, ".doctrine"));
   assert(!entries.some((e) => e.endsWith(".tmp")));
 
-  const { stdout } = await runGit(
-    "git",
-    ["-C", repo, "log", "--oneline"],
-  );
+  const { stdout } = await runGit("git", ["-C", repo, "log", "--oneline"]);
   assert.equal(stdout.trim().split("\n").length, 1);
 });
 
@@ -122,15 +128,23 @@ test("project.config.save で setup を空にすると project.yaml から setup
   const h = createHandler(ctx);
   await h("workspace.add", { path: repo }, NOOP_CONN);
 
-  await h("project.config.save", {
-    project: repo,
-    config: { defaultWorkflow: "feature", maxConcurrent: 1, baseBranch: "main", setup: "pnpm i" },
-  }, NOOP_CONN);
+  await h(
+    "project.config.save",
+    {
+      project: repo,
+      config: { defaultWorkflow: "feature", maxConcurrent: 1, baseBranch: "main", setup: "pnpm i" },
+    },
+    NOOP_CONN,
+  );
 
-  const result = await h("project.config.save", {
-    project: repo,
-    config: { defaultWorkflow: "feature", maxConcurrent: 1, baseBranch: "main", setup: "" },
-  }, NOOP_CONN) as ProjectSummary;
+  const result = (await h(
+    "project.config.save",
+    {
+      project: repo,
+      config: { defaultWorkflow: "feature", maxConcurrent: 1, baseBranch: "main", setup: "" },
+    },
+    NOOP_CONN,
+  )) as ProjectSummary;
 
   assert.equal(result.setup, null);
   const text = await readFile(join(repo, ".doctrine", "project.yaml"), "utf8");
@@ -149,10 +163,14 @@ test("project.config.save は tracker が残った project.yaml を移し先を�
 
   await assert.rejects(
     () =>
-      h("project.config.save", {
-        project: repo,
-        config: { defaultWorkflow: "other", maxConcurrent: 2, baseBranch: "main" },
-      }, NOOP_CONN),
+      h(
+        "project.config.save",
+        {
+          project: repo,
+          config: { defaultWorkflow: "other", maxConcurrent: 2, baseBranch: "main" },
+        },
+        NOOP_CONN,
+      ),
     (e: unknown) => {
       assert(e instanceof WorkflowValidationError);
       assert(e.message.includes("workspace.yaml"));
@@ -172,16 +190,20 @@ test("project.config.save は maxConcurrent が0なら書かずにエラーを�
 
   await assert.rejects(
     () =>
-      h("project.config.save", {
-        project: repo,
-        config: { defaultWorkflow: "feature", maxConcurrent: 0, baseBranch: "main" },
-      }, NOOP_CONN),
+      h(
+        "project.config.save",
+        {
+          project: repo,
+          config: { defaultWorkflow: "feature", maxConcurrent: 0, baseBranch: "main" },
+        },
+        NOOP_CONN,
+      ),
     WorkflowValidationError,
   );
 
   const after = await readFile(join(repo, ".doctrine", "project.yaml"), "utf8");
   assert.equal(after, before);
-  const list = await h("project.list", {}, NOOP_CONN) as ProjectSummary[];
+  const list = (await h("project.list", {}, NOOP_CONN)) as ProjectSummary[];
   assert.equal(list[0].max_concurrent, 1);
 });
 
@@ -193,16 +215,20 @@ test("project.config.save は存在しない defaultWorkflow なら書かずに�
 
   await assert.rejects(
     () =>
-      h("project.config.save", {
-        project: repo,
-        config: { defaultWorkflow: "nope", maxConcurrent: 1, baseBranch: "main" },
-      }, NOOP_CONN),
+      h(
+        "project.config.save",
+        {
+          project: repo,
+          config: { defaultWorkflow: "nope", maxConcurrent: 1, baseBranch: "main" },
+        },
+        NOOP_CONN,
+      ),
     /defaultWorkflow/,
   );
 
   const after = await readFile(join(repo, ".doctrine", "project.yaml"), "utf8");
   assert.equal(after, before);
-  const list = await h("project.list", {}, NOOP_CONN) as ProjectSummary[];
+  const list = (await h("project.list", {}, NOOP_CONN)) as ProjectSummary[];
   assert.equal(list[0].default_workflow, "feature");
 });
 
@@ -211,10 +237,14 @@ test("project.config.save は未登録のプロジェクトを拒む", async () 
   const h = createHandler(ctx);
   await assert.rejects(
     () =>
-      h("project.config.save", {
-        project: join(root, "nope"),
-        config: { defaultWorkflow: "feature", maxConcurrent: 1, baseBranch: "main" },
-      }, NOOP_CONN),
+      h(
+        "project.config.save",
+        {
+          project: join(root, "nope"),
+          config: { defaultWorkflow: "feature", maxConcurrent: 1, baseBranch: "main" },
+        },
+        NOOP_CONN,
+      ),
     /未登録/,
   );
 });

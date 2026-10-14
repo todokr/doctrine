@@ -229,7 +229,10 @@ test("(b) 検証落ちが 3 回続くと要確認になる", async () => {
   assert.equal(reason.runId, runs[2].id);
   assert.equal((await listDrafts(f.db, "i1")).length, 0);
   assert.equal(adapter.calls.length, 3);
-  assert.deepEqual(runs.map((r) => r.attempt), [1, 2, 3]);
+  assert.deepEqual(
+    runs.map((r) => r.attempt),
+    [1, 2, 3],
+  );
 });
 
 test("(b) 調査の実行が PFD を返すと検証落ちになる", async () => {
@@ -357,7 +360,10 @@ test("2 プロジェクトの workspace では、親ディレクトリの下に�
   await stat(join(intake.worktree_path!, "repo", "README.md"));
   await stat(join(intake.worktree_path!, "b", "README.md"));
   const children = await listIntakeWorktrees(intake.worktree_path!);
-  assert.deepEqual(children.map((c) => c.name), ["b", "repo"]);
+  assert.deepEqual(
+    children.map((c) => c.name),
+    ["b", "repo"],
+  );
   assert.equal(intake.state, "answering");
 });
 
@@ -381,10 +387,7 @@ test("どれか 1 つの worktree の書き換えで wrote_repository になり�
   assert.equal(reason.kind, "wrote_repository");
   assert.deepEqual(reason.paths, ["b/x.txt", "repo/README.md"]);
   await assert.rejects(stat(join(intake.worktree_path!, "b", "x.txt")));
-  assert.equal(
-    await readFile(join(intake.worktree_path!, "repo", "README.md"), "utf8"),
-    "x\n",
-  );
+  assert.equal(await readFile(join(intake.worktree_path!, "repo", "README.md"), "utf8"), "x\n");
   assert.equal((await listQuestionSets(f.db, "i1")).length, 0);
 });
 
@@ -475,7 +478,13 @@ test("attempt は新しく立てるたびに進み、上限待ちからの再開
   const b = await enqueueIntakeRun(f.db, "i1", "investigate", opts(true));
   const c = await enqueueIntakeRun(f.db, "i1", "investigate", opts());
   const runs = await listIntakeRuns(f.db, "i1");
-  assert.deepEqual(runs.map((r) => r.id), [a, b, c]);
-  assert.deepEqual(runs.map((r) => r.attempt), [1, 1, 2]);
+  assert.deepEqual(
+    runs.map((r) => r.id),
+    [a, b, c],
+  );
+  assert.deepEqual(
+    runs.map((r) => r.attempt),
+    [1, 1, 2],
+  );
   assert.equal(runs[0].log_path, join(f.logRoot, "intake-i1", "investigate.1.log"));
 });

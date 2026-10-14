@@ -20,9 +20,7 @@ export type QuestionsValidation =
   | ({ ok: true } & QuestionSetContent)
   | { ok: false; issues: string[] };
 
-export type AnswersValidation =
-  | ({ ok: true } & QuestionSetReply)
-  | { ok: false; issues: string[] };
+export type AnswersValidation = ({ ok: true } & QuestionSetReply) | { ok: false; issues: string[] };
 
 // 誤りの理由は zod 同梱の日本語ロケールに任せる。z.config() はアプリ側のメッセージまで変えるので使わない
 const parseOptions = { error: z.locales.ja().localeError };
@@ -85,9 +83,10 @@ function checkQuestions({ questions, assumptions }: QuestionSetContent): string[
 }
 
 /** 質問と仮定のまとまりを、形と整合性の両面から確かめる。例外は投げない。 */
-export function validateQuestions(
-  input: { questions: unknown; assumptions: unknown },
-): QuestionsValidation {
+export function validateQuestions(input: {
+  questions: unknown;
+  assumptions: unknown;
+}): QuestionsValidation {
   const questions = questionSetSchema.safeParse(input.questions, parseOptions);
   const assumptions = assumptionSetSchema.safeParse(input.assumptions, parseOptions);
   const shapeIssues = [

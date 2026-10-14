@@ -27,7 +27,9 @@ afterEach(async () => {
   for (const c of children.splice(0)) {
     try {
       c.kill("SIGKILL");
-    } catch { /* already gone */ }
+    } catch {
+      /* already gone */
+    }
   }
   await rm(root, { recursive: true, force: true });
 });
@@ -230,7 +232,7 @@ test("設定ファイルが無ければ全体の実行枠 4 で起動する", as
   });
   daemons.push(d);
 
-  const slots = await call(sock, "daemon.slots", {}) as DaemonSlots;
+  const slots = (await call(sock, "daemon.slots", {})) as DaemonSlots;
   assert.equal(slots.global_limit, 4);
 });
 
@@ -247,7 +249,7 @@ test("設定ファイルがあればその値で起動する", async () => {
   });
   daemons.push(d);
 
-  const slots = await call(sock, "daemon.slots", {}) as DaemonSlots;
+  const slots = (await call(sock, "daemon.slots", {})) as DaemonSlots;
   assert.equal(slots.global_limit, 7);
 });
 
@@ -264,9 +266,9 @@ test("壊れた設定ファイルでも既定値で起動し、警告を出す",
   });
   daemons.push(d);
 
-  const slots = await call(sock, "daemon.slots", {}) as DaemonSlots;
+  const slots = (await call(sock, "daemon.slots", {})) as DaemonSlots;
   assert.equal(slots.global_limit, 4);
-  const warnings = await call(sock, "daemon.warnings", {}) as Warning[];
+  const warnings = (await call(sock, "daemon.warnings", {})) as Warning[];
   assert.ok(warnings.some((w) => /設定ファイル/.test(w.message)));
 });
 
@@ -296,7 +298,7 @@ test("daemon.setGlobalLimit で変えた値は再起動しても残る", async (
   });
   daemons.push(d2);
 
-  const slots = await call(sock, "daemon.slots", {}) as DaemonSlots;
+  const slots = (await call(sock, "daemon.slots", {})) as DaemonSlots;
   assert.equal(slots.global_limit, 6);
 });
 
@@ -321,7 +323,7 @@ test("configPath を渡さなければ全体の実行枠は設定ディレクト
 
     const d2 = await startDaemon({ socketPath: sock, tickMs: 1_000_000 });
     daemons.push(d2);
-    const slots = await call(sock, "daemon.slots", {}) as DaemonSlots;
+    const slots = (await call(sock, "daemon.slots", {})) as DaemonSlots;
     assert.equal(slots.global_limit, 6);
   } finally {
     if (prevState === undefined) delete process.env.DOCTRINE_STATE_DIR;

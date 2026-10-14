@@ -107,7 +107,10 @@ export async function updateWorkspace(db: Db, rootPath: string): Promise<{ works
   for (const p of [...adding, ...keeping]) configs.set(p.path, await readProjectConfig(p.path));
 
   await db.transaction().execute(async (trx) => {
-    await trx.updateTable("workspaces").set({ name: cfg.name }).where("id", "=", workspace.id)
+    await trx
+      .updateTable("workspaces")
+      .set({ name: cfg.name })
+      .where("id", "=", workspace.id)
       .execute();
     // UNIQUE(workspace_id, name): 外す → 残す → 足す の順なら、外した名前を別のプロジェクトが使える
     for (const r of removing) await trx.deleteFrom("projects").where("id", "=", r.id).execute();
@@ -147,12 +150,9 @@ async function trackerConfigOf(workspacePath: string): Promise<WorkspaceSummary[
 }
 
 /** project.yaml から読んだ設定を projects の行へ写す。 */
-export async function syncProjectRow(
-  db: Db,
-  projectId: number,
-  cfg: ProjectConfig,
-): Promise<void> {
-  await db.updateTable("projects")
+export async function syncProjectRow(db: Db, projectId: number, cfg: ProjectConfig): Promise<void> {
+  await db
+    .updateTable("projects")
     .set({
       default_workflow: cfg.defaultWorkflow,
       max_concurrent: cfg.maxConcurrent,
@@ -217,7 +217,7 @@ async function resolveProjects(root: string, cfg: WorkspaceConfig): Promise<Reso
     }
     // ensureProjectScaffold（assertRepoRoot）が同じことを確かめるが、それは1件ずつ
     // スキャフォルドしながら呼ぶので手遅れ。ここで先に全件を確かめる。
-    if (await requireNotSubdirectory(real) === null) {
+    if ((await requireNotSubdirectory(real)) === null) {
       throw new Error(
         `projects の ${entry.name} が指すパスは git リポジトリではありません: ${real}`,
       );
@@ -242,10 +242,13 @@ async function checkClaim(
   if (!row || row.workspace_id === workspaceId) return null;
 
   const siblings = await listProjectsOf(db, row.workspace_id);
-  const openIntake = await db.selectFrom("intakes").select("id")
+  const openIntake = await db
+    .selectFrom("intakes")
+    .select("id")
     .where("workspace_id", "=", row.workspace_id)
     .where("state", "not in", ["completed", "canceled"])
-    .limit(1).executeTakeFirst();
+    .limit(1)
+    .executeTakeFirst();
   if (siblings.length === 1 && !openIntake) return row;
 
   const other = await getWorkspace(db, row.workspace_id);
@@ -256,14 +259,21 @@ async function checkClaim(
 
 /** projects.retired_at を足すまでは、タスクの記録があるプロジェクトを消せない（外部キー）。 */
 async function checkRemovable(db: Db, project: ProjectRow): Promise<void> {
-  const active = await db.selectFrom("tasks").select("id")
+  const active = await db
+    .selectFrom("tasks")
+    .select("id")
     .where("project_id", "=", project.id)
     .where("state", "in", ACTIVE_TASK_STATES as never[])
-    .limit(1).executeTakeFirst();
+    .limit(1)
+    .executeTakeFirst();
   if (active) throw new Error(`${project.name} には動いているタスクがあるので外せません`);
 
-  const task = await db.selectFrom("tasks").select("id").where("project_id", "=", project.id)
-    .limit(1).executeTakeFirst();
+  const task = await db
+    .selectFrom("tasks")
+    .select("id")
+    .where("project_id", "=", project.id)
+    .limit(1)
+    .executeTakeFirst();
   if (task) throw new Error(`${project.name} にはタスクの記録があるので外せません`);
 }
 
@@ -276,11 +286,17 @@ async function placeProject(
   claimed: ProjectRow | null,
 ): Promise<void> {
   if (claimed) {
-    await trx.updateTable("projects").set({ workspace_id: workspaceId, name: p.name })
-      .where("id", "=", claimed.id).execute();
+    await trx
+      .updateTable("projects")
+      .set({ workspace_id: workspaceId, name: p.name })
+      .where("id", "=", claimed.id)
+      .execute();
     await syncProjectRow(trx, claimed.id, cfg);
-    await trx.updateTable("intakes").set({ workspace_id: workspaceId })
-      .where("workspace_id", "=", claimed.workspace_id).execute();
+    await trx
+      .updateTable("intakes")
+      .set({ workspace_id: workspaceId })
+      .where("workspace_id", "=", claimed.workspace_id)
+      .execute();
     await trx.deleteFrom("workspaces").where("id", "=", claimed.workspace_id).execute();
     return;
   }

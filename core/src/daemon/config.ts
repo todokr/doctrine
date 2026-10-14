@@ -15,10 +15,12 @@ export function defaultConfigPath(): string {
 
 export type DaemonConfig = { globalLimit: number; linearApiKey?: string };
 
-const schema = z.object({
-  globalLimit: z.number().int().min(1).optional(),
-  linearApiKey: z.string().min(1).optional(),
-}).strict();
+const schema = z
+  .object({
+    globalLimit: z.number().int().min(1).optional(),
+    linearApiKey: z.string().min(1).optional(),
+  })
+  .strict();
 
 /** 1 以上の整数でなければ投げる。上限は無い。 */
 export function validateGlobalLimit(value: unknown): number {
@@ -38,10 +40,9 @@ export async function readDaemonConfig(
     }
     return {
       config: { globalLimit: DEFAULT_GLOBAL_LIMIT },
-      warning:
-        `設定ファイル (${path}) を読めないため全体の実行枠は既定値 ${DEFAULT_GLOBAL_LIMIT} で動きます: ${
-          (e as Error).message
-        }`,
+      warning: `設定ファイル (${path}) を読めないため全体の実行枠は既定値 ${DEFAULT_GLOBAL_LIMIT} で動きます: ${
+        (e as Error).message
+      }`,
     };
   }
 
@@ -51,10 +52,9 @@ export async function readDaemonConfig(
   } catch (e) {
     return {
       config: { globalLimit: DEFAULT_GLOBAL_LIMIT },
-      warning:
-        `設定ファイル (${path}) を読めないため全体の実行枠は既定値 ${DEFAULT_GLOBAL_LIMIT} で動きます: ${
-          (e as Error).message
-        }`,
+      warning: `設定ファイル (${path}) を読めないため全体の実行枠は既定値 ${DEFAULT_GLOBAL_LIMIT} で動きます: ${
+        (e as Error).message
+      }`,
     };
   }
 
@@ -62,10 +62,9 @@ export async function readDaemonConfig(
   if (!parsed.success) {
     return {
       config: { globalLimit: DEFAULT_GLOBAL_LIMIT },
-      warning:
-        `設定ファイル (${path}) を読めないため全体の実行枠は既定値 ${DEFAULT_GLOBAL_LIMIT} で動きます: ${
-          formatZodIssues(parsed.error).join("; ")
-        }`,
+      warning: `設定ファイル (${path}) を読めないため全体の実行枠は既定値 ${DEFAULT_GLOBAL_LIMIT} で動きます: ${formatZodIssues(
+        parsed.error,
+      ).join("; ")}`,
     };
   }
   return {

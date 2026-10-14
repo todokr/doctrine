@@ -98,11 +98,15 @@ test("setup → agent → command → approval → 承認 → 完了まで通る
   });
   const { ctx, events, handler } = await context();
   await handler("workspace.add", { path: repo }, NOOP_CONN);
-  const t = await handler("task.create", {
-    project: repo,
-    title: "マーカーを作る",
-    prompt: "作って",
-  }, NOOP_CONN) as { id: string };
+  const t = (await handler(
+    "task.create",
+    {
+      project: repo,
+      title: "マーカーを作る",
+      prompt: "作って",
+    },
+    NOOP_CONN,
+  )) as { id: string };
 
   await tick(ctx);
   await until(
@@ -126,14 +130,14 @@ test("setup → agent → command → approval → 承認 → 完了まで通る
   );
   assert.ok(stepRunEvent, "stepRun.started イベントが broadcast されている");
   assert.notEqual(stepRunEvent!.step_run_id, 0, "step_run_id がプレースホルダの0のままではない");
-  const logs = await handler(
+  const logs = (await handler(
     "task.logs",
     { task_id: t.id, step_run_id: stepRunEvent!.step_run_id },
     NOOP_CONN,
-  ) as { log_path: string };
+  )) as { log_path: string };
   assert.ok(logs.log_path, "イベントに載った step_run_id が実在する step_run に解決する");
-  const resolvedRun = (await listStepRuns(ctx.db, t.id)).find((r) =>
-    r.id === stepRunEvent!.step_run_id
+  const resolvedRun = (await listStepRuns(ctx.db, t.id)).find(
+    (r) => r.id === stepRunEvent!.step_run_id,
   );
   assert.ok(resolvedRun, "step_run_id が本当に step_runs テーブルの行を指している");
   assert.equal(
@@ -193,11 +197,11 @@ test("却下すると実装ステップへ戻り、コメントがエージェ�
   const adapter = createMockAdapter({ result: { ok: true, text: "やりました" } });
   const { ctx, handler } = await context(adapter);
   await handler("workspace.add", { path: repo }, NOOP_CONN);
-  const t = await handler(
+  const t = (await handler(
     "task.create",
     { project: repo, title: "T", prompt: "作って" },
     NOOP_CONN,
-  ) as { id: string };
+  )) as { id: string };
 
   await tick(ctx);
   await until(
@@ -231,16 +235,20 @@ test("プロジェクト枠1のとき、承認待ちのタスクが次のタス�
   });
   const { ctx, handler } = await context();
   await handler("workspace.add", { path: repo }, NOOP_CONN);
-  const a = await handler("task.create", { project: repo, title: "A", prompt: "p" }, NOOP_CONN) as {
+  const a = (await handler(
+    "task.create",
+    { project: repo, title: "A", prompt: "p" },
+    NOOP_CONN,
+  )) as {
     id: string;
   };
   // 受付順の FIFO は created_at（ミリ秒精度）で、同じミリ秒に作られると id（ランダムな UUID）で
   // 決まる。A が先に admit される前提を運に任せないよう、B の優先度を下げて順序を固定する。
-  const b = await handler(
+  const b = (await handler(
     "task.create",
     { project: repo, title: "B", prompt: "p", priority: 3 },
     NOOP_CONN,
-  ) as { id: string };
+  )) as { id: string };
 
   await tick(ctx);
   await until(
@@ -264,7 +272,11 @@ test("失敗したタスクの worktree は残る", async () => {
   });
   const { ctx, handler } = await context();
   await handler("workspace.add", { path: repo }, NOOP_CONN);
-  const t = await handler("task.create", { project: repo, title: "T", prompt: "p" }, NOOP_CONN) as {
+  const t = (await handler(
+    "task.create",
+    { project: repo, title: "T", prompt: "p" },
+    NOOP_CONN,
+  )) as {
     id: string;
   };
   await tick(ctx);
@@ -288,7 +300,11 @@ test("完了したタスクは worktree を消すがブランチは残す", asyn
   });
   const { ctx, handler } = await context();
   await handler("workspace.add", { path: repo }, NOOP_CONN);
-  const t = await handler("task.create", { project: repo, title: "T", prompt: "p" }, NOOP_CONN) as {
+  const t = (await handler(
+    "task.create",
+    { project: repo, title: "T", prompt: "p" },
+    NOOP_CONN,
+  )) as {
     id: string;
   };
   await tick(ctx);
@@ -320,7 +336,11 @@ async function runSolo(adapter: ReturnType<typeof createMockAdapter>) {
   });
   const { ctx, handler } = await context(adapter);
   await handler("workspace.add", { path: repo }, NOOP_CONN);
-  const t = await handler("task.create", { project: repo, title: "T", prompt: "p" }, NOOP_CONN) as {
+  const t = (await handler(
+    "task.create",
+    { project: repo, title: "T", prompt: "p" },
+    NOOP_CONN,
+  )) as {
     id: string;
   };
   await tick(ctx);
@@ -330,7 +350,7 @@ async function runSolo(adapter: ReturnType<typeof createMockAdapter>) {
     "agent ステップ1つのワークフローが completed に到達すること",
   );
   await until(() => ctx.running.size === 0);
-  const detail = await handler("task.get", { task_id: t.id }, NOOP_CONN) as TaskDetail;
+  const detail = (await handler("task.get", { task_id: t.id }, NOOP_CONN)) as TaskDetail;
   return detail.stepRuns;
 }
 
@@ -340,9 +360,11 @@ test("権限拒否を含む実行は task.get から中身が読める", async (
     tool_use_id: "tu_1",
     input: { command: "git push origin main" },
   };
-  const runs = await runSolo(createMockAdapter({
-    result: { ok: true, text: "やれませんでした", permissionDenials: [denial] },
-  }));
+  const runs = await runSolo(
+    createMockAdapter({
+      result: { ok: true, text: "やれませんでした", permissionDenials: [denial] },
+    }),
+  );
   const work = runs.find((r) => r.step_id === "work")!;
   assert.equal(work.status, "success", "拒否があっても成功は成功");
   assert.deepEqual(work.permission_denials, { total: 1, denials: [denial] });

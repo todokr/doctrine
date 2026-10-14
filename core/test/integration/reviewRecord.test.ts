@@ -57,8 +57,11 @@ async function fixture(): Promise<{ db: Db; repo: string; worktree: string; logR
     branch: "doctrine/t1",
     priority: 2,
   });
-  await db.updateTable("tasks").set({ state: "running", worktree_path: worktree })
-    .where("id", "=", "t1").execute();
+  await db
+    .updateTable("tasks")
+    .set({ state: "running", worktree_path: worktree })
+    .where("id", "=", "t1")
+    .execute();
   return { db, repo, worktree, logRoot: join(root, "logs") };
 }
 
@@ -79,7 +82,8 @@ test("2回差し戻した後、両方のコメントと時刻とそれぞれの�
   await runTask(db, "t1", WORKFLOW, deps(db, logRoot));
   await applyApproval(db, "t1", { approved: false, comment: "2回目: テストが無い" }, WORKFLOW);
 
-  const rows = await db.selectFrom("step_runs")
+  const rows = await db
+    .selectFrom("step_runs")
     .innerJoin("step_outputs", "step_outputs.step_run_id", "step_runs.id")
     .select([
       "step_runs.attempt",
@@ -93,8 +97,14 @@ test("2回差し戻した後、両方のコメントと時刻とそれぞれの�
     .execute();
 
   assert.equal(rows.length, 2);
-  assert.deepEqual(rows.map((r) => r.last_stdout), ["1回目: 命名が雑", "2回目: テストが無い"]);
-  assert.deepEqual(rows.map((r) => r.attempt), [1, 2]);
+  assert.deepEqual(
+    rows.map((r) => r.last_stdout),
+    ["1回目: 命名が雑", "2回目: テストが無い"],
+  );
+  assert.deepEqual(
+    rows.map((r) => r.attempt),
+    [1, 2],
+  );
   for (const r of rows) {
     assert.ok(r.ended_at !== null, "決まった時刻が残っていない");
     // 待ち時間 = ended_at - started_at。行ごとに引ける。

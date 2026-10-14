@@ -183,14 +183,16 @@ test("3 リポジトリの workspace で、1 つの Intake が各リポジトリ
         const pr = merged.get(g.raw[`h${i}`]);
         found[`b${i}`] = {
           nodes: pr
-            ? [{
-              number: pr.number,
-              url: pr.url,
-              state: "MERGED",
-              baseRefName: "main",
-              mergedAt: "2026-09-30T00:00:00Z",
-              mergeCommit: { oid: pr.oid },
-            }]
+            ? [
+                {
+                  number: pr.number,
+                  url: pr.url,
+                  state: "MERGED",
+                  baseRefName: "main",
+                  mergedAt: "2026-09-30T00:00:00Z",
+                  mergeCommit: { oid: pr.oid },
+                },
+              ]
             : [],
         };
       }
@@ -243,7 +245,10 @@ test("3 リポジトリの workspace で、1 つの Intake が各リポジトリ
       [kubernetes.path, "R_kubernetes"],
     ],
   );
-  assert.deepEqual(creates.map((c) => c.g.raw.parentIssueId), ["I_1", "I_1", "I_1"]);
+  assert.deepEqual(
+    creates.map((c) => c.g.raw.parentIssueId),
+    ["I_1", "I_1", "I_1"],
+  );
   assert.ok((await subOf("1")).sub_issue_url?.startsWith("https://github.com/o/terraform/issues/"));
   assert.ok((await subOf("2")).sub_issue_url?.startsWith("https://github.com/o/tp/issues/"));
   assert.ok(
@@ -281,9 +286,15 @@ test("3 リポジトリの workspace で、1 つの Intake が各リポジトリ
   const done = (await getIntake(db, "i1"))!;
   assert.equal(done.state, "completed");
   assert.notEqual(done.ended_at, null);
-  assert.deepEqual(transitions.map((t) => [t.from, t.to]), [["active", "completed"]]);
+  assert.deepEqual(
+    transitions.map((t) => [t.from, t.to]),
+    [["active", "completed"]],
+  );
   const all = await listTasks(db);
   assert.deepEqual(all.map((t) => t.intake_process_id).toSorted(), ["1", "2", "3"]);
   assert.equal(createCalls().length, 3);
-  assert.equal(gh.calls.some((c) => /closeIssue/.test(parseGraphqlArgs(c.args).query)), false);
+  assert.equal(
+    gh.calls.some((c) => /closeIssue/.test(parseGraphqlArgs(c.args).query)),
+    false,
+  );
 });

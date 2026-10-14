@@ -39,8 +39,14 @@ function yamlBlocks(text: string): string[] {
 test("同梱ワークフローは parseWorkflow を通り、draft → validate → review → apply の順", () => {
   const { workflow } = parseWorkflow(setupWorkflowYaml());
   assert.equal(workflow.name, SETUP_WORKFLOW_NAME);
-  assert.deepEqual(workflow.steps.map((s) => s.id), ["draft", "validate", "review", "apply"]);
-  assert.deepEqual(workflow.steps.map((s) => s.type), ["agent", "command", "approval", "command"]);
+  assert.deepEqual(
+    workflow.steps.map((s) => s.id),
+    ["draft", "validate", "review", "apply"],
+  );
+  assert.deepEqual(
+    workflow.steps.map((s) => s.type),
+    ["agent", "command", "approval", "command"],
+  );
 });
 
 test("draft の allowedTools は読み取り系だけ", () => {
@@ -83,14 +89,17 @@ test("setupPrompt の雛形は baseBranch で作る", () => {
 });
 
 test("setupPrompt は方針を文章にする", () => {
-  const off = setupPrompt({
-    ...FULL,
-    plan: false,
-    agentReview: false,
-    guide: false,
-    pr: "branch_only",
-    sync: false,
-  }, "main");
+  const off = setupPrompt(
+    {
+      ...FULL,
+      plan: false,
+      agentReview: false,
+      guide: false,
+      pr: "branch_only",
+      sync: false,
+    },
+    "main",
+  );
   assert.ok(off.includes("計画を入れない"));
   assert.ok(off.includes("PR を開かない"));
   for (const m of Object.values(FULL.models)) assert.ok(off.includes(m), m);

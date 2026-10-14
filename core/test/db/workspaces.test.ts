@@ -42,15 +42,24 @@ test("listWorkspaces は id 順", async () => {
   const d = await openDb(":memory:");
   await insertWorkspace(d, { path: "/b", name: "b" });
   await insertWorkspace(d, { path: "/a", name: "a" });
-  assert.deepEqual((await listWorkspaces(d)).map((w) => w.path), ["/b", "/a"]);
+  assert.deepEqual(
+    (await listWorkspaces(d)).map((w) => w.path),
+    ["/b", "/a"],
+  );
 });
 
 test("listProjectsOf は他の workspace のプロジェクトを返さない", async () => {
   const d = await openDb(":memory:");
   const a = await seedProject(d, { path: "/a" });
   const b = await seedProject(d, { path: "/b" });
-  assert.deepEqual((await listProjectsOf(d, a.workspace_id)).map((p) => p.path), ["/a"]);
-  assert.deepEqual((await listProjectsOf(d, b.workspace_id)).map((p) => p.path), ["/b"]);
+  assert.deepEqual(
+    (await listProjectsOf(d, a.workspace_id)).map((p) => p.path),
+    ["/a"],
+  );
+  assert.deepEqual(
+    (await listProjectsOf(d, b.workspace_id)).map((p) => p.path),
+    ["/b"],
+  );
 });
 
 test("同じ workspace に同じ名前のプロジェクトは入らず、存在しない workspace も指せない", async () => {

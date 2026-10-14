@@ -13,7 +13,10 @@ function q1Materials(): Obj[] {
       kind: "table",
       caption: "案の比較",
       columns: ["案", "利点", "欠点"],
-      rows: [["a", "単純", "遅い"], ["b", "速い", "複雑"]],
+      rows: [
+        ["a", "単純", "遅い"],
+        ["b", "速い", "複雑"],
+      ],
     },
     {
       kind: "code",
@@ -63,20 +66,25 @@ function question2(over: Obj = {}): Obj {
       { id: "b", label: "B", description: "説明 B" },
       { id: "c", label: "C", description: "説明 C" },
     ],
-    materials: [{
-      kind: "diagram",
-      caption: "状態",
-      diagram: {
-        id: "g2",
-        title: "状態遷移",
-        body: {
-          shape: "graph",
-          kind: "state",
-          nodes: [{ id: "n1", label: "開始" }, { id: "n2", label: "終了" }],
-          edges: [{ from: "n1", to: "n2", label: "完了" }],
+    materials: [
+      {
+        kind: "diagram",
+        caption: "状態",
+        diagram: {
+          id: "g2",
+          title: "状態遷移",
+          body: {
+            shape: "graph",
+            kind: "state",
+            nodes: [
+              { id: "n1", label: "開始" },
+              { id: "n2", label: "終了" },
+            ],
+            edges: [{ from: "n1", to: "n2", label: "完了" }],
+          },
         },
       },
-    }],
+    ],
     ...over,
   };
 }
@@ -312,7 +320,10 @@ test("表の行の列数が columns と違えば落ちる", () => {
     kind: "table",
     caption: "案の比較",
     columns: ["案", "利点", "欠点"],
-    rows: [["a", "単純", "遅い"], ["b", "速い"]],
+    rows: [
+      ["a", "単純", "遅い"],
+      ["b", "速い"],
+    ],
   };
   const issues = questionIssuesOf([question1({ materials })]);
   assert.ok(issues.some((s) => s.startsWith(`questions.0.materials.${tableIndex}.rows.1`)));

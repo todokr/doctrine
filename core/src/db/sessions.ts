@@ -9,8 +9,11 @@ export async function getSessionId(
   taskId: string,
   role: string,
 ): Promise<string | undefined> {
-  const row = await db.selectFrom("task_sessions").select("session_id")
-    .where("task_id", "=", taskId).where("role", "=", role)
+  const row = await db
+    .selectFrom("task_sessions")
+    .select("session_id")
+    .where("task_id", "=", taskId)
+    .where("role", "=", role)
     .executeTakeFirst();
   return row?.session_id;
 }

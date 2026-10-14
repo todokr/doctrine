@@ -126,11 +126,11 @@ async function taskFixture(workflowYaml: string) {
     branch: "doctrine/t1-t",
     priority: 2,
   });
-  await db.updateTable("tasks").set({ state: "running", worktree_path: root }).where(
-    "id",
-    "=",
-    "t1",
-  ).execute();
+  await db
+    .updateTable("tasks")
+    .set({ state: "running", worktree_path: root })
+    .where("id", "=", "t1")
+    .execute();
   return { db, root, workflow: parseWorkflow(workflowYaml).workflow };
 }
 
@@ -162,10 +162,13 @@ steps:
     globalLimit: 4,
   });
   assert.equal((await getTask(db, "t1"))?.state, "completed");
-  assert.deepEqual((await listStepRuns(db, "t1")).map((r) => [r.step_id, r.status]), [[
-    "a",
-    "success",
-  ], ["b", "success"]]);
+  assert.deepEqual(
+    (await listStepRuns(db, "t1")).map((r) => [r.step_id, r.status]),
+    [
+      ["a", "success"],
+      ["b", "success"],
+    ],
+  );
 });
 
 const ISSUE_ECHO = `
@@ -179,10 +182,14 @@ steps:
 test("command ステップの issue 系統はタスクの issue_url・parent_issue_url から展開される", async () => {
   const { db, root, workflow } = await taskFixture(ISSUE_ECHO);
   // intake_id は入れない（CHECK は issue_url / parent_issue_url に掛からない）。
-  await db.updateTable("tasks").set({
-    issue_url: "https://github.com/o/r/issues/2",
-    parent_issue_url: "https://github.com/o/r/issues/1",
-  }).where("id", "=", "t1").execute();
+  await db
+    .updateTable("tasks")
+    .set({
+      issue_url: "https://github.com/o/r/issues/2",
+      parent_issue_url: "https://github.com/o/r/issues/1",
+    })
+    .where("id", "=", "t1")
+    .execute();
   await runTask(db, "t1", workflow, {
     db,
     adapter: createMockAdapter({ result: {} }),
@@ -345,12 +352,15 @@ steps:
   });
 
   const tests = (await listStepRuns(db, "t1")).filter((r) => r.step_id === "test");
-  assert.deepEqual(tests.map((r) => [r.attempt, r.status, r.goto_step_id]), [
-    [1, "bounced", "implement"],
-    [2, "bounced", "implement"],
-    // 3回目は分岐先が無い（maxAttempts を使い切った）ので本当の失敗。
-    [3, "failed", null],
-  ]);
+  assert.deepEqual(
+    tests.map((r) => [r.attempt, r.status, r.goto_step_id]),
+    [
+      [1, "bounced", "implement"],
+      [2, "bounced", "implement"],
+      // 3回目は分岐先が無い（maxAttempts を使い切った）ので本当の失敗。
+      [3, "failed", null],
+    ],
+  );
   assert.equal((await getTask(db, "t1"))?.state, "failed");
 });
 
@@ -369,7 +379,10 @@ steps:
     globalLimit: 4,
   });
   const runs = await listStepRuns(db, "t1");
-  assert.deepEqual(runs.map((r) => [r.status, r.goto_step_id]), [["failed", null]]);
+  assert.deepEqual(
+    runs.map((r) => [r.status, r.goto_step_id]),
+    [["failed", null]],
+  );
   assert.equal((await getTask(db, "t1"))?.state, "failed");
 });
 
@@ -401,10 +414,13 @@ steps:
   await applyApproval(db, "t1", { approved: false, comment: "2回目" }, workflow);
 
   const reviews = (await listStepRuns(db, "t1")).filter((r) => r.step_id === "review");
-  assert.deepEqual(reviews.map((r) => [r.status, r.goto_step_id]), [
-    ["bounced", "implement"],
-    ["failed", null],
-  ]);
+  assert.deepEqual(
+    reviews.map((r) => [r.status, r.goto_step_id]),
+    [
+      ["bounced", "implement"],
+      ["failed", null],
+    ],
+  );
   assert.equal((await getTask(db, "t1"))?.state, "failed");
 });
 
@@ -643,11 +659,10 @@ test("上限に当たった agent ステップは失敗ではなく rate_limited
   assert.equal(task.child_pid, null);
 
   const runs = await listStepRuns(db, "t1");
-  assert.deepEqual(runs.map((r) => [r.step_id, r.status, r.attempt]), [[
-    "implement",
-    "rate_limited",
-    1,
-  ]]);
+  assert.deepEqual(
+    runs.map((r) => [r.step_id, r.status, r.attempt]),
+    [["implement", "rate_limited", 1]],
+  );
   assert.equal(task.attempt_counts, JSON.stringify({ implement: 1 }));
   assert.deepEqual(events.onStateChanged, ["running -> rate_limited"]);
   assert.deepEqual(events.onStepRunFinished, ["implement:rate_limited"]);
@@ -710,10 +725,14 @@ steps:
   assert.equal(adapter.calls[2].sessionId, adapter.calls[1].sessionId);
 
   const implement = (await listStepRuns(db, "t1")).filter((r) => r.step_id === "implement");
-  assert.deepEqual(implement.map((r) => [r.status, r.attempt]), [["rate_limited", 1], [
-    "success",
-    1,
-  ]], "上限はワークフロー上の試行ではないので attempt は進まない");
+  assert.deepEqual(
+    implement.map((r) => [r.status, r.attempt]),
+    [
+      ["rate_limited", 1],
+      ["success", 1],
+    ],
+    "上限はワークフロー上の試行ではないので attempt は進まない",
+  );
   assert.equal(
     implement[0].log_path,
     implement[1].log_path,
@@ -834,26 +853,35 @@ test("resetsAt が6時間より先なら、onFailure があっても待たずに
     "閉じていると分かっている枠に対して、onFailure で何度も起動し直さない",
   );
   assert.equal(task.attempt_counts, JSON.stringify({ implement: 1 }));
-  assert.deepEqual((await listStepRuns(db, "t1")).map((r) => r.status), ["failed"]);
+  assert.deepEqual(
+    (await listStepRuns(db, "t1")).map((r) => r.status),
+    ["failed"],
+  );
 });
 
 test("同じステップで連続して上限に当たり続けたら failed にする", async () => {
   const { db, root, workflow } = await taskFixture(AGENT_WITH_RETRY);
   // 既に5回連続で上限に当たっている記録を作る（1回ずつ回すと上限の意味が変わらない）。
-  await db.updateTable("tasks").set({ attempt_counts: JSON.stringify({ implement: 1 }) })
-    .where("id", "=", "t1").execute();
+  await db
+    .updateTable("tasks")
+    .set({ attempt_counts: JSON.stringify({ implement: 1 }) })
+    .where("id", "=", "t1")
+    .execute();
   for (let i = 0; i < 5; i++) {
-    await db.insertInto("step_runs").values({
-      task_id: "t1",
-      step_id: "implement",
-      attempt: 1,
-      status: "rate_limited",
-      exit_code: 1,
-      started_at: new Date().toISOString(),
-      ended_at: new Date().toISOString(),
-      log_path: "",
-      review_tree: null,
-    }).execute();
+    await db
+      .insertInto("step_runs")
+      .values({
+        task_id: "t1",
+        step_id: "implement",
+        attempt: 1,
+        status: "rate_limited",
+        exit_code: 1,
+        started_at: new Date().toISOString(),
+        ended_at: new Date().toISOString(),
+        log_path: "",
+        review_tree: null,
+      })
+      .execute();
   }
   const adapter = createMockAdapter({
     eventsSequence: [[saturated()]],
@@ -886,12 +914,15 @@ steps:
       feed: "もう一度"
 `);
   // 飽和したサンプルはあるが、この実行が始まる前のもの（別タスクが残した行）。
-  await db.insertInto("rate_limit_samples").values({
-    observed_at: new Date(Date.now() - 60_000).toISOString(),
-    window: "five_hour",
-    utilization: 1,
-    resets_at: new Date(Date.now() + 60 * 60_000).toISOString(),
-  }).execute();
+  await db
+    .insertInto("rate_limit_samples")
+    .values({
+      observed_at: new Date(Date.now() - 60_000).toISOString(),
+      window: "five_hour",
+      utilization: 1,
+      resets_at: new Date(Date.now() + 60 * 60_000).toISOString(),
+    })
+    .execute();
   const adapter = createMockAdapter({ result: {}, sequence: [HIT, HIT] });
 
   await runTask(db, "t1", workflow, { db, adapter, logRoot: join(root, "logs"), globalLimit: 4 });
@@ -914,12 +945,14 @@ test("上限のイベントが取れなくても、実行開始以降のサン�
   const origStart = adapter.start;
   adapter.start = (prompt, opts) => {
     const run = origStart(prompt, opts);
-    db.insertInto("rate_limit_samples").values({
-      observed_at: run.startedAt,
-      window: "five_hour",
-      utilization: 1,
-      resets_at: resetsAt,
-    }).execute();
+    db.insertInto("rate_limit_samples")
+      .values({
+        observed_at: run.startedAt,
+        window: "five_hour",
+        utilization: 1,
+        resets_at: resetsAt,
+      })
+      .execute();
     return run;
   };
 
@@ -938,12 +971,15 @@ steps:
     type: command
     run: "false"
 `);
-  await db.insertInto("rate_limit_samples").values({
-    observed_at: new Date(Date.now() + 60_000).toISOString(),
-    window: "five_hour",
-    utilization: 1,
-    resets_at: new Date(Date.now() + 60 * 60_000).toISOString(),
-  }).execute();
+  await db
+    .insertInto("rate_limit_samples")
+    .values({
+      observed_at: new Date(Date.now() + 60_000).toISOString(),
+      window: "five_hour",
+      utilization: 1,
+      resets_at: new Date(Date.now() + 60 * 60_000).toISOString(),
+    })
+    .execute();
 
   await runTask(db, "t1", workflow, {
     db,
@@ -1287,10 +1323,13 @@ steps:
       finished.push({ stepId, status, goto: gotoStepId, attempt });
     },
   });
-  assert.deepEqual(finished.filter((f) => f.stepId === "test"), [
-    { stepId: "test", status: "bounced", goto: "implement", attempt: 1 },
-    { stepId: "test", status: "failed", goto: null, attempt: 2 },
-  ]);
+  assert.deepEqual(
+    finished.filter((f) => f.stepId === "test"),
+    [
+      { stepId: "test", status: "bounced", goto: "implement", attempt: 1 },
+      { stepId: "test", status: "failed", goto: null, attempt: 2 },
+    ],
+  );
 });
 
 test("onReject が無い却下は failed", async () => {
@@ -1358,11 +1397,11 @@ test("状態を読んだ直後に cancel が届いても、runTask はステッ�
     branch: "b",
     priority: 2,
   });
-  await db.updateTable("tasks").set({ state: "running", worktree_path: root }).where(
-    "id",
-    "=",
-    "t1",
-  ).execute();
+  await db
+    .updateTable("tasks")
+    .set({ state: "running", worktree_path: root })
+    .where("id", "=", "t1")
+    .execute();
   const workflow = parseWorkflow(`
 name: f
 steps:
@@ -1419,11 +1458,11 @@ test("captureTree が走っている間に cancel が届いても、awaiting の
     branch: "b",
     priority: 2,
   });
-  await db.updateTable("tasks").set({ state: "running", worktree_path: repo }).where(
-    "id",
-    "=",
-    "t1",
-  ).execute();
+  await db
+    .updateTable("tasks")
+    .set({ state: "running", worktree_path: repo })
+    .where("id", "=", "t1")
+    .execute();
   const workflow = parseWorkflow(`
 name: f
 steps:
@@ -1547,10 +1586,19 @@ steps:
 
   const reviews = (await listStepRuns(db, "t1")).filter((r) => r.step_id === "review");
   assert.equal(reviews.length, 2);
-  assert.deepEqual(reviews.map((r) => r.attempt), [1, 2]);
+  assert.deepEqual(
+    reviews.map((r) => r.attempt),
+    [1, 2],
+  );
   // どちらも差し戻し（maxAttempts 5 をまだ使い切っていない）。
-  assert.deepEqual(reviews.map((r) => r.status), ["bounced", "bounced"]);
-  assert.deepEqual(reviews.map((r) => r.goto_step_id), ["implement", "implement"]);
+  assert.deepEqual(
+    reviews.map((r) => r.status),
+    ["bounced", "bounced"],
+  );
+  assert.deepEqual(
+    reviews.map((r) => r.goto_step_id),
+    ["implement", "implement"],
+  );
   // それぞれの待ち時間が引ける（started_at と ended_at が両方ある）。
   for (const r of reviews) {
     assert.ok(r.ended_at !== null);
@@ -1559,8 +1607,7 @@ steps:
   // 1回目の待ちは2回目より先に始まっている。
   assert.ok(Date.parse(reviews[0].started_at) <= Date.parse(reviews[1].started_at));
 
-  const outputs = await db.selectFrom("step_outputs").selectAll()
-    .orderBy("step_run_id").execute();
+  const outputs = await db.selectFrom("step_outputs").selectAll().orderBy("step_run_id").execute();
   assert.deepEqual(
     outputs.filter((o) => reviews.some((r) => r.id === o.step_run_id)).map((o) => o.last_stdout),
     ["1回目の指摘", "2回目の指摘"],
@@ -1705,7 +1752,10 @@ test("実行中に canceled になっても interrupted で閉じ、タスクは
   await stopMidFlight(db, done, "canceled");
 
   const runs = await listStepRuns(db, "t1");
-  assert.deepEqual(runs.map((r) => r.status), ["interrupted"]);
+  assert.deepEqual(
+    runs.map((r) => r.status),
+    ["interrupted"],
+  );
   assert.equal((await getTask(db, "t1"))!.state, "canceled");
 });
 
@@ -1722,7 +1772,10 @@ test("止めた直後に成功で返った実行も interrupted で閉じ、次�
   await stopMidFlight(db, done, "paused");
 
   const runs = await listStepRuns(db, "t1");
-  assert.deepEqual(runs.map((r) => r.status), ["interrupted"]);
+  assert.deepEqual(
+    runs.map((r) => r.status),
+    ["interrupted"],
+  );
   const task = (await getTask(db, "t1"))!;
   assert.equal(task.state, "paused");
   assert.equal(task.current_step_id, "implement");
@@ -1748,7 +1801,10 @@ test("上限待ちに入るはずだった実行を止めても、行を running
   await stopMidFlight(db, done, "paused");
 
   const runs = await listStepRuns(db, "t1");
-  assert.deepEqual(runs.map((r) => r.status), ["interrupted"]);
+  assert.deepEqual(
+    runs.map((r) => r.status),
+    ["interrupted"],
+  );
   const task = (await getTask(db, "t1"))!;
   assert.equal(task.state, "paused");
   assert.equal(task.rate_limited_until, null);
@@ -1801,7 +1857,11 @@ test("poll が 75 なら waiting で待ち、期限で戻ると同じ行を使�
   const t = (await getTask(db, "t1"))!;
   assert.equal(t.state, "completed");
   const runs = (await listStepRuns(db, "t1")).filter((r) => r.step_id === "wait");
-  assert.deepEqual(runs.map((r) => [r.status, r.attempt]), [["success", 1]], "待ちの1周は1行");
+  assert.deepEqual(
+    runs.map((r) => [r.status, r.attempt]),
+    [["success", 1]],
+    "待ちの1周は1行",
+  );
   assert.equal(JSON.parse(t.attempt_counts).wait, 1);
 });
 
@@ -1815,7 +1875,10 @@ test("poll が 2 なら分岐せずに canceled になり、行は interrupted �
     globalLimit: 4,
   });
   assert.equal((await getTask(db, "t1"))?.state, "canceled");
-  assert.deepEqual((await listStepRuns(db, "t1")).map((r) => r.status), ["interrupted"]);
+  assert.deepEqual(
+    (await listStepRuns(db, "t1")).map((r) => r.status),
+    ["interrupted"],
+  );
 });
 
 test("poll がそれ以外で落ちたら onFailure へ差し戻す", async () => {
@@ -1842,7 +1905,11 @@ steps:
   assert.equal((await getTask(db, "t1"))?.state, "completed");
   assert.deepEqual(
     (await listStepRuns(db, "t1")).map((r) => [r.step_id, r.status]),
-    [["wait", "bounced"], ["fix", "success"], ["wait", "success"]],
+    [
+      ["wait", "bounced"],
+      ["fix", "success"],
+      ["wait", "success"],
+    ],
   );
 });
 
@@ -1868,7 +1935,10 @@ steps:
   await stopMidFlight(db, done, "paused");
 
   const runs = await listStepRuns(db, "t1");
-  assert.deepEqual(runs.map((r) => r.status), ["interrupted"]);
+  assert.deepEqual(
+    runs.map((r) => r.status),
+    ["interrupted"],
+  );
   const task = (await getTask(db, "t1"))!;
   assert.equal(task.state, "paused");
   assert.equal(task.waiting_until, null, "waiting へは書き換わっていない");
@@ -1898,7 +1968,10 @@ steps:
   await stopMidFlight(db, done, "paused");
 
   const runs = await listStepRuns(db, "t1");
-  assert.deepEqual(runs.map((r) => r.status), ["interrupted"]);
+  assert.deepEqual(
+    runs.map((r) => r.status),
+    ["interrupted"],
+  );
   const task = (await getTask(db, "t1"))!;
   assert.equal(task.state, "paused", "canceled には上書きされない");
   assert.deepEqual(events.onStepRunFinished, ["wait:interrupted"]);
@@ -1933,10 +2006,13 @@ test("上限に達すると、そのステップの awaiting の行を立てて 
   assert.equal(t.current_step_id, "check");
   assert.deepEqual(
     (await listStepRuns(db, "t1")).map((r) => [r.step_id, r.status]),
-    [["fix", "success"], ["check", "bounced"], ["fix", "success"], ["check", "failed"], [
-      "check",
-      "awaiting",
-    ]],
+    [
+      ["fix", "success"],
+      ["check", "bounced"],
+      ["fix", "success"],
+      ["check", "failed"],
+      ["check", "awaiting"],
+    ],
   );
 });
 

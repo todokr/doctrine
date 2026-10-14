@@ -44,26 +44,24 @@ export async function processProgressOf(
   for (const p of await listProcesses(db, intakeId)) {
     if (p.retired_at !== null) continue;
     const task = p.current_task_id === null ? undefined : await getTask(db, p.current_task_id);
-    const obs = p.current_task_id === null
-      ? undefined
-      : await getPrObservation(db, p.current_task_id);
+    const obs =
+      p.current_task_id === null ? undefined : await getPrObservation(db, p.current_task_id);
     const pr: PrFact | null = obs
       ? {
-        number: obs.pr_number,
-        url: obs.pr_url,
-        state: obs.state,
-        baseRef: obs.base_ref,
-        mergedAt: obs.merged_at,
-        mergeCommit: obs.merge_commit,
-      }
+          number: obs.pr_number,
+          url: obs.pr_url,
+          state: obs.state,
+          baseRef: obs.base_ref,
+          mergedAt: obs.merged_at,
+          mergeCommit: obs.merge_commit,
+        }
       : null;
     progress.set(p.process_id, {
       task: task ? { id: task.id, state: task.state } : null,
       pr,
       subIssueUrl: p.sub_issue_url,
-      humanDone: p.human_done_at === null
-        ? null
-        : { note: p.human_note ?? "", at: p.human_done_at },
+      humanDone:
+        p.human_done_at === null ? null : { note: p.human_note ?? "", at: p.human_done_at },
     });
   }
   return progress;
@@ -103,9 +101,8 @@ function summaryOf(
     issue_title: row.issue_title,
     state: row.state,
     revising: row.revising === 1,
-    attention_reason: row.attention_reason === null
-      ? null
-      : JSON.parse(row.attention_reason) as AttentionReason,
+    attention_reason:
+      row.attention_reason === null ? null : (JSON.parse(row.attention_reason) as AttentionReason),
     dispatch_paused: row.dispatch_paused === 1,
     rate_limited_until: row.rate_limited_until,
     progress: {
@@ -155,8 +152,13 @@ export async function toIntakeDetail(
   const approval = await latestApproval(db, row.id);
 
   const taskIds = new Map<string, string[]>();
-  const tasks = await db.selectFrom("tasks").select(["id", "intake_process_id"])
-    .where("intake_id", "=", row.id).orderBy("created_at").orderBy("id").execute();
+  const tasks = await db
+    .selectFrom("tasks")
+    .select(["id", "intake_process_id"])
+    .where("intake_id", "=", row.id)
+    .orderBy("created_at")
+    .orderBy("id")
+    .execute();
   for (const t of tasks) {
     if (t.intake_process_id === null) continue;
     taskIds.set(t.intake_process_id, [...(taskIds.get(t.intake_process_id) ?? []), t.id]);
@@ -172,11 +174,11 @@ export async function toIntakeDetail(
     latest_draft: latest ? toPfdDraft(latest) : null,
     approval: approval
       ? {
-        id: approval.id,
-        draft_id: approval.draft_id,
-        hash: approval.hash,
-        approved_at: approval.approved_at,
-      }
+          id: approval.id,
+          draft_id: approval.draft_id,
+          hash: approval.hash,
+          approved_at: approval.approved_at,
+        }
       : null,
     question_sets: await loadQuestionSets(db, row.id),
     comments: (await listComments(db, row.id)).map((c) => ({
@@ -187,12 +189,14 @@ export async function toIntakeDetail(
       body: c.body,
       created_at: c.created_at,
     })),
-    processes: facts.map((f): IntakeProcessView => ({
-      id: f.id,
-      ...f.status,
-      sub_issue_url: f.subIssueUrl,
-      task_ids: taskIds.get(f.id) ?? [],
-    })),
+    processes: facts.map(
+      (f): IntakeProcessView => ({
+        id: f.id,
+        ...f.status,
+        sub_issue_url: f.subIssueUrl,
+        task_ids: taskIds.get(f.id) ?? [],
+      }),
+    ),
     runs: (await listIntakeRuns(db, row.id)).map((r) => ({
       id: r.id,
       purpose: r.purpose,
@@ -203,10 +207,9 @@ export async function toIntakeDetail(
       cost_usd: r.cost_usd,
       num_turns: r.num_turns,
       duration_ms: r.duration_ms,
-      issues: r.issues === null ? null : JSON.parse(r.issues) as string[],
-      permission_denials: r.permission_denials === null
-        ? null
-        : JSON.parse(r.permission_denials) as StepRunDenials,
+      issues: r.issues === null ? null : (JSON.parse(r.issues) as string[]),
+      permission_denials:
+        r.permission_denials === null ? null : (JSON.parse(r.permission_denials) as StepRunDenials),
     })),
   };
 }

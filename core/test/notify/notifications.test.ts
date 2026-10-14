@@ -47,12 +47,10 @@ async function seed(db: Db) {
   });
 }
 
-async function setup(o: {
-  notifier?: MockNotifier;
-  workflowOf?: () => Promise<Workflow>;
-  db?: Db;
-} = {}) {
-  const db = o.db ?? await openDb(":memory:");
+async function setup(
+  o: { notifier?: MockNotifier; workflowOf?: () => Promise<Workflow>; db?: Db } = {},
+) {
+  const db = o.db ?? (await openDb(":memory:"));
   await seed(db);
   const mock = o.notifier ?? createMockNotifier();
   const events: ServerEvent[] = [];
@@ -155,12 +153,15 @@ test("Intake の回答待ち・レビュー待ち・要確認・完了をそれ�
   for (const to of ["answering", "reviewing", "needs_attention", "completed"]) {
     await s.notifier.handle(intakeEv("i1", to));
   }
-  assert.deepEqual(s.mock.calls.map((c) => c.body), [
-    "[myproj] #54 通知を出す — 回答待ち",
-    "[myproj] #54 通知を出す — レビュー待ち",
-    "[myproj] #54 通知を出す — 要確認",
-    "[myproj] #54 通知を出す — 完了",
-  ]);
+  assert.deepEqual(
+    s.mock.calls.map((c) => c.body),
+    [
+      "[myproj] #54 通知を出す — 回答待ち",
+      "[myproj] #54 通知を出す — レビュー待ち",
+      "[myproj] #54 通知を出す — 要確認",
+      "[myproj] #54 通知を出す — 完了",
+    ],
+  );
 });
 
 test("改訂中の Intake の遷移も同じ文面で送る", async () => {

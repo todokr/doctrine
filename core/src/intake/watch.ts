@@ -25,7 +25,7 @@ import type { WorkflowLoader } from "../workflow/load.ts";
 
 export const WATCH_INTERVAL_MS = 120_000;
 
-const describe = (e: unknown): string => e instanceof Error ? e.message : String(e);
+const describe = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
 /**
  * 1 ブランチの PR から 1 つを選ぶ。
@@ -33,9 +33,12 @@ const describe = (e: unknown): string => e instanceof Error ? e.message : String
  */
 export function choosePr(facts: readonly PrFact[], baseBranch: string): PrFact | null {
   const byNumber = [...facts].sort((a, b) => b.number - a.number);
-  return byNumber.find((f) => f.state === "MERGED" && f.baseRef === baseBranch) ??
+  return (
+    byNumber.find((f) => f.state === "MERGED" && f.baseRef === baseBranch) ??
     byNumber.find((f) => f.state === "OPEN") ??
-    byNumber[0] ?? null;
+    byNumber[0] ??
+    null
+  );
 }
 
 export type ObserveReport = { changedIntakeIds: Set<string> };
@@ -65,7 +68,8 @@ async function projectsAwaitingMerges(
   projects: ReadonlyMap<number, ProjectRow>,
   intakeId: string,
 ): Promise<Set<number>> {
-  const merged = await db.selectFrom("intake_processes as p")
+  const merged = await db
+    .selectFrom("intake_processes as p")
     .innerJoin("tasks as t", "t.id", "p.current_task_id")
     .innerJoin("pr_observations as o", "o.task_id", "t.id")
     .select([
@@ -82,7 +86,7 @@ async function projectsAwaitingMerges(
   for (const m of merged) {
     const project = projects.get(m.project_id);
     if (!project || m.base_ref !== project.base_branch || awaiting.has(project.id)) continue;
-    if (!await baseSync.contains(project.path, project.base_branch, m.merge_commit!)) {
+    if (!(await baseSync.contains(project.path, project.base_branch, m.merge_commit!))) {
       awaiting.add(project.id);
     }
   }
@@ -114,7 +118,8 @@ export async function observePullRequests(
 ): Promise<ObserveReport> {
   const report: ObserveReport = { changedIntakeIds: new Set() };
   // 観測が無い行は o.state が null になるので、「マージ済みでない」は null も含めて数える
-  const targets = await db.selectFrom("intake_processes as p")
+  const targets = await db
+    .selectFrom("intake_processes as p")
     .innerJoin("intakes as i", "i.id", "p.intake_id")
     .innerJoin("tasks as t", "t.id", "p.current_task_id")
     .leftJoin("pr_observations as o", "o.task_id", "t.id")
@@ -123,7 +128,7 @@ export async function observePullRequests(
       eb.or([
         eb("i.state", "=", "active"),
         eb.and([eb("i.revising", "=", 1), eb("i.state", "not in", ["completed", "canceled"])]),
-      ])
+      ]),
     )
     .where("i.workspace_id", "=", project.workspace_id)
     .where("t.project_id", "=", project.id)
@@ -133,22 +138,30 @@ export async function observePullRequests(
         eb("o.state", "is", null),
         eb("o.state", "!=", "MERGED"),
         eb("o.base_ref", "!=", project.base_branch),
-      ])
+      ]),
     )
-    .orderBy("t.created_at").orderBy("t.id")
+    .orderBy("t.created_at")
+    .orderBy("t.id")
     .execute();
   if (targets.length === 0) return report;
 
-  const found = await prWatcher.pullRequests(project.path, targets.map((t) => t.branch));
+  const found = await prWatcher.pullRequests(
+    project.path,
+    targets.map((t) => t.branch),
+  );
   for (const t of targets) {
     const chosen = choosePr(found.get(t.branch) ?? [], project.base_branch);
     if (chosen === null) continue;
     const before = await getPrObservation(db, t.task_id);
     if (
-      before && before.pr_number === chosen.number && before.state === chosen.state &&
-      before.base_ref === chosen.baseRef && before.merged_at === chosen.mergedAt &&
+      before &&
+      before.pr_number === chosen.number &&
+      before.state === chosen.state &&
+      before.base_ref === chosen.baseRef &&
+      before.merged_at === chosen.mergedAt &&
       before.merge_commit === chosen.mergeCommit
-    ) continue;
+    )
+      continue;
     await upsertPrObservation(db, {
       task_id: t.task_id,
       pr_number: chosen.number,
@@ -212,8 +225,9 @@ export async function watchWorkspace(
   try {
     // 改訂中の Intake は PR の観測だけ続ける。計画が変わりうるので、sub-issue の同期・投入・完了の判定は
     // active のものだけが行う（投入は dispatchIntake の revising の検査でも止まる）
-    const watched = (await listIntakes(db, { workspaceId }))
-      .filter((i) => i.state === "active" || i.revising === 1);
+    const watched = (await listIntakes(db, { workspaceId })).filter(
+      (i) => i.state === "active" || i.revising === 1,
+    );
     if (watched.length === 0) return report;
     const projects = await listProjectsOf(db, workspaceId);
     const byId = new Map(projects.map((p) => [p.id, p]));
@@ -267,9 +281,11 @@ export async function watchWorkspace(
           );
         }
         if (
-          [synced.created, synced.adopted, synced.updated, synced.closed, synced.completed]
-            .some((l) => l.length > 0)
-        ) report.updated.add(intake.id);
+          [synced.created, synced.adopted, synced.updated, synced.closed, synced.completed].some(
+            (l) => l.length > 0,
+          )
+        )
+          report.updated.add(intake.id);
       } catch (e) {
         report.errors.push(`${intake.issue_url} の sub-issue の同期: ${describe(e)}`);
       }
@@ -437,16 +453,18 @@ export function createIntakeWatcher(deps: {
   // lastSucceededAt だけの変化では配らない（成功の周のたびに全 Intake へ飛ぶため）
   function record(workspaceId: number, errors: string[]): boolean {
     const before = healthOf(workspaceId);
-    const next: WatchHealth = errors.length === 0
-      ? { lastSucceededAt: now().toISOString(), consecutiveFailures: 0, lastError: null }
-      : {
-        lastSucceededAt: before.lastSucceededAt,
-        consecutiveFailures: before.consecutiveFailures + 1,
-        lastError: errors.join("\n"),
-      };
+    const next: WatchHealth =
+      errors.length === 0
+        ? { lastSucceededAt: now().toISOString(), consecutiveFailures: 0, lastError: null }
+        : {
+            lastSucceededAt: before.lastSucceededAt,
+            consecutiveFailures: before.consecutiveFailures + 1,
+            lastError: errors.join("\n"),
+          };
     health.set(workspaceId, next);
-    return next.consecutiveFailures !== before.consecutiveFailures ||
-      next.lastError !== before.lastError;
+    return (
+      next.consecutiveFailures !== before.consecutiveFailures || next.lastError !== before.lastError
+    );
   }
 
   async function pass(workspaceId: number): Promise<void> {

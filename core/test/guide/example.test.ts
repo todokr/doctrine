@@ -64,13 +64,16 @@ test("見本が指す hunk とパスは patch に実在する", async () => {
 
 async function loadFiles(): Promise<DiffFile[]> {
   const paths = new Set((await loadHunks()).map((h) => h.path));
-  return [...paths].map((path) => ({
-    path,
-    status: "M",
-    binary: false,
-    additions: 0,
-    deletions: 0,
-  } as const));
+  return [...paths].map(
+    (path) =>
+      ({
+        path,
+        status: "M",
+        binary: false,
+        additions: 0,
+        deletions: 0,
+      }) as const,
+  );
 }
 
 async function loadValidGuide(): Promise<Guide> {
@@ -81,10 +84,7 @@ async function loadValidGuide(): Promise<Guide> {
 
 test("見本の risks は 3 段階の impact をすべて含み、hunk に紐づいた risk がある", async () => {
   const guide = await loadValidGuide();
-  assert.deepEqual(
-    new Set(guide.risks.map((r) => r.impact)),
-    new Set(["high", "medium", "low"]),
-  );
+  assert.deepEqual(new Set(guide.risks.map((r) => r.impact)), new Set(["high", "medium", "low"]));
   assert.ok(guide.risks.some((r) => r.locations.some((l) => l.hunk !== undefined)));
 });
 
@@ -109,8 +109,8 @@ test("risk の箇所を変更に無いファイルにすると checkGuideLocatio
   guide.risks[0].locations[0] = { path: "src/nowhere.ts" };
   const issues = checkGuideLocations(guide, { hunks: await loadHunks(), files: await loadFiles() });
   assert.ok(
-    issues.some((i) =>
-      i.includes("risks.0.locations.0") && i.includes("変更に含まれないファイルです")
+    issues.some(
+      (i) => i.includes("risks.0.locations.0") && i.includes("変更に含まれないファイルです"),
     ),
     issues.join("\n"),
   );
@@ -124,6 +124,9 @@ test("参照を 1 つ壊すと validateGuide が落ちる", async () => {
   const result = validateGuide(broken);
   assert.equal(result.ok, false);
   if (!result.ok) {
-    assert.ok(result.issues.some((i) => i.includes("d-nonexistent")), result.issues.join("\n"));
+    assert.ok(
+      result.issues.some((i) => i.includes("d-nonexistent")),
+      result.issues.join("\n"),
+    );
   }
 });

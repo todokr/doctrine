@@ -65,10 +65,10 @@ async function listSubRepositories(
     }
     if (!info.isDirectory()) continue;
     const real = await realpath(dir);
-    if (await gitTopLevel(dir) === real) {
+    if ((await gitTopLevel(dir)) === real) {
       found.push({ name: entry.name, suggestedName: projectNameFrom(entry.name) });
     }
   }
-  found.sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
+  found.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
   return found.map(({ name, suggestedName }) => ({ dir: name, suggestedName }));
 }

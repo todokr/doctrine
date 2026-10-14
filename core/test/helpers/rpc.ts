@@ -36,7 +36,9 @@ async function send(
   params: Record<string, unknown>,
 ): Promise<void> {
   const line = JSON.stringify({ id, method, params }) + "\n";
-  await new Promise<void>((resolve, reject) => conn.write(line, (e) => (e ? reject(e) : resolve())));
+  await new Promise<void>((resolve, reject) =>
+    conn.write(line, (e) => (e ? reject(e) : resolve())),
+  );
 }
 
 /**

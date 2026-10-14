@@ -56,7 +56,10 @@ async function add(
 test("枠が空いていれば queued を返す", async () => {
   const { d, p } = await fixture();
   await add(d, p, "t1");
-  assert.deepEqual((await selectAdmissible(d)).map((t) => t.id), ["t1"]);
+  assert.deepEqual(
+    (await selectAdmissible(d)).map((t) => t.id),
+    ["t1"],
+  );
 });
 
 test("プロジェクト枠が埋まっていれば返さない", async () => {
@@ -100,9 +103,7 @@ test("全体枠の上限を超えて返さない", async () => {
   const d = await openDb(":memory:");
   const projects: number[] = [];
   for (const n of [1, 2, 3, 4, 5]) {
-    projects.push(
-      (await seedProject(d, { path: `/p${n}` })).id,
-    );
+    projects.push((await seedProject(d, { path: `/p${n}` })).id);
   }
   for (const [i, p] of projects.entries()) await add(d, p, `t${i}`);
   assert.equal((await selectAdmissible(d, 4)).length, 4);
@@ -125,14 +126,15 @@ test("優先度 → 作成時刻のFIFO", async () => {
   const d = await openDb(":memory:");
   const ps: number[] = [];
   for (const n of ["a", "b", "c"]) {
-    ps.push(
-      (await seedProject(d, { path: `/${n}` })).id,
-    );
+    ps.push((await seedProject(d, { path: `/${n}` })).id);
   }
   await add(d, ps[0], "p2-old", { priority: 2, createdAt: "2026-01-01T00:00:00Z" });
   await add(d, ps[1], "p0-new", { priority: 0, createdAt: "2026-09-01T00:00:00Z" });
   await add(d, ps[2], "p2-new", { priority: 2, createdAt: "2026-09-02T00:00:00Z" });
-  assert.deepEqual((await selectAdmissible(d, 3)).map((t) => t.id), ["p0-new", "p2-old", "p2-new"]);
+  assert.deepEqual(
+    (await selectAdmissible(d, 3)).map((t) => t.id),
+    ["p0-new", "p2-old", "p2-new"],
+  );
 });
 
 // --- 上限待ち（2026-09-19-rate-limit-wait-design.md） ------------------------
@@ -141,8 +143,11 @@ const UNTIL = "2026-09-19T03:20:00.000Z";
 
 async function addRateLimited(d: Db, p: number, id: string, until = UNTIL) {
   await add(d, p, id);
-  await d.updateTable("tasks").set({ state: "rate_limited", rate_limited_until: until })
-    .where("id", "=", id).execute();
+  await d
+    .updateTable("tasks")
+    .set({ state: "rate_limited", rate_limited_until: until })
+    .where("id", "=", id)
+    .execute();
 }
 
 async function addWaiting(d: Db, p: number, id: string, until = "2026-09-22T03:20:00.000Z") {
@@ -277,7 +282,10 @@ test("selectAdmissibleIntakeRuns は全体枠の空きまで返す", async () =>
   await addRun(d, "i3", "queued");
   await add(d, p, "r1", { state: "running" });
   const admitted = await selectAdmissibleIntakeRuns(d, 2);
-  assert.deepEqual(admitted.map((r) => r.id), [first]);
+  assert.deepEqual(
+    admitted.map((r) => r.id),
+    [first],
+  );
 });
 
 test("Intake の上限待ちも hasActiveRateLimit に数える", async () => {

@@ -62,7 +62,10 @@ export function buildWorkflowLookup(
  * 場合は必ず拒否する側に倒す。
  */
 async function assertSocketNotLive(path: string): Promise<void> {
-  const exists = await stat(path).then(() => true, () => false);
+  const exists = await stat(path).then(
+    () => true,
+    () => false,
+  );
   if (!exists) return;
 
   let result: { kind: "live" } | { kind: "stale" } | { kind: "unknown"; code: string };
@@ -118,14 +121,16 @@ export async function tickCycle(ctx: DaemonContext): Promise<void> {
   }
 }
 
-export async function startDaemon(o: {
-  dbPath?: string;
-  socketPath?: string;
-  logRoot?: string;
-  configPath?: string;
-  tickMs?: number;
-  watchMs?: number;
-} = {}): Promise<{ stop(): Promise<void> }> {
+export async function startDaemon(
+  o: {
+    dbPath?: string;
+    socketPath?: string;
+    logRoot?: string;
+    configPath?: string;
+    tickMs?: number;
+    watchMs?: number;
+  } = {},
+): Promise<{ stop(): Promise<void> }> {
   const resolvedSocketPath = o.socketPath ?? socketPath();
   await assertSocketNotLive(resolvedSocketPath);
 
@@ -209,8 +214,9 @@ export async function startDaemon(o: {
   for (const project of await listProjects(db)) {
     const known = [
       ...(await listTasks(db, { projectId: project.id })).map((t) => t.worktree_path),
-      ...(await listIntakes(db, { workspaceId: project.workspace_id, includeClosed: true }))
-        .map((i) => i.worktree_path),
+      ...(await listIntakes(db, { workspaceId: project.workspace_id, includeClosed: true })).map(
+        (i) => i.worktree_path,
+      ),
     ].filter((p): p is string => p !== null);
     for (const orphan of await findOrphans(project.path, known)) {
       ctx.warnings.push(`対応するタスクのない worktree: ${orphan}`);

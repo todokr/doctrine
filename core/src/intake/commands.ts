@@ -136,7 +136,7 @@ export async function answerIntake(
       answers: JSON.stringify(validated.answers),
       assumption_responses: JSON.stringify(validated.assumptionResponses),
     };
-    if (!await answerQuestionSet(trx, set.id, reply)) {
+    if (!(await answerQuestionSet(trx, set.id, reply))) {
       throw new Error("すでに回答されています");
     }
     await updateIntake(trx, intake.id, { state: "decomposing" }, { requireState: "answering" });
@@ -282,14 +282,19 @@ export async function reviseIntake(
       resume: false,
     });
     await insertComments(trx, intake.id, approved.draftId, comments, runId);
-    await updateIntake(trx, intake.id, {
-      state: "decomposing",
-      revising: 1,
-      revision_run_id: runId,
-      claude_session_id: null,
-      attention_reason: null,
-      rate_limited_until: null,
-    }, { requireState: "active" });
+    await updateIntake(
+      trx,
+      intake.id,
+      {
+        state: "decomposing",
+        revising: 1,
+        revision_run_id: runId,
+        claude_session_id: null,
+        attention_reason: null,
+        rate_limited_until: null,
+      },
+      { requireState: "active" },
+    );
   });
   return { intakeId: intake.id, from: "active", to: "decomposing", revising: true };
 }
@@ -312,17 +317,23 @@ export async function abandonRevision(
   await killStaleChild(intake, deps.probe, "SIGTERM");
 
   await db.transaction().execute(async (trx) => {
-    await updateIntake(trx, intake.id, {
-      state: "active",
-      revising: 0,
-      revision_run_id: null,
-      claude_session_id: null,
-      attention_reason: null,
-      rate_limited_until: null,
-      child_pid: null,
-      child_started_at: null,
-    }, { requireState: intake.state });
-    await trx.updateTable("intake_runs")
+    await updateIntake(
+      trx,
+      intake.id,
+      {
+        state: "active",
+        revising: 0,
+        revision_run_id: null,
+        claude_session_id: null,
+        attention_reason: null,
+        rate_limited_until: null,
+        child_pid: null,
+        child_started_at: null,
+      },
+      { requireState: intake.state },
+    );
+    await trx
+      .updateTable("intake_runs")
       .set({ status: "interrupted", ended_at: new Date().toISOString() })
       .where("intake_id", "=", intake.id)
       .where("status", "=", "queued")
@@ -360,14 +371,20 @@ export async function cancelIntake(
 
   const now = new Date().toISOString();
   await db.transaction().execute(async (trx) => {
-    await updateIntake(trx, intake.id, {
-      state: "canceled",
-      ended_at: now,
-      child_pid: null,
-      child_started_at: null,
-      rate_limited_until: null,
-    }, { requireState: intake.state });
-    await trx.updateTable("intake_runs")
+    await updateIntake(
+      trx,
+      intake.id,
+      {
+        state: "canceled",
+        ended_at: now,
+        child_pid: null,
+        child_started_at: null,
+        rate_limited_until: null,
+      },
+      { requireState: intake.state },
+    );
+    await trx
+      .updateTable("intake_runs")
       .set({ status: "interrupted", ended_at: now })
       .where("intake_id", "=", intake.id)
       .where("status", "=", "queued")
@@ -419,7 +436,7 @@ export async function cancelIntake(
   return outcome;
 }
 
-const describe = (e: unknown) => e instanceof Error ? e.message : String(e);
+const describe = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 /**
  * 人のプロセスの完了を記録する（H-2）。経路は RPC だけで、runner には無い（H-4）。
@@ -477,9 +494,14 @@ export async function setDispatchPaused(
   if (intake.state !== "active" && !revising) {
     throw new Error(`自動 dispatch を切り替えられる状態ではありません: ${intake.state}`);
   }
-  await updateIntake(db, intake.id, { dispatch_paused: o.paused ? 1 : 0 }, {
-    requireState: intake.state,
-  });
+  await updateIntake(
+    db,
+    intake.id,
+    { dispatch_paused: o.paused ? 1 : 0 },
+    {
+      requireState: intake.state,
+    },
+  );
   return await requireIntake(db, intake.id);
 }
 

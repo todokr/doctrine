@@ -307,10 +307,7 @@ test("slugify は日本語だけのタイトルで空文字を返す", () => {
 });
 
 test("slugify は日本語と英数字が混ざったタイトルから ASCII の英数字だけを残す", () => {
-  assert.equal(
-    slugify("/healthz を clamd への PING で応答するように変える"),
-    "healthz-clamd-ping",
-  );
+  assert.equal(slugify("/healthz を clamd への PING で応答するように変える"), "healthz-clamd-ping");
   assert.equal(slugify("ログイン画面の v2 を直す"), "v2");
   assert.equal(slugify("café を追加"), "caf");
   // 日本語は連続が "-" 1 つに畳まれるので 40 文字の上限に数えない。
@@ -337,10 +334,7 @@ test("branchNameFor は日本語が混ざったタイトルでも ASCII のブ�
 
 test("intakeWorktreePathFor は worktrees 直下の intake-<id> を返す", () => {
   process.env.DOCTRINE_STATE_DIR = join(root, "state");
-  assert.equal(
-    intakeWorktreePathFor("i1"),
-    join(root, "state", "worktrees", "intake-i1"),
-  );
+  assert.equal(intakeWorktreePathFor("i1"), join(root, "state", "worktrees", "intake-i1"));
 });
 
 test("listIntakeWorktrees は .git を持つ子だけを名前順で返す", async () => {

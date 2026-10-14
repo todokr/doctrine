@@ -34,41 +34,32 @@ test("stateRoot: DOCTRINE_STATE_DIR が空文字なら未設定として扱う",
 });
 
 test("configRoot: DOCTRINE_CONFIG_DIR があればそれを使う", () => {
-  withEnv(
-    { DOCTRINE_CONFIG_DIR: "/tmp/doctrine-config", XDG_CONFIG_HOME: "/tmp/xdg" },
-    () => assert.equal(configRoot(), "/tmp/doctrine-config"),
+  withEnv({ DOCTRINE_CONFIG_DIR: "/tmp/doctrine-config", XDG_CONFIG_HOME: "/tmp/xdg" }, () =>
+    assert.equal(configRoot(), "/tmp/doctrine-config"),
   );
 });
 
 test("configRoot: DOCTRINE_CONFIG_DIR が無ければ $XDG_CONFIG_HOME/doctrine", () => {
-  withEnv(
-    { DOCTRINE_CONFIG_DIR: undefined, XDG_CONFIG_HOME: "/tmp/xdg" },
-    () => assert.equal(configRoot(), "/tmp/xdg/doctrine"),
+  withEnv({ DOCTRINE_CONFIG_DIR: undefined, XDG_CONFIG_HOME: "/tmp/xdg" }, () =>
+    assert.equal(configRoot(), "/tmp/xdg/doctrine"),
   );
 });
 
 test("configRoot: どちらも無ければ ~/.config/doctrine", () => {
-  withEnv(
-    { DOCTRINE_CONFIG_DIR: undefined, XDG_CONFIG_HOME: undefined },
-    () =>
-      assert.equal(
-        configRoot(),
-        join(process.env.HOME!, ".config", "doctrine"),
-      ),
+  withEnv({ DOCTRINE_CONFIG_DIR: undefined, XDG_CONFIG_HOME: undefined }, () =>
+    assert.equal(configRoot(), join(process.env.HOME!, ".config", "doctrine")),
   );
 });
 
 test("configRoot: 空文字は未設定として扱う", () => {
-  withEnv(
-    { DOCTRINE_CONFIG_DIR: "", XDG_CONFIG_HOME: "" },
-    () => assert.ok(configRoot().endsWith("/.config/doctrine")),
+  withEnv({ DOCTRINE_CONFIG_DIR: "", XDG_CONFIG_HOME: "" }, () =>
+    assert.ok(configRoot().endsWith("/.config/doctrine")),
   );
 });
 
 test("configRoot: 相対パスの XDG_CONFIG_HOME は無視する", () => {
-  withEnv(
-    { DOCTRINE_CONFIG_DIR: undefined, XDG_CONFIG_HOME: "rel/xdg" },
-    () => assert.ok(configRoot().endsWith("/.config/doctrine")),
+  withEnv({ DOCTRINE_CONFIG_DIR: undefined, XDG_CONFIG_HOME: "rel/xdg" }, () =>
+    assert.ok(configRoot().endsWith("/.config/doctrine")),
   );
 });
 

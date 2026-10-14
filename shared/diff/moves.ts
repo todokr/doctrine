@@ -168,8 +168,10 @@ function pickRuns(dels: Line[], adds: Line[], maxCandidates: number): Cand[] {
       let n = 1;
       let substantive = isSubstantive(d.norm) ? 1 : 0;
       while (
-        i + n < dels.length && j + n < adds.length &&
-        follows(dels, i + n) && follows(adds, j + n) &&
+        i + n < dels.length &&
+        j + n < adds.length &&
+        follows(dels, i + n) &&
+        follows(adds, j + n) &&
         dels[i + n].norm === adds[j + n].norm
       ) {
         if (isSubstantive(dels[i + n].norm)) substantive++;

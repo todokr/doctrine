@@ -3,7 +3,11 @@ import type { Db, StepRunRow } from "./schema.ts";
 export type { StepRunRow, StepRunStatus } from "./schema.ts";
 
 export function listStepRuns(db: Db, taskId: string): Promise<StepRunRow[]> {
-  return db.selectFrom("step_runs").selectAll().where("task_id", "=", taskId).orderBy("id")
+  return db
+    .selectFrom("step_runs")
+    .selectAll()
+    .where("task_id", "=", taskId)
+    .orderBy("id")
     .execute();
 }
 
@@ -12,8 +16,12 @@ export function listStepRuns(db: Db, taskId: string): Promise<StepRunRow[]> {
  * 「今のログ」が指すのは常に最後に始まった実行である。
  */
 export function lastStepRun(db: Db, taskId: string): Promise<StepRunRow | undefined> {
-  return db.selectFrom("step_runs").selectAll().where("task_id", "=", taskId)
-    .orderBy("id desc").executeTakeFirst();
+  return db
+    .selectFrom("step_runs")
+    .selectAll()
+    .where("task_id", "=", taskId)
+    .orderBy("id desc")
+    .executeTakeFirst();
 }
 
 /** そのステップの直前の実行。ステップ開始時に「上限待ちからのやり直しか」を見るのに使う。 */
@@ -22,7 +30,9 @@ export function lastStepRunFor(
   taskId: string,
   stepId: string,
 ): Promise<StepRunRow | undefined> {
-  return db.selectFrom("step_runs").selectAll()
+  return db
+    .selectFrom("step_runs")
+    .selectAll()
     .where("task_id", "=", taskId)
     .where("step_id", "=", stepId)
     .orderBy("id", "desc")
@@ -49,7 +59,9 @@ export function getAwaitingStepRun(
   taskId: string,
   stepId: string,
 ): Promise<StepRunRow | undefined> {
-  return db.selectFrom("step_runs").selectAll()
+  return db
+    .selectFrom("step_runs")
+    .selectAll()
     .where("task_id", "=", taskId)
     .where("step_id", "=", stepId)
     .where("status", "=", "awaiting")
@@ -77,7 +89,8 @@ export async function lastRejectedReview(
   db: Db,
   taskId: string,
 ): Promise<{ step_run_id: number; review_tree: string } | undefined> {
-  const row = await db.selectFrom("step_runs")
+  const row = await db
+    .selectFrom("step_runs")
     .select(["id", "review_tree"])
     .where("task_id", "=", taskId)
     .where("status", "in", ["bounced", "failed"])
@@ -99,7 +112,8 @@ export async function getStepOutputs(
   db: Db,
   taskId: string,
 ): Promise<Record<string, { last_stdout: string; last_stderr: string; exitCode: string }>> {
-  const rows = await db.selectFrom("step_outputs")
+  const rows = await db
+    .selectFrom("step_outputs")
     .innerJoin("step_runs", "step_runs.id", "step_outputs.step_run_id")
     .select([
       "step_runs.step_id",
@@ -131,7 +145,8 @@ export async function listStepOutputs(
   db: Db,
   taskId: string,
 ): Promise<Map<number, { last_stdout: string; last_stderr: string; exit_code: number | null }>> {
-  const rows = await db.selectFrom("step_outputs")
+  const rows = await db
+    .selectFrom("step_outputs")
     .innerJoin("step_runs", "step_runs.id", "step_outputs.step_run_id")
     .select([
       "step_outputs.step_run_id",
@@ -142,10 +157,13 @@ export async function listStepOutputs(
     .where("step_runs.task_id", "=", taskId)
     .execute();
   return new Map(
-    rows.map((r) => [r.step_run_id, {
-      last_stdout: r.last_stdout,
-      last_stderr: r.last_stderr,
-      exit_code: r.exit_code,
-    }]),
+    rows.map((r) => [
+      r.step_run_id,
+      {
+        last_stdout: r.last_stdout,
+        last_stderr: r.last_stderr,
+        exit_code: r.exit_code,
+      },
+    ]),
   );
 }

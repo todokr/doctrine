@@ -18,9 +18,7 @@ test("コメントに 1 からの番号と、指す要素の名前が付く", ()
 });
 
 test("存在しない要素を指しても投げない", () => {
-  const text = buildFeedback(example(), [
-    { target_kind: "artifact", target_id: "zzz", body: "x" },
-  ]);
+  const text = buildFeedback(example(), [{ target_kind: "artifact", target_id: "zzz", body: "x" }]);
   assert.match(text, /zzz/);
 });
 

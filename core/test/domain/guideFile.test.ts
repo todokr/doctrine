@@ -58,7 +58,10 @@ test("封筒の tree が無ければ broken", async () => {
   const res = await readGuideFile(wt);
   assert.equal(res.status, "broken");
   if (res.status !== "broken") throw new Error("unreachable");
-  assert.ok(res.issues.some((i) => i.includes("tree")), res.issues.join("\n"));
+  assert.ok(
+    res.issues.some((i) => i.includes("tree")),
+    res.issues.join("\n"),
+  );
 });
 
 test("検証を通らないガイドは broken で、issues は validateGuide と同じ", async () => {

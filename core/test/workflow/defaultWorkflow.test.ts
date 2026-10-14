@@ -82,8 +82,14 @@ cat > "$GH_BODY"
     } catch (e) {
       code = (e as { code: number }).code;
     }
-    const argsExists = await stat(argsPath).then(() => true, () => false);
-    const bodyExists = await stat(bodyPath).then(() => true, () => false);
+    const argsExists = await stat(argsPath).then(
+      () => true,
+      () => false,
+    );
+    const bodyExists = await stat(bodyPath).then(
+      () => true,
+      () => false,
+    );
     const syncNotesLeft = await stat(join(dir, ".doctrine-out", "sync-notes.md")).then(
       () => true,
       () => false,
@@ -118,10 +124,13 @@ test("Intake 由来のタスクでは open-pr の PR 本文の末尾で sub-issu
 });
 
 test("PR が既にあれば open-pr は作り直さない", async () => {
-  const r = await runOpenPr({
-    url: "https://github.com/o/r/issues/2",
-    parent_url: "https://github.com/o/r/issues/1",
-  }, true);
+  const r = await runOpenPr(
+    {
+      url: "https://github.com/o/r/issues/2",
+      parent_url: "https://github.com/o/r/issues/1",
+    },
+    true,
+  );
   assert.equal(r.code, 0);
   assert.equal(r.body, null);
 });
@@ -139,7 +148,10 @@ test("open-pr: sync の記録があれば PR にコメントし、ファイル�
 
 test("open-pr: sync の記録が無ければコメントしない", async () => {
   const r = await runOpenPr({ url: null, parent_url: null }, true);
-  assert.equal(r.args.some((a) => a === "comment"), false);
+  assert.equal(
+    r.args.some((a) => a === "comment"),
+    false,
+  );
 });
 
 test("open-pr: PR がまだ無く sync の記録があれば、PR を作ってからコメントし、ファイルを消す", async () => {

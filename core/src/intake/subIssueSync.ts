@@ -147,14 +147,10 @@ export async function syncSubIssues(
   for (const r of rows) {
     if (r.retired_at === null || r.sub_issue_url === null || r.sub_issue_closed !== 0) continue;
     const ref: IssueRef = { url: r.sub_issue_url, nodeId: r.sub_issue_node_id! };
-    const closed = await attempt(
-      r.process_id,
-      "close",
-      async () => {
-        await tracker.closeIssue(projectPath, ref, "not_planned");
-        await updateProcess(db, intake.id, r.process_id, { sub_issue_closed: 1 });
-      },
-    );
+    const closed = await attempt(r.process_id, "close", async () => {
+      await tracker.closeIssue(projectPath, ref, "not_planned");
+      await updateProcess(db, intake.id, r.process_id, { sub_issue_closed: 1 });
+    });
     if (closed.ok) result.closed.push(r.process_id);
   }
 
@@ -179,15 +175,12 @@ export async function syncSubIssues(
         if (found.has(marker.processId)) continue;
         found.add(marker.processId);
         // 閉じられた sub-issue も採用する。状態は見ない
-        const recorded = await attempt(
-          marker.processId,
-          "record",
-          () =>
-            updateProcess(db, intake.id, marker.processId, {
-              sub_issue_url: sub.ref.url,
-              sub_issue_node_id: sub.ref.nodeId,
-              sub_issue_hash: null,
-            }),
+        const recorded = await attempt(marker.processId, "record", () =>
+          updateProcess(db, intake.id, marker.processId, {
+            sub_issue_url: sub.ref.url,
+            sub_issue_node_id: sub.ref.nodeId,
+            sub_issue_hash: null,
+          }),
         );
         if (!recorded.ok) continue;
         links.set(marker.processId, { url: sub.ref.url, nodeId: sub.ref.nodeId, hash: null });
@@ -212,10 +205,8 @@ export async function syncSubIssues(
         createPath = path;
       }
       const body = content(p);
-      const made = await attempt(
-        p.id,
-        "create",
-        () => tracker.createSubIssue(createPath, parent, body),
+      const made = await attempt(p.id, "create", () =>
+        tracker.createSubIssue(createPath, parent, body),
       );
       if (!made.ok) continue;
       const ref = made.value;
@@ -228,7 +219,8 @@ export async function syncSubIssues(
           sub_issue_url: ref.url,
           sub_issue_node_id: ref.nodeId,
           sub_issue_hash: hash,
-        }));
+        }),
+      );
       if (!recorded.ok) continue;
       links.set(p.id, { url: ref.url, nodeId: ref.nodeId, hash });
       result.created.push(p.id);
@@ -325,7 +317,8 @@ export async function closeSubIssuesOnCancel(
     let reason: "completed" | "not_planned";
     if (facts?.humanDone) reason = "completed";
     else if (
-      facts?.pr?.state === "MERGED" && facts.pr.baseRef === o.baseBranches.get(r.process_id)
+      facts?.pr?.state === "MERGED" &&
+      facts.pr.baseRef === o.baseBranches.get(r.process_id)
     ) {
       if (tracker.closesViaPullRequest) continue;
       reason = "completed";

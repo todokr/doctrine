@@ -172,11 +172,11 @@ function toStepDetail(step: Step): WorkflowStepDetail {
   const b = branchOf(step);
   const branch = b
     ? {
-      goto: b.goto,
-      maxAttempts: b.maxAttempts,
-      feed: b.feed ?? null,
-      implicit: step.type === "guide" && step.onFailure === undefined,
-    }
+        goto: b.goto,
+        maxAttempts: b.maxAttempts,
+        feed: b.feed ?? null,
+        implicit: step.type === "guide" && step.onFailure === undefined,
+      }
     : null;
 
   switch (step.type) {
@@ -263,7 +263,9 @@ function readWorkflowChanges(params: Record<string, unknown>): WorkflowStepChang
   if (!Array.isArray(changes)) throw new Error("changes は必須です");
   for (const c of changes) {
     if (
-      typeof c !== "object" || c === null || typeof (c as { id: unknown }).id !== "string" ||
+      typeof c !== "object" ||
+      c === null ||
+      typeof (c as { id: unknown }).id !== "string" ||
       (c as { id: string }).id === ""
     ) {
       throw new Error("changes は必須です");
@@ -295,7 +297,9 @@ function readWorkspaceInit(
   }
   const projects = params.projects;
   if (
-    typeof projects !== "object" || projects === null || Array.isArray(projects) ||
+    typeof projects !== "object" ||
+    projects === null ||
+    Array.isArray(projects) ||
     Object.values(projects).some((v) => typeof v !== "string")
   ) {
     throw new Error("projects は文字列のオブジェクトで渡してください");
@@ -376,10 +380,7 @@ export function createHandler(ctx: DaemonContext): Handler {
       case "project.config.save": {
         const project = await reqProject(ctx, params);
         const input = readProjectConfigInput(params);
-        const yamlText = await readFile(
-          join(project.path, ".doctrine", "project.yaml"),
-          "utf8",
-        );
+        const yamlText = await readFile(join(project.path, ".doctrine", "project.yaml"), "utf8");
         const { text, config } = applyProjectConfig(yamlText, input);
         await ctx.loadWorkflow(project.path, config.defaultWorkflow).catch((e) => {
           throw new Error(
@@ -396,19 +397,21 @@ export function createHandler(ctx: DaemonContext): Handler {
       case "workflow.list": {
         const project = await reqProject(ctx, params);
         const names = await workflowNames(project.path);
-        return await Promise.all(names.map(async (name): Promise<WorkflowListEntry> => {
-          const isDefault = name === project.default_workflow;
-          try {
-            const { workflow } = await ctx.loadWorkflow(project.path, name);
-            const steps = toStepViews(withSetupStep(workflow, project.setup ?? undefined));
-            return { name, default: isDefault, ok: true, steps };
-          } catch (e) {
-            if (e instanceof WorkflowValidationError) {
-              return { name, default: isDefault, ok: false, issues: e.issues };
+        return await Promise.all(
+          names.map(async (name): Promise<WorkflowListEntry> => {
+            const isDefault = name === project.default_workflow;
+            try {
+              const { workflow } = await ctx.loadWorkflow(project.path, name);
+              const steps = toStepViews(withSetupStep(workflow, project.setup ?? undefined));
+              return { name, default: isDefault, ok: true, steps };
+            } catch (e) {
+              if (e instanceof WorkflowValidationError) {
+                return { name, default: isDefault, ok: false, issues: e.issues };
+              }
+              return { name, default: isDefault, ok: false, issues: [(e as Error).message] };
             }
-            return { name, default: isDefault, ok: false, issues: [(e as Error).message] };
-          }
-        }));
+          }),
+        );
       }
       case "workflow.get": {
         const project = await reqProject(ctx, params);
@@ -451,9 +454,8 @@ export function createHandler(ctx: DaemonContext): Handler {
         if (!project) throw new Error(`未登録のプロジェクトです: ${projectPath}`);
         const title = req(params, "title");
         const prompt = req(params, "prompt");
-        const workflowName = typeof params.workflow === "string"
-          ? params.workflow
-          : project.default_workflow;
+        const workflowName =
+          typeof params.workflow === "string" ? params.workflow : project.default_workflow;
         // 不正な定義はタスク作成時に落とす
         const loaded = await ctx.loadWorkflow(projectPath, workflowName);
         const task = await createTaskRow(ctx.db, project, {
@@ -602,8 +604,10 @@ export function createHandler(ctx: DaemonContext): Handler {
         const task = await getTask(ctx.db, taskId);
         if (!task) throw new Error("タスクがありません");
         if (
-          task.state !== "paused" && task.state !== "suspended" &&
-          task.state !== "rate_limited" && task.state !== "waiting"
+          task.state !== "paused" &&
+          task.state !== "suspended" &&
+          task.state !== "rate_limited" &&
+          task.state !== "waiting"
         ) {
           throw new Error(`再開できる状態ではありません: ${task.state}`);
         }
@@ -647,9 +651,10 @@ export function createHandler(ctx: DaemonContext): Handler {
         // 投げるので、遅れて届いた前者が後者を取り消しうる。
         if (params.follow === true) conn.follow(taskId);
         else if (params.follow === false && conn.isFollowing(taskId)) conn.unfollow();
-        const run = params.step_run_id === undefined
-          ? await lastStepRun(ctx.db, taskId)
-          : await getStepRun(ctx.db, Number(params.step_run_id));
+        const run =
+          params.step_run_id === undefined
+            ? await lastStepRun(ctx.db, taskId)
+            : await getStepRun(ctx.db, Number(params.step_run_id));
         if (params.step_run_id !== undefined && !run) throw new Error("ステップ実行がありません");
         // まだ1度もステップが走っていないタスク（queued）。追従だけ張って空で返す。
         if (!run) return { step_run_id: null, log_path: null, lines: [] } satisfies TaskLogs;
@@ -675,9 +680,8 @@ export function createHandler(ctx: DaemonContext): Handler {
         const toRef = await captureTree(task.worktree_path);
 
         // 記録が無ければ全体に倒す（初回のレビューには「前回」が無い）。
-        const last = params.since === "last_review"
-          ? await lastRejectedReview(ctx.db, taskId)
-          : undefined;
+        const last =
+          params.since === "last_review" ? await lastRejectedReview(ctx.db, taskId) : undefined;
 
         const { files, patch, truncated } = await computeDiff({
           worktreePath: task.worktree_path,
@@ -788,12 +792,14 @@ export function createHandler(ctx: DaemonContext): Handler {
           ctx.db,
           typeof params.limit === "number" ? params.limit : 50,
         );
-        return rows.map((r): RateLimitSample => ({
-          observed_at: r.observed_at,
-          window: r.window,
-          utilization: r.utilization,
-          resets_at: normalizeResetsAt(r.resets_at),
-        }));
+        return rows.map(
+          (r): RateLimitSample => ({
+            observed_at: r.observed_at,
+            window: r.window,
+            utilization: r.utilization,
+            resets_at: normalizeResetsAt(r.resets_at),
+          }),
+        );
       }
 
       case "tracker.status": {
@@ -813,17 +819,21 @@ export function createHandler(ctx: DaemonContext): Handler {
         const assignee = params.assignee === "any" ? "any" : "me";
         const search = typeof params.search === "string" ? params.search : undefined;
         const wt = await ctx.trackerOf(await workspaceRefOf(ctx.db, ws.id));
-        const issues = await wt.listIssues({
-          assignee,
-          ...(search === undefined ? {} : { search }),
-        }).catch(async (e) => {
-          // 理由が分かる失敗は、トラッカーの生のエラーより先に返す。
-          const failed = (await wt.status()).find((s) => !s.ok);
-          if (failed && !failed.ok) {
-            throw new Error(`Issue トラッカーを使えません（${failed.reason}）: ${failed.message}`);
-          }
-          throw e;
-        });
+        const issues = await wt
+          .listIssues({
+            assignee,
+            ...(search === undefined ? {} : { search }),
+          })
+          .catch(async (e) => {
+            // 理由が分かる失敗は、トラッカーの生のエラーより先に返す。
+            const failed = (await wt.status()).find((s) => !s.ok);
+            if (failed && !failed.ok) {
+              throw new Error(
+                `Issue トラッカーを使えません（${failed.reason}）: ${failed.message}`,
+              );
+            }
+            throw e;
+          });
         const open = new Map(
           (await listIntakes(ctx.db, { workspaceId: ws.id })).map((i) => [i.issue_url, i.id]),
         );
@@ -922,9 +932,13 @@ export function createHandler(ctx: DaemonContext): Handler {
       case "intake.abandonRevision": {
         const summary = await settleIntakeCommand(
           ctx,
-          await abandonRevision(ctx.db, { probe: defaultProbe() }, {
-            intakeId: req(params, "intake_id"),
-          }),
+          await abandonRevision(
+            ctx.db,
+            { probe: defaultProbe() },
+            {
+              intakeId: req(params, "intake_id"),
+            },
+          ),
         );
         // 元の計画に戻った。止めていた投入は待たずに再開する（request は reject しない）
         void ctx.intakeWatcher.request(summary.workspace_id);
@@ -983,10 +997,14 @@ export function createHandler(ctx: DaemonContext): Handler {
       }
       case "intake.redispatch": {
         const intakeId = req(params, "intake_id");
-        const { replacedTaskId } = await redispatchProcess(ctx.db, {
-          intakeId,
-          processId: req(params, "process_id"),
-        }, { loadWorkflow: ctx.loadWorkflow });
+        const { replacedTaskId } = await redispatchProcess(
+          ctx.db,
+          {
+            intakeId,
+            processId: req(params, "process_id"),
+          },
+          { loadWorkflow: ctx.loadWorkflow },
+        );
         if (replacedTaskId !== null) await cleanupReplacedTask(ctx, replacedTaskId);
         ctx.broadcast({ event: "intake.updated", intake_id: intakeId });
         return await intakeDetailOf(ctx, intakeId);
@@ -1026,7 +1044,7 @@ export function createHandler(ctx: DaemonContext): Handler {
 
       case "intake.logs": {
         const intakeId = req(params, "intake_id");
-        if (!await getIntake(ctx.db, intakeId)) throw new Error("Intake がありません");
+        if (!(await getIntake(ctx.db, intakeId))) throw new Error("Intake がありません");
         // 追従の作法は task.logs と同じ。追従先の枠もタスクと分け合う
         if (params.follow === true) conn.follow(intakeId);
         else if (params.follow === false && conn.isFollowing(intakeId)) conn.unfollow();
@@ -1113,9 +1131,10 @@ async function worktreeEntries(db: Db): Promise<WorktreeEntry[]> {
       if (t.worktree_path !== null) tasks.set(await canonical(t.worktree_path), t);
     }
     const intakes = new Map<string, IntakeRow>();
-    for (
-      const i of await listIntakes(db, { workspaceId: project.workspace_id, includeClosed: true })
-    ) {
+    for (const i of await listIntakes(db, {
+      workspaceId: project.workspace_id,
+      includeClosed: true,
+    })) {
       if (i.worktree_path !== null) intakes.set(await canonical(i.worktree_path), i);
     }
     const entries = await Promise.all(
@@ -1131,8 +1150,7 @@ async function worktreeEntries(db: Db): Promise<WorktreeEntry[]> {
         const key = await canonical(w.path);
         const task = tasks.get(key);
         const intake = task ? undefined : intakes.get(dirname(key));
-        const age = task?.updated_at ?? intake?.updated_at ??
-          info.mtime.toISOString();
+        const age = task?.updated_at ?? intake?.updated_at ?? info.mtime.toISOString();
         return {
           project: project.path,
           path: w.path,
@@ -1200,29 +1218,27 @@ async function resolveRemoveTarget(
   // 相対パスはデーモンの cwd から解決されてしまう。
   if (!isAbsolute(path!)) throw new Error(`path は絶対パスで指定してください: ${path}`);
   const real = await canonical(path!);
-  if (!await isUnderWorktreesDir(real)) {
+  if (!(await isUnderWorktreesDir(real))) {
     throw new Error(`doctrine の worktree 置き場の外にあるパスは消せません: ${path}`);
   }
 
   for (const project of await listProjects(ctx.db)) {
     let worktreePath: string | undefined;
     for (const w of await listWorktrees(project.path)) {
-      if (await canonical(w.path) === real) worktreePath = w.path;
+      if ((await canonical(w.path)) === real) worktreePath = w.path;
     }
     if (worktreePath === undefined) continue;
 
     for (const task of await listTasks(ctx.db, { projectId: project.id })) {
-      if (task.worktree_path && await canonical(task.worktree_path) === real) {
+      if (task.worktree_path && (await canonical(task.worktree_path)) === real) {
         return { kind: "task", task, project, worktreePath };
       }
     }
-    for (
-      const intake of await listIntakes(ctx.db, {
-        workspaceId: project.workspace_id,
-        includeClosed: true,
-      })
-    ) {
-      if (intake.worktree_path && await canonical(intake.worktree_path) === dirname(real)) {
+    for (const intake of await listIntakes(ctx.db, {
+      workspaceId: project.workspace_id,
+      includeClosed: true,
+    })) {
+      if (intake.worktree_path && (await canonical(intake.worktree_path)) === dirname(real)) {
         return { kind: "intake", intake, parentPath: intake.worktree_path };
       }
     }
@@ -1237,7 +1253,7 @@ async function resolveRemoveTarget(
       return { kind: "intake", intake, parentPath: intake.worktree_path };
     }
     // 名前を確かめないと、存在しないパスも canonical が resolve に倒れて一致してしまう
-    if (dirname(real) === parent && await hasIntakeChild(parent, basename(real))) {
+    if (dirname(real) === parent && (await hasIntakeChild(parent, basename(real)))) {
       return { kind: "intake", intake, parentPath: intake.worktree_path };
     }
   }
@@ -1259,11 +1275,7 @@ async function hasIntakeChild(parentPath: string, name: string): Promise<boolean
  * プロジェクトの子は worktree 自身から元のリポジトリを引く。force でなければ、汚れた子が
  * 1 つでもあれば何も消さずに投げる。途中で失敗したら親は残す。
  */
-async function removeIntakeWorktrees(
-  db: Db,
-  parentPath: string,
-  force: boolean,
-): Promise<void> {
+async function removeIntakeWorktrees(db: Db, parentPath: string, force: boolean): Promise<void> {
   let children: { name: string; path: string }[] = [];
   try {
     children = await listIntakeWorktrees(parentPath);
@@ -1280,7 +1292,7 @@ async function removeIntakeWorktrees(
   const targets: { repoPath: string; worktreePath: string }[] = [];
   for (const child of children) {
     targets.push({
-      repoPath: repoOf.get(await canonical(child.path)) ?? await repoOfWorktree(child.path),
+      repoPath: repoOf.get(await canonical(child.path)) ?? (await repoOfWorktree(child.path)),
       worktreePath: child.path,
     });
   }
@@ -1455,7 +1467,7 @@ async function startIntakeRuns(ctx: DaemonContext): Promise<void> {
     if (ctx.runningIntakeRuns.has(run.id)) continue;
     ctx.runningIntakeRuns.add(run.id);
     try {
-      if (!await claimIntakeRun(ctx.db, run.id)) {
+      if (!(await claimIntakeRun(ctx.db, run.id))) {
         ctx.runningIntakeRuns.delete(run.id);
         continue;
       }
@@ -1491,13 +1503,18 @@ async function startIntakeRuns(ctx: DaemonContext): Promise<void> {
           });
           const intake = await getIntake(ctx.db, run.intake_id);
           if (intake && (intake.state === "investigating" || intake.state === "decomposing")) {
-            await updateIntake(ctx.db, intake.id, {
-              state: "needs_attention",
-              attention_reason: JSON.stringify({ kind: "agent_failed", runId: run.id, message }),
-              rate_limited_until: null,
-              child_pid: null,
-              child_started_at: null,
-            }, { requireState: intake.state });
+            await updateIntake(
+              ctx.db,
+              intake.id,
+              {
+                state: "needs_attention",
+                attention_reason: JSON.stringify({ kind: "agent_failed", runId: run.id, message }),
+                rate_limited_until: null,
+                child_pid: null,
+                child_started_at: null,
+              },
+              { requireState: intake.state },
+            );
             broadcastIntakeTransition(ctx, {
               intakeId: intake.id,
               from: intake.state,
@@ -1572,12 +1589,14 @@ async function tickOnce(ctx: DaemonContext): Promise<void> {
 
       // worktree はタスク作成時ではなく、実行枠が取れた瞬間に作る
       // DB には createWorktree が返す実パスを保存する（worktree.list が返す表記と揃える）
-      worktreePath = task.worktree_path ?? await createWorktree({
-        repoPath: project.path,
-        worktreePath: worktreePathFor(project.path, task.id),
-        branch: task.branch,
-        baseBranch: task.intake_id === null ? project.base_branch : await intakeBase(project),
-      });
+      worktreePath =
+        task.worktree_path ??
+        (await createWorktree({
+          repoPath: project.path,
+          worktreePath: worktreePathFor(project.path, task.id),
+          branch: task.branch,
+          baseBranch: task.intake_id === null ? project.base_branch : await intakeBase(project),
+        }));
 
       await commitStepBoundary(ctx.db, {
         taskId: task.id,

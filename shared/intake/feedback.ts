@@ -11,9 +11,8 @@ function targetLabel(pfd: Pfd, c: FeedbackComment): string {
   if (c.target_kind === "whole") return "計画全体";
   const kind = c.target_kind === "artifact" ? "成果物" : "プロセス";
   const id = c.target_id ?? "";
-  const list: { id: string; name: string }[] = c.target_kind === "artifact"
-    ? pfd.artifacts
-    : pfd.processes;
+  const list: { id: string; name: string }[] =
+    c.target_kind === "artifact" ? pfd.artifacts : pfd.processes;
   const found = list.find((e) => e.id === id);
   return found ? `${kind} ${id}「${found.name}」` : `${kind} ${id}`;
 }

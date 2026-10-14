@@ -73,7 +73,11 @@ export async function insertActiveIntake(
     replies: "[]",
   });
   await insertApproval(db, { intake_id: "i1", draft_id: draft.id, hash: draft.hash });
-  await insertProcesses(db, "i1", pfd.processes.map((p) => p.id));
+  await insertProcesses(
+    db,
+    "i1",
+    pfd.processes.map((p) => p.id),
+  );
   await updateIntake(db, "i1", { state: "active" });
   return { runId };
 }

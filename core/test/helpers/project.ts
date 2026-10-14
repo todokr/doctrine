@@ -4,14 +4,17 @@ import { getProject, insertProject } from "../../src/db/tasks.ts";
 import { insertWorkspace, projectNameFrom } from "../../src/db/workspaces.ts";
 
 /** workspace（root = path）とプロジェクト 1 つを入れ、プロジェクトの行を返す。 */
-export async function seedProject(db: Db, p: {
-  path: string;
-  name?: string;
-  default_workflow?: string;
-  max_concurrent?: number;
-  base_branch?: string;
-  setup?: string | null;
-}): Promise<ProjectRow> {
+export async function seedProject(
+  db: Db,
+  p: {
+    path: string;
+    name?: string;
+    default_workflow?: string;
+    max_concurrent?: number;
+    base_branch?: string;
+    setup?: string | null;
+  },
+): Promise<ProjectRow> {
   const dir = basename(p.path);
   const workspace_id = await insertWorkspace(db, { path: p.path, name: dir });
   const id = await insertProject(db, {

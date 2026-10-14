@@ -40,15 +40,17 @@ test("implement のモデルとプロンプトを変えると、その2か所だ
     "      {{ worktree.path }}/.doctrine-out/plan.md を読んでから実装してください。",
   );
   const promptEnd = originalWithModel.indexOf("\n  # node --test と tsc は失敗の詳細", promptStart);
-  const expected = originalWithModel.slice(0, promptStart) +
+  const expected =
+    originalWithModel.slice(0, promptStart) +
     "      新しいプロンプト\n" +
     originalWithModel.slice(promptEnd);
 
   assert.equal(result.text, expected);
 
   const promptLineCountBefore = original.split("\n").filter((l) => l.trim() === "prompt: |").length;
-  const promptLineCountAfter =
-    result.text.split("\n").filter((l) => l.trim() === "prompt: |").length;
+  const promptLineCountAfter = result.text
+    .split("\n")
+    .filter((l) => l.trim() === "prompt: |").length;
   assert.equal(promptLineCountAfter, promptLineCountBefore);
 
   assert.deepEqual(commentLines(result.text), commentLines(original));
@@ -144,9 +146,7 @@ test("guide の既定の分岐に変更を送ると明示的な onFailure にな
 
 test("goto に存在しないステップを入れると ok: false で、ステップと項目が分かる", async () => {
   const original = await readDefaultYaml();
-  const result = applyWorkflowChanges(original, [
-    { id: "verify", branch: { goto: "nowhere" } },
-  ]);
+  const result = applyWorkflowChanges(original, [{ id: "verify", branch: { goto: "nowhere" } }]);
   assert(!result.ok);
   assert.deepEqual(
     result.issues.find((i) => i.stepId === "verify"),

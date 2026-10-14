@@ -18,10 +18,13 @@ function single(id: string): Question {
 }
 
 test("選んだ選択肢の label と other と note が出る", () => {
-  const text = buildAnswerText({ questions: [single("q1")], assumptions: [] }, {
-    answers: [{ questionId: "q1", optionIds: ["a"], other: "その他の答え", note: "補足" }],
-    assumptionResponses: [],
-  });
+  const text = buildAnswerText(
+    { questions: [single("q1")], assumptions: [] },
+    {
+      answers: [{ questionId: "q1", optionIds: ["a"], other: "その他の答え", note: "補足" }],
+      assumptionResponses: [],
+    },
+  );
   assert.match(text, /q1/);
   assert.match(text, /同期で書く/);
   assert.doesNotMatch(text, /キューに積む/);
@@ -30,10 +33,13 @@ test("選んだ選択肢の label と other と note が出る", () => {
 });
 
 test("答えの無い質問は回答なしと書く", () => {
-  const text = buildAnswerText({ questions: [single("q1"), single("q2")], assumptions: [] }, {
-    answers: [{ questionId: "q1", optionIds: ["b"], other: null, note: null }],
-    assumptionResponses: [],
-  });
+  const text = buildAnswerText(
+    { questions: [single("q1"), single("q2")], assumptions: [] },
+    {
+      answers: [{ questionId: "q1", optionIds: ["b"], other: null, note: null }],
+      assumptionResponses: [],
+    },
+  );
   assert.match(text, /q2[\s\S]*回答なし/);
 });
 

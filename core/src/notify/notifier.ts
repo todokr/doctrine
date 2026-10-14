@@ -27,10 +27,10 @@ export function notifierFor(
   run: RunCommand = runCommand,
 ): Notifier {
   if (os === "darwin") {
-    return { notify: async (t, b) => void await run("osascript", osascriptArgs(t, b)) };
+    return { notify: async (t, b) => void (await run("osascript", osascriptArgs(t, b))) };
   }
   if (os === "linux") {
-    return { notify: async (t, b) => void await run("notify-send", notifySendArgs(t, b)) };
+    return { notify: async (t, b) => void (await run("notify-send", notifySendArgs(t, b))) };
   }
   return { notify: () => Promise.resolve() };
 }

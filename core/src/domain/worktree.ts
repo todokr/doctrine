@@ -74,13 +74,12 @@ export async function ensureDoctrineOutExcluded(repoPath: string): Promise<void>
   try {
     content = await readFile(excludePath, "utf8");
   } catch (e) {
-    if (!(isNotFound(e))) throw e;
+    if (!isNotFound(e)) throw e;
   }
   if (content.split("\n").some((l) => l.trim() === DOCTRINE_OUT_EXCLUDE_LINE)) return;
 
-  const withTrailingNewline = content.length > 0 && !content.endsWith("\n")
-    ? content + "\n"
-    : content;
+  const withTrailingNewline =
+    content.length > 0 && !content.endsWith("\n") ? content + "\n" : content;
   await mkdir(dirname(excludePath), { recursive: true });
   await writeFile(excludePath, withTrailingNewline + DOCTRINE_OUT_EXCLUDE_LINE + "\n");
 }
@@ -224,7 +223,7 @@ export async function removeWorktree(o: {
   worktreePath: string;
   force: boolean;
 }): Promise<void> {
-  if (!o.force && await hasUncommittedChanges(o.worktreePath)) {
+  if (!o.force && (await hasUncommittedChanges(o.worktreePath))) {
     throw new UncommittedChangesError(o.worktreePath);
   }
   const args = ["-C", o.repoPath, "worktree", "remove", o.worktreePath];
@@ -234,12 +233,7 @@ export async function removeWorktree(o: {
 
 /** リンクされた worktree の元のリポジトリの git ディレクトリ（git rev-parse --git-common-dir）。 */
 export async function repoOfWorktree(worktreePath: string): Promise<string> {
-  const { stdout } = await runCommand("git", [
-    "-C",
-    worktreePath,
-    "rev-parse",
-    "--git-common-dir",
-  ]);
+  const { stdout } = await runCommand("git", ["-C", worktreePath, "rev-parse", "--git-common-dir"]);
   const raw = stdout.trim();
   return isAbsolute(raw) ? raw : join(worktreePath, raw);
 }
@@ -279,7 +273,10 @@ export async function listWorktrees(repoPath: string): Promise<ListedWorktree[]>
     for (const line of block.split("\n")) {
       if (line.startsWith("worktree ")) path = line.slice("worktree ".length).trim();
       else if (line.startsWith("branch ")) {
-        branch = line.slice("branch ".length).trim().replace(/^refs\/heads\//, "");
+        branch = line
+          .slice("branch ".length)
+          .trim()
+          .replace(/^refs\/heads\//, "");
       }
     }
     if (path !== null) listed.push({ path, branch });

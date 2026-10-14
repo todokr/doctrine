@@ -53,9 +53,9 @@ beforeEach(async () => {
 });
 afterEach(async () => {
   await until(() =>
-    contexts.every((c) =>
-      c.running.size === 0 && c.runningIntakeRuns.size === 0 && c.intakeWatcher.idle()
-    )
+    contexts.every(
+      (c) => c.running.size === 0 && c.runningIntakeRuns.size === 0 && c.intakeWatcher.idle(),
+    ),
   );
   contexts.length = 0;
   await rm(root, { recursive: true, force: true });
@@ -172,7 +172,9 @@ async function count(
   ctx: DaemonContext,
   table: "intake_comments" | "intake_approvals" | "intake_processes",
 ) {
-  const row = await ctx.db.selectFrom(table).select((eb) => eb.fn.countAll<number>().as("n"))
+  const row = await ctx.db
+    .selectFrom(table)
+    .select((eb) => eb.fn.countAll<number>().as("n"))
     .executeTakeFirstOrThrow();
   return Number(row.n);
 }
@@ -238,12 +240,15 @@ test("開始から承認までの一連の呼び出しが通る", async () => {
   assert.equal(approved.needs_human, true);
   const active = await call<IntakeDetail>("intake.get", { intake_id: id });
   assert.equal(active.approval!.draft_id, second.latest_draft!.id);
-  assert.deepEqual(active.processes.map((p) => p.id), ["1", "2", "3", "4"]);
+  assert.deepEqual(
+    active.processes.map((p) => p.id),
+    ["1", "2", "3", "4"],
+  );
   assert.deepEqual(await call("task.list"), []);
 
   const transitions = events
     .filter((e) => e.event === "intake.stateChanged")
-    .map((e) => e.event === "intake.stateChanged" ? [e.from, e.to] : []);
+    .map((e) => (e.event === "intake.stateChanged" ? [e.from, e.to] : []));
   assert.deepEqual(transitions, [
     ["investigating", "answering"],
     ["answering", "decomposing"],
@@ -287,14 +292,14 @@ test("差し戻しのコメントの対象が案に無ければ拒まれる", as
       intake_id: detail.id,
       draft_id,
       comments: [{ target_kind: "process", target_id: "99", body: "x" }],
-    })
+    }),
   );
   await assert.rejects(() =>
     call("intake.reject", {
       intake_id: detail.id,
       draft_id,
       comments: [{ target_kind: "whole", target_id: "1", body: "x" }],
-    })
+    }),
   );
   assert.equal(await count(ctx, "intake_comments"), 0);
 });
@@ -344,7 +349,10 @@ test("承認するとデーモンの見張りが走り、プロセス 1 だけ�
   await until(() => ctx.intakeWatcher.idle());
 
   const tasks = await call<{ intake_process_id: string | null }[]>("task.list");
-  assert.deepEqual(tasks.map((t) => t.intake_process_id), ["1"]);
+  assert.deepEqual(
+    tasks.map((t) => t.intake_process_id),
+    ["1"],
+  );
   assert.ok(events.some((e) => e.event === "intake.updated" && e.intake_id === reviewing.id));
   const detail = await call<IntakeDetail>("intake.get", { intake_id: reviewing.id });
   assert.equal(detail.processes.find((p) => p.id === "1")!.state, "running");
@@ -371,7 +379,7 @@ test("reviewing でない Intake は承認できない", async () => {
   const { ctx, call } = await setup();
   const started = await toAnswering(ctx, call);
   await assert.rejects(() =>
-    call("intake.approve", { intake_id: started.id, draft_id: 1, hash: "0".repeat(64) })
+    call("intake.approve", { intake_id: started.id, draft_id: 1, hash: "0".repeat(64) }),
   );
   assert.equal((await getIntake(ctx.db, started.id))!.state, "answering");
 });
@@ -400,12 +408,18 @@ test("中止した Issue はもう一度開始できる", async () => {
   });
   assert.equal(canceled.state, "canceled");
   const runs = await listIntakeRuns(ctx.db, first.id);
-  assert.deepEqual(runs.map((r) => r.status), ["interrupted"]);
+  assert.deepEqual(
+    runs.map((r) => r.status),
+    ["interrupted"],
+  );
   assert.ok(runs[0].ended_at);
   assert.ok(
-    events.some((e) =>
-      e.event === "intake.stateChanged" && e.intake_id === first.id &&
-      e.from === "investigating" && e.to === "canceled"
+    events.some(
+      (e) =>
+        e.event === "intake.stateChanged" &&
+        e.intake_id === first.id &&
+        e.from === "investigating" &&
+        e.to === "canceled",
     ),
   );
 
@@ -416,10 +430,7 @@ test("中止した Issue はもう一度開始できる", async () => {
   assert.equal(again.alreadyActive, false);
   assert.notEqual(again.id, first.id);
   assert.equal((await call<IntakeSummary[]>("intake.list")).length, 1);
-  assert.equal(
-    (await call<IntakeSummary[]>("intake.list", { include_closed: true })).length,
-    2,
-  );
+  assert.equal((await call<IntakeSummary[]>("intake.list", { include_closed: true })).length, 2);
 });
 
 test("中止は終端から拒まれ、mode が無ければ拒まれる", async () => {
@@ -452,7 +463,7 @@ test("回答の検証に落ちると状態は変わらない", async () => {
       question_set_id,
       answers: [{ questionId: "q1", optionIds: ["zzz"], other: null, note: null }],
       assumption_responses: [],
-    })
+    }),
   );
   assert.equal((await getIntake(ctx.db, started.id))!.state, "answering");
 
@@ -468,46 +479,55 @@ test("回答の検証に落ちると状態は変わらない", async () => {
       question_set_id,
       answers: answerQ1,
       assumption_responses: [],
-    })
+    }),
   );
   assert.equal((await getIntake(ctx.db, started.id))!.state, "decomposing");
 });
 
 test("tracker.issues は進行中の Intake に印を付ける", async () => {
-  const tracker = fakeTracker({}, {
-    issues: [
-      {
-        url: ISSUE,
-        identifier: "#1",
-        title: "one",
-        assignees: [],
-        updatedAt: "2026-09-21T00:00:00Z",
-      },
-      {
-        url: "https://github.com/o/r/issues/2",
-        identifier: "#2",
-        title: "two",
-        assignees: [],
-        updatedAt: "2026-09-21T00:00:00Z",
-      },
-    ],
-  });
+  const tracker = fakeTracker(
+    {},
+    {
+      issues: [
+        {
+          url: ISSUE,
+          identifier: "#1",
+          title: "one",
+          assignees: [],
+          updatedAt: "2026-09-21T00:00:00Z",
+        },
+        {
+          url: "https://github.com/o/r/issues/2",
+          identifier: "#2",
+          title: "two",
+          assignees: [],
+          updatedAt: "2026-09-21T00:00:00Z",
+        },
+      ],
+    },
+  );
   const { call } = await setup({ tracker });
   const started = await call<IntakeSummary>("intake.start", { workspace: repo, issue_url: ISSUE });
 
   const issues = await call<{ url: string; intake_id: string | null }[]>("tracker.issues", {
     workspace: repo,
   });
-  assert.deepEqual(issues.map((i) => i.intake_id), [started.id, null]);
+  assert.deepEqual(
+    issues.map((i) => i.intake_id),
+    [started.id, null],
+  );
   await call("tracker.issues", { workspace: repo, assignee: "any", search: "x" });
   assert.deepEqual(tracker.listCalls, [{ assignee: "me" }, { assignee: "any", search: "x" }]);
 });
 
 test("トラッカーが使えないとき tracker.issues は理由を返して失敗する", async () => {
-  const tracker = fakeTracker({}, {
-    failList: true,
-    status: { ok: false, reason: "not_logged_in", message: "gh auth login を" },
-  });
+  const tracker = fakeTracker(
+    {},
+    {
+      failList: true,
+      status: { ok: false, reason: "not_logged_in", message: "gh auth login を" },
+    },
+  );
   const { call } = await setup({ tracker });
   await assert.rejects(
     () => call("tracker.issues", { workspace: repo }),
@@ -592,7 +612,10 @@ test("内容の無い完了の記録は拒まれる", async () => {
   }
   const row = (await listProcesses(ctx.db, id)).find((r) => r.process_id === "3")!;
   assert.equal(row.human_done_at, null);
-  assert.equal(ft.calls.some((c) => c.op === "closeIssue"), false);
+  assert.equal(
+    ft.calls.some((c) => c.op === "closeIssue"),
+    false,
+  );
 });
 
 test("完了の記録は人のプロセスで、あなたの番のときだけ", async () => {
@@ -670,8 +693,8 @@ test("再投入すると、置き換えた古いタスクの worktree を消し�
   assert.equal(kept.state, "canceled");
   assert.equal(kept.worktree_path, null);
   assert.ok(
-    events.some((e) =>
-      e.event === "task.cleanedUp" && e.task_id === old.id && e.outcome === "removed"
+    events.some(
+      (e) => e.event === "task.cleanedUp" && e.task_id === old.id && e.outcome === "removed",
     ),
   );
 });
@@ -707,7 +730,10 @@ test("中止（leave）はタスクと sub-issue をそのままにする", asyn
   assert.equal((await tasksOf(call))[0].state, "queued");
   assert.ok(ft.issues.length > 0);
   assert.ok(ft.issues.every((i) => i.state === "OPEN"));
-  assert.equal(ft.calls.some((c) => c.op === "closeIssue"), false);
+  assert.equal(
+    ft.calls.some((c) => c.op === "closeIssue"),
+    false,
+  );
 });
 
 test("中止（stop）はタスクを止め、sub-issue を取りやめとして閉じる", async () => {
@@ -724,9 +750,12 @@ test("中止（stop）はタスクを止め、sub-issue を取りやめとして
   assert.equal(canceled.state, "canceled");
   assert.equal((await tasksOf(call))[0].state, "canceled");
   assert.ok(
-    events.some((e) =>
-      e.event === "task.stateChanged" && e.task_id === first.id && e.from === "queued" &&
-      e.to === "canceled"
+    events.some(
+      (e) =>
+        e.event === "task.stateChanged" &&
+        e.task_id === first.id &&
+        e.from === "queued" &&
+        e.to === "canceled",
     ),
   );
   const issueOf = (processId: string) =>
@@ -782,7 +811,10 @@ test("自動 dispatch を一時停止すると投入されず、再開すると�
   const two = processOf(detail, "2");
   assert.equal(two.state, "ready");
   assert.equal((two as { blockedBy: string | null }).blockedBy, "paused");
-  assert.equal((await tasksOf(call)).some((t) => t.intake_process_id === "2"), false);
+  assert.equal(
+    (await tasksOf(call)).some((t) => t.intake_process_id === "2"),
+    false,
+  );
 
   const resumed = await call<IntakeSummary>("intake.setDispatchPaused", {
     intake_id: id,
@@ -881,10 +913,9 @@ test("workspace.yaml が無い workspace の tracker.status は workspace_config
   const lin = fakeTracker({}, { kind: "linear", status: linearStatus });
   const { call } = await twoProjects({ github: gh, linear: lin });
   await rm(join(repo, ".doctrine", "workspace.yaml"));
-  const status = await call<{ ok: boolean; reason?: string; message?: string }>(
-    "tracker.status",
-    { workspace: repo },
-  );
+  const status = await call<{ ok: boolean; reason?: string; message?: string }>("tracker.status", {
+    workspace: repo,
+  });
   assert.equal(status.ok, false);
   assert.equal(status.reason, "workspace_config_missing");
   assert.ok(status.message?.includes("workspace.yaml"));
@@ -918,7 +949,10 @@ test("プロジェクトが 2 つの workspace でも intake.start が通る", a
   assert.equal(started.alreadyActive, false);
   assert.equal(started.issue_url, ISSUE);
   const listed = await call<IntakeSummary[]>("intake.list", { workspace: ws });
-  assert.deepEqual(listed.map((i) => i.id), [started.id]);
+  assert.deepEqual(
+    listed.map((i) => i.id),
+    [started.id],
+  );
   assert.deepEqual(tracker.reads, [ISSUE]);
 });
 
@@ -1038,14 +1072,21 @@ test("改訂に入ると自動 dispatch が止まり、走っているタスク�
   assert.equal(revising.state, "decomposing");
   assert.equal(revising.revising, true);
   assert.ok(
-    events.some((e) =>
-      e.event === "intake.stateChanged" && e.intake_id === id && e.from === "active" &&
-      e.to === "decomposing" && e.revising === true
+    events.some(
+      (e) =>
+        e.event === "intake.stateChanged" &&
+        e.intake_id === id &&
+        e.from === "active" &&
+        e.to === "decomposing" &&
+        e.revising === true,
     ),
   );
   assert.equal((await tasksOf(call))[0].state, "queued");
   const queued = await queuedRuns(ctx, id);
-  assert.deepEqual(queued.map((r) => r.purpose), ["revise"]);
+  assert.deepEqual(
+    queued.map((r) => r.purpose),
+    ["revise"],
+  );
   const intake = (await getIntake(ctx.db, id))!;
   assert.equal(intake.claude_session_id, null);
   assert.equal(intake.revision_run_id, queued[0].id);
@@ -1092,7 +1133,10 @@ test("再承認で sub-issue が整えられ、投入が再開する", async () 
   const rows = await listProcesses(ctx.db, id);
   assert.notEqual(rows.find((r) => r.process_id === "4")!.retired_at, null);
   const after = await call<IntakeDetail>("intake.get", { intake_id: id });
-  assert.deepEqual(after.processes.map((p) => p.id), ["1", "2", "3", "4b"]);
+  assert.deepEqual(
+    after.processes.map((p) => p.id),
+    ["1", "2", "3", "4b"],
+  );
   assert.notEqual(processOf(after, "4b").sub_issue_url, null);
 
   pw.prs.set(first.branch, [MERGED]);
@@ -1114,7 +1158,10 @@ test("改訂をやめると元の承認済みの計画に戻る", async () => {
   assert.equal(abandoned.revising, false);
   const after = await call<IntakeDetail>("intake.get", { intake_id: id });
   assert.equal(after.approval!.draft_id, before.approval!.draft_id);
-  assert.deepEqual(after.processes.map((p) => p.id), ["1", "2", "3", "4"]);
+  assert.deepEqual(
+    after.processes.map((p) => p.id),
+    ["1", "2", "3", "4"],
+  );
   assert.equal((await queuedRuns(ctx, id)).length, 0);
   await assert.rejects(
     () =>
@@ -1140,7 +1187,10 @@ test("分解中に改訂をやめると、立っている実行を閉じる", as
 
   assert.equal(abandoned.state, "active");
   const revise = (await listIntakeRuns(ctx.db, id)).filter((r) => r.purpose === "revise");
-  assert.deepEqual(revise.map((r) => r.status), ["interrupted"]);
+  assert.deepEqual(
+    revise.map((r) => r.status),
+    ["interrupted"],
+  );
 });
 
 test("改訂の RPC は状態とコメントを確かめる", async () => {
@@ -1177,10 +1227,7 @@ function talkingAdapter(): AgentAdapter {
   return createMockAdapter({
     result: {},
     events: [{ kind: "assistant", text: "Issue を読んでいます" }],
-    sequence: [
-      questionsOut([question("q1")]),
-      pfdOut(example()),
-    ],
+    sequence: [questionsOut([question("q1")]), pfdOut(example())],
   });
 }
 
@@ -1201,7 +1248,10 @@ test("intake.logs は run_id を省くと最新の実行の末尾を返し、指
   const latest = await call<IntakeLogs>("intake.logs", { intake_id: started.id });
   assert.equal(latest.run_id, runs.at(-1)!.id);
   assert.equal(latest.log_path, runs.at(-1)!.log_path);
-  assert.ok(latest.lines.some((l) => l !== ""), "ログファイルの中身が返る");
+  assert.ok(
+    latest.lines.some((l) => l !== ""),
+    "ログファイルの中身が返る",
+  );
 
   const first = await call<IntakeLogs>("intake.logs", {
     intake_id: started.id,
@@ -1237,8 +1287,8 @@ test("intake.logs の follow は接続の追従先をこの Intake に移し、f
   const h = createHandler(ctx);
   let following: string | null = null;
   const conn = {
-    follow: (id: string) => following = id,
-    unfollow: () => following = null,
+    follow: (id: string) => (following = id),
+    unfollow: () => (following = null),
     isFollowing: (id: string) => following === id,
   };
   const started = await call<IntakeSummary>("intake.start", { workspace: repo, issue_url: ISSUE });
@@ -1270,7 +1320,10 @@ test("実行中の出力は intake.logLine として、その Intake を追従�
     assert.equal(e.intake_id, started.id);
     assert.equal(e.run_id, run.id);
   }
-  assert.ok(keys.every((k) => k === started.id), "追従している接続にだけ流す");
+  assert.ok(
+    keys.every((k) => k === started.id),
+    "追従している接続にだけ流す",
+  );
   const logs = await call<IntakeLogs>("intake.logs", { intake_id: started.id, run_id: run.id });
   assert.deepEqual(
     lines.map((e) => e.line),

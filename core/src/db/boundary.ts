@@ -146,20 +146,25 @@ export function commitStepBoundary(db: Db, b: StepBoundary): Promise<number | nu
   return db.transaction().execute(async (trx) => {
     let stepRunId: number | null = null;
 
-    const updated = await trx.updateTable("tasks")
+    const updated = await trx
+      .updateTable("tasks")
       .set({ ...b.taskPatch, updated_at: new Date().toISOString() })
       .where("id", "=", b.taskId)
       .$if(b.requireState !== undefined, (q) => q.where("state", "=", b.requireState!))
       .executeTakeFirstOrThrow();
     if (b.requireState !== undefined && updated.numUpdatedRows === 0n) {
-      const actual = await trx.selectFrom("tasks").select("state")
-        .where("id", "=", b.taskId).executeTakeFirst();
+      const actual = await trx
+        .selectFrom("tasks")
+        .select("state")
+        .where("id", "=", b.taskId)
+        .executeTakeFirst();
       throw new StateConflictError(b.taskId, b.requireState, actual?.state ?? null);
     }
 
     if (b.stepRun) {
       const s = b.stepRun;
-      const inserted = await trx.insertInto("step_runs")
+      const inserted = await trx
+        .insertInto("step_runs")
         .values({
           task_id: b.taskId,
           step_id: s.step_id,
@@ -181,7 +186,8 @@ export function commitStepBoundary(db: Db, b: StepBoundary): Promise<number | nu
 
     if (b.stepRunReopen) {
       // started_at は戻さない: この行が指す attempt は最初に waiting へ入ったときに始まっている。
-      await trx.updateTable("step_runs")
+      await trx
+        .updateTable("step_runs")
         .set({ status: "running", ended_at: null, exit_code: null })
         .where("id", "=", b.stepRunReopen.id)
         .execute();
@@ -190,7 +196,8 @@ export function commitStepBoundary(db: Db, b: StepBoundary): Promise<number | nu
 
     if (b.stepRunUpdate) {
       const u = b.stepRunUpdate;
-      await trx.updateTable("step_runs")
+      await trx
+        .updateTable("step_runs")
         .set({
           status: u.status,
           exit_code: u.exit_code,
@@ -208,18 +215,20 @@ export function commitStepBoundary(db: Db, b: StepBoundary): Promise<number | nu
 
     if (b.sessionUpsert) {
       const s = b.sessionUpsert;
-      await trx.insertInto("task_sessions")
+      await trx
+        .insertInto("task_sessions")
         .values({ task_id: b.taskId, role: s.role, session_id: s.session_id })
         .onConflict((oc) =>
           oc.columns(["task_id", "role"]).doUpdateSet((eb) => ({
             session_id: eb.ref("excluded.session_id"),
-          }))
+          })),
         )
         .execute();
     }
 
     if (b.sessionDelete) {
-      await trx.deleteFrom("task_sessions")
+      await trx
+        .deleteFrom("task_sessions")
         .where("task_id", "=", b.taskId)
         .where("role", "=", b.sessionDelete.role)
         .execute();
@@ -232,7 +241,8 @@ export function commitStepBoundary(db: Db, b: StepBoundary): Promise<number | nu
         );
       }
       const o = b.outputs;
-      await trx.insertInto("step_outputs")
+      await trx
+        .insertInto("step_outputs")
         .values({
           step_run_id: stepRunId,
           last_stdout: tail(o.last_stdout),
@@ -244,7 +254,7 @@ export function commitStepBoundary(db: Db, b: StepBoundary): Promise<number | nu
             last_stdout: eb.ref("excluded.last_stdout"),
             last_stderr: eb.ref("excluded.last_stderr"),
             exit_code: eb.ref("excluded.exit_code"),
-          }))
+          })),
         )
         .execute();
     }

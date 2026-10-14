@@ -85,17 +85,15 @@ test("不正な遷移は例外を投げる", () => {
 
 test("全体枠を握るのは running だけ", () => {
   assert.ok(holdsGlobalSlot("running"));
-  for (
-    const s of [
-      "queued",
-      "suspended",
-      "paused",
-      "rate_limited",
-      "completed",
-      "failed",
-      "canceled",
-    ] as const
-  ) {
+  for (const s of [
+    "queued",
+    "suspended",
+    "paused",
+    "rate_limited",
+    "completed",
+    "failed",
+    "canceled",
+  ] as const) {
     assert.equal(holdsGlobalSlot(s), false, s);
   }
 });

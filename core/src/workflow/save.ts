@@ -63,13 +63,14 @@ function applyBranchChange(
   }
   let branchNode = stepMap.get(key, true);
   if (!isMap(branchNode)) {
-    const defaults = stepType === "guide"
-      ? {
-        goto: stepId,
-        maxAttempts: DEFAULT_GUIDE_MAX_ATTEMPTS,
-        feed: `{{ steps.${stepId}.last_stderr }}`,
-      }
-      : {};
+    const defaults =
+      stepType === "guide"
+        ? {
+            goto: stepId,
+            maxAttempts: DEFAULT_GUIDE_MAX_ATTEMPTS,
+            feed: `{{ steps.${stepId}.last_stderr }}`,
+          }
+        : {};
     stepMap.set(key, doc.createNode(defaults));
     branchNode = stepMap.get(key, true);
   }
@@ -166,11 +167,13 @@ export function applyWorkflowChanges(
   if (doc.errors.length > 0) {
     return {
       ok: false,
-      issues: [{
-        stepId: null,
-        field: null,
-        message: `YAMLとして読めません: ${doc.errors.map((e) => e.message).join(", ")}`,
-      }],
+      issues: [
+        {
+          stepId: null,
+          field: null,
+          message: `YAMLとして読めません: ${doc.errors.map((e) => e.message).join(", ")}`,
+        },
+      ],
     };
   }
 

@@ -15,7 +15,7 @@ test("pfdHash: キーの順が違っても同じ値", async () => {
   const b = example();
   b.processes[0] = Object.fromEntries(
     Object.entries(b.processes[0]).reverse(),
-  ) as typeof b.processes[0];
+  ) as (typeof b.processes)[0];
   assert.equal(await pfdHash(a), await pfdHash(b));
 });
 

@@ -37,8 +37,14 @@ test("宣言されたファイルの本文が返る", async () => {
 test("宣言された順に、宣言された数だけ返る", async () => {
   const wt = await worktree({ "a.md": "a", "b.md": "b" });
   const files = await readReviewFiles(wt, ["b.md", "missing.md", "a.md"]);
-  assert.deepEqual(files.map((f) => f.path), ["b.md", "missing.md", "a.md"]);
-  assert.deepEqual(files.map((f) => f.status), ["ok", "missing", "ok"]);
+  assert.deepEqual(
+    files.map((f) => f.path),
+    ["b.md", "missing.md", "a.md"],
+  );
+  assert.deepEqual(
+    files.map((f) => f.status),
+    ["ok", "missing", "ok"],
+  );
 });
 
 test("無いファイルは missing（中身も大きさも持たない）", async () => {

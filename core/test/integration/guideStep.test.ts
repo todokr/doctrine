@@ -43,8 +43,11 @@ beforeEach(async () => {
     branch: "doctrine/t1-t",
     priority: 2,
   });
-  await db.updateTable("tasks").set({ state: "running", worktree_path: repo })
-    .where("id", "=", "t1").execute();
+  await db
+    .updateTable("tasks")
+    .set({ state: "running", worktree_path: repo })
+    .where("id", "=", "t1")
+    .execute();
 });
 afterEach(async () => {
   await rm(root, { recursive: true, force: true });
@@ -79,12 +82,14 @@ function guideAt(location: { path: string; hunk?: string }) {
     why: "README に行を足す",
     what: [{ name: "README", summary: "d を足した", paths: ["README.md"] }],
     how: [{ body: "1 行足した" }],
-    readingOrder: [{
-      title: "README",
-      body: "足した行",
-      locations: [location],
-      refs: { decisions: [], risks: [], tests: [], diagrams: [] },
-    }],
+    readingOrder: [
+      {
+        title: "README",
+        body: "足した行",
+        locations: [location],
+        refs: { decisions: [], risks: [], tests: [], diagrams: [] },
+      },
+    ],
     decisions: [],
     risks: [],
     tests: [],
@@ -125,7 +130,10 @@ test("1回目が壊れた出力でも、同じ会話に理由を戻して2回目
   await go(WORKFLOW, adapter);
 
   assert.equal((await getTask(db, "t1"))?.state, "completed");
-  assert.deepEqual(adapter.calls.map((c) => c.kind), ["start", "resume"]);
+  assert.deepEqual(
+    adapter.calls.map((c) => c.kind),
+    ["start", "resume"],
+  );
   assert.equal(adapter.calls[0].sessionId, adapter.calls[1].sessionId);
   assert.match(adapter.calls[1].prompt, /構造化出力/);
   assert.deepEqual(adapter.calls[0].opts.jsonSchema, guideJsonSchema());
@@ -136,10 +144,13 @@ test("1回目が壊れた出力でも、同じ会話に理由を戻して2回目
   assert.deepEqual(written.guide, good);
 
   const runs = await listStepRuns(db, "t1");
-  assert.deepEqual(runs.map((r) => [r.step_id, r.status]), [
-    ["write-guide", "bounced"],
-    ["write-guide", "success"],
-  ]);
+  assert.deepEqual(
+    runs.map((r) => [r.step_id, r.status]),
+    [
+      ["write-guide", "bounced"],
+      ["write-guide", "success"],
+    ],
+  );
 });
 
 test("壊れた出力が続くと maxAttempts で failed になり、guide.json は書かれない", async () => {
@@ -166,13 +177,15 @@ test("スキーマは通るが存在しない hunk を指すガイドは失敗�
 test("スキーマは通るが、risks が存在しない hunk を指すガイドは失敗する", async () => {
   const bad = {
     ...(await validGuide()),
-    risks: [{
-      id: "r1",
-      kind: "breaks",
-      impact: "high",
-      body: "壊れうる",
-      locations: [{ path: "README.md", hunk: "h_00000000000000" }],
-    }],
+    risks: [
+      {
+        id: "r1",
+        kind: "breaks",
+        impact: "high",
+        body: "壊れうる",
+        locations: [{ path: "README.md", hunk: "h_00000000000000" }],
+      },
+    ],
   };
   const adapter = createMockAdapter({ result: { structuredOutput: bad } });
   await go(ONE_SHOT, adapter);

@@ -236,8 +236,11 @@ test("承認待ちで宣言があれば、宣言されたファイルの中身�
   await writeFile(join(wt, ".doctrine-out", "plan.md"), "# 計画\n");
 
   const db = await fixture(wt);
-  await db.updateTable("tasks").set({ state: "suspended", current_step_id: "review" })
-    .where("id", "=", "t1").execute();
+  await db
+    .updateTable("tasks")
+    .set({ state: "suspended", current_step_id: "review" })
+    .where("id", "=", "t1")
+    .execute();
   await run(db, { stepId: "review", status: "awaiting", endedAt: null });
 
   const { reviewFiles } = await buildTaskContext(db, (await getTask(db, "t1"))!, WORKFLOW);
@@ -255,8 +258,11 @@ test("承認待ちでなければ reviewFiles は空", async () => {
 
 test("ワークフロー定義が引けなくても、経緯は返る", async () => {
   const db = await fixture();
-  await db.updateTable("tasks").set({ state: "suspended", current_step_id: "review" })
-    .where("id", "=", "t1").execute();
+  await db
+    .updateTable("tasks")
+    .set({ state: "suspended", current_step_id: "review" })
+    .where("id", "=", "t1")
+    .execute();
   await run(db, {
     stepId: "review",
     status: "failed",
@@ -281,8 +287,11 @@ test("ワークフロー定義が引けないとき、実行中の行は例外�
   // engine.ts は command/agent ステップでも current_step_id を書き換えるので、
   // 定義が無いと「今のステップの行」に running の command/agent が混ざり得る。
   const db = await fixture();
-  await db.updateTable("tasks").set({ state: "running", current_step_id: "test" })
-    .where("id", "=", "t1").execute();
+  await db
+    .updateTable("tasks")
+    .set({ state: "running", current_step_id: "test" })
+    .where("id", "=", "t1")
+    .execute();
   await run(db, { stepId: "test", status: "running", endedAt: null });
 
   const ctx = await buildTaskContext(db, (await getTask(db, "t1"))!, null);
@@ -303,8 +312,11 @@ steps:
 
 test("approval 以外のステップで止まっていれば escalation を返す", async () => {
   const db = await fixture();
-  await db.updateTable("tasks").set({ state: "suspended", current_step_id: "check" })
-    .where("id", "=", "t1").execute();
+  await db
+    .updateTable("tasks")
+    .set({ state: "suspended", current_step_id: "check" })
+    .where("id", "=", "t1")
+    .execute();
   await run(db, { stepId: "check", status: "awaiting", endedAt: null });
 
   const c = await buildTaskContext(db, (await getTask(db, "t1"))!, ESCALATE_WORKFLOW);
@@ -313,8 +325,11 @@ test("approval 以外のステップで止まっていれば escalation を返�
 
 test("approval で止まっていれば escalation は null", async () => {
   const db = await fixture();
-  await db.updateTable("tasks").set({ state: "suspended", current_step_id: "review" })
-    .where("id", "=", "t1").execute();
+  await db
+    .updateTable("tasks")
+    .set({ state: "suspended", current_step_id: "review" })
+    .where("id", "=", "t1")
+    .execute();
   await run(db, { stepId: "review", status: "awaiting", endedAt: null });
 
   const c = await buildTaskContext(db, (await getTask(db, "t1"))!, WORKFLOW);
@@ -323,8 +338,11 @@ test("approval で止まっていれば escalation は null", async () => {
 
 test("ワークフロー定義が引けないとき、同じステップidに実行中の行と本物のレビュー行が混ざっても拾うのはレビューらしい status だけ", async () => {
   const db = await fixture();
-  await db.updateTable("tasks").set({ state: "suspended", current_step_id: "review" })
-    .where("id", "=", "t1").execute();
+  await db
+    .updateTable("tasks")
+    .set({ state: "suspended", current_step_id: "review" })
+    .where("id", "=", "t1")
+    .execute();
   await run(db, {
     stepId: "review",
     status: "success",

@@ -23,42 +23,42 @@ export type ServerEvent =
   | { event: "task.stateChanged"; task_id: string; from: string; to: string }
   | { event: "stepRun.started"; task_id: string; step_run_id: number; step_id: string }
   | {
-    event: "stepRun.finished";
-    task_id: string;
-    step_run_id: number;
-    step_id: string;
-    /** step_runs.status に記録した値。差し戻しは "bounced"（"failed" ではない）。 */
-    status: string;
-    /** status が "bounced" のときの差し戻し先。それ以外は null。 */
-    goto_step_id: string | null;
-    /** このステップの何回目の実行か。差し戻しなら「差し戻しが何回目か」でもある。 */
-    attempt: number;
-  }
+      event: "stepRun.finished";
+      task_id: string;
+      step_run_id: number;
+      step_id: string;
+      /** step_runs.status に記録した値。差し戻しは "bounced"（"failed" ではない）。 */
+      status: string;
+      /** status が "bounced" のときの差し戻し先。それ以外は null。 */
+      goto_step_id: string | null;
+      /** このステップの何回目の実行か。差し戻しなら「差し戻しが何回目か」でもある。 */
+      attempt: number;
+    }
   | { event: "log.line"; task_id: string; step_run_id: number; line: string }
   | {
-    event: "task.cleanedUp";
-    task_id: string;
-    /** removed = worktree を消した / refused = 消さずに残した（理由は warning） */
-    outcome: "removed" | "refused";
-    worktree_path: string | null;
-    warning?: string;
-  }
+      event: "task.cleanedUp";
+      task_id: string;
+      /** removed = worktree を消した / refused = 消さずに残した（理由は warning） */
+      outcome: "removed" | "refused";
+      worktree_path: string | null;
+      warning?: string;
+    }
   | { event: "daemon.warning"; at: string; message: string; task_id?: string }
   | {
-    event: "ratelimit.sample";
-    /** five_hour / seven_day。claude が枠を増やせば未知の値も来る。 */
-    window: string;
-    utilization: number;
-    /** 枠が明ける時刻（ISO 8601）。デーモンが生値を正規化してあり、読めない生値は null。 */
-    resets_at: string | null;
-  }
+      event: "ratelimit.sample";
+      /** five_hour / seven_day。claude が枠を増やせば未知の値も来る。 */
+      window: string;
+      utilization: number;
+      /** 枠が明ける時刻（ISO 8601）。デーモンが生値を正規化してあり、読めない生値は null。 */
+      resets_at: string | null;
+    }
   | {
-    event: "intake.stateChanged";
-    intake_id: string;
-    from: IntakeState;
-    to: IntakeState;
-    revising: boolean;
-  }
+      event: "intake.stateChanged";
+      intake_id: string;
+      from: IntakeState;
+      to: IntakeState;
+      revising: boolean;
+    }
   /** 状態以外（プロセスの状態・sub-issue・観測した PR・見張りの失敗）が変わった。アプリは intake.get を取り直す。 */
   | { event: "intake.updated"; intake_id: string }
   /** 調査・分解のエージェントの出力 1 行。intake.logs で追従している接続にだけ流れる。 */
@@ -172,11 +172,9 @@ export type WorkflowBranchDetail = {
 };
 
 /** workflow.get が返すステップ1つ。YAML に書かれた設定を種類ごとにそのまま返す。 */
-export type WorkflowStepDetail =
-  & { id: string; branch: WorkflowBranchDetail | null }
-  & (
-    | { type: "command"; run: string }
-    | {
+export type WorkflowStepDetail = { id: string; branch: WorkflowBranchDetail | null } & (
+  | { type: "command"; run: string }
+  | {
       type: "agent";
       prompt: string;
       session: string | null;
@@ -184,16 +182,16 @@ export type WorkflowStepDetail =
       permissionMode: string | null;
       allowedTools: string[] | null;
     }
-    | { type: "approval"; title: string; reviewFiles: string[] | null }
-    | { type: "poll"; run: string; interval: string }
-    | {
+  | { type: "approval"; title: string; reviewFiles: string[] | null }
+  | { type: "poll"; run: string; interval: string }
+  | {
       type: "guide";
       session: string;
       model: string | null;
       permissionMode: string | null;
       allowedTools: string[] | null;
     }
-  );
+);
 
 /**
  * workflow.list の1件。name は .doctrine/workflows/<name>.yaml の <name>。
@@ -331,10 +329,10 @@ export type WorkspaceSummary = {
   tracker:
     | { ok: true; config: TrackerConfig }
     | {
-      ok: false;
-      reason: "workspace_config_missing" | "workspace_config_invalid";
-      message: string;
-    };
+        ok: false;
+        reason: "workspace_config_missing" | "workspace_config_invalid";
+        message: string;
+      };
 };
 
 /** project.yaml の tracker（core/src/workflow/project.ts の TrackerConfig と同じ形）。 */
@@ -385,10 +383,11 @@ export type ProjectConfigInput = {
  * どちらも交差型で表すので、「R / C でないのに old_path」「バイナリなのに additions」
  * という読み方を型が許さない。
  */
-export type DiffFileMeta =
-  & { path: string }
-  & ({ status: "R" | "C"; old_path: string } | { status: "A" | "M" | "D" })
-  & ({ binary: false; additions: number; deletions: number } | { binary: true });
+export type DiffFileMeta = { path: string } & (
+  | { status: "R" | "C"; old_path: string }
+  | { status: "A" | "M" | "D" }
+) &
+  ({ binary: false; additions: number; deletions: number } | { binary: true });
 
 /** task.diff の応答（core/src/domain/diff.ts の TaskDiff）。 */
 export type TaskDiff = {
@@ -431,13 +430,13 @@ export type TaskGuide =
   | { status: "too_large"; size: number }
   | { status: "broken"; issues: string[] }
   | {
-    status: "ok";
-    guide: Guide;
-    createdAt: string;
-    tree: string;
-    worktreeTree: string;
-    stale: boolean;
-  };
+      status: "ok";
+      guide: Guide;
+      createdAt: string;
+      tree: string;
+      worktreeTree: string;
+      stale: boolean;
+    };
 
 type ReviewBase = {
   stepRunId: number;
@@ -538,10 +537,10 @@ export type IntakeRun = {
   permission_denials: StepRunDenials | null;
 };
 
-export type IntakeProcessView =
-  & { id: string }
-  & ProcessStatus
-  & { sub_issue_url: string | null; task_ids: string[] };
+export type IntakeProcessView = { id: string } & ProcessStatus & {
+    sub_issue_url: string | null;
+    task_ids: string[];
+  };
 
 /**
  * intake.get の応答。drafts は全部の案の見出しだけを持つ。中身は最新の案（latest_draft）だけに
