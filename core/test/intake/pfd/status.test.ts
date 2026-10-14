@@ -4,6 +4,7 @@ import type { PrFact } from "../../../../shared/intake/processStatus.ts";
 import type { TaskState } from "../../../src/db/tasks.ts";
 import {
   computeProcessStatuses,
+  directProcessStatus,
   goalReached,
   type ProcessProgress,
   type StatusInput,
@@ -282,4 +283,32 @@ test("computeProcessStatuses: baseBranches に無い agent のプロセスの PR
     state: "waiting",
     missing: ["new-table", "metric-definition"],
   });
+});
+
+const directProgress = (o: Partial<ProcessProgress> = {}): ProcessProgress => ({
+  task: { id: "t1", state: "running" },
+  pr: null,
+  subIssueUrl: null,
+  humanDone: null,
+  ...o,
+});
+
+test("direct: タスクと PR だけから running / pr_open / merged / needs_attention を求める", () => {
+  const state = (o: Partial<ProcessProgress>) =>
+    directProcessStatus(directProgress(o), "main").state;
+  assert.equal(state({}), "running");
+  assert.equal(state({ pr: pr("OPEN") }), "pr_open");
+  assert.equal(state({ pr: pr("MERGED") }), "merged");
+  assert.equal(state({ pr: pr("MERGED", "release") }), "needs_attention");
+  assert.equal(state({ pr: pr("CLOSED") }), "needs_attention");
+  assert.equal(state({ task: { id: "t1", state: "completed" } }), "needs_attention");
+  assert.equal(state({ task: { id: "t1", state: "failed" } }), "needs_attention");
+  assert.equal(directProcessStatus(directProgress(), "main").id, "main");
+});
+
+test("direct: タスクが無ければ投げる", () => {
+  assert.throws(
+    () => directProcessStatus(directProgress({ task: null }), "main"),
+    /タスクがありません/,
+  );
 });

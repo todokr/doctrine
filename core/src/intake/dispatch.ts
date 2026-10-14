@@ -1,10 +1,15 @@
+import { DIRECT_PROCESS_ID } from "../../../shared/intake/processStatus.ts";
+import type { IssueDetail } from "../../../shared/intake/tracker.ts";
 import { decisionTexts } from "../../../shared/intake/answerText.ts";
 import type { Pfd } from "../../../shared/intake/pfd.ts";
 import {
   getDraft,
   getIntake,
+  insertIntake,
+  insertProcesses,
   latestApproval,
   listProcesses,
+  type NewIntake,
   replaceCurrentTask,
 } from "../db/intakes.ts";
 import { loadQuestionSets } from "./questionSet.ts";
@@ -268,4 +273,67 @@ export async function redispatchProcess(
   const taskId = await dispatchProcess(db, src, row, project, pin);
   if (taskId === null) throw new Error("ほかの操作が先にタスクを置き換えました");
   return { taskId, replacedTaskId: row.current_task_id };
+}
+
+/** direct のタスクの prompt。Issue の本文の前に、題と URL を置く。 */
+export function directTaskPrompt(issue: Pick<IssueDetail, "url" | "title" | "body">): string {
+  return `# ${issue.title}\n\n${issue.url}\n\n${issue.body}`;
+}
+
+/** direct の Intake のタスク。issue_url は親 Issue そのもので、sub-issue は無い。 */
+export function directTask(o: {
+  intakeId: string;
+  issueUrl: string;
+  project: ProjectRow;
+  title: string;
+  prompt: string;
+  pin: WorkflowPin;
+}): NewTask {
+  const id = crypto.randomUUID();
+  return {
+    id,
+    project_id: o.project.id,
+    title: o.title,
+    prompt: o.prompt,
+    workflow_name: o.project.default_workflow,
+    branch: branchNameFor(id, o.title),
+    priority: 2,
+    intake_id: o.intakeId,
+    intake_process_id: DIRECT_PROCESS_ID,
+    issue_url: o.issueUrl,
+    parent_issue_url: null,
+    ...o.pin,
+  };
+}
+
+/**
+ * direct の Intake を、プロセス main とそのタスクごと 1 トランザクションで入れる（spec 5.1）。
+ * 調査・分解・承認・sub-issue の同期・投入はどれも通らない。
+ */
+export async function insertDirectIntake(
+  db: Db,
+  o: {
+    intake: Omit<NewIntake, "mode">;
+    project: ProjectRow;
+    issue: Pick<IssueDetail, "url" | "title" | "body">;
+    pin: WorkflowPin;
+  },
+): Promise<IntakeRow> {
+  return await db.transaction().execute(async (trx) => {
+    const row = await insertIntake(trx, { ...o.intake, mode: "direct" });
+    await insertProcesses(trx, row.id, [DIRECT_PROCESS_ID]);
+    const task = directTask({
+      intakeId: row.id,
+      issueUrl: row.issue_url,
+      project: o.project,
+      title: o.issue.title,
+      prompt: directTaskPrompt(o.issue),
+      pin: o.pin,
+    });
+    await insertTask(trx, task);
+    if (!await replaceCurrentTask(trx, row.id, DIRECT_PROCESS_ID, null, task.id)) {
+      throw new Error("direct のタスクを紐づけられませんでした");
+    }
+    return row;
+  });
 }

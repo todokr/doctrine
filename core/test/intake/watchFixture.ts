@@ -5,12 +5,16 @@ import {
   insertIntake,
   insertIntakeRun,
   insertProcesses,
+  listProcesses,
   updateIntake,
 } from "../../src/db/intakes.ts";
 import { openDb } from "../../src/db/migrate.ts";
 import type { Db } from "../../src/db/schema.ts";
 import { insertProject } from "../../src/db/tasks.ts";
 import { seedProject } from "../helpers/project.ts";
+import { insertDirectIntake } from "../../src/intake/dispatch.ts";
+import { pinOf } from "../../src/workflow/load.ts";
+import { fakeWorkflowLoader } from "../helpers/watcher.ts";
 import { pfdHash } from "../../src/intake/pfd/hash.ts";
 import { example } from "./pfd/fixture.ts";
 
@@ -76,4 +80,30 @@ export async function insertActiveIntake(
   await insertProcesses(db, "i1", pfd.processes.map((p) => p.id));
   await updateIntake(db, "i1", { state: "active" });
   return { runId };
+}
+
+export const DIRECT_WORKFLOW =
+  'name: feature\nsteps:\n  - id: a\n    type: command\n    run: "true"\n  - id: review\n    type: approval\n    title: 見て\n';
+
+/** direct で開始した Intake（id は d1、親 Issue は PARENT_URL）を 1 つ持つ DB。 */
+export async function seedDirect(): Promise<
+  { db: Db; projectId: number; workspaceId: number; taskId: string }
+> {
+  const db = await openDb(":memory:");
+  const project = await seedProject(db, { path: "/repo", default_workflow: "feature" });
+  const loaded = await fakeWorkflowLoader(DIRECT_WORKFLOW)("/repo", "feature");
+  await insertDirectIntake(db, {
+    intake: {
+      id: "d1",
+      workspace_id: project.workspace_id,
+      issue_url: PARENT_URL,
+      issue_node_id: "I_1",
+      issue_title: "直す",
+    },
+    project,
+    issue: { url: PARENT_URL, title: "直す", body: "本文" },
+    pin: pinOf(loaded, project),
+  });
+  const taskId = (await listProcesses(db, "d1"))[0].current_task_id!;
+  return { db, projectId: project.id, workspaceId: project.workspace_id, taskId };
 }

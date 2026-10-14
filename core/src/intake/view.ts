@@ -14,10 +14,15 @@ import { getProject, getTask } from "../db/tasks.ts";
 import { listStepRuns } from "../db/stepRuns.ts";
 import { taskWorkflow, toStepViews, type WorkflowLoader } from "../workflow/load.ts";
 import { buildRail, type RailNode } from "../../../shared/rail.ts";
-import { baseBranchesOf, projectsOfProcesses } from "./processProject.ts";
+import { baseBranchesOf, directBaseBranch, projectsOfProcesses } from "./processProject.ts";
 import type { AttentionReason, CommentReply } from "../../../shared/intake/decomposer.ts";
 import type { Pfd } from "../../../shared/intake/pfd.ts";
-import type { PrFact, ProcessStatus } from "../../../shared/intake/processStatus.ts";
+import {
+  DIRECT_PROCESS_ID,
+  type PrFact,
+  type ProcessStatus,
+  type ProcessStatusEntry,
+} from "../../../shared/intake/processStatus.ts";
 import type { IntakeState } from "../../../shared/intake/state.ts";
 import type {
   IntakeDetail,
@@ -27,7 +32,7 @@ import type {
   StepRunDenials,
   WatchHealth,
 } from "../../../shared/protocol.ts";
-import { computeProcessStatuses, type ProcessProgress } from "./pfd/status.ts";
+import { computeProcessStatuses, directProcessStatus, type ProcessProgress } from "./pfd/status.ts";
 
 /** 人の手が要る状態か（spec 5 章）。active は、あなたの番か要確認のプロセスがあるときだけ。 */
 export function needsHuman(state: IntakeState, statuses: readonly ProcessStatus[]): boolean {
@@ -72,8 +77,22 @@ export async function processProgressOf(
   return progress;
 }
 
-/** 承認の前は空配列。承認後は、承認された案と DB の進み具合から組む。 */
+/** direct の Intake のプロセス main の状態（spec 5.3）。 */
+export async function directStatusOf(db: Db, intakeId: string): Promise<ProcessStatusEntry> {
+  const progress = (await processProgressOf(db, intakeId)).get(DIRECT_PROCESS_ID);
+  if (!progress) throw new Error(`direct の Intake ${intakeId} にプロセスがありません`);
+  return directProcessStatus(progress, await directBaseBranch(db, intakeId));
+}
+
+/**
+ * plan は承認の前は空配列。承認後は、承認された案と DB の進み具合から組む。
+ * direct はプロセス main の 1 つ。
+ */
 async function processStatusesOf(db: Db, row: IntakeRow): Promise<ProcessFacts[]> {
+  if (row.mode === "direct") {
+    const status = await directStatusOf(db, row.id);
+    return [{ id: status.id, status, subIssueUrl: null }];
+  }
   const approval = await latestApproval(db, row.id);
   if (!approval) return [];
   const pfd = JSON.parse((await getDraft(db, approval.draft_id))!.pfd) as Pfd;
