@@ -45,8 +45,10 @@ export type PfdNode = {
   lines: string[];
   /** ラベルの最初の行のベースライン。行は LINE_H ずつ下げる */
   labelY: number;
-  /** 種類の印（◎・既存・決定・人・🔒）。ラベルの上の小さな行に描く。Execution の図のプロセスは持たない */
+  /** 種類の印（🏁・既存・決定・人・🔒）。プロセスはラベルの上の小さな行、成果物は badge に描く。Execution の図のプロセスは持たない */
   marks: string[];
+  /** 成果物の印を描く札。箱の左上の角にまたがる。印の無い成果物とプロセスは null */
+  badge: { x: number; y: number; w: number; h: number } | null;
   /** Execution の図のエージェントのプロセスだけが持つ、いまのタスクの帯。タスクが無ければ []。それ以外は null */
   rail: RailNode[] | null;
   /** Execution の図のプロセスの状態の文言と、そのベースライン。状態が無ければ null */
@@ -149,11 +151,17 @@ export function statusNote(status: ProcessStatus): string | null {
   return null;
 }
 
-/** Execution の図のプロセスの状態の文言。「word · detail」と 1 行に描く。awaiting はいまのタスクの承認待ち */
-export type StatusLine = { word: string; detail: string | null; awaiting: boolean };
+/**
+ * Execution の図のプロセスの状態の文言。状態の色の点（STATUS_DOT）と text を 1 行に描く。
+ * word は図に描かず読み上げに使う。awaiting はいまのタスクの承認待ち
+ */
+export type StatusLine = { word: string; text: string; awaiting: boolean };
+
+export const STATUS_DOT = "●";
 
 /**
- * 状態の言葉と、添える語（spec 6.2）。実行中はいまのステップの名前、要確認と着手可能は statusNote。
+ * 状態の言葉と、点の後ろに描く語（spec 6.2）。実行中はいまのステップの名前、要確認と着手可能は statusNote。
+ * 添える語が無ければ点だけでは状態が読めないので、状態の言葉を描く。
  * 実行中でいまのタスクが承認待ち（suspended）なら、言葉をタスク画面と同じ「レビュー待ち」にする（プロセスの状態は running のまま）。
  * 1 行が max に収まらなければ添える語を … で切る
  */
@@ -161,18 +169,27 @@ export function statusLine(status: ProcessStatus, rail: readonly RailNode[] | nu
   const awaiting = suspended && status.state === "running";
   const word = awaiting ? "レビュー待ち" : LOOK[status.state].word;
   const detail = status.state === "running" ? rail?.find((r) => r.current)?.id ?? null : statusNote(status);
-  if (detail === null) return { word, detail, awaiting };
-  const fits = (d: string) => textWidth(`${word} · ${d}`) <= max;
-  if (fits(detail)) return { word, detail, awaiting };
+  if (detail === null) return { word, text: word, awaiting };
+  const fits = (d: string) => textWidth(`${STATUS_DOT} ${d}`) <= max;
+  if (fits(detail)) return { word, text: detail, awaiting };
   let cut = [...detail];
   while (cut.length > 0 && !fits(`${cut.join("")}…`)) cut = cut.slice(0, -1);
-  return { word, detail: `${cut.join("")}…`, awaiting };
+  return { word, text: `${cut.join("")}…`, awaiting };
 }
 
 // 箱の寸法。幅は種類ごとに固定し、長いラベルは行を増やして収める
-const BOX_W = { artifact: 168, process: 188 } as const;
-const BOX_PAD_X = 8;
+const BOX_W = { artifact: 168, process: 204 } as const;
+/** ラベルの左右の余白。プロセスは両端が半円なので、丸みの分を広く取る */
+const BOX_PAD_X = { artifact: 8, process: 20 } as const;
 const BOX_PAD_Y = 7;
+/** 成果物の上下の余白。印は札にして箱の外へ出すので、印の行を取らない */
+const ARTIFACT_PAD_Y = 9;
+/** 成果物の印の札。高さの半分を箱の上に出し、左端を箱の左端から BADGE_OUT だけ外に出す */
+const BADGE_H = 14;
+const BADGE_OUT = 6;
+const BADGE_PAD_X = 5;
+/** 札の文字の大きさ（px）。textWidth の 10.5px からの比で幅を見積もる */
+const BADGE_FONT = 9;
 const LINE_H = 13;
 const MARK_H = 12;
 const MAX_LINES = 3;
@@ -192,7 +209,7 @@ const STATUS_DESCENT = 3;
 export const RAIL_BAR_H = 6;
 const RAIL_GAP = 2;
 /** 状態の文言を収める幅。両端の丸みの分を左右から引く */
-const STATUS_INSET = 12;
+const STATUS_INSET = 20;
 
 /** ラベルの描画幅の見積もり（px）。10.5px の文字で、ASCII は 6、それ以外は 10.5 */
 export function textWidth(s: string): number {
@@ -327,7 +344,7 @@ export function buildPfdView(
   const marksOf = (s: (typeof sources)[number]): string[] =>
     exec && s.kind === "process" ? [] : [
       o.frozen?.has(pfdKey(s.kind, s.id)) && "🔒",
-      s.goal && "◎",
+      s.goal && "🏁",
       s.given && !s.decision && "既存",
       s.decision && "決定",
       s.human && "人",
@@ -337,7 +354,7 @@ export function buildPfdView(
   const sized = new Map(keys.map((k): [string, { w: number; h: number; lines: string[]; marks: string[]; labelDy: number; statusDy: number | null }] => {
     const s = byKey.get(k)!;
     const w = BOX_W[s.kind];
-    const lines = wrap(s.name, w - BOX_PAD_X * 2);
+    const lines = wrap(s.name, w - BOX_PAD_X[s.kind] * 2);
     const marks = marksOf(s);
     if (exec && s.kind === "process") {
       const labelDy = EXEC_PAD_Y + LABEL_ASCENT;
@@ -345,6 +362,9 @@ export function buildPfdView(
       // 人のプロセスは帯を描かない
       const bottom = s.human ? statusDy + STATUS_DESCENT : statusDy + RAIL_TOP + RAIL_BAR_H;
       return [k, { w, h: bottom + EXEC_PAD_Y, lines, marks, labelDy, statusDy }];
+    }
+    if (s.kind === "artifact") {
+      return [k, { w, h: ARTIFACT_PAD_Y * 2 + lines.length * LINE_H, lines, marks, labelDy: ARTIFACT_PAD_Y + LABEL_ASCENT, statusDy: null }];
     }
     // 印の行は、印が無くても取る。状態の印（承認）や 🔒（改訂）が付いたときに箱の高さが変わらないように
     const h = BOX_PAD_Y * 2 + MARK_H + lines.length * LINE_H;
@@ -396,6 +416,9 @@ export function buildPfdView(
       lines,
       labelY: y + labelDy,
       marks,
+      badge: s.kind === "artifact" && marks.length > 0
+        ? { x: x - BADGE_OUT, y: y - BADGE_H / 2, w: (textWidth(marks.join(" ")) * BADGE_FONT) / 10.5 + BADGE_PAD_X * 2, h: BADGE_H }
+        : null,
       rail,
       status: status === undefined ? null : { ...statusLine(status, rail, w - STATUS_INSET * 2, exec?.suspended?.has(s.id)), y: y + statusDy! },
       attention: s.kind === "process" && (exec?.attention?.has(s.id) ?? false),
