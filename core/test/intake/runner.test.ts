@@ -1,4 +1,6 @@
-import { afterEach, beforeEach, test } from "@std/testing/bdd";
+import { writeFileSync } from "node:fs";
+import { mkdir, readFile, stat } from "node:fs/promises";
+import { afterEach, beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import { createMockAdapter } from "../../src/adapter/mock.ts";
@@ -95,10 +97,10 @@ test("(a) 調査が質問を返したら回答待ちになる", async () => {
   assert.equal(call.opts.permissionMode, undefined);
 });
 
-test("intakeAllowedTools は書き込みと gh・dctl を含まない", () => {
+test("intakeAllowedTools は書き込みと gh を含まない", () => {
   for (const t of intakeAllowedTools(["api", "web"])) {
     assert.ok(!/^(Write|Edit|NotebookEdit)/.test(t), t);
-    assert.ok(!/gh|dctl/.test(t), t);
+    assert.ok(!/gh/.test(t), t);
   }
 });
 
@@ -227,7 +229,10 @@ test("(b) 検証落ちが 3 回続くと要確認になる", async () => {
   assert.equal(reason.runId, runs[2].id);
   assert.equal((await listDrafts(f.db, "i1")).length, 0);
   assert.equal(adapter.calls.length, 3);
-  assert.deepEqual(runs.map((r) => r.attempt), [1, 2, 3]);
+  assert.deepEqual(
+    runs.map((r) => r.attempt),
+    [1, 2, 3],
+  );
 });
 
 test("(b) 調査の実行が PFD を返すと検証落ちになる", async () => {
@@ -325,7 +330,7 @@ test("リポジトリを書き換えたら出力を捨てて戻し、要確認�
   const inner = createMockAdapter({ result: questionsOut([question("q1")]) });
   const adapter: AgentAdapter = {
     start(prompt, o) {
-      Deno.writeTextFileSync(join(o.cwd, "repo", "x.txt"), "x");
+      writeFileSync(join(o.cwd, "repo", "x.txt"), "x");
       return inner.start(prompt, o);
     },
     resume: inner.resume,
@@ -338,7 +343,7 @@ test("リポジトリを書き換えたら出力を捨てて戻し、要確認�
   const reason = await attentionOf();
   assert.equal(reason.kind, "wrote_repository");
   assert.deepEqual(reason.paths, ["repo/x.txt"]);
-  await assert.rejects(Deno.stat(join(intake.worktree_path!, "repo", "x.txt")));
+  await assert.rejects(stat(join(intake.worktree_path!, "repo", "x.txt")));
   assert.equal((await listQuestionSets(f.db, "i1")).length, 0);
 });
 
@@ -352,10 +357,13 @@ test("2 プロジェクトの workspace では、親ディレクトリの下に�
   const expectedParent = await canonical(join(f.root, "state", "worktrees", "intake-i1"));
   assert.equal(intake.worktree_path, expectedParent);
   assert.equal(adapter.calls[0].opts.cwd, intake.worktree_path);
-  await Deno.stat(join(intake.worktree_path!, "repo", "README.md"));
-  await Deno.stat(join(intake.worktree_path!, "b", "README.md"));
+  await stat(join(intake.worktree_path!, "repo", "README.md"));
+  await stat(join(intake.worktree_path!, "b", "README.md"));
   const children = await listIntakeWorktrees(intake.worktree_path!);
-  assert.deepEqual(children.map((c) => c.name), ["b", "repo"]);
+  assert.deepEqual(
+    children.map((c) => c.name),
+    ["b", "repo"],
+  );
   assert.equal(intake.state, "answering");
 });
 
@@ -364,8 +372,8 @@ test("どれか 1 つの worktree の書き換えで wrote_repository になり�
   const inner = createMockAdapter({ result: questionsOut([question("q1")]) });
   const adapter: AgentAdapter = {
     start(prompt, o) {
-      Deno.writeTextFileSync(join(o.cwd, "b", "x.txt"), "x");
-      Deno.writeTextFileSync(join(o.cwd, "repo", "README.md"), "changed\n");
+      writeFileSync(join(o.cwd, "b", "x.txt"), "x");
+      writeFileSync(join(o.cwd, "repo", "README.md"), "changed\n");
       return inner.start(prompt, o);
     },
     resume: inner.resume,
@@ -378,18 +386,15 @@ test("どれか 1 つの worktree の書き換えで wrote_repository になり�
   const reason = await attentionOf();
   assert.equal(reason.kind, "wrote_repository");
   assert.deepEqual(reason.paths, ["b/x.txt", "repo/README.md"]);
-  await assert.rejects(Deno.stat(join(intake.worktree_path!, "b", "x.txt")));
-  assert.equal(
-    await Deno.readTextFile(join(intake.worktree_path!, "repo", "README.md")),
-    "x\n",
-  );
+  await assert.rejects(stat(join(intake.worktree_path!, "b", "x.txt")));
+  assert.equal(await readFile(join(intake.worktree_path!, "repo", "README.md"), "utf8"), "x\n");
   assert.equal((await listQuestionSets(f.db, "i1")).length, 0);
 });
 
 test("外されたプロジェクトの worktree も書き換えを見て巻き戻し、残しておく", async () => {
   const bRepo = await makeRepo(join(f.root, "b"), { "README.md": "y\n" });
   const parent = intakeWorktreePathFor("i1");
-  await Deno.mkdir(parent, { recursive: true });
+  await mkdir(parent, { recursive: true });
   await createDetachedWorktree({
     repoPath: bRepo,
     worktreePath: join(parent, "b"),
@@ -400,7 +405,7 @@ test("外されたプロジェクトの worktree も書き換えを見て巻き�
   const inner = createMockAdapter({ result: questionsOut([question("q1")]) });
   const adapter: AgentAdapter = {
     start(prompt, o) {
-      Deno.writeTextFileSync(join(o.cwd, "b", "x.txt"), "x");
+      writeFileSync(join(o.cwd, "b", "x.txt"), "x");
       return inner.start(prompt, o);
     },
     resume: inner.resume,
@@ -412,9 +417,9 @@ test("外されたプロジェクトの worktree も書き換えを見て巻き�
   const reason = await attentionOf();
   assert.equal(reason.kind, "wrote_repository");
   assert.deepEqual(reason.paths, ["b/x.txt"]);
-  await assert.rejects(Deno.stat(join(intake.worktree_path!, "b", "x.txt")));
-  await Deno.stat(join(intake.worktree_path!, "b"));
-  await Deno.stat(join(intake.worktree_path!, "repo"));
+  await assert.rejects(stat(join(intake.worktree_path!, "b", "x.txt")));
+  await stat(join(intake.worktree_path!, "b"));
+  await stat(join(intake.worktree_path!, "repo"));
 
   const tools = inner.calls[0].opts.allowedTools!;
   assert.ok(tools.includes("Bash(git -C repo log:*)"));
@@ -473,7 +478,13 @@ test("attempt は新しく立てるたびに進み、上限待ちからの再開
   const b = await enqueueIntakeRun(f.db, "i1", "investigate", opts(true));
   const c = await enqueueIntakeRun(f.db, "i1", "investigate", opts());
   const runs = await listIntakeRuns(f.db, "i1");
-  assert.deepEqual(runs.map((r) => r.id), [a, b, c]);
-  assert.deepEqual(runs.map((r) => r.attempt), [1, 1, 2]);
+  assert.deepEqual(
+    runs.map((r) => r.id),
+    [a, b, c],
+  );
+  assert.deepEqual(
+    runs.map((r) => r.attempt),
+    [1, 1, 2],
+  );
   assert.equal(runs[0].log_path, join(f.logRoot, "intake-i1", "investigate.1.log"));
 });

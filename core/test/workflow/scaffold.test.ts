@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, test } from "@std/testing/bdd";
+import { afterEach, beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -62,17 +62,20 @@ test("雛形は PR を開くステップを持たない", () => {
 });
 
 test("雛形は 4 章の手順の順に並んでいる", () => {
-  assert.deepEqual(stepsOf().map((s) => s.id), [
-    "plan",
-    "plan-review",
-    "plan-gate",
-    "implement",
-    "verify",
-    "agent-review",
-    "review-gate",
-    "guide",
-    "review",
-  ]);
+  assert.deepEqual(
+    stepsOf().map((s) => s.id),
+    [
+      "plan",
+      "plan-review",
+      "plan-gate",
+      "implement",
+      "verify",
+      "agent-review",
+      "review-gate",
+      "guide",
+      "review",
+    ],
+  );
 });
 
 test("役割はエージェントごとに分かれている", () => {

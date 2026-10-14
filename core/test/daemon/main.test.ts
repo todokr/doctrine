@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, test } from "@std/testing/bdd";
+import { afterEach, beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
 import { chmod, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -12,7 +12,7 @@ import { createMockAdapter } from "../../src/adapter/mock.ts";
 import type { DaemonContext } from "../../src/daemon/handlers.ts";
 import { constTrackerOf, fakeTracker } from "../helpers/tracker.ts";
 import { noopWatcher } from "../helpers/watcher.ts";
-import { call } from "../../src/cli/dctl.ts";
+import { call } from "../helpers/rpc.ts";
 import type { DaemonSlots, Warning } from "../../../shared/protocol.ts";
 
 let root: string;
@@ -27,7 +27,9 @@ afterEach(async () => {
   for (const c of children.splice(0)) {
     try {
       c.kill("SIGKILL");
-    } catch { /* already gone */ }
+    } catch {
+      /* already gone */
+    }
   }
   await rm(root, { recursive: true, force: true });
 });
@@ -41,10 +43,11 @@ afterEach(async () => {
  */
 async function bindAndKill(path: string): Promise<void> {
   const child = spawn(
-    Deno.execPath(),
+    process.execPath,
     [
-      "eval",
-      `import { createServer } from "node:net"; createServer(() => {}).listen(Deno.args[0], () => { console.log("ready"); }); setInterval(() => {}, 60000);`,
+      "--input-type=module",
+      "-e",
+      `import { createServer } from "node:net"; createServer(() => {}).listen(process.argv[1], () => { console.log("ready"); }); setInterval(() => {}, 60000);`,
       path,
     ],
     { stdio: ["ignore", "pipe", "ignore"] },
@@ -135,8 +138,8 @@ test("ソケットに繋げるか判定できない（権限拒否など）な�
 
 test("状態ディレクトリが存在しなくても、0o700 で作って起動できる", async () => {
   const state = join(root, "nested", "state");
-  const prev = Deno.env.get("DOCTRINE_STATE_DIR");
-  Deno.env.set("DOCTRINE_STATE_DIR", state);
+  const prev = process.env.DOCTRINE_STATE_DIR;
+  process.env.DOCTRINE_STATE_DIR = state;
   try {
     const d = await startDaemon({
       socketPath: join(root, "dctld.sock"),
@@ -150,8 +153,8 @@ test("状態ディレクトリが存在しなくても、0o700 で作って起�
     assert.equal(s.mode & 0o777, 0o700, "DBを置くディレクトリは本人以外に見せない");
     await stat(join(state, "doctrine.db"));
   } finally {
-    if (prev === undefined) Deno.env.delete("DOCTRINE_STATE_DIR");
-    else Deno.env.set("DOCTRINE_STATE_DIR", prev);
+    if (prev === undefined) delete process.env.DOCTRINE_STATE_DIR;
+    else process.env.DOCTRINE_STATE_DIR = prev;
   }
 });
 
@@ -229,7 +232,7 @@ test("設定ファイルが無ければ全体の実行枠 4 で起動する", as
   });
   daemons.push(d);
 
-  const slots = await call(sock, "daemon.slots", {}) as DaemonSlots;
+  const slots = (await call(sock, "daemon.slots", {})) as DaemonSlots;
   assert.equal(slots.global_limit, 4);
 });
 
@@ -246,7 +249,7 @@ test("設定ファイルがあればその値で起動する", async () => {
   });
   daemons.push(d);
 
-  const slots = await call(sock, "daemon.slots", {}) as DaemonSlots;
+  const slots = (await call(sock, "daemon.slots", {})) as DaemonSlots;
   assert.equal(slots.global_limit, 7);
 });
 
@@ -263,9 +266,9 @@ test("壊れた設定ファイルでも既定値で起動し、警告を出す",
   });
   daemons.push(d);
 
-  const slots = await call(sock, "daemon.slots", {}) as DaemonSlots;
+  const slots = (await call(sock, "daemon.slots", {})) as DaemonSlots;
   assert.equal(slots.global_limit, 4);
-  const warnings = await call(sock, "daemon.warnings", {}) as Warning[];
+  const warnings = (await call(sock, "daemon.warnings", {})) as Warning[];
   assert.ok(warnings.some((w) => /設定ファイル/.test(w.message)));
 });
 
@@ -295,7 +298,7 @@ test("daemon.setGlobalLimit で変えた値は再起動しても残る", async (
   });
   daemons.push(d2);
 
-  const slots = await call(sock, "daemon.slots", {}) as DaemonSlots;
+  const slots = (await call(sock, "daemon.slots", {})) as DaemonSlots;
   assert.equal(slots.global_limit, 6);
 });
 
@@ -303,10 +306,10 @@ test("configPath を渡さなければ全体の実行枠は設定ディレクト
   const sock = join(root, "dctld.sock");
   const state = join(root, "state");
   const configDir = join(root, "nested", "config");
-  const prevState = Deno.env.get("DOCTRINE_STATE_DIR");
-  const prevConfig = Deno.env.get("DOCTRINE_CONFIG_DIR");
-  Deno.env.set("DOCTRINE_STATE_DIR", state);
-  Deno.env.set("DOCTRINE_CONFIG_DIR", configDir);
+  const prevState = process.env.DOCTRINE_STATE_DIR;
+  const prevConfig = process.env.DOCTRINE_CONFIG_DIR;
+  process.env.DOCTRINE_STATE_DIR = state;
+  process.env.DOCTRINE_CONFIG_DIR = configDir;
   try {
     const d1 = await startDaemon({ socketPath: sock, tickMs: 1_000_000 });
     daemons.push(d1);
@@ -320,12 +323,12 @@ test("configPath を渡さなければ全体の実行枠は設定ディレクト
 
     const d2 = await startDaemon({ socketPath: sock, tickMs: 1_000_000 });
     daemons.push(d2);
-    const slots = await call(sock, "daemon.slots", {}) as DaemonSlots;
+    const slots = (await call(sock, "daemon.slots", {})) as DaemonSlots;
     assert.equal(slots.global_limit, 6);
   } finally {
-    if (prevState === undefined) Deno.env.delete("DOCTRINE_STATE_DIR");
-    else Deno.env.set("DOCTRINE_STATE_DIR", prevState);
-    if (prevConfig === undefined) Deno.env.delete("DOCTRINE_CONFIG_DIR");
-    else Deno.env.set("DOCTRINE_CONFIG_DIR", prevConfig);
+    if (prevState === undefined) delete process.env.DOCTRINE_STATE_DIR;
+    else process.env.DOCTRINE_STATE_DIR = prevState;
+    if (prevConfig === undefined) delete process.env.DOCTRINE_CONFIG_DIR;
+    else process.env.DOCTRINE_CONFIG_DIR = prevConfig;
   }
 });

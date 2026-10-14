@@ -52,8 +52,13 @@ export function holdsGlobalSlot(s: TaskState): boolean {
  * suspended / paused / rate_limited / waiting のタスクは worktree とブランチを生かしたままなので、理由が消えていない。
  */
 export function holdsProjectSlot(s: TaskState): boolean {
-  return s === "running" || s === "suspended" || s === "paused" || s === "rate_limited" ||
-    s === "waiting";
+  return (
+    s === "running" ||
+    s === "suspended" ||
+    s === "paused" ||
+    s === "rate_limited" ||
+    s === "waiting"
+  );
 }
 
 export function isTerminal(s: TaskState): boolean {

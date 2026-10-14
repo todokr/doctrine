@@ -1,5 +1,4 @@
-import { test } from "@std/testing/bdd";
-import { assertSnapshot } from "@std/testing/snapshot";
+import { test } from "node:test";
 import assert from "node:assert/strict";
 import { guideJsonSchema } from "../../../shared/guide/jsonSchema.ts";
 
@@ -22,8 +21,8 @@ function collect(): Node[] {
   return nodes;
 }
 
-test("生成した JSON Schema がスナップショットと一致する", async (t) => {
-  await assertSnapshot(t, JSON.stringify(guideJsonSchema(), null, 2));
+test("生成した JSON Schema がスナップショットと一致する", (t) => {
+  t.assert.snapshot(JSON.stringify(guideJsonSchema(), null, 2));
 });
 
 test("$schema は draft-07 か、無い", () => {

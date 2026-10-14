@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, test } from "@std/testing/bdd";
+import { afterEach, beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -150,16 +150,16 @@ test("saveGlobalLimit はファイルが無ければ globalLimit だけを書く
 });
 
 test("defaultConfigPath は状態ディレクトリではなく設定ディレクトリの config.json", () => {
-  const prevState = Deno.env.get("DOCTRINE_STATE_DIR");
-  const prevConfig = Deno.env.get("DOCTRINE_CONFIG_DIR");
-  Deno.env.set("DOCTRINE_STATE_DIR", join(root, "state"));
-  Deno.env.set("DOCTRINE_CONFIG_DIR", join(root, "config"));
+  const prevState = process.env.DOCTRINE_STATE_DIR;
+  const prevConfig = process.env.DOCTRINE_CONFIG_DIR;
+  process.env.DOCTRINE_STATE_DIR = join(root, "state");
+  process.env.DOCTRINE_CONFIG_DIR = join(root, "config");
   try {
     assert.equal(defaultConfigPath(), join(root, "config", "config.json"));
   } finally {
-    if (prevState === undefined) Deno.env.delete("DOCTRINE_STATE_DIR");
-    else Deno.env.set("DOCTRINE_STATE_DIR", prevState);
-    if (prevConfig === undefined) Deno.env.delete("DOCTRINE_CONFIG_DIR");
-    else Deno.env.set("DOCTRINE_CONFIG_DIR", prevConfig);
+    if (prevState === undefined) delete process.env.DOCTRINE_STATE_DIR;
+    else process.env.DOCTRINE_STATE_DIR = prevState;
+    if (prevConfig === undefined) delete process.env.DOCTRINE_CONFIG_DIR;
+    else process.env.DOCTRINE_CONFIG_DIR = prevConfig;
   }
 });

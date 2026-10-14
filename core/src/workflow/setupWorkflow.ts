@@ -16,9 +16,9 @@ export function setupWorkflowYaml(): string {
   return `# doctrine の同梱ワークフロー（Quick Start の setup のタスクが使う）
 # draft → validate → review → apply
 #
-# draft が .doctrine-out/default.yaml を書き、validate が dctl workflow-check と
-# git status で確かめ、人が承認したら apply が元のリポジトリの
-# .doctrine/workflows/default.yaml に置く。コミットはしない。
+# draft が .doctrine-out/default.yaml を書き、validate が git status で確かめ、
+# 人が承認したら apply が元のリポジトリの .doctrine/workflows/default.yaml に置く。
+# コミットはしない。
 name: ${SETUP_WORKFLOW_NAME}
 steps:
   - id: draft
@@ -64,7 +64,6 @@ ${tools}
 
       - 書き換えてよいのは .doctrine-out/ の中だけです。.doctrine/ を含め、リポジトリの他のファイルは
         書き換えも作成もしないでください。次のステップが git status で確かめ、変更があれば差し戻されます。
-      - 書いた default.yaml は次のステップで dctl workflow-check にかけられます。
       - ファイルは Write / Edit ツールで書きます。Bash に許可しているのは読み取り系のコマンドだけです。
       - 作業ディレクトリは worktree のルートです。Bash に渡すパスは worktree のルートからの相対で
         書いてください。コマンドは1つずつ実行します。&& や cd でつなぐと権限で拒否されます。
@@ -73,13 +72,11 @@ ${tools}
       差し戻されて再度呼ばれた場合は、検証のエラーか人の却下コメントが渡されます。
       それを読んで default.yaml と setup-notes.md を直してください。
 
-  # dctl はこのステップを走らせるシェルの PATH から探す。
+  # draft が .doctrine-out/ の外を書き換えていないことを確かめる。
   - id: validate
     type: command
     run: >-
-      command -v dctl >/dev/null || { echo "dctl が PATH にありません（doctrine の core で deno task install を実行してください）" >&2; exit 1; };
-      dctl workflow-check .doctrine-out/default.yaml &&
-      { test -z "$(git status --porcelain)" || { echo "worktree の .doctrine-out/ の外が書き換えられています:" >&2; git status --porcelain >&2; exit 1; }; }
+      test -z "$(git status --porcelain)" || { echo "worktree の .doctrine-out/ の外が書き換えられています:" >&2; git status --porcelain >&2; exit 1; }
     onFailure:
       goto: draft
       maxAttempts: 3
@@ -128,17 +125,17 @@ export function setupPrompt(policy: SetupPolicy, baseBranch: string): string {
     planApproval
       ? "- 人の承認は計画の後と実装の後の2回。plan-gate の後に approval のステップ（review.files に .doctrine-out/plan.md）を足し、却下なら plan へ戻す。実装の後は雛形の review を使う。"
       : policy.plan || policy.approval === "after_implement"
-      ? "- 人の承認は実装の後だけ。雛形の review を使う。"
-      : "- 人の承認は計画の後と実装の後の方針だが、計画を入れないので実装の後だけにする。雛形の review を使う。",
+        ? "- 人の承認は実装の後だけ。雛形の review を使う。"
+        : "- 人の承認は計画の後と実装の後の方針だが、計画を入れないので実装の後だけにする。雛形の review を使う。",
     openPr
       ? `- 人が承認したら PR を開き（--base ${baseBranch}）、マージされるまで待つ。下のステップの例を review の後ろに足す。`
       : "- PR を開かない。承認で終わり、変更はブランチに積んだままにする。open-pr・wait-merge・sync は足さない。",
     ...(openPr
       ? [
-        policy.sync
-          ? `- PR を開く前に ${baseBranch} を取り込む（sync → verify-sync）。マージを待つ間に ${baseBranch} と conflict したときも sync へ戻って取り込み直す。`
-          : `- ${baseBranch} の取り込みはしない。conflict は人が PR 上で解く。`,
-      ]
+          policy.sync
+            ? `- PR を開く前に ${baseBranch} を取り込む（sync → verify-sync）。マージを待つ間に ${baseBranch} と conflict したときも sync へ戻って取り込み直す。`
+            : `- ${baseBranch} の取り込みはしない。conflict は人が PR 上で解く。`,
+        ]
       : []),
     "- ステップごとのモデル（model: に書く）:",
     `  - plan: ${policy.models.plan}`,
@@ -149,7 +146,7 @@ export function setupPrompt(policy: SetupPolicy, baseBranch: string): string {
     "",
     "## 出発点の雛形",
     "",
-    "dctl workspace-add が作る雛形です。テンプレート変数（{{ task.prompt }} など）は",
+    "workspace の登録時に doctrine が置く雛形です。テンプレート変数（{{ task.prompt }} など）は",
     "doctrine がそのワークフローの実行時に展開するので、そのまま残してください。",
     "",
     "```yaml",
@@ -163,9 +160,9 @@ export function setupPrompt(policy: SetupPolicy, baseBranch: string): string {
       "doctrine 自身のワークフローから要点を写したものです。review の後ろにこの順で足します。",
       ...(policy.sync
         ? [
-          "verify-sync の run は verify と同じコマンドにし、sync の allowedTools には verify で使う",
-          "コマンドを足してください。",
-        ]
+            "verify-sync の run は verify と同じコマンドにし、sync の allowedTools には verify で使う",
+            "コマンドを足してください。",
+          ]
         : []),
       "",
       "```yaml",
@@ -222,11 +219,9 @@ function prStepsExample(base: string, sync: boolean): string {
 
 `;
   const syncComment = sync
-    ? String
-      .raw` && if [ -f .doctrine-out/sync-notes.md ]; then gh pr comment --body-file .doctrine-out/sync-notes.md && rm .doctrine-out/sync-notes.md; fi`
+    ? String.raw` && if [ -f .doctrine-out/sync-notes.md ]; then gh pr comment --body-file .doctrine-out/sync-notes.md && rm .doctrine-out/sync-notes.md; fi`
     : "";
-  const openPr = String
-    .raw`  # 人の承認が済んだものだけを PR にする。command ステップはクラッシュ復帰のたびに
+  const openPr = String.raw`  # 人の承認が済んだものだけを PR にする。command ステップはクラッシュ復帰のたびに
   # 頭から再実行されるので、既に PR があれば作らない形にしてある。
   # 本文は implement-notes.md。Intake から投入されたタスクなら {{ issue.closes }} の行を足す。
   - id: open-pr

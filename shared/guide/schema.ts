@@ -8,10 +8,7 @@ const changeSchema = z
 
 const locationSchema = z.strictObject({
   path: z.string().describe("リポジトリのルートからのファイルパス"),
-  hunk: z
-    .string()
-    .optional()
-    .describe("doctrine が振った hunk の id。省くとファイル全体を指す"),
+  hunk: z.string().optional().describe("doctrine が振った hunk の id。省くとファイル全体を指す"),
 });
 
 const refsSchema = z.strictObject({
@@ -126,9 +123,9 @@ export const guideSchema = z.strictObject({
         reason: z.string().describe(`その理由。${prose}`),
         source: z
           .strictObject({
-            kind: z.enum(["step", "file"]).describe(
-              "step: ワークフローのステップ id / file: worktree 内のファイルパス",
-            ),
+            kind: z
+              .enum(["step", "file"])
+              .describe("step: ワークフローのステップ id / file: worktree 内のファイルパス"),
             value: z.string().describe("kind に応じたステップ id かファイルパス"),
           })
           .optional()

@@ -1,4 +1,5 @@
-import { join } from "@std/path";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import type { ProjectRow, TaskRow } from "../db/schema.ts";
 import { parseWorkflow, type Workflow } from "./schema.ts";
 import { withSetupStep } from "./project.ts";
@@ -13,7 +14,7 @@ export async function loadWorkflowFromDisk(
   name: string,
 ): Promise<LoadedWorkflow> {
   const path = join(projectPath, ".doctrine", "workflows", `${name}.yaml`);
-  const text = await Deno.readTextFile(path).catch(() => {
+  const text = await readFile(path, "utf8").catch(() => {
     throw new Error(`ワークフローがありません: ${path}`);
   });
   const { workflow, warnings } = parseWorkflow(text);

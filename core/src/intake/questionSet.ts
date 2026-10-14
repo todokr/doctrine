@@ -15,10 +15,15 @@ export function parseQuestionSet(row: IntakeQuestionSetRow): IntakeQuestionSet {
     run_id: row.run_id,
     questions: JSON.parse(row.questions) as Question[],
     assumptions: JSON.parse(row.assumptions) as Assumption[],
-    reply: row.answers === null ? null : {
-      answers: JSON.parse(row.answers) as Answer[],
-      assumptionResponses: JSON.parse(row.assumption_responses ?? "[]") as AssumptionResponse[],
-    },
+    reply:
+      row.answers === null
+        ? null
+        : {
+            answers: JSON.parse(row.answers) as Answer[],
+            assumptionResponses: JSON.parse(
+              row.assumption_responses ?? "[]",
+            ) as AssumptionResponse[],
+          },
     created_at: row.created_at,
     answered_at: row.answered_at,
   };

@@ -32,7 +32,6 @@ pub struct RelayOptions {
 impl Default for RelayOptions {
     fn default() -> Self {
         RelayOptions {
-            // dctl の REQUEST_TIMEOUT_MS と揃える
             request_timeout: Duration::from_secs(30),
             backoff_initial: Duration::from_millis(500),
             backoff_max: Duration::from_secs(30),

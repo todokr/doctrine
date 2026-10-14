@@ -11,7 +11,7 @@ doctrine の内部構造を、コードに手を入れる人向けに説明す�
 | 1 | [アーキテクチャ](01-architecture.md) | プロセスの構成、core の層、依存の向き、全体を貫く設計の約束 |
 | 2 | [リポジトリとツールチェーン](02-repository-and-tooling.md) | ディレクトリの責務、版の固定、よく使うコマンド、CI、doctrine 自身の開発設定 |
 | 3 | [ワークフローとタスク実行エンジン](03-workflow-engine.md) | ワークフロー定義、tick から Claude Code 起動までの流れ、状態機械、差し戻し・会話・上限待ち・マージ待ち・クラッシュ復帰 |
-| 4 | [デーモン・永続化・RPC](04-daemon-and-persistence.md) | dctld の起動、ソケットとワイヤ形式、RPC とイベントの一覧、DB とマイグレーション、ディスク上の配置、dctl |
+| 4 | [デーモン・永続化・RPC](04-daemon-and-persistence.md) | dctld の起動、ソケットとワイヤ形式、RPC とイベントの一覧、DB とマイグレーション、ディスク上の配置 |
 | 5 | [diff と Review Guide](05-review-guide.md) | diff の取り方、レビュー時点のツリー、hunk id、ガイドの生成・検証・表示、移動検出 |
 | 6 | [Intake](06-intake.md) | Issue の取り込み、質問と仮定、PFD の検証とハッシュ、sub-issue、投入、マージの見張り、トラッカー |
 | 7 | [デスクトップアプリ](07-app.md) | Tauri の中継、React の状態管理、画面とファイルと RPC の対応 |

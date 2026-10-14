@@ -1,5 +1,5 @@
 import { Buffer } from "node:buffer";
-import { afterEach, beforeEach, test } from "@std/testing/bdd";
+import { afterEach, beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -41,10 +41,7 @@ test("index が一度も作られていないリポジトリでも空のツリ�
 /** テストの定型: merge-base から今の worktree まで。 */
 function diffNow(patchLimitBytes?: number) {
   return (async () => {
-    const [fromRef, toRef] = await Promise.all([
-      mergeBase(repo, "main"),
-      captureTree(repo),
-    ]);
+    const [fromRef, toRef] = await Promise.all([mergeBase(repo, "main"), captureTree(repo)]);
     return await computeDiff({ worktreePath: repo, fromRef, toRef, patchLimitBytes });
   })();
 }
@@ -147,7 +144,11 @@ test("base ブランチが worktree の後に進んでも merge-base を基準�
   await run("git", ["-C", repo, "checkout", "-q", "task"]);
   await writeFile(join(repo, "mine.txt"), "mine\n");
   const d = await diffNow();
-  assert.deepEqual(d.files.map((f) => f.path), ["mine.txt"], "base 側のコミットは混ざらない");
+  assert.deepEqual(
+    d.files.map((f) => f.path),
+    ["mine.txt"],
+    "base 側のコミットは混ざらない",
+  );
 });
 
 test("上限を超えた patch は改行境界で切って truncated を立てる", async () => {
@@ -157,7 +158,11 @@ test("上限を超えた patch は改行境界で切って truncated を立て�
   assert.equal(d.truncated, true);
   assert.ok(d.patch.endsWith("\n"), "行の途中で切ると unified diff のパーサが壊れる");
   assert.ok(new TextEncoder().encode(d.patch).length <= 300);
-  assert.deepEqual(d.files.map((f) => f.path), ["big.txt"], "files は打ち切らない");
+  assert.deepEqual(
+    d.files.map((f) => f.path),
+    ["big.txt"],
+    "files は打ち切らない",
+  );
   const big = d.files[0];
   if (!big.binary) {
     assert.equal(big.additions, 300, "行数も打ち切らない");

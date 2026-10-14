@@ -1,4 +1,4 @@
-import { test } from "@std/testing/bdd";
+import { test } from "node:test";
 import assert from "node:assert/strict";
 import { buildTaskPrompt } from "../../../src/intake/pfd/prompt.ts";
 import { example, withDecision } from "./fixture.ts";
@@ -44,10 +44,7 @@ test("buildTaskPrompt: sub-issue が無ければ PFD spec 7.2 の形そのまま
     humanNotes,
     decisions: {},
   });
-  assert.equal(
-    text,
-    `https://github.com/o/r/issues/123 利用状況の集計を画面に出す\n\n${rest}`,
-  );
+  assert.equal(text, `https://github.com/o/r/issues/123 利用状況の集計を画面に出す\n\n${rest}`);
 });
 
 test("buildTaskPrompt: sub-issue があれば親 Issue の次の行に載せる", () => {

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, test } from "@std/testing/bdd";
+import { afterEach, beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
 import { readdir, readFile, realpath, rm } from "node:fs/promises";
 import { mkdtemp } from "node:fs/promises";
@@ -74,11 +74,15 @@ test("workflow.save は変更を作業ツリーのファイルに書き、コメ
   const h = createHandler(ctx);
   await h("workspace.add", { path: repo }, NOOP_CONN);
 
-  const result = await h("workflow.save", {
-    project: repo,
-    name: "default",
-    changes: [{ id: "implement", model: "claude-opus-5", prompt: "新しいプロンプト\n" }],
-  }, NOOP_CONN) as WorkflowSaveResult;
+  const result = (await h(
+    "workflow.save",
+    {
+      project: repo,
+      name: "default",
+      changes: [{ id: "implement", model: "claude-opus-5", prompt: "新しいプロンプト\n" }],
+    },
+    NOOP_CONN,
+  )) as WorkflowSaveResult;
 
   assert(result.ok);
   assert(result.warnings.length >= 1);
@@ -108,11 +112,11 @@ test("workflow.save は変更を作業ツリーのファイルに書き、コメ
   const status = await runGit("git", ["-C", repo, "status", "--porcelain"]);
   assert.equal(status.stdout.trim(), "M .doctrine/workflows/default.yaml");
 
-  const got = await h(
+  const got = (await h(
     "workflow.get",
     { project: repo, name: "default" },
     NOOP_CONN,
-  ) as WorkflowDetail;
+  )) as WorkflowDetail;
   assert(got.ok);
   const implementStep = got.steps.find((s) => s.id === "implement");
   assert.equal((implementStep as { model?: string | null }).model, "claude-opus-5");
@@ -125,11 +129,15 @@ test("workflow.save は goto に存在しないステップを入れると書か
 
   const before = await readFile(join(repo, ".doctrine", "workflows", "default.yaml"), "utf8");
 
-  const result = await h("workflow.save", {
-    project: repo,
-    name: "default",
-    changes: [{ id: "verify", branch: { goto: "nowhere" } }],
-  }, NOOP_CONN) as WorkflowSaveResult;
+  const result = (await h(
+    "workflow.save",
+    {
+      project: repo,
+      name: "default",
+      changes: [{ id: "verify", branch: { goto: "nowhere" } }],
+    },
+    NOOP_CONN,
+  )) as WorkflowSaveResult;
 
   assert(!result.ok);
   assert.deepEqual(
@@ -154,11 +162,15 @@ test("workflow.save は gh pr create を含む run に警告を返す", async ()
   const h = createHandler(ctx);
   await h("workspace.add", { path: repo }, NOOP_CONN);
 
-  const result = await h("workflow.save", {
-    project: repo,
-    name: "default",
-    changes: [{ id: "verify", run: "gh pr create --fill" }],
-  }, NOOP_CONN) as WorkflowSaveResult;
+  const result = (await h(
+    "workflow.save",
+    {
+      project: repo,
+      name: "default",
+      changes: [{ id: "verify", run: "gh pr create --fill" }],
+    },
+    NOOP_CONN,
+  )) as WorkflowSaveResult;
 
   assert(result.ok);
   assert(result.warnings.some((w) => w.includes('ステップ "verify"')));
@@ -170,8 +182,8 @@ test("workflow.save は無いワークフロー・不正な名前・未登録の
   const h = createHandler(ctx);
   await h("workspace.add", { path: repo }, NOOP_CONN);
 
-  await assert.rejects(
-    () => h("workflow.save", { project: repo, name: "nope", changes: [] }, NOOP_CONN),
+  await assert.rejects(() =>
+    h("workflow.save", { project: repo, name: "nope", changes: [] }, NOOP_CONN),
   );
 
   await assert.rejects(

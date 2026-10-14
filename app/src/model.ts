@@ -1171,7 +1171,7 @@ export function reduce(s: State, a: Action): State {
         if (!target) return s;
         const patch: Partial<Task> = {};
         if (ev.status === "bounced" && ev.goto_step_id !== null) {
-          // 持つのは最新の1件だけ。経緯の一覧は dctl get の領分
+          // 持つのは最新の1件だけ。経緯の一覧は task.get の stepRuns の領分
           patch.bounce = { step: ev.step_id, goto: ev.goto_step_id, attempt: ev.attempt };
         } else if (target.bounce?.step === ev.step_id) {
           // 差し戻したステップが今度は先へ進んだ（通った、あるいは本当に失敗した）。

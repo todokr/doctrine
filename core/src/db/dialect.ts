@@ -41,7 +41,7 @@ export class NodeSqliteDialect implements Dialect {
     return new SqliteQueryCompiler();
   }
 
-  // deno-lint-ignore no-explicit-any
+  // biome-ignore lint/suspicious/noExplicitAny: Kysely の Dialect.createIntrospector が Kysely<any> を受け取る
   createIntrospector(db: Kysely<any>): DatabaseIntrospector {
     return new SqliteIntrospector(db);
   }
@@ -121,7 +121,7 @@ class NodeSqliteConnection implements DatabaseConnection {
     return { rows: [], numAffectedRows: BigInt(changes), insertId: BigInt(lastInsertRowid) };
   }
 
-  // deno-lint-ignore require-yield
+  // biome-ignore lint/correctness/useYield: ストリーミングに対応しないので、yield せずに投げる
   async *streamQuery<R>(): AsyncIterableIterator<QueryResult<R>> {
     throw new Error("node:sqlite dialect はストリーミングに対応していません");
   }

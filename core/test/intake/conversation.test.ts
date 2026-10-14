@@ -1,4 +1,4 @@
-import { test } from "@std/testing/bdd";
+import { test } from "node:test";
 import assert from "node:assert/strict";
 import type {
   IntakeCommentRow,
@@ -158,7 +158,7 @@ test("continuationMessage: 回答が無いまま続きを求めたら投げる",
       questionSets: [questionSet(1, false)],
       drafts: [],
       comments: [],
-    })
+    }),
   );
 });
 

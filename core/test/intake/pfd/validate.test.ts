@@ -1,4 +1,4 @@
-import { test } from "@std/testing/bdd";
+import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { Pfd } from "../../../../shared/intake/pfd.ts";
 import { frozenPart, type ValidateContext, validatePfd } from "../../../src/intake/pfd/validate.ts";
@@ -210,6 +210,12 @@ test("validatePfd: 固定されたプロセスに project が無くても例外�
 
 test("frozenPart: 固定されたプロセスとその入出力の成果物を集める", () => {
   const part = frozenPart(example(), new Set(["1", "3"]));
-  assert.deepEqual(part.processes.map((p) => p.id), ["1", "3"]);
-  assert.deepEqual(part.artifacts.map((a) => a.id), ["schema", "new-table", "metric-definition"]);
+  assert.deepEqual(
+    part.processes.map((p) => p.id),
+    ["1", "3"],
+  );
+  assert.deepEqual(
+    part.artifacts.map((a) => a.id),
+    ["schema", "new-table", "metric-definition"],
+  );
 });

@@ -1,6 +1,8 @@
-import { afterEach, test } from "@std/testing/bdd";
+import { tmpdir } from "node:os";
+import { mkdtemp, rm } from "node:fs/promises";
+import { afterEach, test } from "node:test";
 import assert from "node:assert/strict";
-import { join } from "@std/path";
+import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { sql } from "kysely";
 import { openDb, openDbOn } from "../../src/db/migrate.ts";
@@ -11,11 +13,11 @@ import { seedProject } from "../helpers/project.ts";
 
 const dirs: string[] = [];
 afterEach(async () => {
-  await Promise.all(dirs.splice(0).map((d) => Deno.remove(d, { recursive: true })));
+  await Promise.all(dirs.splice(0).map((d) => rm(d, { recursive: true, force: true })));
 });
 
 async function tempDbPath(): Promise<string> {
-  const dir = await Deno.makeTempDir({ prefix: "doctrine-migrate-" });
+  const dir = await mkdtemp(join(tmpdir(), "doctrine-migrate-"));
   dirs.push(dir);
   return join(dir, "doctrine.db");
 }
@@ -347,52 +349,51 @@ type ColumnInfo = {
 };
 
 async function columnsOf(d: Db, table: string): Promise<ColumnInfo[]> {
-  const { rows } = await sql<
-    ColumnInfo
-  >`SELECT name, type, "notnull", dflt_value, pk FROM pragma_table_info(${table})`
-    .execute(d);
-  return rows.map((r) => ({
-    name: r.name,
-    type: r.type,
-    notnull: r.notnull,
-    dflt_value: r.dflt_value,
-    pk: r.pk,
-  }))
+  const { rows } =
+    await sql<ColumnInfo>`SELECT name, type, "notnull", dflt_value, pk FROM pragma_table_info(${table})`.execute(
+      d,
+    );
+  return rows
+    .map((r) => ({
+      name: r.name,
+      type: r.type,
+      notnull: r.notnull,
+      dflt_value: r.dflt_value,
+      pk: r.pk,
+    }))
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
 async function appliedMigrations(d: Db): Promise<string[]> {
-  const { rows } = await sql<{ name: string }>`SELECT name FROM kysely_migration ORDER BY name`
-    .execute(d);
+  const { rows } = await sql<{
+    name: string;
+  }>`SELECT name FROM kysely_migration ORDER BY name`.execute(d);
   return rows.map((r) => r.name);
 }
 
 test("マイグレーションで15のテーブルができる", async () => {
   const d = await db();
-  const { rows } = await sql<
-    { name: string }
-  >`SELECT name FROM sqlite_master WHERE type='table' ORDER BY name`
-    .execute(d);
+  const { rows } = await sql<{
+    name: string;
+  }>`SELECT name FROM sqlite_master WHERE type='table' ORDER BY name`.execute(d);
   const names = rows.map((r) => r.name);
-  for (
-    const t of [
-      "intake_approvals",
-      "intake_comments",
-      "intake_drafts",
-      "intake_processes",
-      "intake_question_sets",
-      "intake_runs",
-      "intakes",
-      "pr_observations",
-      "projects",
-      "rate_limit_samples",
-      "step_outputs",
-      "step_runs",
-      "task_sessions",
-      "tasks",
-      "workspaces",
-    ]
-  ) {
+  for (const t of [
+    "intake_approvals",
+    "intake_comments",
+    "intake_drafts",
+    "intake_processes",
+    "intake_question_sets",
+    "intake_runs",
+    "intakes",
+    "pr_observations",
+    "projects",
+    "rate_limit_samples",
+    "step_outputs",
+    "step_runs",
+    "task_sessions",
+    "tasks",
+    "workspaces",
+  ]) {
     assert.ok(names.includes(t), `${t} が無い: ${names.join(",")}`);
   }
 });
@@ -446,7 +447,10 @@ test("state でフィルタできる", async () => {
     priority: 2,
   });
   await d.updateTable("tasks").set({ state: "running" }).where("id", "=", "t2").execute();
-  assert.deepEqual((await listTasks(d, { state: "queued" })).map((t) => t.id), ["t1"]);
+  assert.deepEqual(
+    (await listTasks(d, { state: "queued" })).map((t) => t.id),
+    ["t1"],
+  );
 });
 
 test("同じidのタスクは作れない", async () => {
@@ -470,14 +474,16 @@ test("同じidのタスクは作れない", async () => {
       workflow_name: "f",
       branch: "b1",
       priority: 2,
-    })
+    }),
   );
 });
 
 test("ファイルのDBは WAL で開き、外部キー制約が効いている", async () => {
   const d = await openDb(await tempDbPath());
   try {
-    const { rows: [mode] } = await sql<{ journal_mode: string }>`PRAGMA journal_mode`.execute(d);
+    const {
+      rows: [mode],
+    } = await sql<{ journal_mode: string }>`PRAGMA journal_mode`.execute(d);
     assert.equal(mode.journal_mode, "wal");
     await assert.rejects(
       () =>
@@ -557,10 +563,12 @@ test("pending_feed を足す前に作られたDBファイルは、行を保っ�
   const legacy = new DatabaseSync(path);
   legacy.exec(LEGACY_DDL_WITHOUT_PENDING_FEED);
   legacy.prepare("INSERT INTO projects (path, default_workflow) VALUES ('/repo', 'feature')").run();
-  legacy.prepare(
-    `INSERT INTO tasks (id, project_id, title, prompt, workflow_name, state, branch, created_at, updated_at)
+  legacy
+    .prepare(
+      `INSERT INTO tasks (id, project_id, title, prompt, workflow_name, state, branch, created_at, updated_at)
      VALUES ('old', 1, 'T', 'P', 'feature', 'suspended', 'b', 'x', 'x')`,
-  ).run();
+    )
+    .run();
   legacy.close();
 
   const d = await openDb(path);
@@ -598,14 +606,18 @@ test('claude_session_id を持つ既存タスクは role "default" として tas
   const legacy = new DatabaseSync(path);
   legacy.exec(LEGACY_DDL);
   legacy.prepare("INSERT INTO projects (path, default_workflow) VALUES ('/repo', 'feature')").run();
-  legacy.prepare(
-    `INSERT INTO tasks (id, project_id, title, prompt, workflow_name, state, branch, claude_session_id, created_at, updated_at)
+  legacy
+    .prepare(
+      `INSERT INTO tasks (id, project_id, title, prompt, workflow_name, state, branch, claude_session_id, created_at, updated_at)
      VALUES ('old', 1, 'T', 'P', 'feature', 'running', 'b', 'sess-1', 'x', 'x')`,
-  ).run();
-  legacy.prepare(
-    `INSERT INTO tasks (id, project_id, title, prompt, workflow_name, state, branch, created_at, updated_at)
+    )
+    .run();
+  legacy
+    .prepare(
+      `INSERT INTO tasks (id, project_id, title, prompt, workflow_name, state, branch, created_at, updated_at)
      VALUES ('no-session', 1, 'T', 'P', 'feature', 'queued', 'b2', 'x', 'x')`,
-  ).run();
+    )
+    .run();
   legacy.close();
 
   const d = await openDb(path);
@@ -625,20 +637,27 @@ test("degraded だった既存の step_run は success になる", async () => {
   const legacy = new DatabaseSync(path);
   legacy.exec(LEGACY_DDL);
   legacy.prepare("INSERT INTO projects (path, default_workflow) VALUES ('/repo', 'feature')").run();
-  legacy.prepare(
-    `INSERT INTO tasks (id, project_id, title, prompt, workflow_name, state, branch, created_at, updated_at)
+  legacy
+    .prepare(
+      `INSERT INTO tasks (id, project_id, title, prompt, workflow_name, state, branch, created_at, updated_at)
      VALUES ('old', 1, 'T', 'P', 'feature', 'completed', 'b', 'x', 'x')`,
-  ).run();
-  legacy.prepare(
-    `INSERT INTO step_runs (task_id, step_id, attempt, status, started_at, log_path)
+    )
+    .run();
+  legacy
+    .prepare(
+      `INSERT INTO step_runs (task_id, step_id, attempt, status, started_at, log_path)
      VALUES ('old', 'plan', 1, 'degraded', 'x', '')`,
-  ).run();
+    )
+    .run();
   legacy.close();
 
   const d = await openDb(path);
   try {
     const rows = await d.selectFrom("step_runs").selectAll().where("task_id", "=", "old").execute();
-    assert.deepEqual(rows.map((r) => r.status), ["success"]);
+    assert.deepEqual(
+      rows.map((r) => r.status),
+      ["success"],
+    );
   } finally {
     await d.destroy();
   }
@@ -678,20 +697,26 @@ test("step_runs は awaiting と interrupted を受け付ける", async () => {
     priority: 2,
   });
   for (const status of ["awaiting", "interrupted"] as const) {
-    await d.insertInto("step_runs").values({
-      task_id: "t1",
-      step_id: "review",
-      attempt: 1,
-      status,
-      exit_code: null,
-      started_at: "2026-09-18T00:00:00.000Z",
-      ended_at: null,
-      log_path: "",
-      review_tree: null,
-      goto_step_id: null,
-    }).execute();
+    await d
+      .insertInto("step_runs")
+      .values({
+        task_id: "t1",
+        step_id: "review",
+        attempt: 1,
+        status,
+        exit_code: null,
+        started_at: "2026-09-18T00:00:00.000Z",
+        ended_at: null,
+        log_path: "",
+        review_tree: null,
+        goto_step_id: null,
+      })
+      .execute();
   }
-  const rows = await d.selectFrom("step_runs").select("status").where("task_id", "=", "t1")
+  const rows = await d
+    .selectFrom("step_runs")
+    .select("status")
+    .where("task_id", "=", "t1")
     .execute();
   assert.deepEqual(rows.map((r) => r.status).sort(), ["awaiting", "interrupted"]);
 });
@@ -711,19 +736,22 @@ test("未知の status と、もう使わない degraded は CHECK 制約で落�
   for (const status of ["bogus", "degraded"]) {
     await assert.rejects(
       () =>
-        d.insertInto("step_runs").values({
-          task_id: "t1",
-          step_id: "review",
-          attempt: 1,
-          // deno-lint-ignore no-explicit-any
-          status: status as any,
-          exit_code: null,
-          started_at: "2026-09-18T00:00:00.000Z",
-          ended_at: null,
-          log_path: "",
-          review_tree: null,
-          goto_step_id: null,
-        }).execute(),
+        d
+          .insertInto("step_runs")
+          .values({
+            task_id: "t1",
+            step_id: "review",
+            attempt: 1,
+            // biome-ignore lint/suspicious/noExplicitAny: CHECK 制約を確かめるため、型に無い値を書き込む
+            status: status as any,
+            exit_code: null,
+            started_at: "2026-09-18T00:00:00.000Z",
+            ended_at: null,
+            log_path: "",
+            review_tree: null,
+            goto_step_id: null,
+          })
+          .execute(),
       Error,
       status,
     );
@@ -742,18 +770,21 @@ test("step_runs は bounced を受け付け、差し戻し先を goto_step_id �
     branch: "b",
     priority: 2,
   });
-  await d.insertInto("step_runs").values({
-    task_id: "t1",
-    step_id: "plan-gate",
-    attempt: 1,
-    status: "bounced",
-    exit_code: 1,
-    started_at: "2026-09-19T00:00:00.000Z",
-    ended_at: "2026-09-19T00:01:00.000Z",
-    log_path: "",
-    review_tree: null,
-    goto_step_id: "plan",
-  }).execute();
+  await d
+    .insertInto("step_runs")
+    .values({
+      task_id: "t1",
+      step_id: "plan-gate",
+      attempt: 1,
+      status: "bounced",
+      exit_code: 1,
+      started_at: "2026-09-19T00:00:00.000Z",
+      ended_at: "2026-09-19T00:01:00.000Z",
+      log_path: "",
+      review_tree: null,
+      goto_step_id: "plan",
+    })
+    .execute();
   const rows = await d.selectFrom("step_runs").selectAll().where("task_id", "=", "t1").execute();
   assert.equal(rows[0].status, "bounced");
   assert.equal(rows[0].goto_step_id, "plan");
@@ -784,14 +815,18 @@ test("bounced と goto_step_id の対応は CHECK 制約で固定されている
   // 分岐先の無い差し戻し
   await assert.rejects(
     () =>
-      d.insertInto("step_runs").values({ ...row, status: "bounced", goto_step_id: null })
+      d
+        .insertInto("step_runs")
+        .values({ ...row, status: "bounced", goto_step_id: null })
         .execute(),
     /CHECK/,
   );
   // 分岐先のある失敗
   await assert.rejects(
     () =>
-      d.insertInto("step_runs").values({ ...row, status: "failed", goto_step_id: "plan" })
+      d
+        .insertInto("step_runs")
+        .values({ ...row, status: "failed", goto_step_id: "plan" })
         .execute(),
     /CHECK/,
   );
@@ -813,9 +848,10 @@ test("0005: step_outputs の行は step_runs の再構築を越えて残る", as
   const d = await openDbOn(sqlite);
 
   const rows = await d.selectFrom("step_outputs").selectAll().execute();
-  assert.deepEqual(rows.map((r) => ({ ...r })), [
-    { step_run_id: 1, last_stdout: "計画", last_stderr: "", exit_code: 0 },
-  ]);
+  assert.deepEqual(
+    rows.map((r) => ({ ...r })),
+    [{ step_run_id: 1, last_stdout: "計画", last_stderr: "", exit_code: 0 }],
+  );
   const { rows: violations } = await sql<{ table: string }>`PRAGMA foreign_key_check`.execute(d);
   assert.deepEqual(violations, []);
 });
@@ -842,9 +878,10 @@ test("既存の step_outputs は同じステップの最新の実行に割り当
   const rows = await d.selectFrom("step_outputs").selectAll().execute();
   // node:sqlite が返す行は prototype なしのオブジェクトなので、deepEqual の前に
   // 素のオブジェクトへ写す（他のテストの selectAll 結果比較と同じ理由）。
-  assert.deepEqual(rows.map((r) => ({ ...r })), [
-    { step_run_id: 2, last_stdout: "2回目のコメント", last_stderr: "", exit_code: 1 },
-  ]);
+  assert.deepEqual(
+    rows.map((r) => ({ ...r })),
+    [{ step_run_id: 2, last_stdout: "2回目のコメント", last_stderr: "", exit_code: 1 }],
+  );
 });
 
 test("移行時点で suspended のタスクには awaiting 行が立ち、attempt_counts が進む", async () => {
@@ -887,8 +924,12 @@ test("移行前に一度差し戻されている suspended タスクの awaiting
   `);
   const d = await openDbOn(sqlite);
 
-  const runs = await d.selectFrom("step_runs").selectAll().where("task_id", "=", "t1")
-    .orderBy("id").execute();
+  const runs = await d
+    .selectFrom("step_runs")
+    .selectAll()
+    .where("task_id", "=", "t1")
+    .orderBy("id")
+    .execute();
   assert.equal(runs.length, 2, "既存の行は残り、今待っている回のぶんが1行足される");
   assert.equal(runs[1].status, "awaiting");
   assert.equal(runs[1].attempt, 2, "既存の step_run 数 + 1");
@@ -941,29 +982,30 @@ test("0005: tasks と step_runs を作り直しても、全テーブルの行が
   assert.equal(t.rate_limited_until, null, "新しい列は NULL で足される");
 
   const runs = await d.selectFrom("step_runs").selectAll().execute();
-  assert.deepEqual(runs.map((r) => [r.id, r.step_id, r.status, r.log_path]), [[
-    1,
-    "implement",
-    "failed",
-    "/logs/implement.1.log",
-  ]], "id を含めて残る（step_outputs の参照先）");
+  assert.deepEqual(
+    runs.map((r) => [r.id, r.step_id, r.status, r.log_path]),
+    [[1, "implement", "failed", "/logs/implement.1.log"]],
+    "id を含めて残る（step_outputs の参照先）",
+  );
 
   const outputs = await d.selectFrom("step_outputs").selectAll().execute();
-  assert.deepEqual(outputs.map((o) => [o.step_run_id, o.last_stdout]), [[1, "out"]]);
+  assert.deepEqual(
+    outputs.map((o) => [o.step_run_id, o.last_stdout]),
+    [[1, "out"]],
+  );
 
   const sessions = await d.selectFrom("task_sessions").selectAll().execute();
-  assert.deepEqual(sessions.map((s) => [s.task_id, s.role, s.session_id]), [[
-    "t1",
-    "default",
-    "sess-1",
-  ]]);
+  assert.deepEqual(
+    sessions.map((s) => [s.task_id, s.role, s.session_id]),
+    [["t1", "default", "sess-1"]],
+  );
 
   const samples = await d.selectFrom("rate_limit_samples").selectAll().execute();
-  assert.deepEqual(samples.map((s) => [s.window, s.utilization, s.resets_at]), [[
-    "five_hour",
-    1,
-    "2026-09-19T03:20:00.000Z",
-  ]], "rate_limit_samples には触っていない");
+  assert.deepEqual(
+    samples.map((s) => [s.window, s.utilization, s.resets_at]),
+    [["five_hour", 1, "2026-09-19T03:20:00.000Z"]],
+    "rate_limit_samples には触っていない",
+  );
 
   const violations = await sql<{ table: string }>`PRAGMA foreign_key_check`.execute(d);
   assert.deepEqual(violations.rows, [], "外部キーが壊れていない");
@@ -974,11 +1016,10 @@ test("0005: 再構築した tasks / step_runs の索引が残っている", asyn
   const { rows } = await sql<{ name: string }>`
     SELECT name FROM sqlite_master WHERE type='index' AND name LIKE 'idx_%' ORDER BY name
   `.execute(d);
-  assert.deepEqual(rows.map((r) => r.name), [
-    "idx_step_runs_task",
-    "idx_tasks_project",
-    "idx_tasks_state",
-  ]);
+  assert.deepEqual(
+    rows.map((r) => r.name),
+    ["idx_step_runs_task", "idx_tasks_project", "idx_tasks_state"],
+  );
 });
 
 test("0005: tasks.state は rate_limited を受け付け、未知の値は CHECK で落ちる", async () => {
@@ -993,17 +1034,22 @@ test("0005: tasks.state は rate_limited を受け付け、未知の値は CHECK
     branch: "b",
     priority: 2,
   });
-  await d.updateTable("tasks")
+  await d
+    .updateTable("tasks")
     .set({ state: "rate_limited", rate_limited_until: "2026-09-19T03:20:00.000Z" })
-    .where("id", "=", "t1").execute();
+    .where("id", "=", "t1")
+    .execute();
   const t = (await getTask(d, "t1"))!;
   assert.equal(t.state, "rate_limited");
   assert.equal(t.rate_limited_until, "2026-09-19T03:20:00.000Z");
 
   await assert.rejects(() =>
-    d.updateTable("tasks")
-      // deno-lint-ignore no-explicit-any
-      .set({ state: "bogus" as any }).where("id", "=", "t1").execute()
+    d
+      .updateTable("tasks")
+      // biome-ignore lint/suspicious/noExplicitAny: CHECK 制約を確かめるため、型に無い値を書き込む
+      .set({ state: "bogus" as any })
+      .where("id", "=", "t1")
+      .execute(),
   );
 });
 
@@ -1019,19 +1065,25 @@ test("0005: step_runs.status は rate_limited を受け付ける", async () => {
     branch: "b",
     priority: 2,
   });
-  await d.insertInto("step_runs").values({
-    task_id: "t1",
-    step_id: "implement",
-    attempt: 1,
-    status: "rate_limited",
-    exit_code: 1,
-    started_at: "2026-09-19T00:00:00.000Z",
-    ended_at: "2026-09-19T00:00:10.000Z",
-    log_path: "",
-    review_tree: null,
-  }).execute();
+  await d
+    .insertInto("step_runs")
+    .values({
+      task_id: "t1",
+      step_id: "implement",
+      attempt: 1,
+      status: "rate_limited",
+      exit_code: 1,
+      started_at: "2026-09-19T00:00:00.000Z",
+      ended_at: "2026-09-19T00:00:10.000Z",
+      log_path: "",
+      review_tree: null,
+    })
+    .execute();
   const rows = await d.selectFrom("step_runs").select("status").execute();
-  assert.deepEqual(rows.map((r) => r.status), ["rate_limited"]);
+  assert.deepEqual(
+    rows.map((r) => r.status),
+    ["rate_limited"],
+  );
 });
 
 test("0004: step_outputs の列が last_stdout / last_stderr に改名され、値は残る", async () => {
@@ -1063,16 +1115,19 @@ function insertIntakeRow(
   issueUrl: string,
   state: Database["intakes"]["state"] = "investigating",
 ) {
-  return d.insertInto("intakes").values({
-    id,
-    workspace_id: workspaceId,
-    issue_url: issueUrl,
-    issue_node_id: `I_${id}`,
-    issue_title: "T",
-    state,
-    created_at: "2026-09-21T00:00:00.000Z",
-    updated_at: "2026-09-21T00:00:00.000Z",
-  }).execute();
+  return d
+    .insertInto("intakes")
+    .values({
+      id,
+      workspace_id: workspaceId,
+      issue_url: issueUrl,
+      issue_node_id: `I_${id}`,
+      issue_title: "T",
+      state,
+      created_at: "2026-09-21T00:00:00.000Z",
+      updated_at: "2026-09-21T00:00:00.000Z",
+    })
+    .execute();
 }
 
 function newTask(id: string) {
@@ -1163,27 +1218,32 @@ test("0009: 終わっていない Intake は同じ Issue に 1 つだけ", async
   await insertIntakeRow(d, p.workspace_id, "i3", url);
 
   await insertIntakeRow(d, p.workspace_id, "i4", "https://github.com/o/r/issues/2");
-  const open = await d.selectFrom("intakes").select("id")
-    .where("state", "not in", ["completed", "canceled"]).orderBy("id").execute();
-  assert.deepEqual(open.map((r) => r.id), ["i3", "i4"]);
+  const open = await d
+    .selectFrom("intakes")
+    .select("id")
+    .where("state", "not in", ["completed", "canceled"])
+    .orderBy("id")
+    .execute();
+  assert.deepEqual(
+    open.map((r) => r.id),
+    ["i3", "i4"],
+  );
 });
 
 test("0009: intakes.state は 8 値だけを受け付ける", async () => {
   const d = await db();
   const p = await seedWorkspace(d);
   await insertIntakeRow(d, p.workspace_id, "i1", "https://github.com/o/r/issues/1");
-  for (
-    const state of [
-      "investigating",
-      "answering",
-      "decomposing",
-      "reviewing",
-      "active",
-      "needs_attention",
-      "completed",
-      "canceled",
-    ] as const
-  ) {
+  for (const state of [
+    "investigating",
+    "answering",
+    "decomposing",
+    "reviewing",
+    "active",
+    "needs_attention",
+    "completed",
+    "canceled",
+  ] as const) {
     await d.updateTable("intakes").set({ state }).where("id", "=", "i1").execute();
     assert.equal(
       (await d.selectFrom("intakes").select("state").executeTakeFirstOrThrow()).state,
@@ -1192,9 +1252,12 @@ test("0009: intakes.state は 8 値だけを受け付ける", async () => {
   }
   await assert.rejects(
     () =>
-      d.updateTable("intakes")
-        // deno-lint-ignore no-explicit-any
-        .set({ state: "bogus" as any }).where("id", "=", "i1").execute(),
+      d
+        .updateTable("intakes")
+        // biome-ignore lint/suspicious/noExplicitAny: CHECK 制約を確かめるため、型に無い値を書き込む
+        .set({ state: "bogus" as any })
+        .where("id", "=", "i1")
+        .execute(),
     /CHECK/,
   );
 });
@@ -1204,20 +1267,26 @@ test("0009: intake_runs の purpose と status は CHECK で固められてい�
   const p = await seedWorkspace(d);
   await insertIntakeRow(d, p.workspace_id, "i1", "https://github.com/o/r/issues/1");
   const run = { intake_id: "i1", attempt: 1, log_path: "" };
-  await d.insertInto("intake_runs").values({ ...run, purpose: "investigate", status: "queued" })
+  await d
+    .insertInto("intake_runs")
+    .values({ ...run, purpose: "investigate", status: "queued" })
     .execute();
   await assert.rejects(
     () =>
-      d.insertInto("intake_runs")
-        // deno-lint-ignore no-explicit-any
-        .values({ ...run, purpose: "bogus" as any, status: "queued" }).execute(),
+      d
+        .insertInto("intake_runs")
+        // biome-ignore lint/suspicious/noExplicitAny: CHECK 制約を確かめるため、型に無い値を書き込む
+        .values({ ...run, purpose: "bogus" as any, status: "queued" })
+        .execute(),
     /CHECK/,
   );
   await assert.rejects(
     () =>
-      d.insertInto("intake_runs")
-        // deno-lint-ignore no-explicit-any
-        .values({ ...run, purpose: "decompose", status: "bogus" as any }).execute(),
+      d
+        .insertInto("intake_runs")
+        // biome-ignore lint/suspicious/noExplicitAny: CHECK 制約を確かめるため、型に無い値を書き込む
+        .values({ ...run, purpose: "decompose", status: "bogus" as any })
+        .execute(),
     /CHECK/,
   );
 });
@@ -1226,11 +1295,13 @@ test("0010: 改訂の範囲の列は null で足される", async () => {
   const d = await db();
   const p = await seedWorkspace(d);
   await insertIntakeRow(d, p.workspace_id, "i1", "https://github.com/o/r/issues/1");
-  const run = await d.insertInto("intake_runs")
+  const run = await d
+    .insertInto("intake_runs")
     .values({ intake_id: "i1", attempt: 1, log_path: "", purpose: "decompose", status: "queued" })
     .executeTakeFirstOrThrow();
   const runId = Number(run.insertId);
-  const draft = await d.insertInto("intake_drafts")
+  const draft = await d
+    .insertInto("intake_drafts")
     .values({
       intake_id: "i1",
       seq: 1,
@@ -1241,7 +1312,8 @@ test("0010: 改訂の範囲の列は null で足される", async () => {
       created_at: "2026-09-21T00:00:00.000Z",
     })
     .executeTakeFirstOrThrow();
-  await d.insertInto("intake_comments")
+  await d
+    .insertInto("intake_comments")
     .values({
       intake_id: "i1",
       draft_id: Number(draft.insertId),
@@ -1311,18 +1383,24 @@ test("0013: tasks.state と step_runs.status が waiting を受け付け、waiti
     branch: "b",
     priority: 2,
   });
-  await d.updateTable("tasks").set({ state: "waiting", waiting_until: "2026-09-22T00:01:00.000Z" })
-    .where("id", "=", "t1").execute();
-  await d.insertInto("step_runs").values({
-    task_id: "t1",
-    step_id: "wait-merge",
-    attempt: 1,
-    status: "waiting",
-    exit_code: 75,
-    started_at: "2026-09-22T00:00:00.000Z",
-    ended_at: "2026-09-22T00:00:01.000Z",
-    log_path: "",
-  }).execute();
+  await d
+    .updateTable("tasks")
+    .set({ state: "waiting", waiting_until: "2026-09-22T00:01:00.000Z" })
+    .where("id", "=", "t1")
+    .execute();
+  await d
+    .insertInto("step_runs")
+    .values({
+      task_id: "t1",
+      step_id: "wait-merge",
+      attempt: 1,
+      status: "waiting",
+      exit_code: 75,
+      started_at: "2026-09-22T00:00:00.000Z",
+      ended_at: "2026-09-22T00:00:01.000Z",
+      log_path: "",
+    })
+    .execute();
   const t = (await getTask(d, "t1"))!;
   assert.equal(t.state, "waiting");
   assert.equal(t.waiting_until, "2026-09-22T00:01:00.000Z");
@@ -1333,7 +1411,10 @@ test("0013: 作り直しても既存の行・索引・外部キーが残る", as
   const t = (await getTask(d, "t1"))!;
   assert.equal(t.waiting_until, null, "新しい列は NULL で足される");
   const outputs = await d.selectFrom("step_outputs").selectAll().execute();
-  assert.deepEqual(outputs.map((o) => [o.step_run_id, o.last_stdout]), [[1, "out"]]);
+  assert.deepEqual(
+    outputs.map((o) => [o.step_run_id, o.last_stdout]),
+    [[1, "out"]],
+  );
   const { rows } = await sql<{ name: string }>`
     SELECT name FROM sqlite_master WHERE type='index' AND tbl_name IN ('tasks','step_runs')
       AND name LIKE 'idx_%' ORDER BY name
@@ -1359,14 +1440,16 @@ test("0015: 既存のプロジェクトを 1 つずつの workspace に移し、
   `);
   await migrateToLatest(d);
 
-  const workspaces = (await d.selectFrom("workspaces").selectAll().orderBy("id").execute())
-    .map((r) => ({ ...r }));
+  const workspaces = (await d.selectFrom("workspaces").selectAll().orderBy("id").execute()).map(
+    (r) => ({ ...r }),
+  );
   assert.deepEqual(workspaces, [
     { id: 1, path: "/w/assured-tp", name: "assured-tp" },
     { id: 2, path: "/w/My_Repo", name: "My_Repo" },
   ]);
-  const projects = (await d.selectFrom("projects").selectAll().orderBy("id").execute())
-    .map((r) => ({ ...r }));
+  const projects = (await d.selectFrom("projects").selectAll().orderBy("id").execute()).map(
+    (r) => ({ ...r }),
+  );
   assert.deepEqual(projects, [
     {
       id: 1,
@@ -1390,7 +1473,10 @@ test("0015: 既存のプロジェクトを 1 つずつの workspace に移し、
     },
   ]);
   assert.equal((await getTask(d, "t1"))?.project_id, 1);
-  const intake = await d.selectFrom("intakes").select("workspace_id").where("id", "=", "i1")
+  const intake = await d
+    .selectFrom("intakes")
+    .select("workspace_id")
+    .where("id", "=", "i1")
     .executeTakeFirstOrThrow();
   assert.equal(intake.workspace_id, 2);
   const { rows: violations } = await sql`PRAGMA foreign_key_check`.execute(d);
@@ -1418,19 +1504,28 @@ test("0016: Intake をプロジェクトの workspace に付け替え、終わ�
   `);
   await migrateToLatest(d);
 
-  const rows =
-    (await d.selectFrom("intakes").select(["id", "workspace_id"]).orderBy("id").execute())
-      .map((r) => ({ ...r }));
-  assert.deepEqual(rows, [{ id: "i1", workspace_id: 2 }, { id: "i2", workspace_id: 2 }]);
+  const rows = (
+    await d.selectFrom("intakes").select(["id", "workspace_id"]).orderBy("id").execute()
+  ).map((r) => ({ ...r }));
+  assert.deepEqual(rows, [
+    { id: "i1", workspace_id: 2 },
+    { id: "i2", workspace_id: 2 },
+  ]);
 
   const cols = (await columnsOf(d, "intakes")).map((c) => c.name);
   assert.ok(!cols.includes("project_id"));
   assert.ok(cols.includes("workspace_id"));
 
-  const i1 = await d.selectFrom("intakes").selectAll().where("id", "=", "i1")
+  const i1 = await d
+    .selectFrom("intakes")
+    .selectAll()
+    .where("id", "=", "i1")
     .executeTakeFirstOrThrow();
   assert.equal(i1.state, "completed");
-  const i2 = await d.selectFrom("intakes").selectAll().where("id", "=", "i2")
+  const i2 = await d
+    .selectFrom("intakes")
+    .selectAll()
+    .where("id", "=", "i2")
     .executeTakeFirstOrThrow();
   assert.equal(i2.issue_url, "https://github.com/o/r/issues/2");
 

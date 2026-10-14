@@ -89,23 +89,26 @@ export class WorkflowValidationError extends Error {
   }
 }
 
-const stepId = z.string().min(1).regex(
-  /^[a-zA-Z0-9_-]+$/,
-  "ステップidは英数字・ハイフン・アンダースコアのみ",
-);
-const branch = z.object({
-  goto: z.string().min(1),
-  maxAttempts: z.number().int().min(1),
-  feed: z.string().optional(),
-  onExhausted: z.enum(["fail", "suspend"]).optional(),
-}).strict();
+const stepId = z
+  .string()
+  .min(1)
+  .regex(/^[a-zA-Z0-9_-]+$/, "ステップidは英数字・ハイフン・アンダースコアのみ");
+const branch = z
+  .object({
+    goto: z.string().min(1),
+    maxAttempts: z.number().int().min(1),
+    feed: z.string().optional(),
+    onExhausted: z.enum(["fail", "suspend"]).optional(),
+  })
+  .strict();
 
 /**
  * review.files のパス。worktree からの相対に限る。
  * 指す先が worktree の外に出ていないかは、読み出し時に realpath で確かめる
  * （src/domain/reviewFiles.ts）。ここで見るのは書かれた文字列だけ。
  */
-const reviewPath = z.string()
+const reviewPath = z
+  .string()
   .min(1, "ファイルのパスが空です")
   .refine(
     (p) => !p.startsWith("/"),
@@ -120,68 +123,85 @@ const reviewPath = z.string()
     ".. は書けません（worktree の外のファイルは宣言できません）",
   );
 
-const review = z.object({
-  files: z.array(reviewPath).min(1, "review.files は1つ以上必要です"),
-}).strict();
+const review = z
+  .object({
+    files: z.array(reviewPath).min(1, "review.files は1つ以上必要です"),
+  })
+  .strict();
 
-const sessionRole = z.string().min(1).regex(
-  /^[a-zA-Z0-9_-]+$/,
-  "sessionは英数字・ハイフン・アンダースコアのみ",
-);
+const sessionRole = z
+  .string()
+  .min(1)
+  .regex(/^[a-zA-Z0-9_-]+$/, "sessionは英数字・ハイフン・アンダースコアのみ");
 
 const stepSchema = z.discriminatedUnion("type", [
-  z.object({
-    id: stepId,
-    type: z.literal("command"),
-    run: z.string().min(1),
-    onFailure: branch.optional(),
-  }).strict(),
-  z.object({
-    id: stepId,
-    type: z.literal("agent"),
-    prompt: z.string().min(1),
-    session: sessionRole.optional(),
-    permissionMode: z.string().optional(),
-    model: z.string().optional(),
-    allowedTools: z.array(z.string().min(1)).optional(),
-    onFailure: branch.optional(),
-  }).strict(),
-  z.object({
-    id: stepId,
-    type: z.literal("approval"),
-    title: z.string().min(1),
-    onReject: branch.optional(),
-    review: review.optional(),
-  }).strict(),
-  z.object({
-    id: stepId,
-    type: z.literal("guide"),
-    session: sessionRole,
-    permissionMode: z.string().optional(),
-    model: z.string().optional(),
-    allowedTools: z.array(z.string().min(1)).optional(),
-    onFailure: branch.optional(),
-  }).strict(),
-  z.object({
-    id: stepId,
-    type: z.literal("poll"),
-    run: z.string().min(1),
-    interval: z.string().default(DEFAULT_POLL_INTERVAL).refine((v) => {
-      try {
-        intervalMs(v);
-        return true;
-      } catch {
-        return false;
-      }
-    }, "interval は 30s 以上で、30s / 5m / 2h のように書いてください"),
-    onFailure: branch.optional(),
-  }).strict(),
+  z
+    .object({
+      id: stepId,
+      type: z.literal("command"),
+      run: z.string().min(1),
+      onFailure: branch.optional(),
+    })
+    .strict(),
+  z
+    .object({
+      id: stepId,
+      type: z.literal("agent"),
+      prompt: z.string().min(1),
+      session: sessionRole.optional(),
+      permissionMode: z.string().optional(),
+      model: z.string().optional(),
+      allowedTools: z.array(z.string().min(1)).optional(),
+      onFailure: branch.optional(),
+    })
+    .strict(),
+  z
+    .object({
+      id: stepId,
+      type: z.literal("approval"),
+      title: z.string().min(1),
+      onReject: branch.optional(),
+      review: review.optional(),
+    })
+    .strict(),
+  z
+    .object({
+      id: stepId,
+      type: z.literal("guide"),
+      session: sessionRole,
+      permissionMode: z.string().optional(),
+      model: z.string().optional(),
+      allowedTools: z.array(z.string().min(1)).optional(),
+      onFailure: branch.optional(),
+    })
+    .strict(),
+  z
+    .object({
+      id: stepId,
+      type: z.literal("poll"),
+      run: z.string().min(1),
+      interval: z
+        .string()
+        .default(DEFAULT_POLL_INTERVAL)
+        .refine((v) => {
+          try {
+            intervalMs(v);
+            return true;
+          } catch {
+            return false;
+          }
+        }, "interval は 30s 以上で、30s / 5m / 2h のように書いてください"),
+      onFailure: branch.optional(),
+    })
+    .strict(),
 ]);
 
-const workflowSchema = z.object({
-  name: z.string().min(1),
-  steps: z.array(stepSchema).min(1, "steps は1つ以上必要です"),
-}).strict();
+const workflowSchema = z
+  .object({
+    name: z.string().min(1),
+    steps: z.array(stepSchema).min(1, "steps は1つ以上必要です"),
+  })
+  .strict();
 
 /**
  * ステップの「失敗時の分岐」を型を問わず取り出す。
@@ -272,8 +292,8 @@ function translateZodIssue(issue: z.ZodIssueOptionalMessage & { message?: string
  * project.yaml のバリデーション（後続タスク）もこの関数を再利用する。
  */
 export function formatZodIssues(error: z.ZodError): string[] {
-  return error.issues.map((issue) =>
-    `${issue.path.join(".") || "(root)"}: ${translateZodIssue(issue)}`
+  return error.issues.map(
+    (issue) => `${issue.path.join(".") || "(root)"}: ${translateZodIssue(issue)}`,
   );
 }
 

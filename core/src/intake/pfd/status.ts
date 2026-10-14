@@ -73,9 +73,10 @@ export function computeProcessStatuses(input: StatusInput): ProcessStatusEntry[]
   const progressOf = (id: string) => input.progress.get(id) ?? noProgress;
 
   const settled = new Map<string, ProcessStatusEntry | null>(
-    pfd.processes.map((
-      p,
-    ) => [p.id, settledState(p, progressOf(p.id), input.baseBranches.get(p.id))]),
+    pfd.processes.map((p) => [
+      p.id,
+      settledState(p, progressOf(p.id), input.baseBranches.get(p.id)),
+    ]),
   );
 
   const available = availableArtifacts(pfd, (id) => settled.get(id)?.state);
@@ -89,10 +90,10 @@ export function computeProcessStatuses(input: StatusInput): ProcessStatusEntry[]
     const blockedBy = input.revising
       ? "revising"
       : input.dispatchPaused
-      ? "paused"
-      : progressOf(p.id).subIssueUrl === null
-      ? "no_sub_issue"
-      : null;
+        ? "paused"
+        : progressOf(p.id).subIssueUrl === null
+          ? "no_sub_issue"
+          : null;
     return { id: p.id, state: "ready", blockedBy };
   });
 }

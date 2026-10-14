@@ -11,8 +11,7 @@ flowchart LR
     Rust["Rust 中継<br/>app/src-tauri"]
     React -- "invoke('rpc')<br/>listen('daemon-event')" --> Rust
   end
-  CLI["dctl<br/>core/src/cli/dctl.ts"]
-  subgraph Daemon["dctld（常駐デーモン, Deno）"]
+  subgraph Daemon["dctld（常駐デーモン, Node）"]
     Server["server.ts<br/>ソケット・NDJSON"]
     Handlers["handlers.ts<br/>RPC・tick"]
     Engine["domain/*<br/>engine・scheduler"]
@@ -22,7 +21,6 @@ flowchart LR
     Handlers --> Intake --> DB
   end
   Rust -- "Unix ソケット<br/>改行区切り JSON" --> Server
-  CLI -- "Unix ソケット" --> Server
   Engine -- "spawn" --> Claude["claude -p<br/>(Claude Code)"]
   Engine -- "spawn" --> Git["git / sh"]
   Intake -- "spawn" --> Gh["gh"]
@@ -32,7 +30,6 @@ flowchart LR
 | プロセス | 実体 | 役割 |
 | --- | --- | --- |
 | **dctld** | [`core/src/daemon/main.ts`](../../core/src/daemon/main.ts) | 唯一の常駐プロセス。状態機械の権威で、DB に書くのはこれだけ。タスクと Intake を進め、Claude Code・git・gh を子プロセスとして起動する。アプリを閉じても動き続ける |
-| **dctl** | [`core/src/cli/dctl.ts`](../../core/src/cli/dctl.ts) | 1 コマンドを 1 RPC にして結果の JSON を出す薄い CLI。製品の UI ではなく、デバッグとテストのための面 |
 | **アプリ** | [`app/`](../../app) | Tauri v2 のデスクトップアプリ。React が画面、Rust がソケット接続を 1 本保持して RPC を素通しで中継する。dctld が居なければ切り離して起動する |
 
 dctld とクライアントの間の契約は [`shared/protocol.ts`](../../shared/protocol.ts) の型だけで、core と app がこのファイルを直接 import する。
@@ -42,10 +39,9 @@ Rust の中継は型を知らず、`method` の中身も見ない（4 章・7 �
 
 | ディレクトリ | 言語・実行環境 | 中身 |
 | --- | --- | --- |
-| `core/` | Deno + TypeScript | デーモン、CLI、ワークフローエンジン、永続化、Intake、トラッカー |
+| `core/` | Node + TypeScript | デーモン、ワークフローエンジン、永続化、Intake、トラッカー |
 | `shared/` | TypeScript（設定ファイルなし） | core と app の両方が import する契約（RPC の型、Review Guide と PFD と質問のスキーマ）と純関数（hunk id、移動検出） |
 | `app/` | React 19 + Vite + Vitest、Rust（Tauri v2） | デスクトップアプリ |
-| `pfd/` | Deno | Intake 以前の試作 CLI。どこからも import されておらず、削除予定（2 章） |
 
 詳しいディレクトリの責務は [2 章](02-repository-and-tooling.md) にある。
 
@@ -54,7 +50,6 @@ Rust の中継は型を知らず、`method` の中身も見ない（4 章・7 �
 ```mermaid
 flowchart TB
   daemon["daemon/<br/>main・server・handlers"]
-  cli["cli/dctl.ts"]
   intake["intake/<br/>commands・runner・dispatch・watch"]
   domain["domain/<br/>engine・stepRunner・scheduler・states<br/>worktree・diff・reviewTree・guide*"]
   workflow["workflow/<br/>schema・load・template・scaffold"]
@@ -74,7 +69,6 @@ flowchart TB
   domain --> shared
   intake --> shared
   daemon --> shared
-  cli --> shared
 ```
 
 - **`daemon/`** は配線である。RPC をメソッド名で振り分け（`handlers.ts:createHandler`）、1 秒ごとの `tick` でスケジューラを回し、エンジンのコールバックをイベントに変えて配る。worktree の作成と後始末もここが持つ
@@ -104,7 +98,7 @@ Intake は承認された PFD のプロセスごとに**普通のタスク**を�
 
 ```mermaid
 sequenceDiagram
-  participant U as 人 (アプリ / dctl)
+  participant U as 人 (アプリ)
   participant H as handlers.ts
   participant T as tick
   participant E as engine.runTask
@@ -142,7 +136,7 @@ sequenceDiagram
    `StateConflictError` になる。Intake も `updateIntake(..., { requireState })` で同じ作法を取る
 4. **実行枠はカウンタで持たず、毎回状態から数える**（`scheduler.ts:currentUsage`）
 5. **タスクが従うワークフローは作成時に固定する。** `tasks.workflow_yaml` と `workflow_setup` に作成時の中身を保存し、以後はディスクを読まない
-6. **判断は人に残す。** approval の承認・却下、Intake の承認と人のプロセスの完了記録は RPC だけが経路で、エージェントの道具にも dctl にも無い
+6. **判断は人に残す。** approval の承認・却下、Intake の承認と人のプロセスの完了記録は RPC だけが経路で、エージェントの道具には無い
 7. **失敗した実行の証拠を消さない。** `failed` / `canceled` のタスクの worktree は残す。`completed` でも未コミットの変更があれば消さない
 8. **tick・見張り・後始末は例外を外へ投げない。** 1 件の失敗で他のタスクやデーモン全体を巻き込まないため、失敗は行を `failed` にし、警告として届ける
 9. **doctrine はワークフローの成果物の中身を理解しない。** `.doctrine-out/` のファイルは規約上の置き場で、コアがするのは

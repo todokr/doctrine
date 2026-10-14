@@ -23,8 +23,8 @@ plan の Global Constraints に繰り返し書かれている約束が、事実�
 - コメント・エラーメッセージ・テスト名は日本語
 - 一度コミットしたマイグレーションは書き換えない。新しい番号で足す
 - `shared/protocol.ts` の union に値を足したら、app 側の網羅的な `Record` も同じ変更で足す
-- core は `deno fmt`（`lineWidth: 100`）と `deno lint` を通す。CI が見る
-- プロンプトなどの文面を別ファイルに出さない。`deno compile` の単一バイナリに同梱できないため
+- core と shared は Biome（`pnpm exec biome check`、`lineWidth: 100`）を通す。CI が見る
+- プロンプトなどの文面を別ファイルに出さない。単一バイナリ（esbuild + SEA）に同梱されないため
 - エージェントに渡す文字列を組むとき、利用者由来の文字列（Issue の本文、タスクの prompt）を `template.ts:expand` に通さない。`{{ }}` が展開されてしまうため
 
 ## 9.3 コミットと PR
@@ -34,7 +34,7 @@ plan の Global Constraints に繰り返し書かれている約束が、事実�
 - 必須チェックは CI の `ci` ジョブ 1 つ（[2.5](02-repository-and-tooling.md)）。push の前に、触ったサブプロジェクトの検査を手元で通す
 
 ```bash
-mise run core:check && mise run core:test && (cd core && deno fmt --check && deno lint)
+mise run core:check && mise run core:test && pnpm exec biome check
 mise run app:build && mise run app:test
 (cd app/src-tauri && cargo test --locked)   # Rust を触ったとき
 ```
@@ -45,9 +45,8 @@ mise run app:build && mise run app:test
 
 1. `shared/protocol.ts` の `Methods` に params と result の型を足す
 2. `core/src/daemon/handlers.ts:createHandler` の `switch` に `case` を足す。引数は `req` / `reqNumber` / `reqProject` で検査する
-3. dctl から呼べるようにするなら `core/src/cli/dctl.ts:parseArgv` と `USAGE` に足す（人だけが行う操作は足さない）
-4. `core/test/daemon/` にテストを書く
-5. アプリから呼ぶなら `app/src/store.tsx` の該当するフックに足す。**Rust は変えない**
+3. `core/test/daemon/` にテストを書く
+4. アプリから呼ぶなら `app/src/store.tsx` の該当するフックに足す。**Rust は変えない**
 
 ### イベントを足す
 

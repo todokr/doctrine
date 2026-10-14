@@ -1,4 +1,4 @@
-import { test } from "@std/testing/bdd";
+import { test } from "node:test";
 import assert from "node:assert/strict";
 import { detectMoves } from "../../../shared/diff/moves.ts";
 
@@ -37,7 +37,8 @@ const FUNC = [
 ];
 
 test("別ファイルへ丸ごと移した関数を1つの移動として返す", () => {
-  const patch = section("src/a.ts", "@@ -9,7 +9,2 @@", [" before", ...del(...FUNC), " after"]) +
+  const patch =
+    section("src/a.ts", "@@ -9,7 +9,2 @@", [" before", ...del(...FUNC), " after"]) +
     section("src/b.ts", "@@ -1,2 +1,7 @@", [" top", ...add(...FUNC), " bottom"]);
   const moves = detectMoves(patch);
   assert.equal(moves.length, 1);
@@ -159,15 +160,17 @@ test("末尾の空白だけの違いは完全一致として扱う", () => {
 
 test("非 ASCII のパスは復号して返す", () => {
   const quoted = String.raw`"src/\346\227\245.ts"`;
-  const patch = removed("src/a.ts", FUNC) + [
-    `diff --git "a/src/\\346\\227\\245.ts" "b/src/\\346\\227\\245.ts"`,
-    "index 104f954..967f419 100644",
-    `--- "a/${quoted.slice(1)}`,
-    `+++ "b/${quoted.slice(1)}`,
-    `@@ -0,0 +1,${FUNC.length} @@`,
-    ...add(...FUNC),
-    "",
-  ].join("\n");
+  const patch =
+    removed("src/a.ts", FUNC) +
+    [
+      `diff --git "a/src/\\346\\227\\245.ts" "b/src/\\346\\227\\245.ts"`,
+      "index 104f954..967f419 100644",
+      `--- "a/${quoted.slice(1)}`,
+      `+++ "b/${quoted.slice(1)}`,
+      `@@ -0,0 +1,${FUNC.length} @@`,
+      ...add(...FUNC),
+      "",
+    ].join("\n");
   const moves = detectMoves(patch);
   assert.equal(moves.length, 1);
   assert.equal(moves[0].to.path, "src/日.ts");
@@ -175,12 +178,12 @@ test("非 ASCII のパスは復号して返す", () => {
 
 test("リネームされたファイルの中の移動は新しいパスで返す", () => {
   const moved = ["const a = 1;", "const b = 2;", "const c = 3;", "const d = 4;"];
-  const patch = section("new.ts", "@@ -1,6 +1,6 @@", [
-    " ctx1",
-    ...del(...moved),
-    " ctx2",
-    ...add(...moved),
-  ], "old.ts");
+  const patch = section(
+    "new.ts",
+    "@@ -1,6 +1,6 @@",
+    [" ctx1", ...del(...moved), " ctx2", ...add(...moved)],
+    "old.ts",
+  );
   const moves = detectMoves(patch);
   assert.equal(moves.length, 1);
   assert.equal(moves[0].from.path, "new.ts");

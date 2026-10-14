@@ -1,4 +1,4 @@
-import { test } from "@std/testing/bdd";
+import { test } from "node:test";
 import assert from "node:assert/strict";
 import { ghTracker } from "../../src/github/ghTracker.ts";
 import { fakeGh, parseGraphqlArgs } from "../helpers/gh.ts";
@@ -14,16 +14,17 @@ test("status: 3 つとも通れば repo を target として返す", async () =>
   });
   const s = await ghTracker(run).status(P);
   assert.deepEqual(s, { ok: true, target: { id: "R_1", name: "o/r" } });
-  assert.deepEqual(calls.map((c) => c.args), [
-    ["--version"],
-    ["auth", "status"],
-    ["repo", "view", "--json", "id,nameWithOwner"],
-  ]);
+  assert.deepEqual(
+    calls.map((c) => c.args),
+    [["--version"], ["auth", "status"], ["repo", "view", "--json", "id,nameWithOwner"]],
+  );
   assert.ok(calls.every((c) => c.cwd === P));
 });
 
 test("status: gh が無ければ not_installed", async () => {
-  const { run, calls } = fakeGh(() => new Deno.errors.NotFound("gh"));
+  const { run, calls } = fakeGh(() =>
+    Object.assign(new Error("spawn gh ENOENT"), { code: "ENOENT" }),
+  );
   const s = await ghTracker(run).status(P);
   assert.equal(s.ok, false);
   if (!s.ok) assert.equal(s.reason, "not_installed");
@@ -80,13 +81,15 @@ test("listIssues: 既定は自分の担当で絞る", async () => {
   const rows = await ghTracker(run).listIssues(P, { assignee: "me" });
   assert.deepEqual(calls[0].args, [...LIST_ARGS, "--assignee", "@me"]);
   assert.equal(calls[0].cwd, P);
-  assert.deepEqual(rows, [{
-    url: issueRow.url,
-    identifier: "#1",
-    title: issueRow.title,
-    assignees: ["a"],
-    updatedAt: issueRow.updatedAt,
-  }]);
+  assert.deepEqual(rows, [
+    {
+      url: issueRow.url,
+      identifier: "#1",
+      title: issueRow.title,
+      assignees: ["a"],
+      updatedAt: issueRow.updatedAt,
+    },
+  ]);
 });
 
 test("listIssues: any なら担当者で絞らず、検索語を渡す", async () => {
@@ -116,14 +119,17 @@ test("readIssue: 本文とコメントを読む", async () => {
         { author: { login: "a" }, body: "c1", createdAt: "2026-09-21T00:00:00Z" },
         { author: null, body: "c2", createdAt: "2026-09-21T01:00:00Z" },
       ],
-    })
+    }),
   );
   const d = await ghTracker(run).readIssue(P, URL1);
   assert.deepEqual(calls[0].args, ["issue", "view", URL1, "--json", "url,id,title,body,comments"]);
   assert.equal(calls[0].cwd, P);
   assert.equal(d.nodeId, "I_1");
   assert.equal(d.url, URL1);
-  assert.deepEqual(d.comments.map((c) => c.author), ["a", null]);
+  assert.deepEqual(
+    d.comments.map((c) => c.author),
+    ["a", null],
+  );
 });
 
 test("readIssue: JSON でない出力はラベル付きで投げる", async () => {
@@ -220,7 +226,7 @@ test("findSubIssues: 親の sub-issue を本文と状態つきで返す", async 
           },
         },
       },
-    })
+    }),
   );
   const subs = await ghTracker(run).findSubIssues(P, parent);
   assert.equal(calls[0].cwd, P);
@@ -238,7 +244,7 @@ test("findSubIssues: Issue でない node は投げる", async () => {
 
 test("updateIssue: タイトルと本文を node id で更新する", async () => {
   const { run, calls } = fakeGh(() =>
-    JSON.stringify({ data: { updateIssue: { issue: { id: "I_2" } } } })
+    JSON.stringify({ data: { updateIssue: { issue: { id: "I_2" } } } }),
   );
   await ghTracker(run).updateIssue(P, { url: URL1, nodeId: "I_2" }, { title: "T2", body: "B2" });
   assert.equal(calls[0].cwd, P);
@@ -251,14 +257,17 @@ test("updateIssue: タイトルと本文を node id で更新する", async () =
 
 test("closeIssue: 理由を stateReason に写す", async () => {
   const { run, calls } = fakeGh(() =>
-    JSON.stringify({ data: { closeIssue: { issue: { id: "I_2" } } } })
+    JSON.stringify({ data: { closeIssue: { issue: { id: "I_2" } } } }),
   );
   const t = ghTracker(run);
   const ref = { url: URL1, nodeId: "I_2" };
   await t.closeIssue(P, ref, "completed");
   await t.closeIssue(P, ref, "not_planned");
   const gs = calls.map((c) => parseGraphqlArgs(c.args));
-  assert.deepEqual(gs.map((g) => g.raw.reason), ["COMPLETED", "NOT_PLANNED"]);
+  assert.deepEqual(
+    gs.map((g) => g.raw.reason),
+    ["COMPLETED", "NOT_PLANNED"],
+  );
   assert.ok(gs.every((g) => /closeIssue/.test(g.query) && g.raw.id === "I_2"));
   assert.ok(calls.every((c) => c.cwd === P));
 });

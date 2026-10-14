@@ -46,8 +46,8 @@ export function parsePfd(input: unknown): PfdParse {
   if (parsed.success) return { ok: true, pfd: parsed.data };
   return {
     ok: false,
-    issues: parsed.error.issues.map((issue) =>
-      `${issue.path.join(".") || "(root)"}: ${issue.message}`
+    issues: parsed.error.issues.map(
+      (issue) => `${issue.path.join(".") || "(root)"}: ${issue.message}`,
     ),
   };
 }

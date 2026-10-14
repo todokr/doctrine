@@ -65,14 +65,16 @@ export function buildTaskPrompt(input: TaskPromptInput): string {
   const head = [`${parentIssue.url} ${parentIssue.title}`];
   if (subIssueUrl !== null) head.push(`この作業の sub-issue: ${subIssueUrl}`);
 
-  return [
-    head.join("\n"),
-    "この作業は、上の Issue を分解したうちの 1 つである。",
-    `## 目的\n${process.purpose ?? ""}`,
-    `## 前提\n${premise.join("\n\n")}`,
-    `## 作るもの\n${outputs.join("\n")}`,
-    `## 手順\n${process.steps ?? ""}`,
-    `## 完了条件\n${process.done_when ?? ""}`,
-    "## 範囲\nこの作業の出力は上の「作るもの」だけである。Issue の残りの部分は別の作業が担う。",
-  ].join("\n\n") + "\n";
+  return (
+    [
+      head.join("\n"),
+      "この作業は、上の Issue を分解したうちの 1 つである。",
+      `## 目的\n${process.purpose ?? ""}`,
+      `## 前提\n${premise.join("\n\n")}`,
+      `## 作るもの\n${outputs.join("\n")}`,
+      `## 手順\n${process.steps ?? ""}`,
+      `## 完了条件\n${process.done_when ?? ""}`,
+      "## 範囲\nこの作業の出力は上の「作るもの」だけである。Issue の残りの部分は別の作業が担う。",
+    ].join("\n\n") + "\n"
+  );
 }

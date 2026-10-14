@@ -1,9 +1,7 @@
 import { z } from "zod/v4";
 import { type Guide, guideSchema } from "./schema.ts";
 
-export type GuideValidation =
-  | { ok: true; guide: Guide }
-  | { ok: false; issues: string[] };
+export type GuideValidation = { ok: true; guide: Guide } | { ok: false; issues: string[] };
 
 // 誤りの理由は zod 同梱の日本語ロケールに任せる。z.config() はアプリ側のメッセージまで変えるので使わない
 const parseOptions = { error: z.locales.ja().localeError };

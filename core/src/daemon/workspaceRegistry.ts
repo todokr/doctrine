@@ -1,4 +1,6 @@
-import { basename, isAbsolute, join } from "@std/path";
+import { isNotFound } from "../util/fsError.ts";
+import { readFile, realpath, rm } from "node:fs/promises";
+import { basename, isAbsolute, join } from "node:path";
 import type { Db, ProjectRow } from "../db/schema.ts";
 import { getProjectByPath, insertProject } from "../db/tasks.ts";
 import {
@@ -58,7 +60,7 @@ export async function addWorkspace(
       if (claimed) claims.set(p.path, claimed);
     }
   } catch (e) {
-    if (scaffold.created.includes(yamlPath)) await Deno.remove(yamlPath);
+    if (scaffold.created.includes(yamlPath)) await rm(yamlPath);
     throw e;
   }
 
@@ -105,7 +107,10 @@ export async function updateWorkspace(db: Db, rootPath: string): Promise<{ works
   for (const p of [...adding, ...keeping]) configs.set(p.path, await readProjectConfig(p.path));
 
   await db.transaction().execute(async (trx) => {
-    await trx.updateTable("workspaces").set({ name: cfg.name }).where("id", "=", workspace.id)
+    await trx
+      .updateTable("workspaces")
+      .set({ name: cfg.name })
+      .where("id", "=", workspace.id)
       .execute();
     // UNIQUE(workspace_id, name): 外す → 残す → 足す の順なら、外した名前を別のプロジェクトが使える
     for (const r of removing) await trx.deleteFrom("projects").where("id", "=", r.id).execute();
@@ -145,12 +150,9 @@ async function trackerConfigOf(workspacePath: string): Promise<WorkspaceSummary[
 }
 
 /** project.yaml から読んだ設定を projects の行へ写す。 */
-export async function syncProjectRow(
-  db: Db,
-  projectId: number,
-  cfg: ProjectConfig,
-): Promise<void> {
-  await db.updateTable("projects")
+export async function syncProjectRow(db: Db, projectId: number, cfg: ProjectConfig): Promise<void> {
+  await db
+    .updateTable("projects")
     .set({
       default_workflow: cfg.defaultWorkflow,
       max_concurrent: cfg.maxConcurrent,
@@ -166,9 +168,9 @@ export async function resolveRoot(rootPath: string): Promise<string> {
   // デーモンの cwd で解決されて黙って別の場所を指すのを防ぐ
   if (!isAbsolute(rootPath)) throw new Error(`絶対パスを指定してください: ${rootPath}`);
   try {
-    return await Deno.realPath(rootPath);
+    return await realpath(rootPath);
   } catch (e) {
-    if (e instanceof Deno.errors.NotFound) throw new Error(`パスがありません: ${rootPath}`);
+    if (isNotFound(e)) throw new Error(`パスがありません: ${rootPath}`);
     throw e;
   }
 }
@@ -177,9 +179,9 @@ async function readConfig(root: string): Promise<WorkspaceConfig> {
   const yamlPath = join(root, WORKSPACE_YAML);
   let text: string;
   try {
-    text = await Deno.readTextFile(yamlPath);
+    text = await readFile(yamlPath, "utf8");
   } catch (e) {
-    if (e instanceof Deno.errors.NotFound) {
+    if (isNotFound(e)) {
       throw new Error(`workspace.yaml がありません: ${yamlPath}`);
     }
     throw e;
@@ -199,9 +201,9 @@ async function resolveProjects(root: string, cfg: WorkspaceConfig): Promise<Reso
     const abs = join(root, entry.path);
     let real: string;
     try {
-      real = await Deno.realPath(abs);
+      real = await realpath(abs);
     } catch (e) {
-      if (e instanceof Deno.errors.NotFound) {
+      if (isNotFound(e)) {
         throw new Error(`projects の ${entry.name} が指すパスがありません: ${abs}`);
       }
       throw e;
@@ -215,7 +217,7 @@ async function resolveProjects(root: string, cfg: WorkspaceConfig): Promise<Reso
     }
     // ensureProjectScaffold（assertRepoRoot）が同じことを確かめるが、それは1件ずつ
     // スキャフォルドしながら呼ぶので手遅れ。ここで先に全件を確かめる。
-    if (await requireNotSubdirectory(real) === null) {
+    if ((await requireNotSubdirectory(real)) === null) {
       throw new Error(
         `projects の ${entry.name} が指すパスは git リポジトリではありません: ${real}`,
       );
@@ -240,10 +242,13 @@ async function checkClaim(
   if (!row || row.workspace_id === workspaceId) return null;
 
   const siblings = await listProjectsOf(db, row.workspace_id);
-  const openIntake = await db.selectFrom("intakes").select("id")
+  const openIntake = await db
+    .selectFrom("intakes")
+    .select("id")
     .where("workspace_id", "=", row.workspace_id)
     .where("state", "not in", ["completed", "canceled"])
-    .limit(1).executeTakeFirst();
+    .limit(1)
+    .executeTakeFirst();
   if (siblings.length === 1 && !openIntake) return row;
 
   const other = await getWorkspace(db, row.workspace_id);
@@ -254,14 +259,21 @@ async function checkClaim(
 
 /** projects.retired_at を足すまでは、タスクの記録があるプロジェクトを消せない（外部キー）。 */
 async function checkRemovable(db: Db, project: ProjectRow): Promise<void> {
-  const active = await db.selectFrom("tasks").select("id")
+  const active = await db
+    .selectFrom("tasks")
+    .select("id")
     .where("project_id", "=", project.id)
     .where("state", "in", ACTIVE_TASK_STATES as never[])
-    .limit(1).executeTakeFirst();
+    .limit(1)
+    .executeTakeFirst();
   if (active) throw new Error(`${project.name} には動いているタスクがあるので外せません`);
 
-  const task = await db.selectFrom("tasks").select("id").where("project_id", "=", project.id)
-    .limit(1).executeTakeFirst();
+  const task = await db
+    .selectFrom("tasks")
+    .select("id")
+    .where("project_id", "=", project.id)
+    .limit(1)
+    .executeTakeFirst();
   if (task) throw new Error(`${project.name} にはタスクの記録があるので外せません`);
 }
 
@@ -274,11 +286,17 @@ async function placeProject(
   claimed: ProjectRow | null,
 ): Promise<void> {
   if (claimed) {
-    await trx.updateTable("projects").set({ workspace_id: workspaceId, name: p.name })
-      .where("id", "=", claimed.id).execute();
+    await trx
+      .updateTable("projects")
+      .set({ workspace_id: workspaceId, name: p.name })
+      .where("id", "=", claimed.id)
+      .execute();
     await syncProjectRow(trx, claimed.id, cfg);
-    await trx.updateTable("intakes").set({ workspace_id: workspaceId })
-      .where("workspace_id", "=", claimed.workspace_id).execute();
+    await trx
+      .updateTable("intakes")
+      .set({ workspace_id: workspaceId })
+      .where("workspace_id", "=", claimed.workspace_id)
+      .execute();
     await trx.deleteFrom("workspaces").where("id", "=", claimed.workspace_id).execute();
     return;
   }
@@ -294,5 +312,5 @@ async function placeProject(
 }
 
 async function readProjectConfig(path: string): Promise<ProjectConfig> {
-  return parseProjectConfig(await Deno.readTextFile(join(path, ".doctrine", "project.yaml")));
+  return parseProjectConfig(await readFile(join(path, ".doctrine", "project.yaml"), "utf8"));
 }

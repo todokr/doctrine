@@ -1,4 +1,7 @@
-import { basename, join } from "@std/path";
+import { isNotFound } from "../util/fsError.ts";
+import type { Stats } from "node:fs";
+import { readdir, readFile, realpath, stat } from "node:fs/promises";
+import { basename, join } from "node:path";
 import type { Db } from "../db/schema.ts";
 import { getWorkspaceByPath, projectNameFrom } from "../db/workspaces.ts";
 import { parseWorkspaceConfig, WORKSPACE_YAML } from "../workflow/workspace.ts";
@@ -22,8 +25,8 @@ export async function detectWorkspace(db: Db, path: string): Promise<WorkspaceDe
   const repositories = isRepoRoot ? [] : await listSubRepositories(root);
 
   const yamlPath = join(root, WORKSPACE_YAML);
-  const text = await Deno.readTextFile(yamlPath).catch((e) => {
-    if (e instanceof Deno.errors.NotFound) return null;
+  const text = await readFile(yamlPath, "utf8").catch((e) => {
+    if (isNotFound(e)) return null;
     throw e;
   });
   let existing: WorkspaceDetection["existing"] = null;
@@ -51,21 +54,21 @@ async function listSubRepositories(
   root: string,
 ): Promise<{ dir: string; suggestedName: string }[]> {
   const found: { name: string; suggestedName: string }[] = [];
-  for await (const entry of Deno.readDir(root)) {
+  for (const entry of await readdir(root, { withFileTypes: true })) {
     if (entry.name.startsWith(".")) continue;
     const dir = join(root, entry.name);
-    let stat: Deno.FileInfo;
+    let info: Stats;
     try {
-      stat = await Deno.stat(dir);
+      info = await stat(dir);
     } catch {
       continue;
     }
-    if (!stat.isDirectory) continue;
-    const real = await Deno.realPath(dir);
-    if (await gitTopLevel(dir) === real) {
+    if (!info.isDirectory()) continue;
+    const real = await realpath(dir);
+    if ((await gitTopLevel(dir)) === real) {
       found.push({ name: entry.name, suggestedName: projectNameFrom(entry.name) });
     }
   }
-  found.sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
+  found.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
   return found.map(({ name, suggestedName }) => ({ dir: name, suggestedName }));
 }

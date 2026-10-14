@@ -1,5 +1,5 @@
 import { readNdjson } from "./ndjson.ts";
-import { exitCodeOf } from "../util/exec.ts";
+import { exitCodeOf, startChild } from "../util/exec.ts";
 import type { PermissionDenial } from "../../../shared/protocol.ts";
 import type { AgentAdapter, AgentEvent, AgentResult, AgentRun, StartOptions } from "./types.ts";
 
@@ -77,7 +77,7 @@ type ContentBlock = {
 
 function blocksOf(o: Record<string, unknown>): ContentBlock[] {
   const content = (o.message as { content?: unknown } | undefined)?.content;
-  return Array.isArray(content) ? content as ContentBlock[] : [];
+  return Array.isArray(content) ? (content as ContentBlock[]) : [];
 }
 
 /**
@@ -94,9 +94,10 @@ function assistantEvents(o: Record<string, unknown>): AgentEvent[] {
       out.push({
         kind: "toolUse",
         name: typeof b.name === "string" ? b.name : "",
-        input: typeof b.input === "object" && b.input !== null && !Array.isArray(b.input)
-          ? b.input as Record<string, unknown>
-          : {},
+        input:
+          typeof b.input === "object" && b.input !== null && !Array.isArray(b.input)
+            ? (b.input as Record<string, unknown>)
+            : {},
       });
     }
   }
@@ -172,14 +173,15 @@ export function resultFrom(
  */
 function denialsFrom(raw: unknown[]): PermissionDenial[] {
   return raw.map((e) => {
-    const d = typeof e === "object" && e !== null ? e as Record<string, unknown> : {};
+    const d = typeof e === "object" && e !== null ? (e as Record<string, unknown>) : {};
     const input = d.tool_input;
     return {
       tool_name: typeof d.tool_name === "string" ? d.tool_name : "",
       tool_use_id: typeof d.tool_use_id === "string" ? d.tool_use_id : null,
-      input: typeof input === "object" && input !== null && !Array.isArray(input)
-        ? input as Record<string, unknown>
-        : {},
+      input:
+        typeof input === "object" && input !== null && !Array.isArray(input)
+          ? (input as Record<string, unknown>)
+          : {},
     };
   });
 }
@@ -194,26 +196,18 @@ function denialsFrom(raw: unknown[]): PermissionDenial[] {
 function structuredOutputOf(o: Record<string, unknown>): Record<string, unknown> | null {
   const v = o.structured_output;
   return typeof v === "object" && v !== null && !Array.isArray(v)
-    ? v as Record<string, unknown>
+    ? (v as Record<string, unknown>)
     : null;
 }
 
 export function createClaudeAdapter(bin = "claude"): AgentAdapter {
   function launch(args: string[], opts: StartOptions, runSessionId: string): AgentRun {
     const startedAt = new Date().toISOString();
-    let child: Deno.ChildProcess;
-    try {
-      child = new Deno.Command(bin, {
-        args,
-        cwd: opts.cwd,
-        stdin: "null",
-        stdout: "piped",
-        stderr: "piped",
-      }).spawn();
-    } catch (e) {
-      // 起動失敗（バイナリや cwd が無い）は同期例外で来る。呼び出し側は
+    const started = startChild(bin, args, { cwd: opts.cwd });
+    if ("failed" in started) {
+      // 起動失敗（バイナリや cwd が無い）。呼び出し側は
       // 「pid -1 で通知され、result が reject される」形で扱うので、それに揃える。
-      const result = Promise.reject(e);
+      const result = started.failed.then((e) => Promise.reject(e));
       result.catch(() => {}); // 呼び出し側が await するまでの間に未処理扱いされないように
       return {
         sessionId: runSessionId,
@@ -224,6 +218,7 @@ export function createClaudeAdapter(bin = "claude"): AgentAdapter {
         kill: () => {},
       };
     }
+    const child = started.child;
     // stderr を消費しないとパイプが埋まって子プロセスがブロックし、
     // headless でハングしないという契約が壊れる。診断用に末尾だけ残す。
     let stderrTail = "";
@@ -264,8 +259,9 @@ export function createClaudeAdapter(bin = "claude"): AgentAdapter {
 
     // 終了ステータスだけでなく stdout / stderr を読み切るまで待つ。
     // 先に確定させると、パイプに残った result 行や stderr の末尾を取りこぼす。
-    const result: Promise<AgentResult> = Promise.all([child.status, pump, stderrDone])
-      .then(([status]) => resultFrom(resultLine, exitCodeOf(status), stderrTail));
+    const result: Promise<AgentResult> = Promise.all([child.status, pump, stderrDone]).then(
+      ([status]) => resultFrom(resultLine, exitCodeOf(status), stderrTail),
+    );
 
     return {
       sessionId: runSessionId,
@@ -276,7 +272,9 @@ export function createClaudeAdapter(bin = "claude"): AgentAdapter {
       kill: () => {
         try {
           child.kill("SIGTERM");
-        } catch { /* 既に終了している */ }
+        } catch {
+          /* 既に終了している */
+        }
       },
     };
   }

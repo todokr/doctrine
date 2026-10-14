@@ -88,7 +88,8 @@ function isLinearUrl(url: string): boolean {
 function resolve(expr: string, ctx: TemplateContext): string {
   const parts = expr.split(".");
   if (
-    parts[0] === "task" && parts.length === 2 &&
+    parts[0] === "task" &&
+    parts.length === 2 &&
     (TASK_FIELDS as readonly string[]).includes(parts[1])
   ) {
     return ctx.task[parts[1] as (typeof TASK_FIELDS)[number]];

@@ -1,4 +1,6 @@
-import { dirname, join } from "@std/path";
+import { isNotFound } from "../util/fsError.ts";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { z } from "zod";
 import { formatZodIssues } from "../workflow/schema.ts";
 import { DEFAULT_GLOBAL_LIMIT } from "../domain/scheduler.ts";
@@ -13,10 +15,12 @@ export function defaultConfigPath(): string {
 
 export type DaemonConfig = { globalLimit: number; linearApiKey?: string };
 
-const schema = z.object({
-  globalLimit: z.number().int().min(1).optional(),
-  linearApiKey: z.string().min(1).optional(),
-}).strict();
+const schema = z
+  .object({
+    globalLimit: z.number().int().min(1).optional(),
+    linearApiKey: z.string().min(1).optional(),
+  })
+  .strict();
 
 /** 1 以上の整数でなければ投げる。上限は無い。 */
 export function validateGlobalLimit(value: unknown): number {
@@ -29,17 +33,16 @@ export async function readDaemonConfig(
 ): Promise<{ config: DaemonConfig; warning: string | null }> {
   let text: string;
   try {
-    text = await Deno.readTextFile(path);
+    text = await readFile(path, "utf8");
   } catch (e) {
-    if (e instanceof Deno.errors.NotFound) {
+    if (isNotFound(e)) {
       return { config: { globalLimit: DEFAULT_GLOBAL_LIMIT }, warning: null };
     }
     return {
       config: { globalLimit: DEFAULT_GLOBAL_LIMIT },
-      warning:
-        `設定ファイル (${path}) を読めないため全体の実行枠は既定値 ${DEFAULT_GLOBAL_LIMIT} で動きます: ${
-          (e as Error).message
-        }`,
+      warning: `設定ファイル (${path}) を読めないため全体の実行枠は既定値 ${DEFAULT_GLOBAL_LIMIT} で動きます: ${
+        (e as Error).message
+      }`,
     };
   }
 
@@ -49,10 +52,9 @@ export async function readDaemonConfig(
   } catch (e) {
     return {
       config: { globalLimit: DEFAULT_GLOBAL_LIMIT },
-      warning:
-        `設定ファイル (${path}) を読めないため全体の実行枠は既定値 ${DEFAULT_GLOBAL_LIMIT} で動きます: ${
-          (e as Error).message
-        }`,
+      warning: `設定ファイル (${path}) を読めないため全体の実行枠は既定値 ${DEFAULT_GLOBAL_LIMIT} で動きます: ${
+        (e as Error).message
+      }`,
     };
   }
 
@@ -60,10 +62,9 @@ export async function readDaemonConfig(
   if (!parsed.success) {
     return {
       config: { globalLimit: DEFAULT_GLOBAL_LIMIT },
-      warning:
-        `設定ファイル (${path}) を読めないため全体の実行枠は既定値 ${DEFAULT_GLOBAL_LIMIT} で動きます: ${
-          formatZodIssues(parsed.error).join("; ")
-        }`,
+      warning: `設定ファイル (${path}) を読めないため全体の実行枠は既定値 ${DEFAULT_GLOBAL_LIMIT} で動きます: ${formatZodIssues(
+        parsed.error,
+      ).join("; ")}`,
     };
   }
   return {
@@ -73,13 +74,13 @@ export async function readDaemonConfig(
 }
 
 export async function writeDaemonConfig(path: string, config: DaemonConfig): Promise<void> {
-  await Deno.mkdir(dirname(path), { recursive: true, mode: 0o700 });
+  await mkdir(dirname(path), { recursive: true, mode: 0o700 });
   const tmp = `${path}.${crypto.randomUUID()}.tmp`;
-  await Deno.writeTextFile(tmp, JSON.stringify(config, null, 2) + "\n", { mode: 0o600 });
+  await writeFile(tmp, JSON.stringify(config, null, 2) + "\n", { mode: 0o600 });
   try {
-    await Deno.rename(tmp, path);
+    await rename(tmp, path);
   } catch (e) {
-    await Deno.remove(tmp).catch(() => {});
+    await rm(tmp, { force: true }).catch(() => {});
     throw e;
   }
 }

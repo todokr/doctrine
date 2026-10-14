@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, test } from "@std/testing/bdd";
+import { afterEach, beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -102,11 +102,11 @@ test("approval の時点で task.context から計画の本文が取れる（完
   });
   const { ctx, handler } = await context();
   await handler("workspace.add", { path: repo }, NOOP_CONN);
-  const t = await handler(
+  const t = (await handler(
     "task.create",
     { project: repo, title: "在庫の引当", prompt: "在庫の引当を冪等にして" },
     NOOP_CONN,
-  ) as { id: string };
+  )) as { id: string };
 
   await tick(ctx);
   await until(
@@ -115,7 +115,7 @@ test("approval の時点で task.context から計画の本文が取れる（完
     "計画の承認待ちに到達すること",
   );
 
-  const got = await handler("task.context", { task_id: t.id }, NOOP_CONN) as Got;
+  const got = (await handler("task.context", { task_id: t.id }, NOOP_CONN)) as Got;
 
   assert.equal(got.prompt, "在庫の引当を冪等にして");
   assert.equal(got.reviewFiles.length, 1);
@@ -153,11 +153,11 @@ test("2回差し戻したタスクで、両方のレビューが返る（完了�
   });
   const { ctx, handler } = await context();
   await handler("workspace.add", { path: repo }, NOOP_CONN);
-  const t = await handler(
+  const t = (await handler(
     "task.create",
     { project: repo, title: "T", prompt: "やって" },
     NOOP_CONN,
-  ) as { id: string };
+  )) as { id: string };
 
   const waitSuspended = (label: string) =>
     until(async () => (await getTask(ctx.db, t.id))?.state === "suspended", 5000, label);
@@ -177,11 +177,17 @@ test("2回差し戻したタスクで、両方のレビューが返る（完了�
   await tickWhenIdle(ctx);
   await waitSuspended("3回目の承認待ち");
 
-  const { reviews } = await handler("task.context", { task_id: t.id }, NOOP_CONN) as Got;
+  const { reviews } = (await handler("task.context", { task_id: t.id }, NOOP_CONN)) as Got;
 
   assert.equal(reviews.length, 3, "却下2回 + まだ決まっていない1回");
-  assert.deepEqual(reviews.map((r) => r.status), ["rejected", "rejected", "awaiting"]);
-  assert.deepEqual(reviews.map((r) => r.attempt), [1, 2, 3]);
+  assert.deepEqual(
+    reviews.map((r) => r.status),
+    ["rejected", "rejected", "awaiting"],
+  );
+  assert.deepEqual(
+    reviews.map((r) => r.attempt),
+    [1, 2, 3],
+  );
   assert.deepEqual(
     reviews.filter((r) => r.status === "rejected").map((r) => r.comment),
     ["手順が粗いです", "ロールバックの話がありません"],

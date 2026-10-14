@@ -53,7 +53,7 @@ export function createMockAdapter(script: MockScript): MockAdapter {
         for (const e of events) yield e;
       })(),
       result: new Promise((resolve) =>
-        setTimeout(() => resolve({ ...DEFAULT, ...partial }), script.delayMs ?? 0)
+        setTimeout(() => resolve({ ...DEFAULT, ...partial }), script.delayMs ?? 0),
       ),
       kill: () => {},
     };

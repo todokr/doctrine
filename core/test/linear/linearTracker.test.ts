@@ -1,4 +1,4 @@
-import { test } from "@std/testing/bdd";
+import { test } from "node:test";
 import assert from "node:assert/strict";
 import { linearTracker } from "../../src/linear/linearTracker.ts";
 import { fakeLinear } from "../helpers/linear.ts";
@@ -45,7 +45,10 @@ test("status: viewer が引けなければ invalid_api_key", async () => {
     assert.equal(res.reason, "invalid_api_key");
     assert.match(res.message, /Authentication required/);
   }
-  assert.equal(calls.some((c) => has(c.query, "teams")), false);
+  assert.equal(
+    calls.some((c) => has(c.query, "teams")),
+    false,
+  );
 });
 
 test("status: チームのキーで引けなければ team_not_found", async () => {
@@ -85,13 +88,15 @@ test("listIssues: me ならチーム・未完了・自分の担当で絞る", as
     state: { type: { nin: ["completed", "canceled"] } },
     assignee: { isMe: { eq: true } },
   });
-  assert.deepEqual(res, [{
-    url: U1,
-    identifier: "ENG-1",
-    title: "T",
-    assignees: ["alice"],
-    updatedAt: "2026-09-21T00:00:00Z",
-  }]);
+  assert.deepEqual(res, [
+    {
+      url: U1,
+      identifier: "ENG-1",
+      title: "T",
+      assignees: ["alice"],
+      updatedAt: "2026-09-21T00:00:00Z",
+    },
+  ]);
 });
 
 test("listIssues: any なら担当者で絞らず、検索語でタイトルを絞る", async () => {
@@ -137,7 +142,10 @@ test("readIssue: URL の識別子で引き、本文とコメントを古い順�
   assert.equal(res.url, U1);
   assert.equal(res.nodeId, "uuid-1");
   assert.equal(res.body, "B");
-  assert.deepEqual(res.comments.map((c) => c.author), [null, "alice"]);
+  assert.deepEqual(
+    res.comments.map((c) => c.author),
+    [null, "alice"],
+  );
 });
 
 test("readIssue: 本文が null なら空文字", async () => {
@@ -160,7 +168,9 @@ test("readIssue: Issue が無ければ投げる", async () => {
 });
 
 test("listIssues と readIssue は同じ Issue に同じ url を返す", async () => {
-  const { fetch } = fakeLinear((q) => has(q, "issues(") ? { issues: { nodes: [row] } } : detail());
+  const { fetch } = fakeLinear((q) =>
+    has(q, "issues(") ? { issues: { nodes: [row] } } : detail(),
+  );
   const tr = t(fetch);
   const listed = await tr.listIssues(P, { assignee: "any" });
   const read = await tr.readIssue(P, "https://linear.app/acme/issue/ENG-1/old-slug");
@@ -229,7 +239,10 @@ test("findSubIssues: 子を本文と状態つきで返し、completed と cancel
   }));
   const res = await t(fetch).findSubIssues(P, parent);
   assert.deepEqual(calls[0].variables, { id: "uuid-parent" });
-  assert.deepEqual(res.map((s) => s.state), ["OPEN", "OPEN", "CLOSED", "CLOSED"]);
+  assert.deepEqual(
+    res.map((s) => s.state),
+    ["OPEN", "OPEN", "CLOSED", "CLOSED"],
+  );
   assert.deepEqual(res[0].ref, { url: "https://linear.app/acme/issue/ENG-3/x", nodeId: "3" });
   assert.equal(res[1].body, "");
 });
@@ -276,7 +289,10 @@ test("closeIssue: not_planned は種類が canceled の状態へ移す", async (
 test("closeIssue: その種類の状態が無ければ投げる", async () => {
   const { fetch, calls } = closeFake([{ id: "s-todo", type: "unstarted", position: 0 }]);
   await assert.rejects(t(fetch).closeIssue(P, issue, "not_planned"), /canceled/);
-  assert.equal(calls.some((c) => has(c.query, "issueUpdate")), false);
+  assert.equal(
+    calls.some((c) => has(c.query, "issueUpdate")),
+    false,
+  );
 });
 
 const S = {
@@ -352,13 +368,19 @@ test("advanceIssue: 完了・取りやめの Issue は触らない", async () =>
 });
 
 test("advanceIssue: その名前の状態が無ければ投げる", async () => {
-  const { fetch, calls } = advanceFake(S.inprog, ALL.filter((s) => s.id !== "s-review"));
+  const { fetch, calls } = advanceFake(
+    S.inprog,
+    ALL.filter((s) => s.id !== "s-review"),
+  );
   await assert.rejects(t(fetch).advanceIssue(P, issue, "inReview"), /In Review/);
   assert.equal(updates(calls).length, 0);
 });
 
 test("advanceIssue: その種類の状態が無ければ投げる", async () => {
-  const { fetch } = advanceFake(S.backlog, ALL.filter((s) => s.type !== "unstarted"));
+  const { fetch } = advanceFake(
+    S.backlog,
+    ALL.filter((s) => s.type !== "unstarted"),
+  );
   await assert.rejects(t(fetch).advanceIssue(P, issue, "todo"), /unstarted/);
 });
 

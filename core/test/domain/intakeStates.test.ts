@@ -1,4 +1,4 @@
-import { test } from "@std/testing/bdd";
+import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   assertIntakeTransition,
@@ -151,16 +151,22 @@ test("不正な遷移は InvalidIntakeTransitionError を投げる", () => {
     },
   );
   assert.doesNotThrow(() => assertIntakeTransition("reviewing", "active", false));
-  assert.throws(() => assertIntakeTransition("answering", "active", false), (e: unknown) => {
-    assert.ok(e instanceof InvalidIntakeTransitionError);
-    assert.doesNotMatch(e.message, /改訂中/);
-    return true;
-  });
-  assert.throws(() => assertIntakeTransition("completed", "active", true), (e: unknown) => {
-    assert.ok(e instanceof InvalidIntakeTransitionError);
-    assert.match(e.message, /改訂中/);
-    return true;
-  });
+  assert.throws(
+    () => assertIntakeTransition("answering", "active", false),
+    (e: unknown) => {
+      assert.ok(e instanceof InvalidIntakeTransitionError);
+      assert.doesNotMatch(e.message, /改訂中/);
+      return true;
+    },
+  );
+  assert.throws(
+    () => assertIntakeTransition("completed", "active", true),
+    (e: unknown) => {
+      assert.ok(e instanceof InvalidIntakeTransitionError);
+      assert.match(e.message, /改訂中/);
+      return true;
+    },
+  );
   assert.doesNotThrow(() => assertIntakeTransition("answering", "active", true));
 });
 

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, test } from "@std/testing/bdd";
+import { afterEach, beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -71,8 +71,14 @@ test("git 管理外の root に 3 つのリポジトリを束ねて登録する"
   const r = await addWorkspace(db, tp);
   assert.equal(r.alreadyRegistered, false);
   const rows = await listProjectsOf(db, r.workspaceId);
-  assert.deepEqual(rows.map((p) => p.name), ["terraform", "tp", "kubernetes"]);
-  assert.deepEqual(rows.map((p) => p.path), [a, b, c]);
+  assert.deepEqual(
+    rows.map((p) => p.name),
+    ["terraform", "tp", "kubernetes"],
+  );
+  assert.deepEqual(
+    rows.map((p) => p.path),
+    [a, b, c],
+  );
   const w = await getWorkspace(db, r.workspaceId);
   assert.equal(w?.name, "tp");
   assert.equal(w?.path, tp);
@@ -145,7 +151,10 @@ test("1 つずつの workspace になっていたリポジトリを吸収する"
   const tp = await writeTp(THREE);
   const r = await addWorkspace(db, tp);
   const workspaces = await listWorkspaces(db);
-  assert.deepEqual(workspaces.map((w) => w.id), [r.workspaceId]);
+  assert.deepEqual(
+    workspaces.map((w) => w.id),
+    [r.workspaceId],
+  );
   const names = ["terraform", "tp", "kubernetes"];
   for (const [i, s] of seeded.entries()) {
     const p = (await getProject(db, s.id))!;
@@ -199,7 +208,10 @@ test("終わった Intake だけを持つ 1 つずつの workspace は吸収し�
   const tp = await writeTp(THREE);
   const r = await addWorkspace(db, tp);
   const workspaces = await listWorkspaces(db);
-  assert.deepEqual(workspaces.map((w) => w.id), [r.workspaceId]);
+  assert.deepEqual(
+    workspaces.map((w) => w.id),
+    [r.workspaceId],
+  );
   assert.equal((await getIntake(db, "i1"))!.workspace_id, r.workspaceId);
   assert.equal((await getIntake(db, "i2"))!.workspace_id, r.workspaceId);
   const p = (await getProject(db, seeded[1].id))!;
@@ -311,8 +323,14 @@ test("git 管理外の root に workspace.yaml が無くても、projects を渡
   assert.equal(r.alreadyRegistered, false);
   assert.deepEqual(r.created, [join(tp, ".doctrine", "workspace.yaml")]);
   const rows = await listProjectsOf(db, r.workspaceId);
-  assert.deepEqual(rows.map((p) => p.name), ["a"]);
-  assert.deepEqual(rows.map((p) => p.path), [a]);
+  assert.deepEqual(
+    rows.map((p) => p.name),
+    ["a"],
+  );
+  assert.deepEqual(
+    rows.map((p) => p.path),
+    [a],
+  );
 });
 
 test("tracker を渡すと workspace.yaml に書く", async () => {
@@ -334,8 +352,14 @@ test("workspace.yaml があれば projects と tracker を使わない", async (
   const r = await addWorkspace(db, tp, { projects: { other: "../does/not/exist" } });
   assert.deepEqual(r.created, []);
   const rows = await listProjectsOf(db, r.workspaceId);
-  assert.deepEqual(rows.map((p) => p.name), ["a"]);
-  assert.deepEqual(rows.map((p) => p.path), [a]);
+  assert.deepEqual(
+    rows.map((p) => p.name),
+    ["a"],
+  );
+  assert.deepEqual(
+    rows.map((p) => p.path),
+    [a],
+  );
 });
 
 test("既に .doctrine/ があるプロジェクトの default.yaml は created に入らない", async () => {
@@ -351,7 +375,7 @@ test("不正な projects（名前の形が違う）なら workspace.yaml を残�
   const tp = join(root, "tp-invalid");
   await mkdir(tp, { recursive: true });
   await assert.rejects(
-    addWorkspace(db, tp, { projects: { "Assured_TP": "../a/repo" } }),
+    addWorkspace(db, tp, { projects: { Assured_TP: "../a/repo" } }),
     WorkflowValidationError,
   );
   assert.equal(await pathExists(join(tp, ".doctrine", "workspace.yaml")), false);

@@ -1,4 +1,4 @@
-import { test } from "@std/testing/bdd";
+import { test } from "node:test";
 import assert from "node:assert/strict";
 import { getIntake, replaceCurrentTask, upsertPrObservation } from "../../src/db/intakes.ts";
 import { insertProject, insertTask, type NewTask } from "../../src/db/tasks.ts";
@@ -17,9 +17,7 @@ test("人の入力を待つ状態は needsHuman になる", () => {
 
 test("投入前後の状態は、プロセスの状態によらず needsHuman にならない", () => {
   const statuses: ProcessStatus[] = [{ state: "your_turn" }];
-  for (
-    const s of ["investigating", "decomposing", "completed", "canceled"] as IntakeState[]
-  ) {
+  for (const s of ["investigating", "decomposing", "completed", "canceled"] as IntakeState[]) {
     assert.equal(needsHuman(s, statuses), false, s);
   }
 });

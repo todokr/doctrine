@@ -6,9 +6,10 @@ export type GhCall = { args: string[]; cwd: string };
  * 引数ごとに応答を返す。応答が Error なら投げる。
  * どれにも当たらなければ「想定外の gh 呼び出し」で投げる。
  */
-export function fakeGh(
-  respond: (args: string[], cwd: string) => string | Error | undefined,
-): { run: GhRun; calls: GhCall[] } {
+export function fakeGh(respond: (args: string[], cwd: string) => string | Error | undefined): {
+  run: GhRun;
+  calls: GhCall[];
+} {
   const calls: GhCall[] = [];
   const run: GhRun = (args, cwd) => {
     calls.push({ args, cwd });
@@ -22,9 +23,11 @@ export function fakeGh(
 }
 
 /** `gh api graphql` の引数から query と -f / -F の値を取り出す。 */
-export function parseGraphqlArgs(
-  args: string[],
-): { query: string; raw: Record<string, string>; typed: Record<string, string> } {
+export function parseGraphqlArgs(args: string[]): {
+  query: string;
+  raw: Record<string, string>;
+  typed: Record<string, string>;
+} {
   const raw: Record<string, string> = {};
   const typed: Record<string, string> = {};
   for (let i = 0; i < args.length; i++) {

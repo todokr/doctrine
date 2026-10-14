@@ -52,13 +52,15 @@ export function isSameChild(
  * ここで固定できるのは ps の「出力側」だけで、出力にタイムゾーン表記は付かない。
  * 「パース側」で UTC を明示するのは defaultProbe の責務。
  */
-export function psLstartCommand(
-  pid: number,
-): { cmd: string; args: string[]; env: Record<string, string> } {
+export function psLstartCommand(pid: number): {
+  cmd: string;
+  args: string[];
+  env: Record<string, string>;
+} {
   return {
     cmd: "ps",
     args: ["-o", "lstart=", "-p", String(pid)],
-    env: { ...Deno.env.toObject(), LC_ALL: "C", TZ: "UTC" },
+    env: { LC_ALL: "C", TZ: "UTC" },
   };
 }
 
@@ -83,8 +85,10 @@ export function defaultProbe(): ProcessProbe {
     },
     kill(pid, signal) {
       try {
-        Deno.kill(pid, signal);
-      } catch { /* 既に消えている */ }
+        process.kill(pid, signal);
+      } catch {
+        /* 既に消えている */
+      }
     },
   };
 }
@@ -232,7 +236,7 @@ export async function recoverOnStartup(
         taskId: task.id,
         requireState: task.state,
         taskPatch: { state: "queued", resumed: 1, child_pid: null, child_started_at: null },
-        ...await closeDanglingStepRun(db, task.id),
+        ...(await closeDanglingStepRun(db, task.id)),
       });
       results.push({ taskId: task.id, outcome: "recovered", action });
     } catch (e) {
@@ -243,7 +247,7 @@ export async function recoverOnStartup(
           taskId: task.id,
           requireState: task.state,
           taskPatch: { state: "failed" },
-          ...await closeDanglingStepRun(db, task.id),
+          ...(await closeDanglingStepRun(db, task.id)),
         });
       } catch (e2) {
         // failed への書き込み自体が失敗しても、他タスクの掃討を止めない。
