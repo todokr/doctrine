@@ -2,24 +2,26 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Execution の図のプロセスのノードにワークフローのステップの帯を描き、人の番を強調し、ノードを選ぶと画面の下のパネルにタスク画面・レビュー画面・人の操作を出す。
+**Goal:** Execution の図のプロセスのノードにワークフローのステップの帯を描き、人の番を強調し、ノードを選ぶと画面の下のパネルにタスク画面・レビュー画面・人の操作を出す。段階 2 が暫定で図の上に置いた `ActionNeeded` と、図の下の `exec-panel-slot` に積んだ `OpenedTask` / `DirectProcess` は、このパネルへ移して撤去する。
 
-**Architecture:** 図の見た目は `app/src/pfd.ts:buildPfdView` に `rails` と `attention` の入力を足して純関数で決め、`PfdDiagram` はそれを描くだけにする。パネルに何を出すかは `app/src/execution.ts:panelContentOf` という純関数で決め、パネルの枠（高さ・最大化・閉じる）は props だけで描く `ExecPanel`、中身の組み立ては store を使う `ExecDetail` に分ける。帯を新しく保つため、Intake に属するタスクのイベントで詳細を「消さずに」取り直す。
+**Architecture:** 図の見た目は `app/src/pfd.ts:buildPfdView` に `rails` と `attention` の入力を足して純関数で決め、`PfdDiagram` はそれを描くだけにする。パネルに何を出すかは `app/src/execution.ts:panelContentOf` という純関数で決め、パネルの枠（高さ・最大化・閉じる）は props だけで描く `ExecPanel`、中身の組み立ては store を使う `ExecDetail` に分ける。plan と direct の本体（段階 2 の `PlanBody` / `DirectBody`）は、図とパネルを持つ共通の `GraphBody` に寄せ、direct は `directPfd` で組み立てた図を渡す。パネルのタスクは `s.sel` が決め、帯を新しく保つため、Intake に属するタスクのイベントで詳細を「消さずに」取り直す。
 
-**Tech Stack:** React 19 + TypeScript（`app/`）、vitest（`mise run app:test` = `pnpm test`）、型検査は `cd app && pnpm build`（`tsc && vite build`）。
+**Tech Stack:** React 19 / TypeScript 6 / vitest 5（`app/`）。テスト `cd app && pnpm test`、型 `cd app && pnpm exec tsc`。
 
 **Spec:** `docs/superpowers/specs/2026-10-14-intake-execution-design.md`（6.2 / 6.3 / 6.5 / 7.2 / 10 / 11 章）
 
 ## Global Constraints
 
-- 状態の色は `app/src/tone.ts` からだけ引く（ステップの区画は `RUN_TONE`、プロセスは `PROCESS_TONE`）
+- 段階 1（`docs/superpowers/plans/2026-10-14-intake-execution-1-daemon-direct.md`）と段階 2（`...-2-app-skeleton.md`）がマージ済みであること。着手前に `cd app && pnpm exec tsc && pnpm test` が通ることを確かめる
+- 状態の色は `app/src/tone.ts` からだけ引く（ステップの区画は `RUN_TONE`、プロセスは `PROCESS_TONE`）。`tone.ts` の `executionTone` と `groupTone`（段階 2 が `groupOf` / `Group` ごと残したもの）はこの段階では触らない
 - 人の番は「タスクの承認待ち（いまのタスクが `suspended`）・プロセスの `needs_attention`・プロセスの `your_turn`」の 3 つだけ。`pr_open` は入れない（spec 6.3）
+- 図の上の件数のボタンの文言は「要対応 N 件」。既存の凡例の `LOOK.your_turn`（「あなたの番」、人のプロセスだけを数える）と区別する
 - 区画はノードの幅を等分し、ステップが多くても幅を広げず詰める（spec 6.2）
 - タスクが無いプロセス（`waiting` / `ready`）は灰色の帯 1 本。人のプロセスは帯を描かず状態の文言を出す（spec 6.2）
 - direct の図は Issue（成果物）→ `main` → PR（成果物）。画面で組み立て、保存しない（spec 6.2）
 - パネルの高さは `localStorage` に覚え、読めないときは既定の高さで開く。読み書きは必ず try/catch（spec 6.5）
 - 承認と差し戻しにキーを割り当てない（`App.tsx:useKeys` の既存の約束）
-- 後方互換の仕掛けを作らない。名前を変えたら参照を全部書き換える
+- 後方互換の仕掛けを作らない。消すものは参照ごと消す
 - コードのコメントはそのコード固有の事実だけ。一般論は書かない。既存のコメントの密度に合わせる
 - `task.create`・`shared/protocol.ts` の `task.create`・`dctl` には触らない（spec 8.3）
 
@@ -29,26 +31,31 @@
 2. **タスクはあるが `rail` が null**（ワークフロー YAML が読めない）: 灰色の帯 1 本で描き、例外を投げない → Task 1 のテスト「rail が null のエージェントのプロセスは灰色の帯 1 本」
 3. **`localStorage` が投げる・壊れた値が入っている**: 既定の高さで開き、書き込みの失敗で画面が止まらない → Task 5 のテスト
 4. **ステップが非常に多いワークフロー**（30〜100 ステップ）: 区画がノードの外にはみ出さず、幅が負にならない → Task 1 のテスト「100 ステップでも枠内に収まる」
-5. **選んでいた要素が図から消える**（改訂の再承認でプロセスが retired、Intake の切り替え）と、選び直した過去のタスクが `task_ids` に無い: パネルは閉じる／いまのタスクに戻る → Task 4 のテスト
+5. **選んでいた要素が図から消える**（改訂の再承認でプロセスが retired）と、`s.sel` が別のプロセスや別の Intake のタスクを指している: パネルは閉じる／そのプロセスのいまのタスクを開く → Task 4 のテストと Task 6 の `processKeyOfTask` のテスト
 
 ---
 
-## 着手前に確かめること（段階 1・2 の実名）
+## 前段から使うもの
 
-段階 1・2 の成果物の名前は spec と指示から次のとおりと仮定して書いている。着手前に grep で実名を確かめ、違えば本計画の該当箇所を実名に読み替える（計画のコードの形は変えない）。
-
-| 本計画での名前 | 中身 | 確かめ方 |
+| 名前 | 置き場所 | 段階 |
 | --- | --- | --- |
-| `shared/rail.ts` の `RailNode` / `RailStatus` / `buildRail` | 段階 1 で `app/src/rail.ts` から移したもの | `grep -n "export" shared/rail.ts` |
-| `shared/intake/direct.ts` の `DIRECT_PROCESS_ID` | `"main"` | `grep -rn "DIRECT_PROCESS_ID" shared` |
-| `IntakeProcessView.rail` | `RailNode[] \| null` | `grep -n "rail" shared/protocol.ts` |
-| `IntakeSummary.mode` | `"plan" \| "direct"` | 同上 |
-| `s.execSel` | Execution で選んでいる Intake の id（`string \| null`） | `grep -n "execution" app/src/model.ts` |
-| `executionRows(s)` | Execution の左の一覧の、画面の並び順の行 | `grep -n "export function" app/src/execution.ts` |
-| `ExecutionView` の `selected` / `setSelected` | 図で選んだ要素のキー（`string \| null`）の useState | `grep -n "useState" app/src/components/ExecutionView.tsx` |
-| `RemoveWorktreeModal` / `RemoveWorktreeButton` | 段階 2 で WorktreeView.tsx から移した先 | `grep -rn "export function RemoveWorktree" app/src` |
+| `IntakeMode`、`IntakeSummary.mode` | `shared/protocol.ts` | 1 |
+| `DIRECT_PROCESS_ID = "main"` | `shared/intake/processStatus.ts` | 1 |
+| `RailStatus` / `RailNode` / `buildRail` | `shared/rail.ts`（`app/src/rail.ts` から移したもの。`tone.ts` も `shared/rail.ts` から `RailStatus` を import している） | 1 |
+| `IntakeProcessView.rail: RailNode[] \| null` | `shared/protocol.ts`。`fixtures.ts` の `INTAKE_ACTIVE.processes` は `rail: null` | 1 |
+| `View = "intake" \| "execution" \| "settings"`、`State.execSel` / `State.execClosed` | `app/src/model.ts` | 2 |
+| `case "select"` は無い。タスクを開くのは `task.open`（`view: "execution"`・`execSel`・`execClosed`・`sel` を書く。Intake に属さないタスクはトースト） | `app/src/model.ts` | 2 |
+| `j` / `k` は Execution では `executionOrder(s.intakes, s.tasks, s.workspace, s.execClosed)` の順で `execSel` を動かす（`move`） | `app/src/model.ts`、`app/src/execution.ts` | 2 |
+| Execution の詳細の取得は `store.tsx` の「開いている Intake の詳細」の effect が `s.view === "execution" ? s.execSel` で行う | `app/src/store.tsx` | 2 |
+| `executionOrder` / `isExecutionAttention` / `countExecutionAttention` / `inExecution` / `executionSection`。テストの補助 `task(id, state, intakeId)` | `app/src/execution.ts`、`app/src/execution.test.ts` | 2 |
+| `ExecutionSidebar`（`executionOrder` で並べる）、`ExecutionRow` | `app/src/components/ExecutionSidebar.tsx` | 2 |
+| `ExecutionView` / `PlanBody` / `DirectBody` / `OpenedTask` / `useCall` / `Ops` / `DirectProcess`。`PlanBody` は図の上に暫定の `ActionNeeded` を置き、図の下の `<div className="exec-panel-slot">` に `PfdElementPanel` + `ProcessTrail` と `OpenedTask` を積む。`DirectBody` はスロットに `DirectProcess` と `OpenedTask` を積む | `app/src/components/ExecutionView.tsx` | 2 |
+| `.exec-panel-slot{...}` | `app/src/styles.css` | 2 |
+| `useApprovedPfd(detail)`、`ActionNeeded` / `ProcessTrail({ view, onOpenTask, showSubIssue? })` / `ProgressActions` / `WatchAlert` / `CancelDialog` | `app/src/components/IntakeProgress.tsx` | 2 |
+| `intake.note` / `intake.sent` / `intake.fresh` の action（段階 2 で残っている） | `app/src/model.ts` | 既存 |
+| `RemoveWorktreeButton({ taskId, path, dirty })` / `RemoveWorktreeModal`。`TaskView` は失敗したタスクと削除を断ったタスクにこのボタンを出す | `app/src/components/RemoveWorktree.tsx` | 2 |
 
-`executionRows` に当たる関数が段階 2 に無く、並びが `ExecutionSidebar.tsx` の中に直書きなら、Task 7 の Step 3 でそれを `execution.ts:executionRows` に切り出してサイドバーもそれを使うようにする。
+この段階で撤去するもの: `PlanBody` の図の上の `ActionNeeded`、`OpenedTask`、`DirectProcess`（と `ExecutionView.test.tsx` のそのテスト）、`exec-panel-slot` の要素と CSS。
 
 ---
 
@@ -59,7 +66,7 @@
 - Test: `app/src/pfd.test.ts`
 
 **Interfaces:**
-- Consumes: `RailNode` / `RailStatus`（`shared/rail.ts`）、`DIRECT_PROCESS_ID`（`shared/intake/direct.ts`）
+- Consumes: `RailNode` / `RailStatus`（`shared/rail.ts`）、`DIRECT_PROCESS_ID`（`shared/intake/processStatus.ts`）
 - Produces:
   - `PfdNode.rail: RailNode[] | null` — Execution の図のエージェントのプロセスだけ配列（タスクが無ければ `[]`）。それ以外は null
   - `PfdNode.railRow: boolean` — 帯の行の高さを取ったか（Execution の図のプロセス）
@@ -76,7 +83,7 @@
 
 ```ts
 import type { RailNode } from "../../shared/rail.ts";
-import { DIRECT_PROCESS_ID } from "../../shared/intake/direct.ts";
+import { DIRECT_PROCESS_ID } from "../../shared/intake/processStatus.ts";
 
 const step = (id: string, status: RailNode["status"], current = false): RailNode =>
   ({ id, type: "agent", status, current, unknown: false });
@@ -181,7 +188,7 @@ Expected: FAIL（`railSegments` / `directPfd` / `RAIL_BAR_H` が export され�
 import に足す:
 
 ```ts
-import { DIRECT_PROCESS_ID } from "../../shared/intake/direct.ts";
+import { DIRECT_PROCESS_ID } from "../../shared/intake/processStatus.ts";
 import type { RailNode, RailStatus } from "../../shared/rail.ts";
 ```
 
@@ -436,28 +443,23 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - Modify: `app/src/execution.ts`
 - Modify: `app/src/components/StatusCounts.tsx`
 - Modify: `app/src/styles.css`（`.counts` の近く）
-- Test: `app/src/execution.test.ts`（段階 2 で作られていなければ作る）、`app/src/StatusCounts.test.tsx`（新規）
+- Test: `app/src/execution.test.ts`、`app/src/StatusCounts.test.tsx`（新規）
 
 **Interfaces:**
-- Consumes: `IntakeProcessView`（`task_ids` は古い順、末尾がいまのタスク）、`Task`、`PfdView`
+- Consumes: `IntakeProcessView`（`task_ids` は古い順、末尾がいまのタスク）、`Task`、`PfdView`、`RailNode`
 - Produces:
   - `export function attentionProcessIds(processes: readonly IntakeProcessView[], tasks: readonly Task[]): Set<string>`
   - `export function firstAttentionKey(view: PfdView): string | null`
   - `export function railsOf(processes: readonly IntakeProcessView[]): Record<string, RailNode[] | null>`
   - `StatusCounts` の props に `attention?: { count: number; onJump: () => void }`
 
+段階 2 の `isExecutionAttention` は一覧の行（Intake の要約）の判定で、ここで足す `attentionProcessIds` は図のプロセスごとの判定である。数える 3 種類は同じ。
+
 - [ ] **Step 1: 失敗するテストを書く**
 
-`app/src/execution.test.ts` に足す:
+`app/src/execution.test.ts`: 既存の import に `attentionProcessIds, firstAttentionKey, railsOf`（`./execution`）、`INTAKE_ACTIVE, PFD_SAMPLE`（`./fixtures`）、`buildPfdView`（`./pfd`）を足し、末尾に足す（`task(id, state, intakeId)` は段階 2 が置いた補助）:
 
 ```ts
-import { INTAKE_ACTIVE, PFD_SAMPLE, seedTasks } from "./fixtures";
-import { attentionProcessIds, firstAttentionKey, railsOf } from "./execution";
-import { buildPfdView } from "./pfd";
-import type { Task } from "./types";
-
-const taskOf = (id: string, state: Task["state"]): Task => ({ ...seedTasks()[0], id, state });
-
 describe("attentionProcessIds", () => {
   test("your_turn と needs_attention のプロセス", () => {
     // INTAKE_ACTIVE は approve が your_turn、design が needs_attention
@@ -469,14 +471,14 @@ describe("attentionProcessIds", () => {
       { ...INTAKE_ACTIVE.processes[1], id: "build-api", state: "running" as const, taskId: "t9", task_ids: ["t9"] },
       { ...INTAKE_ACTIVE.processes[1], id: "build-ui", state: "running" as const, taskId: "t8", task_ids: ["t7", "t8"] },
     ];
-    const tasks = [taskOf("t9", "suspended"), taskOf("t7", "suspended"), taskOf("t8", "running")];
+    const tasks = [task("t9", "suspended", "i2"), task("t7", "suspended", "i2"), task("t8", "running", "i2")];
     expect(attentionProcessIds(processes, tasks)).toEqual(new Set(["build-api"]));
   });
 
   test("pr_open は人の番に入れない", () => {
     const pr = { number: 1, url: "u", state: "OPEN" as const, baseRef: "develop", mergedAt: null, mergeCommit: null };
     const processes = [{ ...INTAKE_ACTIVE.processes[0], state: "pr_open" as const, taskId: "t1", pr }];
-    expect(attentionProcessIds(processes, [taskOf("t1", "waiting")]).size).toBe(0);
+    expect(attentionProcessIds(processes, [task("t1", "waiting", "i2")]).size).toBe(0);
   });
 });
 
@@ -507,15 +509,15 @@ import { buildPfdView } from "./pfd";
 const view = buildPfdView(PFD_SAMPLE, { statuses: PFD_STATUSES_B });
 
 describe("StatusCounts", () => {
-  test("attention を渡すと件数のボタンを先頭に出す", () => {
+  test("attention を渡すと「要対応 N 件」のボタンを先頭に出す", () => {
     const html = renderToStaticMarkup(<StatusCounts view={view} attention={{ count: 2, onJump: () => {} }} />);
-    expect(html).toMatch(/<button[^>]*class="count attn-jump[^"]*"[^>]*>.*あなたの番.*2 件/);
+    expect(html).toMatch(/<button[^>]*class="count attn-jump[^"]*"[^>]*>.*要対応.*2 件/);
     expect(html.indexOf("attn-jump")).toBeLessThan(html.indexOf("入力待ち"));
   });
 
   test("0 件ならボタンを押せない", () => {
     const html = renderToStaticMarkup(<StatusCounts view={view} attention={{ count: 0, onJump: () => {} }} />);
-    expect(html).toMatch(/<button[^>]*disabled=""[^>]*class="count attn-jump|<button[^>]*class="count attn-jump[^"]*"[^>]*disabled=""/);
+    expect(html).toMatch(/<button[^>]*class="count attn-jump[^"]*"[^>]*disabled=""/);
   });
 
   test("attention を渡さなければボタンを出さない", () => {
@@ -531,15 +533,10 @@ Expected: FAIL（関数が無い、`attn-jump` が出ない）
 
 - [ ] **Step 3: 実装する**
 
-`app/src/execution.ts` に足す（import は既存の並びに合わせて足す）:
+`app/src/execution.ts` に足す（import は既存の並びに合わせて、`RailNode`（`../../shared/rail.ts`）、`IntakeProcessView`（`../../shared/protocol.ts`）、`PfdView`（`./pfd`）を足す。`Task` は段階 2 が import 済み）:
 
 ```ts
-import type { RailNode } from "../../shared/rail.ts";
-import type { IntakeProcessView } from "../../shared/protocol.ts";
-import type { PfdView } from "./pfd";
-import type { Task } from "./types";
-
-/** 人の番のプロセス（spec 6.3）。task_ids は古い順なので、末尾がいまのタスク */
+/** 図のプロセスごとの人の番（spec 6.3）。task_ids は古い順なので、末尾がいまのタスク */
 export function attentionProcessIds(processes: readonly IntakeProcessView[], tasks: readonly Task[]): Set<string> {
   const ids = new Set<string>();
   for (const p of processes) {
@@ -559,7 +556,7 @@ export function railsOf(processes: readonly IntakeProcessView[]): Record<string,
 }
 ```
 
-`app/src/components/StatusCounts.tsx`:
+`app/src/components/StatusCounts.tsx` の `StatusCounts` を次にする（`counts.map` から下は既存のまま）:
 
 ```tsx
 /** 状態ごとの件数（spec 3.5）。図の凡例を兼ねる。attention は Execution の人の番の件数で、押すと先頭へ飛ぶ（spec 6.3） */
@@ -569,13 +566,13 @@ export function StatusCounts({ view, attention }: { view: PfdView; attention?: {
     <div className="counts" aria-label="状態ごとの件数">
       {attention && (
         <button className={`count attn-jump ${toneClass("human")}`} disabled={attention.count === 0} onClick={attention.onJump}>
-          <span className="lbl">あなたの番</span>
+          <span className="lbl">要対応</span>
           {/* 数と「件」を 1 つの文字列にする。分けると静的な描画で間に <!-- --> が入る */}
           <span className="v">{`${attention.count} 件`}</span>
           <span className="b" />
         </button>
       )}
-      {/* 以下は既存のまま */}
+      {counts.map((c) => (
 ```
 
 `app/src/styles.css` の `.counts .count{...}` の後に足す:
@@ -594,7 +591,7 @@ Expected: PASS
 
 ```bash
 git add app/src/execution.ts app/src/execution.test.ts app/src/components/StatusCounts.tsx app/src/StatusCounts.test.tsx app/src/styles.css
-git commit -m "Execution の人の番のプロセスを求め、件数から先頭へ飛べるようにする
+git commit -m "Execution の人の番のプロセスを求め、要対応の件数から先頭へ飛べるようにする
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
@@ -631,11 +628,9 @@ export function panelContentOf(o: {
 
 - [ ] **Step 1: 失敗するテストを書く**
 
-`app/src/execution.test.ts` に足す:
+`app/src/execution.test.ts` の import に `panelContentOf` を足し、末尾に足す（`task(id, state, intakeId)` は段階 2 の補助）:
 
 ```ts
-import { panelContentOf } from "./execution";
-
 describe("panelContentOf", () => {
   const keys = new Set(buildPfdView(PFD_SAMPLE).nodes.map((n) => n.key));
   const running = (id: string, task_ids: string[]) =>
@@ -661,31 +656,31 @@ describe("panelContentOf", () => {
 
   test("いまのタスクが承認待ちならレビュー画面", () => {
     const processes = [running("build-api", ["t9"])];
-    const r = panelContentOf({ ...base, processes, tasks: [taskOf("t9", "suspended")], key: "p:build-api" });
+    const r = panelContentOf({ ...base, processes, tasks: [task("t9", "suspended", "i2")], key: "p:build-api" });
     expect(r).toEqual({ kind: "review", key: "p:build-api", processId: "build-api", taskId: "t9" });
   });
 
   test("承認待ち以外ならタスク画面", () => {
     const processes = [running("build-api", ["t9"])];
-    const r = panelContentOf({ ...base, processes, tasks: [taskOf("t9", "running")], key: "p:build-api" });
+    const r = panelContentOf({ ...base, processes, tasks: [task("t9", "running", "i2")], key: "p:build-api" });
     expect(r).toEqual({ kind: "task", key: "p:build-api", processId: "build-api", taskId: "t9", attention: false });
   });
 
   test("needs_attention はいまのタスクに理由と再投入を添える", () => {
     // INTAKE_ACTIVE の design は needs_attention で、task_ids は t-old, t1
-    const tasks = [taskOf("t1", "failed"), taskOf("t-old", "canceled")];
+    const tasks = [task("t1", "failed", "i2"), task("t-old", "canceled", "i2")];
     const r = panelContentOf({ ...base, tasks, key: "p:design" });
     expect(r).toEqual({ kind: "task", key: "p:design", processId: "design", taskId: "t1", attention: true });
   });
 
-  test("選び直した過去のタスクを開き、そのときは再投入を添えない", () => {
-    const tasks = [taskOf("t1", "failed"), taskOf("t-old", "canceled")];
+  test("s.sel がそのプロセスの過去のタスクならそれを開き、再投入は添えない", () => {
+    const tasks = [task("t1", "failed", "i2"), task("t-old", "canceled", "i2")];
     const r = panelContentOf({ ...base, tasks, key: "p:design", chosenTaskId: "t-old" });
     expect(r).toEqual({ kind: "task", key: "p:design", processId: "design", taskId: "t-old", attention: false });
   });
 
-  test("選び直したタスクがそのプロセスに無ければ、いまのタスクに戻る", () => {
-    const tasks = [taskOf("t1", "failed")];
+  test("s.sel が別のプロセスのタスクなら、このプロセスのいまのタスクを開く", () => {
+    const tasks = [task("t1", "failed", "i2")];
     const r = panelContentOf({ ...base, tasks, key: "p:design", chosenTaskId: "other" });
     expect(r).toMatchObject({ kind: "task", taskId: "t1" });
   });
@@ -713,7 +708,7 @@ export function panelContentOf(o: {
   keys: ReadonlySet<string>;
   processes: readonly IntakeProcessView[];
   tasks: readonly Task[];
-  /** ProcessTrail で選び直したタスク。そのプロセスの task_ids に無ければ使わない */
+  /** いま選んでいるタスク（s.sel）。そのプロセスの task_ids に無ければ使わない */
   chosenTaskId: string | null;
 }): PanelContent | null {
   if (o.key === null || !o.keys.has(o.key)) return null;
@@ -768,11 +763,9 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 - [ ] **Step 1: 失敗するテストを書く**
 
-`app/src/execution.test.ts` に足す:
+`app/src/execution.test.ts` の import に `clampPanelHeight, PANEL_DEFAULT, PANEL_MIN, readPanelHeight, writePanelHeight`（`./execution`）と `vi`（`vitest`）を足し、末尾に足す:
 
 ```ts
-import { clampPanelHeight, PANEL_DEFAULT, PANEL_MIN, readPanelHeight, writePanelHeight } from "./execution";
-
 describe("パネルの高さ", () => {
   test("下限と、図の分を残した上限に収める", () => {
     expect(clampPanelHeight(10, 800)).toBe(PANEL_MIN);
@@ -801,8 +794,6 @@ describe("パネルの高さ", () => {
   });
 });
 ```
-
-`vi` を vitest の import に足す。
 
 `app/src/ExecPanel.test.tsx` を作る:
 
@@ -942,7 +933,7 @@ export function ExecPanel(p: {
 }
 ```
 
-`app/src/styles.css` の末尾に足す（`.exec` は段階 2 の ExecutionView の外枠。段階 2 が別の名前なら、その外枠に `exec` の class を足す）:
+`app/src/styles.css` の末尾に足す（`.exec` / `.exec-top` は Task 6 の `GraphBody` の外枠と上の領域）:
 
 ```css
 /* Execution: 図の領域と下のパネル（spec 6.5）。外枠が main の高さを埋め、図とパネルがそれぞれスクロールする */
@@ -958,7 +949,6 @@ export function ExecPanel(p: {
 .exec-trail{display:flex;gap:18px;flex-wrap:wrap;padding:10px 24px 0}
 ```
 
-`--line` が styles.css に無ければ、枠線に使っている既存の変数（`grep -n "border:1px solid var(" app/src/styles.css | head -3` で確かめる）に置き換える。
 
 - [ ] **Step 4: 通ることを確かめる**
 
@@ -976,81 +966,81 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ---
 
-### Task 6: パネルの中身を組み立て、ExecutionView に帯・人の番・パネルを繋ぐ
+### Task 6: 図とパネルの本体に組み替え、暫定の ActionNeeded・OpenedTask・DirectProcess を撤去する
 
 **Files:**
+- Create: `app/src/components/useCall.ts`（段階 2 の `ExecutionView.tsx` の `useCall` を移す）
 - Create: `app/src/components/ExecDetail.tsx`
-- Modify: `app/src/components/ExecutionView.tsx`
+- Modify: `app/src/components/ExecutionView.tsx`（`PlanBody` / `DirectBody` を `GraphBody` に寄せる。`OpenedTask` / `DirectProcess` / 図の上の `ActionNeeded` / `exec-panel-slot` を消す）
+- Modify: `app/src/execution.ts`（`processKeyOfTask`）
 - Modify: `app/src/components/ReviewView.tsx:42-50`（`rememberPosition` のスクロールの基準）
 - Modify: `app/src/App.tsx`（`moveBy` のスクロールの基準）
+- Modify: `app/src/styles.css`（`.exec-panel-slot` の行を消す）
+- Test: `app/src/execution.test.ts`、`app/src/ExecutionView.test.tsx`（`DirectProcess` のテストを消す）
 
 **Interfaces:**
-- Consumes: Task 1 の `buildPfdView` の `rails` / `attention`、`directPfd`。Task 3 の `attentionProcessIds` / `firstAttentionKey` / `railsOf`、`StatusCounts` の `attention`。Task 4 の `panelContentOf`。Task 5 の `ExecPanel` / `clampPanelHeight` / `panelStorage` / `readPanelHeight` / `writePanelHeight`。既存の `ActionNeeded` / `ProcessTrail`（`IntakeProgress.tsx`）、`PfdElementPanel`、`TaskView`、`ReviewView`、`actionNeeded`（`intake.ts`）、`intakeDraftOf`（`model.ts`）、`sendDecision`、`useIntakeRpc` の `completeHumanProcess` / `redispatch` / `processPrompt`
-- Produces: `ExecDetail(p: { detail: IntakeDetail; pfd: Pfd; view: PfdView; selected: string | null; onSelect: (key: string | null) => void; maximized: boolean; onMaximize: (on: boolean) => void; room: () => number })`
+- Consumes: Task 1 の `buildPfdView` の `rails` / `attention`、`directPfd`。Task 3 の `attentionProcessIds` / `firstAttentionKey` / `railsOf`、`StatusCounts` の `attention`。Task 4 の `panelContentOf`。Task 5 の `ExecPanel` / `clampPanelHeight` / `panelStorage` / `readPanelHeight` / `writePanelHeight`。段階 2 の `useApprovedPfd` / `Ops` / `ProgressActions` / `WatchAlert` / `CancelDialog` / `IntakeHistory` / `ActionNeeded` / `ProcessTrail({ showSubIssue })`、`task.open`、`intake.note` / `intake.sent` / `intake.fresh`、`useIntakeRpc` の `completeHumanProcess` / `redispatch` / `processPrompt`
+- Produces:
+  - `export function processKeyOfTask(tasks: readonly Task[], sel: string | null, intakeId: string): string | null`（`execution.ts`）
+  - `export function useCall(): { pending: string | null; call: <T>(key: string, send: Promise<T>, failed: string, onOk: (value: T) => void) => Promise<void> }`（`components/useCall.ts`）
+  - `ExecDetail(p: { detail: IntakeDetail; pfd: Pfd; view: PfdView; selected: string | null; onSelect: (key: string | null) => void; maximized: boolean; onMaximize: (on: boolean) => void; room: () => number })`
 
-パネルのタスク画面とレビュー画面は、既存の `TaskView` / `ReviewView` をそのまま載せる。どちらも、差し戻しのモーダル（`App.tsx:RejectModal`）・diff と経緯の取得（`store.tsx` の `reviewing`）・キー操作（`useKeys`）が `s.sel`（`selectedTask(s)`）を見ているので、**パネルにタスクを出すときは `s.sel` をそのタスクに合わせる**。
+パネルのタスク画面とレビュー画面は、既存の `TaskView` / `ReviewView` をそのまま載せる。どちらも、差し戻しのモーダル（`App.tsx:RejectModal`）・diff と経緯の取得（`store.tsx` の `reviewing`）・キー操作（`useKeys`）が `s.sel`（`selectedTask(s)`）を見ている。そこでパネルに出すタスクは `s.sel` で決める:
 
-- [ ] **Step 1: ExecDetail を書く**
+- ノードを選ぶと、`ExecDetail` がそのプロセスのいまのタスクを `task.open` して `s.sel` を合わせる。`s.sel` が既にそのプロセスの過去のタスクなら、そのまま過去のタスクを出す（`panelContentOf` の `chosenTaskId` に `s.sel` を渡す）
+- `ProcessTrail` で過去のタスクを押すと `task.open` する
+- 外から `s.sel` が変わったとき（承認・差し戻しの後の `selectNextReview`、ほかの画面からの `task.open`）は、`GraphBody` がそのタスクのプロセスのノードを選び直す（`processKeyOfTask`）
 
-`app/src/components/ExecDetail.tsx` を作る:
+段階 2 の `OpenedTask` が担っていた「`s.sel` のタスクの画面を出す」はこれで下のパネルに移る。
 
-```tsx
-import { useEffect, useMemo, useState } from "react";
-import type { Pfd } from "../../../shared/intake/pfd.ts";
-import type { IntakeDetail } from "../../../shared/protocol.ts";
+- [ ] **Step 1: 失敗するテストを書く**
+
+`app/src/execution.test.ts` の import に `processKeyOfTask` を足し、末尾に足す:
+
+```ts
+describe("processKeyOfTask", () => {
+  test("選んでいるタスクがこの Intake のものなら、そのプロセスのキー", () => {
+    const tasks = [task("t1", "running", "i2"), task("t2", "running", "i5"), task("t3", "running", null)];
+    // task() の intake.processId は p1
+    expect(processKeyOfTask(tasks, "t1", "i2")).toBe("p:p1");
+    expect(processKeyOfTask(tasks, "t2", "i2")).toBeNull();
+    expect(processKeyOfTask(tasks, "t3", "i2")).toBeNull();
+    expect(processKeyOfTask(tasks, "gone", "i2")).toBeNull();
+    expect(processKeyOfTask(tasks, null, "i2")).toBeNull();
+  });
+});
+```
+
+`app/src/ExecutionView.test.tsx` から、`describe("DirectProcess", ...)`、補助の `direct`、`DirectProcess` と `IntakeProcessView` の import を消す（`ExecutionRow` のテストは残す）。
+
+- [ ] **Step 2: 失敗を確かめる**
+
+Run: `cd app && pnpm vitest run src/execution.test.ts`
+Expected: FAIL（`processKeyOfTask` が無い）
+
+- [ ] **Step 3: processKeyOfTask と useCall**
+
+`app/src/execution.ts` に足す（`pfdKey` を `./pfd` から import）:
+
+```ts
+/** s.sel のタスクがこの Intake のものなら、そのプロセスの図のキー。パネルの外から開いたタスクのノードを選び直すのに使う */
+export function processKeyOfTask(tasks: readonly Task[], sel: string | null, intakeId: string): string | null {
+  const t = sel === null ? undefined : tasks.find((x) => x.id === sel);
+  return t?.intake?.id === intakeId ? pfdKey("process", t.intake.processId) : null;
+}
+```
+
+`app/src/components/useCall.ts` を作る。中身は段階 2 の `ExecutionView.tsx` の `useCall` をそのまま移したもの:
+
+```ts
+import { useState } from "react";
 import { sendDecision } from "../decision";
-import { clampPanelHeight, panelContentOf, panelStorage, readPanelHeight, writePanelHeight } from "../execution";
-import { actionNeeded } from "../intake";
-import { intakeDraftOf, type Loaded } from "../model";
-import { pfdElement, type PfdView } from "../pfd";
-import { useIntakeRpc, useStore } from "../store";
-import { ExecPanel } from "./ExecPanel";
-import { ActionNeeded, ProcessTrail } from "./IntakeProgress";
-import { PfdElementPanel } from "./PfdElementPanel";
-import { ReviewView } from "./ReviewView";
-import { TaskView } from "./TaskView";
+import { useStore } from "../store";
 
-const errorMessage = (e: unknown) => (e instanceof Error ? e.message : String(e));
-
-/** 選んだ要素の下のパネル（spec 6.5）。何を出すかは panelContentOf が決める */
-export function ExecDetail(p: {
-  detail: IntakeDetail;
-  pfd: Pfd;
-  view: PfdView;
-  selected: string | null;
-  onSelect: (key: string | null) => void;
-  maximized: boolean;
-  onMaximize: (on: boolean) => void;
-  /** Execution の領域の高さ。パネルの上限を決める */
-  room: () => number;
-}) {
-  const { s, dispatch } = useStore();
-  const api = useIntakeRpc();
-  const [chosen, setChosen] = useState<string | null>(null);
-  const [height, setHeight] = useState(() => readPanelHeight(panelStorage()));
+/** RPC を送り、成功したときだけ後片付けをする。失敗はトースト */
+export function useCall() {
+  const { dispatch } = useStore();
   const [pending, setPending] = useState<string | null>(null);
-  const [prompts, setPrompts] = useState<Record<string, Loaded<string>>>({});
-  const keys = useMemo(() => new Set(p.view.nodes.map((n) => n.key)), [p.view]);
-
-  // 別の要素を選んだら、選び直した過去のタスクは捨てる
-  useEffect(() => setChosen(null), [p.selected]);
-
-  const content = panelContentOf({ key: p.selected, keys, processes: p.detail.processes, tasks: s.tasks, chosenTaskId: chosen });
-  const taskId = content?.kind === "review" || content?.kind === "task" ? content.taskId : null;
-  useEffect(() => {
-    if (taskId !== null && s.sel !== taskId) dispatch({ type: "select", id: taskId });
-  }, [taskId]);
-
-  if (content === null) return null;
-
-  const local = intakeDraftOf(s, p.detail.id);
-  const info = pfdElement(p.pfd, content.key, p.detail.question_sets);
-  const processView = info?.kind === "process" ? p.detail.processes.find((x) => x.id === info.process.id) : undefined;
-  const trail = processView && <ProcessTrail view={processView} onOpenTask={setChosen} />;
-  // direct は案を持たないので、プロセスのプロンプトはタスク画面のプロンプトで読む
-  const draftId = p.detail.approval?.draft_id ?? null;
-  const processId = info?.kind === "process" ? info.process.id : null;
-
   const call = async <T,>(key: string, send: Promise<T>, failed: string, onOk: (value: T) => void) => {
     setPending(key);
     try {
@@ -1064,6 +1054,70 @@ export function ExecDetail(p: {
       setPending(null);
     }
   };
+  return { pending, call };
+}
+```
+
+`.ts` のファイルでジェネリックの矢印関数 `<T,>` は書けるが、tsc が拒んだら `function call<T>(...)` の宣言に書き換える。`ExecutionView.tsx` の `useCall` の定義は消し、`import { useCall } from "./useCall";` にする。
+
+- [ ] **Step 4: ExecDetail を書く**
+
+`app/src/components/ExecDetail.tsx` を作る:
+
+```tsx
+import { useEffect, useMemo, useState } from "react";
+import type { Pfd } from "../../../shared/intake/pfd.ts";
+import type { IntakeDetail } from "../../../shared/protocol.ts";
+import { clampPanelHeight, panelContentOf, panelStorage, readPanelHeight, writePanelHeight } from "../execution";
+import { actionNeeded } from "../intake";
+import { intakeDraftOf, type Loaded } from "../model";
+import { pfdElement, type PfdView } from "../pfd";
+import { useIntakeRpc, useStore } from "../store";
+import { ExecPanel } from "./ExecPanel";
+import { ActionNeeded, ProcessTrail } from "./IntakeProgress";
+import { PfdElementPanel } from "./PfdElementPanel";
+import { ReviewView } from "./ReviewView";
+import { TaskView } from "./TaskView";
+import { useCall } from "./useCall";
+
+const errorMessage = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+/** 選んだ要素の下のパネル（spec 6.5）。何を出すかは panelContentOf が決め、タスクは s.sel に合わせる */
+export function ExecDetail(p: {
+  detail: IntakeDetail;
+  pfd: Pfd;
+  view: PfdView;
+  selected: string | null;
+  onSelect: (key: string | null) => void;
+  maximized: boolean;
+  onMaximize: (on: boolean) => void;
+  /** Execution の領域の高さ。パネルの上限を決める */
+  room: () => number;
+}) {
+  const { s, dispatch } = useStore();
+  const api = useIntakeRpc();
+  const { pending, call } = useCall();
+  const [height, setHeight] = useState(() => readPanelHeight(panelStorage()));
+  const [prompts, setPrompts] = useState<Record<string, Loaded<string>>>({});
+  const keys = useMemo(() => new Set(p.view.nodes.map((n) => n.key)), [p.view]);
+
+  const content = panelContentOf({ key: p.selected, keys, processes: p.detail.processes, tasks: s.tasks, chosenTaskId: s.sel });
+  const taskId = content?.kind === "review" || content?.kind === "task" ? content.taskId : null;
+  useEffect(() => {
+    if (taskId !== null && s.sel !== taskId) dispatch({ type: "task.open", id: taskId });
+  }, [taskId]);
+
+  if (content === null) return null;
+
+  const openTask = (id: string) => dispatch({ type: "task.open", id });
+  const local = intakeDraftOf(s, p.detail.id);
+  const info = pfdElement(p.pfd, content.key, p.detail.question_sets);
+  const processView = info?.kind === "process" ? p.detail.processes.find((x) => x.id === info.process.id) : undefined;
+  const trail = processView && <ProcessTrail view={processView} onOpenTask={openTask} showSubIssue={p.detail.mode !== "direct"} />;
+  // direct は案を持たないので、プロセスのプロンプトはタスク画面のプロンプトで読む
+  const draftId = p.detail.approval?.draft_id ?? null;
+  const processId = info?.kind === "process" ? info.process.id : null;
+
   const complete = (id: string) => {
     // 送る値は、後片付けの dispatch が下書きを消す前に読んでおく
     const note = local.notes[id] ?? "";
@@ -1099,7 +1153,7 @@ export function ExecDetail(p: {
       onNote={(pid, text) => dispatch({ type: "intake.note", id: p.detail.id, processId: pid, text })}
       onComplete={complete}
       onRedispatch={redispatch}
-      onOpenTask={setChosen}
+      onOpenTask={openTask}
     />
   );
   const element = (
@@ -1118,13 +1172,12 @@ export function ExecDetail(p: {
   );
   const task = taskId === null ? undefined : s.tasks.find((t) => t.id === taskId);
 
-  const resize = (h: number) => setHeight(clampPanelHeight(h, p.room()));
   return (
     <ExecPanel
       height={height}
       maximized={p.maximized}
       title={info?.kind === "artifact" ? info.artifact.name : info?.process.name}
-      onResize={resize}
+      onResize={(h) => setHeight(clampPanelHeight(h, p.room()))}
       onResizeEnd={(h) => {
         const c = clampPanelHeight(h, p.room());
         setHeight(c);
@@ -1156,69 +1209,92 @@ export function ExecDetail(p: {
 }
 ```
 
-`intake.note` / `intake.sent` / `intake.fresh` の action と `useIntakeRpc` の `completeHumanProcess` / `redispatch` / `processPrompt` は、いまの `IntakeProgress.tsx` が使っているものと同じ。段階 2 が `IntakeProgress` の面を消したときにこれらの action を消していれば、`git show develop:app/src/model.ts` から戻す（`git log -S"intake.fresh" -- app/src/model.ts` で消したコミットを探す）。
+失敗したタスクと削除を断ったタスクの「worktree を削除」は、パネルの `TaskView` が段階 2 の `RemoveWorktreeButton` で出す。確認のモーダル（`RemoveWorktreeModal`）は `App.tsx` に置かれたままなので、パネルから押しても開く。
 
-- [ ] **Step 2: ExecutionView に繋ぐ**
+- [ ] **Step 5: ExecutionView を GraphBody に組み替える**
 
-`app/src/components/ExecutionView.tsx` で、段階 2 が図を描いている部分を次のように変える。
+`app/src/components/ExecutionView.tsx`:
 
-1. 図の元の PFD を、direct のときは `directPfd` にする（段階 2 の簡易表示を置き換える）:
-
-```tsx
-const pfd = detail.mode === "direct" ? directPfd(detail.issue_title) : approvedPfd;
-```
-
-（`approvedPfd` は段階 2 が承認された案から取っている PFD の変数。名前は段階 2 の実名に読み替える）
-
-2. `buildPfdView` の呼び出しに帯と人の番を渡す:
+1. `OpenedTask` と `DirectProcess` を消す
+2. `PlanBody` と `DirectBody` を次に置き換え、`GraphBody` を足す:
 
 ```tsx
-const attention = useMemo(() => attentionProcessIds(detail.processes, s.tasks), [detail.processes, s.tasks]);
-const view = useMemo(
-  () => buildPfdView(pfd, { statuses: processStatuses(detail.processes), rails: railsOf(detail.processes), attention }),
-  [pfd, detail.processes, attention],
-);
-```
-
-3. `StatusCounts` に件数と先頭への移動を渡す:
-
-```tsx
-<StatusCounts
-  view={view}
-  attention={{ count: attention.size, onJump: () => setSelected(firstAttentionKey(view)) }}
-/>
-```
-
-4. 外枠を `.exec` にし、図と見出しを `.exec-top` に入れ、`<div className="exec-panel-slot">…</div>` を `ExecDetail` に置き換える:
-
-```tsx
-const execRef = useRef<HTMLDivElement>(null);
-const [maximized, setMaximized] = useState(false);
-// Intake を切り替えたら最大化を解く
-useEffect(() => setMaximized(false), [detail.id]);
-
-return (
-  <div className={maximized ? "exec maximized" : "exec"} ref={execRef}>
-    <div className="exec-top">
-      {/* 段階 2 の見出し・WatchAlert・操作・StatusCounts・PfdDiagram はここにそのまま */}
+/** plan と direct の本体。上に見出し・操作・件数・図、下に選んだ要素のパネル（spec 6.2〜6.5） */
+function GraphBody(p: { detail: IntakeDetail; pfd: Pfd; heading: ReactNode; history: boolean }) {
+  const { s } = useStore();
+  const { pending, call } = useCall();
+  const execRef = useRef<HTMLDivElement>(null);
+  const [maximized, setMaximized] = useState(false);
+  const follow = processKeyOfTask(s.tasks, s.sel, p.detail.id);
+  const [selected, setSelected] = useState<string | null>(follow);
+  // 承認・差し戻しの後の次のレビュー待ちや、ほかから task.open したタスクのノードを選び直す
+  useEffect(() => {
+    if (follow !== null) setSelected(follow);
+  }, [follow]);
+  const attention = useMemo(() => attentionProcessIds(p.detail.processes, s.tasks), [p.detail.processes, s.tasks]);
+  const view = useMemo(
+    () => buildPfdView(p.pfd, { statuses: processStatuses(p.detail.processes), rails: railsOf(p.detail.processes), attention }),
+    [p.pfd, p.detail.processes, attention],
+  );
+  return (
+    <div className={maximized ? "exec maximized" : "exec"} ref={execRef}>
+      <div className="exec-top pad">
+        {p.heading}
+        {p.detail.state === "completed" && <h2 className="plan-title">完了しました</h2>}
+        <WatchAlert watch={p.detail.watch} now={s.now} />
+        <Ops detail={p.detail} pending={pending !== null} call={call} />
+        <StatusCounts view={view} attention={{ count: attention.size, onJump: () => setSelected(firstAttentionKey(view)) }} />
+        <PfdDiagram view={view} selected={selected} onSelect={setSelected} />
+        {p.history && <IntakeHistory detail={p.detail} />}
+      </div>
+      <ExecDetail
+        detail={p.detail}
+        pfd={p.pfd}
+        view={view}
+        selected={selected}
+        onSelect={setSelected}
+        maximized={maximized}
+        onMaximize={setMaximized}
+        room={() => execRef.current?.clientHeight ?? window.innerHeight}
+      />
     </div>
-    <ExecDetail
-      detail={detail}
-      pfd={pfd}
-      view={view}
-      selected={selected}
-      onSelect={setSelected}
-      maximized={maximized}
-      onMaximize={setMaximized}
-      room={() => execRef.current?.clientHeight ?? window.innerHeight}
-    />
-  </div>
-);
+  );
+}
+
+function PlanBody({ detail, heading }: { detail: IntakeDetail; heading: ReactNode }) {
+  const { pfd, error } = useApprovedPfd(detail);
+  const title = detail.state === "completed" ? <h2 className="plan-title">完了しました</h2> : null;
+  if (detail.approval === null) {
+    // 承認の前に中止した。図は無いので経緯だけ読み返せる
+    return <div className="pad">{heading}{title}<IntakeHistory detail={detail} /></div>;
+  }
+  if (!pfd) {
+    return <div className="pad">{heading}{title}<p className="hint">{error ?? "承認された案を読み込み中"}</p></div>;
+  }
+  return <GraphBody detail={detail} pfd={pfd} heading={heading} history />;
+}
+
+function DirectBody({ detail, heading }: { detail: IntakeDetail; heading: ReactNode }) {
+  const pfd = useMemo(() => directPfd(detail.issue_title), [detail.issue_title]);
+  return <GraphBody detail={detail} pfd={pfd} heading={heading} history={false} />;
+}
 ```
 
-段階 2 で図の上に `ActionNeeded`（完了の記録・再投入）を置いていれば、それは消す（パネルへ移った）。import に `useEffect, useMemo, useRef, useState`、`attentionProcessIds, firstAttentionKey, railsOf`（`../execution`）、`directPfd`（`../pfd`）、`ExecDetail` を足す。
+段階 2 の `PlanBody` にあった図の上の `ActionNeeded`（完了の記録・再投入）と、`complete` / `redispatch` / `openPrompt` / `openTask` / `prompts` はパネル（`ExecDetail`）へ移ったので、ここには残さない。`DirectBody` の再投入も、`main` の要確認のパネルの `ActionNeeded` から行う。
 
-- [ ] **Step 3: レビュー画面のスクロールの基準をパネルにする**
+3. `ExecutionView` の振り分けで、Intake を切り替えたら選択と最大化が残らないよう key を付ける:
+
+```tsx
+      {d.mode === "direct"
+        ? <DirectBody key={d.id} detail={d} heading={heading} />
+        : <PlanBody key={`${d.id}:${d.approval?.draft_id}`} detail={d} heading={heading} />}
+```
+
+4. import を整える。足す: `useEffect` / `useRef`、`Pfd`（`../../../shared/intake/pfd.ts`）、`attentionProcessIds` / `firstAttentionKey` / `processKeyOfTask` / `railsOf`（`../execution`）、`directPfd`（`../pfd`）、`ExecDetail`、`useCall`。消す（`pnpm exec tsc` の指摘どおり）: `DIRECT_PROCESS_ID`、`actionNeeded`、`intakeDraftOf`、`selectedTask`、`type Loaded`、`pfdElement`、`ActionNeeded`、`ProcessTrail`、`PfdElementPanel`、`ReviewView`、`TaskView`、`statusText`、`PROCESS_TONE`、`StatusDot`、`IntakeProcessView`、`errorMessage`（使わなくなっていれば）
+
+`app/src/styles.css` から段階 2 の `.exec-panel-slot{...}` の行を消す。`rg -n "exec-panel-slot|OpenedTask|DirectProcess" app/src` が何も出さないこと。
+
+- [ ] **Step 6: レビュー画面のスクロールの基準をパネルにする**
 
 レビュー画面はパネルの中でだけ開くので、スクロールする要素は `main.main` ではなく `.exec-panel-body` になる。
 
@@ -1236,50 +1312,51 @@ function moveBy(selector: string, delta: 1 | -1) {
   const main = document.querySelector(".exec-panel-body");
 ```
 
-両方の関数の上のコメントの「main の上端」を「パネルの上端」に直す。`grep -rn '"main.main"' app/src` で他に残っていないことを確かめる（`App.tsx` の `mainRef` は `<main>` の ref なので触らない）。
+両方の関数の上のコメントの「main の上端」を「パネルの上端」に直す。`rg -n '"main.main"' app/src` が何も出さないこと（`App.tsx` の `mainRef` は `<main>` の ref なので触らない）。
 
-- [ ] **Step 4: 型と全体のテストを確かめる**
+- [ ] **Step 7: 型と全体のテストを確かめる**
 
-Run: `cd app && pnpm build && pnpm test`
+Run: `cd app && pnpm exec tsc && pnpm test`
 Expected: tsc が通り、テストがすべて PASS
 
-- [ ] **Step 5: 画面で確かめる**
+- [ ] **Step 8: 画面で確かめる**
 
 Run: `mise run app:tauri`（dctld に繋がる。`mise run app:dev` はデーモンに繋がらないので図が出ない）
 
 確かめること:
-- 進行中の plan の Intake を選ぶと、エージェントのプロセスに区画が並び、走っているステップに枠が付く。タスクの無いプロセスは灰色の 1 本、人のプロセスは文言
-- 承認待ちのタスクのプロセスは太い枠。「あなたの番 N 件」を押すとそのノードが選ばれ、パネルにレビュー画面が開く。`n` / `p` でファイルが動き、差し戻しのモーダルが開く
+- 進行中の plan の Intake を選ぶと、エージェントのプロセスに区画が並び、走っているステップに枠が付く。タスクの無いプロセスは灰色の 1 本、人のプロセスは文言。図の上に `ActionNeeded` の欄は無い
+- 承認待ちのタスクのプロセスは太い枠。「要対応 N 件」を押すとそのノードが選ばれ、パネルにレビュー画面が開く。`n` / `p` でファイルが動き、差し戻しのモーダルが開く。承認すると同じ Intake の次のレビュー待ちのノードが選ばれる
+- 人のプロセスの番のノードでは、パネルに決めた内容の欄と「完了を記録する」が出る
 - 境目のドラッグで高さが変わり、アプリを開き直しても高さが残る。最大化で図が隠れ、閉じるでパネルが消える
-- direct の Intake は Issue → タイトル → PR の図で、プロセスを選ぶとタスク画面が出る
-- 失敗したタスクのプロセスでは、理由と「再投入する」とタスク画面が出て、タスク画面に「worktree を削除」が出る。押すと削除の確認のモーダルが開く
+- direct の Intake は Issue → タイトル → PR の図で、プロセスを選ぶとタスク画面が出る。sub-issue の欄は出ない
+- 失敗したタスクのプロセスでは、理由と「再投入する」とタスク画面が出て、タスク画面の「worktree を削除」で確認のモーダルが開く
+- `ProcessTrail` で過去のタスクを押すと、パネルがそのタスクの画面になる
 
-- [ ] **Step 6: コミット**
+- [ ] **Step 9: コミット**
 
 ```bash
-git add app/src/components/ExecDetail.tsx app/src/components/ExecutionView.tsx app/src/components/ReviewView.tsx app/src/App.tsx
+git add app/src/components/useCall.ts app/src/components/ExecDetail.tsx app/src/components/ExecutionView.tsx app/src/ExecutionView.test.tsx app/src/execution.ts app/src/execution.test.ts app/src/components/ReviewView.tsx app/src/App.tsx app/src/styles.css
 git commit -m "Execution の図に帯と人の番を描き、選んだノードを下のパネルで開く
+
+段階 2 が暫定で置いた図の上の ActionNeeded と、スロットの OpenedTask・DirectProcess をパネルへ移して撤去する。
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
 
-### Task 7: タスクが動いたら帯を取り直し、j / k で Issue を移る
+### Task 7: タスクが動いたら、詳細を消さずに帯を取り直す
 
 **Files:**
-- Modify: `app/src/model.ts`（`State`、`initialState` 相当、`reduce` の `daemon` と `move`）
+- Modify: `app/src/model.ts`（`State`、`reduce` の `daemon`）
 - Modify: `app/src/store.tsx`（`initialState` と取り直しの effect）
-- Modify: `app/src/execution.ts`（`executionRows` が段階 2 に無ければ）
 - Test: `app/src/model.test.ts`
 
 **Interfaces:**
-- Consumes: `invalidateIntake` の隣の仕組み（`intakeGen` / `intakeGenOf`）、`createRefreshGate`（`refreshGate.ts`）、段階 2 の `s.execSel` と `executionRows`
-- Produces:
-  - `State.intakeStale: Record<string, number>` — Intake の詳細を消さずに取り直したい回数。タスクのイベントで増える
-  - `executionRows(s: State): IntakeSummary[]`（段階 2 に無ければ）
+- Consumes: `invalidateIntake` の隣の仕組み（`intakeGen` / `intakeGenOf`）、`createRefreshGate`（`refreshGate.ts`）、段階 2 の `s.execSel`
+- Produces: `State.intakeStale: Record<string, number>` — Intake の詳細を消さずに取り直したい回数。その Intake のタスクのイベントで増える
 
-詳細を `invalidateIntake` で消すと、取り直しの間「読み込み中」になり、パネルのタスク画面・レビュー画面が外れて読んでいた位置を失う。ステップのたびにそれが起きるので、帯の取り直しは詳細を残したまま行い、古い応答の追い越しは `refreshGate` で防ぐ。
+詳細を `invalidateIntake` で消すと、取り直しの間 `ExecutionView` が「読み込み中」になり、パネルのタスク画面・レビュー画面が外れて読んでいた位置を失う。ステップのたびにそれが起きるので、帯の取り直しは詳細を残したまま行い、古い応答の追い越しは `refreshGate` で防ぐ。`j` / `k` は段階 2 の `move` が Execution の一覧を動かすので、この段階では足さない。
 
 - [ ] **Step 1: 失敗するテストを書く**
 
@@ -1307,28 +1384,14 @@ describe("Intake に属するタスクのイベントで帯を取り直す", () 
     expect(intakeEv({ event: "stepRun.started", task_id: "t-x", step_run_id: 1, step_id: "impl" }, s).intakeStale).toEqual({});
   });
 });
-
-describe("Execution の j / k", () => {
-  test("一覧の並びで Intake を移り、端で止まる", () => {
-    const rows = INTAKES.map((i, n) => ({ ...i, id: `e${n}`, state: "active" as const }));
-    let s = base({ view: "execution", intakes: rows, execSel: null });
-    const order = executionRows(s).map((i) => i.id);
-    s = reduce(s, { type: "move", delta: 1 });
-    expect(s.execSel).toBe(order[0]);
-    s = reduce(s, { type: "move", delta: 1 });
-    expect(s.execSel).toBe(order[Math.min(1, order.length - 1)]);
-    for (let i = 0; i < order.length + 2; i++) s = reduce(s, { type: "move", delta: 1 });
-    expect(s.execSel).toBe(order.at(-1));
-  });
-});
 ```
 
-`stepRun.finished` のイベントの形は `shared/protocol.ts` の `ServerEvent` に合わせる（足りないフィールドがあれば足す）。`executionRows` を `./execution` から import する。`INTAKES` の行に `mode` が無ければ段階 1 の fixtures に合わせる。
+`stepRun.finished` のイベントの形は `shared/protocol.ts` の `ServerEvent` に合わせる（足りないフィールドがあれば足す）。
 
 - [ ] **Step 2: 失敗を確かめる**
 
 Run: `cd app && pnpm vitest run src/model.test.ts`
-Expected: FAIL（`intakeStale` が無い、`move` が execution を扱わない）
+Expected: FAIL（`intakeStale` が無い）
 
 - [ ] **Step 3: 実装する**
 
@@ -1357,25 +1420,11 @@ function touchIntakeOfTask(s: State, taskId: string): Partial<Pick<State, "intak
 - `stepRun.started` の戻り値を `{ ...s, now: a.now, tasks: updateTask(s, ev.task_id, { step: ev.step_id }), ...touchIntakeOfTask(s, ev.task_id) }` にする
 - `stepRun.finished` の `if (Object.keys(patch).length === 0) return s;` を `return { ...s, ...touchIntakeOfTask(s, ev.task_id) };` にし、最後の戻り値にも `...touchIntakeOfTask(s, ev.task_id)` を足す
 
-`reduce` の `move` で、`if (s.view === "intake") {...}` の後に足す:
-
-```ts
-      if (s.view === "execution") {
-        const rows = executionRows(s);
-        if (!rows.length) return s;
-        const i = rows.findIndex((x) => x.id === s.execSel);
-        const n = i < 0 ? rows[0] : rows[Math.max(0, Math.min(rows.length - 1, i + a.delta))];
-        return { ...s, execSel: n.id };
-      }
-```
-
-段階 2 の `move` が既に execution を扱っていれば、この分岐は足さずテストだけ残す。`executionRows` が段階 2 に無ければ、`ExecutionSidebar.tsx` の行の並べ方（区切り・workspace の絞り込み・人の番を上に・更新の新しい順）を `execution.ts` に `export function executionRows(s: Pick<State, "intakes" | "tasks" | "workspace" | ...>): IntakeSummary[]` として切り出し、サイドバーもそれを使う（区切りの state の名前は段階 2 の実名）。`model.ts` から `execution.ts` を import すると循環するなら、`executionRows` の引数を State ではなく必要なフィールドにする。
-
 `app/src/store.tsx`:
 
 `initialState` に `intakeStale: {},` を足す。
 
-`StoreProvider` に足す（`refreshGate` の隣）:
+`StoreProvider` の `refreshGate` の隣に足す:
 
 ```ts
   // 帯の取り直しは詳細を消さずに何本も走る。最後に始めた 1 本だけを反映する
@@ -1406,14 +1455,14 @@ function touchIntakeOfTask(s: State, taskId: string): Partial<Pick<State, "intak
 
 - [ ] **Step 4: 通ることを確かめる**
 
-Run: `cd app && pnpm vitest run src/model.test.ts && pnpm build`
+Run: `cd app && pnpm vitest run src/model.test.ts && pnpm exec tsc`
 Expected: PASS、tsc が通る
 
 - [ ] **Step 5: コミット**
 
 ```bash
-git add app/src/model.ts app/src/model.test.ts app/src/store.tsx app/src/execution.ts app/src/components/ExecutionSidebar.tsx
-git commit -m "タスクが動いたら Execution の帯を取り直し、j / k で Issue を移る
+git add app/src/model.ts app/src/model.test.ts app/src/store.tsx
+git commit -m "タスクが動いたら Execution の帯を詳細を消さずに取り直す
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
@@ -1423,32 +1472,44 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ### Task 8: 開発者ガイドを直す
 
 **Files:**
-- Modify: `docs/developer-guide/07-app.md`（7.4 の画面とファイルの表、7.5 の純関数の表）
+- Modify: `docs/developer-guide/07-app.md`（7.3、7.4 の冒頭と表、7.5 の表。段階 2 が書き換えた後の文面を直す）
 
-- [ ] **Step 1: 7.4 の表を直す**
+- [ ] **Step 1: 7.4 を直す**
 
-Execution の行（段階 2 で足したもの）に、パネルの部品とファイルを足す:
+冒頭の段落（段階 2 が書いたもの）:
 
 ```markdown
-| Execution の図と下のパネル | `components/ExecutionView.tsx`、`ExecDetail.tsx`、`ExecPanel.tsx`、`PfdDiagram.tsx`、`PfdElementPanel.tsx`、`IntakeProgress.tsx`（`ActionNeeded` / `ProcessTrail`）、`TaskView.tsx`、`ReviewView.tsx` | `intake.get`、`intake.completeHumanProcess`、`intake.redispatch`、`intake.processPrompt`、`task.*`（パネルのタスク画面とレビュー画面） |
+本体は `view`（`intake` / `execution` / `settings`）で振り分ける。Execution の本体（`ExecutionView`）は選んだ Intake の図を出し、
+図の下のスロットに、選んだ要素の欄と、開いたタスクの画面（`suspended` なら `ReviewView`、それ以外なら `TaskView`）を出す。
 ```
 
-レビュー画面とタスク画面の行の説明に「Execution の下のパネルに開く。`s.sel` をパネルのタスクに合わせる」を足す。
-
-- [ ] **Step 2: 7.5 の表を直す**
+を次にする:
 
 ```markdown
-| `execution.ts` | Execution の導出（一覧の区切りと並び、人の番、下のパネルに出すもの `panelContentOf`、パネルの高さの記憶） |
+本体は `view`（`intake` / `execution` / `settings`）で振り分ける。Execution の本体（`ExecutionView`）は選んだ Intake の図を出す。
+plan は承認された案、direct は `pfd.ts:directPfd` で組み立てた Issue → タスク → PR の図で、プロセスのノードにはいまのタスクのステップの帯が入る。
+ノードを選ぶと画面の下のパネル（`ExecDetail`、枠は `ExecPanel`）に、要素の欄・人の操作・タスク画面・レビュー画面のどれかを出す（`execution.ts:panelContentOf`）。
+パネルのタスクは `s.sel` が決め、ノードを選ぶと `task.open` で合わせる。
+```
+
+表の「Execution」の行のファイルに `components/ExecDetail.tsx`、`ExecPanel.tsx`、`useCall.ts`、`PfdDiagram.tsx`、`PfdElementPanel.tsx` を足し、RPC に `intake.completeHumanProcess`、`intake.redispatch`、`intake.processPrompt` が入っていることを確かめる（無ければ足す）。タスク画面とレビュー画面の行の説明に「Execution の下のパネルに開く」を足す。
+
+- [ ] **Step 2: 7.5 と 7.3 を直す**
+
+7.5 の表:
+
+```markdown
+| `execution.ts` | Execution の導出（一覧に並ぶか・区切り・並び、一覧の行とプロセスごとの人の番、下のパネルに出すもの `panelContentOf`、パネルの高さの記憶） |
 | `pfd.ts` | PFD の図の配置。列は `diagram.ts:layoutGraph` の最長路に任せ、列の中の順は重心法で交差を減らす。Execution の図のステップの区画（`railSegments`）と direct の図（`directPfd`）もここ |
 ```
 
-7.3「イベントの反映」に 1 行足す: 「Intake に属するタスクの `task.stateChanged` / `stepRun.*` は `intakeStale` を増やし、Execution で開いている Intake の詳細を消さずに取り直す」。
+7.3「イベントの反映」に 1 行足す: 「Intake に属するタスクの `task.stateChanged` / `stepRun.*` は `intakeStale` を増やし、Execution で開いている Intake の詳細を消さずに取り直す（古い応答は `refreshGate` で捨てる）」。
 
 - [ ] **Step 3: コミット**
 
 ```bash
 git add docs/developer-guide/07-app.md
-git commit -m "開発者ガイドに Execution の図とパネルを書く
+git commit -m "開発者ガイドに Execution の図の帯と下のパネルを書く
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
