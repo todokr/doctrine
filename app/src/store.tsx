@@ -26,6 +26,7 @@ import type { QuestionSetReply } from "../../shared/intake/validateQuestion.ts";
 import type {
   DaemonSlots,
   IntakeDetail,
+  IntakeMode,
   IntakeSummary,
   NewComment,
   ParamsOf,
@@ -473,8 +474,9 @@ export function useIntakeRpc() {
     start: (
       workspacePath: string,
       issueUrl: string,
+      mode: IntakeMode,
     ): Promise<IntakeSummary & { alreadyActive: boolean }> =>
-      rpc("intake.start", { workspace: workspacePath, issue_url: issueUrl, mode: "plan" }),
+      rpc("intake.start", { workspace: workspacePath, issue_url: issueUrl, mode }),
     answer: (intakeId: string, questionSetId: number, reply: QuestionSetReply): Promise<IntakeSummary> =>
       rpc("intake.answer", {
         intake_id: intakeId,

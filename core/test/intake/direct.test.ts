@@ -2,9 +2,13 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { getIntake, listProcesses, upsertPrObservation } from "../../src/db/intakes.ts";
 import { getTask } from "../../src/db/tasks.ts";
+import { openDb } from "../../src/db/migrate.ts";
+import { startIntake } from "../../src/intake/commands.ts";
 import { insertDirectIntake } from "../../src/intake/dispatch.ts";
 import { toIntakeDetail } from "../../src/intake/view.ts";
 import { INITIAL_WATCH_HEALTH } from "../../src/intake/watch.ts";
+import { seedProject } from "../helpers/project.ts";
+import { fakeTracker } from "../helpers/tracker.ts";
 import { fakeWorkflowLoader } from "../helpers/watcher.ts";
 import { DIRECT_WORKFLOW, PARENT_URL, seedDirect } from "./watchFixture.ts";
 
@@ -111,4 +115,52 @@ test("direct: タスクが止まると要確認になり、needs_human が立つ
   assert.equal(main.state, "needs_attention");
   assert.equal("reason" in main && main.reason, "task_stopped");
   assert.equal(detail.needs_human, true);
+});
+
+async function startDirect(loadWorkflow = fakeWorkflowLoader(DIRECT_WORKFLOW)) {
+  const db = await openDb(":memory:");
+  const project = await seedProject(db, { path: "/repo", default_workflow: "feature" });
+  const wt = {
+    tracker: fakeTracker({ title: "直す", body: "本文" }),
+    projectPathFor: () => Promise.resolve("/repo"),
+  };
+  const started = () =>
+    startIntake(
+      db,
+      wt,
+      {
+        workspaceId: project.workspace_id,
+        issueUrl: PARENT_URL,
+        logRoot: "/tmp/doctrine-test-logs",
+        mode: "direct",
+      },
+      { loadWorkflow },
+    );
+  return { db, started };
+}
+
+test("startIntake: direct は調査を立てず、Intake・プロセス・タスクを作る", async () => {
+  const { db, started } = await startDirect();
+  const { intake, alreadyActive } = await started();
+  assert.equal(alreadyActive, false);
+  assert.equal(intake.state, "active");
+  assert.equal(intake.mode, "direct");
+  assert.deepEqual(await db.selectFrom("intake_runs").selectAll().execute(), []);
+  const [main] = await listProcesses(db, intake.id);
+  assert.equal((await getTask(db, main.current_task_id!))!.title, "直す");
+});
+
+test("startIntake: ワークフローを読めなければ direct の開始は失敗し、何も作らない", async () => {
+  const { db, started } = await startDirect(() => Promise.reject(new Error("YAML が壊れている")));
+  await assert.rejects(started, /YAML が壊れている/);
+  assert.deepEqual(await db.selectFrom("intakes").selectAll().execute(), []);
+  assert.deepEqual(await db.selectFrom("tasks").selectAll().execute(), []);
+});
+
+test("startIntake: 同じ Issue の direct がまだ終わっていなければ、それを返す", async () => {
+  const { started } = await startDirect();
+  const first = await started();
+  const second = await started();
+  assert.equal(second.alreadyActive, true);
+  assert.equal(second.intake.id, first.intake.id);
 });

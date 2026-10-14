@@ -846,13 +846,22 @@ export function createHandler(ctx: DaemonContext): Handler {
       }
 
       case "intake.start": {
+        const mode = params.mode;
+        if (mode !== "plan" && mode !== "direct") throw new Error("mode は plan か direct です");
         const ws = await reqWorkspace(ctx, params);
         const wt = await ctx.trackerOf(await workspaceRefOf(ctx.db, ws.id));
-        const { intake, alreadyActive, problems } = await startIntake(ctx.db, wt, {
-          workspaceId: ws.id,
-          issueUrl: req(params, "issue_url"),
-          logRoot: ctx.logRoot,
-        });
+        const { intake, alreadyActive, problems } = await startIntake(
+          ctx.db,
+          wt,
+          {
+            workspaceId: ws.id,
+            issueUrl: req(params, "issue_url"),
+            logRoot: ctx.logRoot,
+            mode,
+          },
+          { loadWorkflow: ctx.loadWorkflow },
+        );
+        // direct の作成時の検証の警告は、task.create と同じくタスクに紐づけずに積む
         for (const message of problems) ctx.warnings.push(message);
         const summary = await toIntakeSummary(
           ctx.db,

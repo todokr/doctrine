@@ -1,6 +1,6 @@
 import { type Dispatch, useEffect, useState } from "react";
 import type { IssueDetail, TrackerKind } from "../../../shared/intake/tracker.ts";
-import type { IntakeSummary, TrackerIssue } from "../../../shared/protocol.ts";
+import type { IntakeMode, IntakeSummary, TrackerIssue } from "../../../shared/protocol.ts";
 import { type Cached, revalidate, trackerCache, trackerCacheKey } from "../trackerCache";
 import {
   issueIdentifier,
@@ -231,10 +231,11 @@ export function pickerWorkspace(workspaces: Workspace[], chosen: number | undefi
 export async function startIntake(
   root: string,
   issueUrl: string,
+  mode: IntakeMode,
   deps: { start: ReturnType<typeof useIntakeRpc>["start"]; dispatch: Dispatch<Action> },
 ): Promise<void> {
   try {
-    const { alreadyActive: _, ...intake } = await deps.start(root, issueUrl);
+    const { alreadyActive: _, ...intake } = await deps.start(root, issueUrl, mode);
     deps.dispatch({ type: "intake.started", intake });
   } catch (e) {
     deps.dispatch({ type: "toast", message: `Intake を始められませんでした（${errorMessage(e)}）` });
@@ -387,7 +388,7 @@ export function IssuePicker() {
             onStart={async () => {
               setPending(true);
               try {
-                await startIntake(workspace.path, picked.url, { start: api.start, dispatch });
+                await startIntake(workspace.path, picked.url, "plan", { start: api.start, dispatch });
               } finally {
                 setPending(false);
               }

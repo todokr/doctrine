@@ -8,6 +8,7 @@ import { pickerWorkspace, startIntake, WorkspacePick } from "./components/IssueP
 import { rpc } from "./daemon/client";
 import { INTAKES, WORKSPACES } from "./fixtures";
 import type { Action } from "./model";
+import type { IntakeMode } from "../../shared/protocol.ts";
 
 beforeEach(() => {
   invoke.mockReset();
@@ -34,7 +35,7 @@ describe("startIntake", () => {
     return {
       actions,
       deps: {
-        start: (w: string, u: string) => rpc("intake.start", { workspace: w, issue_url: u, mode: "plan" }),
+        start: (w: string, u: string, m: IntakeMode) => rpc("intake.start", { workspace: w, issue_url: u, mode: m }),
         dispatch: (a: Action) => {
           actions.push(a);
         },
@@ -45,10 +46,10 @@ describe("startIntake", () => {
   test("選んだ workspace の root で intake.start を呼ぶ", async () => {
     invoke.mockResolvedValue({ ...INTAKES[0], alreadyActive: false });
     const { actions, deps } = setup();
-    await startIntake(pickerWorkspace(WORKSPACES, 2)!.path, "https://github.com/o/r/issues/8", deps);
+    await startIntake(pickerWorkspace(WORKSPACES, 2)!.path, "https://github.com/o/r/issues/8", "direct", deps);
     expect(invoke).toHaveBeenCalledWith("rpc", {
       method: "intake.start",
-      params: { workspace: "~/work/shop-api", issue_url: "https://github.com/o/r/issues/8", mode: "plan" },
+      params: { workspace: "~/work/shop-api", issue_url: "https://github.com/o/r/issues/8", mode: "direct" },
     });
     expect(actions).toEqual([{ type: "intake.started", intake: INTAKES[0] }]);
   });
@@ -56,7 +57,7 @@ describe("startIntake", () => {
   test("失敗したらトーストを出す", async () => {
     invoke.mockRejectedValue(new Error("x"));
     const { actions, deps } = setup();
-    await startIntake("~/work/shop-api", "https://github.com/o/r/issues/8", deps);
+    await startIntake("~/work/shop-api", "https://github.com/o/r/issues/8", "direct", deps);
     expect(actions).toEqual([{ type: "toast", message: "Intake を始められませんでした（x）" }]);
   });
 });
