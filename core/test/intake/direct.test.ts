@@ -1,15 +1,17 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { getIntake, listProcesses, upsertPrObservation } from "../../src/db/intakes.ts";
-import { getTask } from "../../src/db/tasks.ts";
+import { getTask, listTasks } from "../../src/db/tasks.ts";
 import { openDb } from "../../src/db/migrate.ts";
-import { startIntake } from "../../src/intake/commands.ts";
+import { type IntakeTransition, startIntake } from "../../src/intake/commands.ts";
 import { insertDirectIntake } from "../../src/intake/dispatch.ts";
 import { toIntakeDetail } from "../../src/intake/view.ts";
-import { INITIAL_WATCH_HEALTH } from "../../src/intake/watch.ts";
+import { createIntakeWatcher, INITIAL_WATCH_HEALTH } from "../../src/intake/watch.ts";
 import { seedProject } from "../helpers/project.ts";
-import { fakeTracker } from "../helpers/tracker.ts";
-import { fakeWorkflowLoader } from "../helpers/watcher.ts";
+import { fakeTracker as statefulTracker } from "../helpers/fakeTracker.ts";
+import { fakePrWatcher } from "../helpers/prWatcher.ts";
+import { constTrackerOf, fakeTracker } from "../helpers/tracker.ts";
+import { fakeBaseSync, fakeWorkflowLoader } from "../helpers/watcher.ts";
 import { DIRECT_WORKFLOW, PARENT_URL, seedDirect } from "./watchFixture.ts";
 
 test("direct: Intake は active で、プロセス main とタスク 1 本を持つ", async () => {
@@ -163,4 +165,58 @@ test("startIntake: 同じ Issue の direct がまだ終わっていなければ�
   const second = await started();
   assert.equal(second.alreadyActive, true);
   assert.equal(second.intake.id, first.intake.id);
+});
+
+async function watchDirect() {
+  const seeded = await seedDirect();
+  const ft = statefulTracker();
+  const pw = fakePrWatcher();
+  const transitions: IntakeTransition[] = [];
+  const watcher = createIntakeWatcher({
+    db: seeded.db,
+    trackerOf: constTrackerOf(ft.tracker),
+    prWatcher: pw.prWatcher,
+    baseSync: fakeBaseSync().baseSync,
+    loadWorkflow: fakeWorkflowLoader(DIRECT_WORKFLOW),
+    onStateChanged: (t) => transitions.push(t),
+    onUpdated: () => {},
+  });
+  return { ...seeded, ft, pw, watcher, transitions };
+}
+
+const merged = (baseRef: string) => ({
+  number: 7,
+  url: "https://github.com/o/r/pull/7",
+  state: "MERGED" as const,
+  baseRef,
+  mergedAt: "2026-10-14T00:00:00.000Z",
+  mergeCommit: "c7",
+});
+
+test("見張り: direct は sub-issue を作らず、PR のマージで completed にする", async () => {
+  const s = await watchDirect();
+  await s.watcher.request(s.workspaceId);
+  assert.equal((await getIntake(s.db, "d1"))!.state, "active");
+  assert.equal(s.ft.calls.filter((c) => c.op === "createSubIssue").length, 0);
+
+  const task = (await getTask(s.db, s.taskId))!;
+  s.pw.prs.set(task.branch, [merged("main")]);
+  await s.watcher.request(s.workspaceId);
+  const row = (await getIntake(s.db, "d1"))!;
+  assert.equal(row.state, "completed");
+  assert.notEqual(row.ended_at, null);
+  assert.deepEqual(
+    s.transitions.map((t) => [t.from, t.to]),
+    [["active", "completed"]],
+  );
+  assert.equal((await listTasks(s.db)).length, 1);
+});
+
+test("見張り: direct の PR が base_branch 以外へマージされても完了にしない", async () => {
+  const s = await watchDirect();
+  const task = (await getTask(s.db, s.taskId))!;
+  s.pw.prs.set(task.branch, [merged("release")]);
+  await s.watcher.request(s.workspaceId);
+  assert.equal((await getIntake(s.db, "d1"))!.state, "active");
+  assert.deepEqual(s.transitions, []);
 });
