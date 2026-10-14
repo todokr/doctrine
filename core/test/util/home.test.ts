@@ -1,4 +1,4 @@
-import { test } from "@std/testing/bdd";
+import { test } from "node:test";
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import { configRoot, stateRoot } from "../../src/util/home.ts";
@@ -6,16 +6,16 @@ import { configRoot, stateRoot } from "../../src/util/home.ts";
 function withEnv(vars: Record<string, string | undefined>, fn: () => void) {
   const prev = new Map<string, string | undefined>();
   for (const [k, v] of Object.entries(vars)) {
-    prev.set(k, Deno.env.get(k));
-    if (v === undefined) Deno.env.delete(k);
-    else Deno.env.set(k, v);
+    prev.set(k, process.env[k]);
+    if (v === undefined) delete process.env[k];
+    else process.env[k] = v;
   }
   try {
     fn();
   } finally {
     for (const [k, v] of prev) {
-      if (v === undefined) Deno.env.delete(k);
-      else Deno.env.set(k, v);
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
     }
   }
 }
@@ -23,13 +23,13 @@ function withEnv(vars: Record<string, string | undefined>, fn: () => void) {
 test("stateRoot: DOCTRINE_STATE_DIR が空文字なら未設定として扱う", () => {
   // 設定し忘れ（`export DOCTRINE_STATE_DIR=` のように空文字を代入してしまう）で
   // 状態ディレクトリが相対パスになると、起動した場所で DB とソケットの位置が変わる
-  const prev = Deno.env.get("DOCTRINE_STATE_DIR");
-  Deno.env.set("DOCTRINE_STATE_DIR", "");
+  const prev = process.env["DOCTRINE_STATE_DIR"];
+  process.env["DOCTRINE_STATE_DIR"] = "";
   try {
     assert.ok(stateRoot().endsWith("/.local/state/doctrine"));
   } finally {
-    if (prev === undefined) Deno.env.delete("DOCTRINE_STATE_DIR");
-    else Deno.env.set("DOCTRINE_STATE_DIR", prev);
+    if (prev === undefined) delete process.env["DOCTRINE_STATE_DIR"];
+    else process.env["DOCTRINE_STATE_DIR"] = prev;
   }
 });
 
@@ -53,7 +53,7 @@ test("configRoot: どちらも無ければ ~/.config/doctrine", () => {
     () =>
       assert.equal(
         configRoot(),
-        join(Deno.env.get("HOME")!, ".config", "doctrine"),
+        join(process.env["HOME"]!, ".config", "doctrine"),
       ),
   );
 });

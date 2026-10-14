@@ -1,4 +1,4 @@
-import { basename } from "@std/path";
+import { basename } from "node:path";
 import type { Db, ProjectRow } from "../../src/db/schema.ts";
 import { getProject, insertProject } from "../../src/db/tasks.ts";
 import { insertWorkspace, projectNameFrom } from "../../src/db/workspaces.ts";

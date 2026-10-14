@@ -1,4 +1,4 @@
-import { test } from "@std/testing/bdd";
+import { test } from "node:test";
 import assert from "node:assert/strict";
 import { ghPrWatcher, PR_ALIASES_PER_QUERY } from "../../src/github/ghPrWatcher.ts";
 import { fakeGh, parseGraphqlArgs } from "../helpers/gh.ts";

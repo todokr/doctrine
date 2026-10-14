@@ -1,7 +1,7 @@
-import { afterEach, beforeEach, test } from "@std/testing/bdd";
+import { afterEach, beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { createMockAdapter } from "../../src/adapter/mock.ts";
@@ -62,7 +62,7 @@ const NEVER_ALIVE = { startTimeOf: () => Promise.resolve(null), kill: () => {} }
 /** 承認済みで active、プロセス 1 が投入済みの Intake にする。worktree と会話（old）も持つ。 */
 async function seedApproved(): Promise<string> {
   const parent = intakeWorktreePathFor("i1");
-  await Deno.mkdir(parent, { recursive: true });
+  await mkdir(parent, { recursive: true });
   const worktree = await createDetachedWorktree({
     repoPath: f.repo,
     worktreePath: join(parent, "repo"),

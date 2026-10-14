@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import assert from "node:assert/strict";
-import { afterEach, beforeEach, test } from "@std/testing/bdd";
+import { afterEach, beforeEach, test } from "node:test";
 import type { Pfd } from "../../../shared/intake/pfd.ts";
 import { getIntake, listProcesses } from "../../src/db/intakes.ts";
 import { openDb } from "../../src/db/migrate.ts";

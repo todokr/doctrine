@@ -1,4 +1,4 @@
-import { test } from "@std/testing/bdd";
+import { test } from "node:test";
 import assert from "node:assert/strict";
 import { decomposerJsonSchema, decomposerOutputSchema } from "../../../shared/intake/decomposer.ts";
 

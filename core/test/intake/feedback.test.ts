@@ -1,4 +1,4 @@
-import { test } from "@std/testing/bdd";
+import { test } from "node:test";
 import assert from "node:assert/strict";
 import { buildFeedback } from "../../../shared/intake/feedback.ts";
 import { example } from "./pfd/fixture.ts";

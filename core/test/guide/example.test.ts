@@ -1,4 +1,5 @@
-import { test } from "@std/testing/bdd";
+import { readFile } from "node:fs/promises";
+import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { Guide, GuideLocation } from "../../../shared/guide/schema.ts";
 import { type GuideHunk, listHunks } from "../../../shared/guide/hunkId.ts";
@@ -13,11 +14,11 @@ const guideUrl = new URL(
 );
 
 async function loadGuide(): Promise<unknown> {
-  return JSON.parse(await Deno.readTextFile(guideUrl));
+  return JSON.parse(await readFile(guideUrl, "utf8"));
 }
 
 async function loadHunks(): Promise<GuideHunk[]> {
-  return listHunks(await Deno.readTextFile(patchUrl));
+  return listHunks(await readFile(patchUrl, "utf8"));
 }
 
 function locationsOf(guide: Guide): GuideLocation[] {

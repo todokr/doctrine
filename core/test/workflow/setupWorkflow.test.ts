@@ -1,4 +1,4 @@
-import { test } from "@std/testing/bdd";
+import { test } from "node:test";
 import assert from "node:assert/strict";
 import { type AgentStep, parseWorkflow } from "../../src/workflow/schema.ts";
 import { expand, type TemplateContext } from "../../src/workflow/template.ts";

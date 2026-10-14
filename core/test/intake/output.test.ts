@@ -1,4 +1,4 @@
-import { test } from "@std/testing/bdd";
+import { test } from "node:test";
 import assert from "node:assert/strict";
 import { checkDecomposerOutput } from "../../src/intake/output.ts";
 import type { Assumption, Question } from "../../../shared/intake/question.ts";

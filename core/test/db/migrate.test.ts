@@ -1,6 +1,8 @@
-import { afterEach, test } from "@std/testing/bdd";
+import { tmpdir } from "node:os";
+import { mkdtemp, rm } from "node:fs/promises";
+import { afterEach, test } from "node:test";
 import assert from "node:assert/strict";
-import { join } from "@std/path";
+import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { sql } from "kysely";
 import { openDb, openDbOn } from "../../src/db/migrate.ts";
@@ -11,11 +13,11 @@ import { seedProject } from "../helpers/project.ts";
 
 const dirs: string[] = [];
 afterEach(async () => {
-  await Promise.all(dirs.splice(0).map((d) => Deno.remove(d, { recursive: true })));
+  await Promise.all(dirs.splice(0).map((d) => rm(d, { recursive: true, force: true })));
 });
 
 async function tempDbPath(): Promise<string> {
-  const dir = await Deno.makeTempDir({ prefix: "doctrine-migrate-" });
+  const dir = await mkdtemp(join(tmpdir(), "doctrine-migrate-"));
   dirs.push(dir);
   return join(dir, "doctrine.db");
 }

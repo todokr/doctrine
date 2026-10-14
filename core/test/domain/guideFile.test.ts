@@ -1,13 +1,15 @@
-import { afterEach, test } from "@std/testing/bdd";
+import { tmpdir } from "node:os";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { afterEach, test } from "node:test";
 import assert from "node:assert/strict";
-import { join } from "@std/path";
+import { join } from "node:path";
 import { GUIDE_RELPATH, MAX_GUIDE_BYTES, readGuideFile } from "../../src/domain/guideFile.ts";
 import type { Guide } from "../../../shared/guide/schema.ts";
 import { validateGuide } from "../../../shared/guide/validate.ts";
 
 const dirs: string[] = [];
 afterEach(async () => {
-  await Promise.all(dirs.splice(0).map((d) => Deno.remove(d, { recursive: true })));
+  await Promise.all(dirs.splice(0).map((d) => rm(d, { recursive: true, force: true })));
 });
 
 const exampleUrl = new URL(
@@ -16,15 +18,15 @@ const exampleUrl = new URL(
 );
 
 async function example(): Promise<Guide> {
-  return JSON.parse(await Deno.readTextFile(exampleUrl));
+  return JSON.parse(await readFile(exampleUrl, "utf8"));
 }
 
 async function worktree(guideJson?: string): Promise<string> {
-  const wt = await Deno.makeTempDir({ prefix: "doctrine-guidefile-" });
+  const wt = await mkdtemp(join(tmpdir(), "doctrine-guidefile-"));
   dirs.push(wt);
   if (guideJson !== undefined) {
-    await Deno.mkdir(join(wt, ".doctrine-out"), { recursive: true });
-    await Deno.writeTextFile(join(wt, GUIDE_RELPATH), guideJson);
+    await mkdir(join(wt, ".doctrine-out"), { recursive: true });
+    await writeFile(join(wt, GUIDE_RELPATH), guideJson);
   }
   return wt;
 }

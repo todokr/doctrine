@@ -1,5 +1,6 @@
-import { afterEach, test } from "@std/testing/bdd";
+import { afterEach, test } from "node:test";
 import assert from "node:assert/strict";
+import childProcess from "node:child_process";
 import { writeFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -9,6 +10,7 @@ import { releaseDueRateLimited, releaseDueWaiting } from "../../src/domain/sched
 import type { AgentEvent, AgentResult } from "../../src/adapter/types.ts";
 import { parseWorkflow } from "../../src/workflow/schema.ts";
 import { DatabaseSync } from "node:sqlite";
+import { syncBuiltinESMExports } from "node:module";
 import { openDb, openDbOn } from "../../src/db/migrate.ts";
 import { getTask, insertTask } from "../../src/db/tasks.ts";
 import { seedProject } from "../helpers/project.ts";
@@ -1398,7 +1400,7 @@ steps:
  * 実I/O（git サブプロセス）が挟まるので、非 approval の分岐より「読んでから書くまで」
  * の窓が広い。上の「状態を読んだ直後に cancel が届いても…」と同じやり方（sqlite の
  * クエリに割り込む）は使えない — captureTree は DB へは触らず git を spawn するだけ
- * なので、割り込む先が無い。代わりに Deno.Command を差し替えて、captureTree が
+ * なので、割り込む先が無い。代わりに child_process.spawn を差し替えて、captureTree が
  * 最初の git を spawn する瞬間に cancel を書き込む。
  */
 test("captureTree が走っている間に cancel が届いても、awaiting の行を立てない", async () => {
@@ -1430,28 +1432,27 @@ steps:
     title: "見て"
 `).workflow;
 
-  const OriginalCommand = Deno.Command;
+  const originalSpawn = childProcess.spawn;
   let injected = false;
-  // captureTree が最初に spawn する git（"add -A"）を捉えた瞬間、別の経路
-  // （task.cancel）が canceled を書いたことにする。生成した Command 自体は
-  // 本物に委ねる（git は実際に走らせ、captureTree の I/O をそのまま踏ませる）。
-  Deno.Command = function (
-    this: unknown,
-    cmd: string | URL,
-    options?: Deno.CommandOptions,
-  ) {
+  // captureTree が最初に spawn する git を捉えた瞬間、別の経路（task.cancel）が
+  // canceled を書いたことにする。spawn 自体は本物に委ねる（git は実際に走らせ、
+  // captureTree の I/O をそのまま踏ませる）。差し替えは syncBuiltinESMExports で
+  // exec.ts の `import { spawn }` にも届く。
+  childProcess.spawn = function (this: unknown, cmd: string, ...rest: unknown[]) {
     if (!injected && cmd === "git") {
       injected = true;
       sqlite.prepare("UPDATE tasks SET state = 'canceled' WHERE id = 't1'").run();
     }
-    return new OriginalCommand(cmd, options);
-  } as unknown as typeof Deno.Command;
+    return (originalSpawn as (...a: unknown[]) => unknown).call(this, cmd, ...rest);
+  } as typeof childProcess.spawn;
+  syncBuiltinESMExports();
 
   try {
     const adapter = createMockAdapter({ result: {} });
     await runTask(db, "t1", workflow, { db, adapter, logRoot: join(root, "logs"), globalLimit: 4 });
   } finally {
-    Deno.Command = OriginalCommand;
+    childProcess.spawn = originalSpawn;
+    syncBuiltinESMExports();
   }
 
   assert.ok(injected, "窓に cancel を差し込めていない（テストの前提が崩れている）");

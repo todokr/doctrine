@@ -1,4 +1,4 @@
-import { test } from "@std/testing/bdd";
+import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createWarningLog, WARNING_CAPACITY } from "../../src/daemon/warnings.ts";
 import type { ServerEvent } from "../../../shared/protocol.ts";

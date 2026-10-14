@@ -2,9 +2,13 @@
   "name": "@doctrine/core",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=26.8.1" },
+  "engines": {
+    "node": ">=26.8.1"
+  },
   "scripts": {
-    "check": "tsc -p ."
+    "check": "tsc -p .",
+    "test": "node --test \"test/**/*.test.ts\"",
+    "test:update-snapshots": "node --test --test-update-snapshots \"test/guide/jsonSchema.test.ts\""
   },
   "dependencies": {
     "kysely": "0.28.17",

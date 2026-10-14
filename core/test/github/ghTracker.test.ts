@@ -1,4 +1,4 @@
-import { test } from "@std/testing/bdd";
+import { test } from "node:test";
 import assert from "node:assert/strict";
 import { ghTracker } from "../../src/github/ghTracker.ts";
 import { fakeGh, parseGraphqlArgs } from "../helpers/gh.ts";
@@ -23,7 +23,7 @@ test("status: 3 つとも通れば repo を target として返す", async () =>
 });
 
 test("status: gh が無ければ not_installed", async () => {
-  const { run, calls } = fakeGh(() => new Deno.errors.NotFound("gh"));
+  const { run, calls } = fakeGh(() => Object.assign(new Error("spawn gh ENOENT"), { code: "ENOENT" }));
   const s = await ghTracker(run).status(P);
   assert.equal(s.ok, false);
   if (!s.ok) assert.equal(s.reason, "not_installed");

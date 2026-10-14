@@ -1,5 +1,5 @@
 import { fakeBaseSync } from "../helpers/watcher.ts";
-import { afterEach, beforeEach, test } from "@std/testing/bdd";
+import { afterEach, beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";

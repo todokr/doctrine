@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, test } from "@std/testing/bdd";
+import { afterEach, beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
 import { readdir, readFile, realpath, rm } from "node:fs/promises";
 import { mkdtemp } from "node:fs/promises";

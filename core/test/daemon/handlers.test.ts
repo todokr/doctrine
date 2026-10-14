@@ -1,7 +1,7 @@
-import { afterEach, beforeEach, test } from "@std/testing/bdd";
+import { afterEach, beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { mkdir, mkdtemp, readFile, realpath, rm, utimes, writeFile } from "node:fs/promises";
+import { existsSync, rmSync } from "node:fs";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { tmpdir } from "node:os";
@@ -440,7 +440,7 @@ test("worktree.list はタスク・Intake・孤児の worktree を全部返す",
     baseBranch: "main",
   });
   const fixed = new Date("2026-01-01T00:00:00.000Z");
-  await Deno.utime(orphan, fixed, fixed);
+  await utimes(orphan, fixed, fixed);
 
   const res = await h("worktree.list", {}, NOOP_CONN) as WorktreeEntry[];
   assert.equal(res.length, 3);
@@ -527,7 +527,7 @@ test("DB の worktree_path は worktree.list と同じ表記（実パス）で�
   const saved = (await getTask(ctx.db, t.id))!.worktree_path!;
   // macOS の tmpdir は /var -> /private/var の symlink 配下。未解決のまま保存すると
   // git が報告するパスと食い違う。
-  assert.equal(saved, await Deno.realPath(saved));
+  assert.equal(saved, await realpath(saved));
   // DB から外すと、同じ表記のまま孤児として出てくる
   await ctx.db.updateTable("tasks").set({ worktree_path: null }).where("id", "=", t.id).execute();
   const res = await h("worktree.list", {}, NOOP_CONN) as WorktreeEntry[];
@@ -1468,7 +1468,7 @@ test("workspace.add: リポジトリのサブディレクトリを指したら�
   const sub = join(bare, "packages", "app");
   await mkdir(sub, { recursive: true });
   const h = createHandler(await context());
-  const realRoot = await Deno.realPath(bare);
+  const realRoot = await realpath(bare);
   await assert.rejects(
     () => h("workspace.add", { path: sub }, NOOP_CONN),
     (e: unknown) => {
@@ -3001,11 +3001,11 @@ test("Intake の実行が例外で落ちたら、行を failed・Intake を要�
   const inner = ctx.adapter;
   const removingAdapter: AgentAdapter = {
     start(prompt, o) {
-      Deno.removeSync(o.cwd, { recursive: true });
+      rmSync(o.cwd, { recursive: true, force: true });
       return inner.start(prompt, o);
     },
     resume(sessionId, prompt, o) {
-      Deno.removeSync(o.cwd, { recursive: true });
+      rmSync(o.cwd, { recursive: true, force: true });
       return inner.resume(sessionId, prompt, o);
     },
   };

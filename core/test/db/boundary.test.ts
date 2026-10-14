@@ -1,4 +1,4 @@
-import { test } from "@std/testing/bdd";
+import { test } from "node:test";
 import assert from "node:assert/strict";
 import { openDb } from "../../src/db/migrate.ts";
 import { getTask, insertTask } from "../../src/db/tasks.ts";

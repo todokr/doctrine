@@ -1,4 +1,4 @@
-import { test } from "@std/testing/bdd";
+import { test } from "node:test";
 import assert from "node:assert/strict";
 import { pfdHash, sha256Hex } from "../../../src/intake/pfd/hash.ts";
 import { example } from "./fixture.ts";

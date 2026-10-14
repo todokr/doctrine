@@ -1,6 +1,8 @@
-import { afterEach, test } from "@std/testing/bdd";
+import { tmpdir } from "node:os";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { afterEach, test } from "node:test";
 import assert from "node:assert/strict";
-import { join } from "@std/path";
+import { join } from "node:path";
 import { openDb } from "../../src/db/migrate.ts";
 import { getTask, insertTask } from "../../src/db/tasks.ts";
 import { seedProject } from "../helpers/project.ts";
@@ -12,7 +14,7 @@ import type { StepRunStatus } from "../../src/db/stepRuns.ts";
 
 const dirs: string[] = [];
 afterEach(async () => {
-  await Promise.all(dirs.splice(0).map((d) => Deno.remove(d, { recursive: true })));
+  await Promise.all(dirs.splice(0).map((d) => rm(d, { recursive: true, force: true })));
 });
 
 const WORKFLOW = parseWorkflow(`
@@ -227,11 +229,11 @@ test("approval の行に想定外の status があれば例外にする", async 
 });
 
 test("承認待ちで宣言があれば、宣言されたファイルの中身が返る", async () => {
-  const root = await Deno.makeTempDir({ prefix: "doctrine-taskctx-" });
+  const root = await mkdtemp(join(tmpdir(), "doctrine-taskctx-"));
   dirs.push(root);
   const wt = join(root, "wt");
-  await Deno.mkdir(join(wt, ".doctrine-out"), { recursive: true });
-  await Deno.writeTextFile(join(wt, ".doctrine-out", "plan.md"), "# 計画\n");
+  await mkdir(join(wt, ".doctrine-out"), { recursive: true });
+  await writeFile(join(wt, ".doctrine-out", "plan.md"), "# 計画\n");
 
   const db = await fixture(wt);
   await db.updateTable("tasks").set({ state: "suspended", current_step_id: "review" })

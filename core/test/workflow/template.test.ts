@@ -1,4 +1,4 @@
-import { test } from "@std/testing/bdd";
+import { test } from "node:test";
 import assert from "node:assert/strict";
 import { expand, type TemplateContext, TemplateError } from "../../src/workflow/template.ts";
 

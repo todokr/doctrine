@@ -1,4 +1,4 @@
-import { test } from "@std/testing/bdd";
+import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { PrFact } from "../../../shared/intake/processStatus.ts";
 import { getIntake, listProcesses, updateProcess } from "../../src/db/intakes.ts";

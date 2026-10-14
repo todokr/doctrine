@@ -1,11 +1,13 @@
-import { test } from "@std/testing/bdd";
+import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { applyWorkflowChanges } from "../../src/workflow/save.ts";
 import { parseWorkflow } from "../../src/workflow/schema.ts";
 
 async function readDefaultYaml(): Promise<string> {
-  return await Deno.readTextFile(
+  return await readFile(
     new URL("../../../.doctrine/workflows/default.yaml", import.meta.url),
+    "utf8",
   );
 }
 

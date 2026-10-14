@@ -25,9 +25,9 @@ export type Fixture = {
 
 /** 実の git リポジトリ・状態ディレクトリ・DB・Intake（id i1）を用意する。 */
 export async function createFixture(): Promise<Fixture> {
-  const originalStateDir = Deno.env.get("DOCTRINE_STATE_DIR");
+  const originalStateDir = process.env["DOCTRINE_STATE_DIR"];
   const root = await mkdtemp(join(tmpdir(), "doctrine-intake-"));
-  Deno.env.set("DOCTRINE_STATE_DIR", join(root, "state"));
+  process.env["DOCTRINE_STATE_DIR"] = join(root, "state");
   const repo = await makeRepo(root, { "README.md": "x\n" });
   const db = await openDb(":memory:");
   const p = await seedProject(db, { path: repo });
@@ -63,8 +63,8 @@ export async function addProject(
 }
 
 export async function destroyFixture(f: Fixture): Promise<void> {
-  if (f.originalStateDir === undefined) Deno.env.delete("DOCTRINE_STATE_DIR");
-  else Deno.env.set("DOCTRINE_STATE_DIR", f.originalStateDir);
+  if (f.originalStateDir === undefined) delete process.env["DOCTRINE_STATE_DIR"];
+  else process.env["DOCTRINE_STATE_DIR"] = f.originalStateDir;
   await rm(f.root, { recursive: true, force: true });
 }
 

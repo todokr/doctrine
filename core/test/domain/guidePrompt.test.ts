@@ -1,4 +1,4 @@
-import { test } from "@std/testing/bdd";
+import { test } from "node:test";
 import assert from "node:assert/strict";
 import { buildGuidePrompt, type GuidePromptInput } from "../../src/domain/guidePrompt.ts";
 import { GUIDE_HUNKS_RELPATH } from "../../src/domain/guideInputs.ts";

@@ -1,4 +1,4 @@
-import { test } from "@std/testing/bdd";
+import { test } from "node:test";
 import assert from "node:assert/strict";
 import { buildAnswerText, decisionTexts } from "../../../shared/intake/answerText.ts";
 import type { Question } from "../../../shared/intake/question.ts";

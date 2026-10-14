@@ -1,4 +1,4 @@
-import { test } from "@std/testing/bdd";
+import { test } from "node:test";
 import assert from "node:assert/strict";
 import { buildTaskPrompt } from "../../../src/intake/pfd/prompt.ts";
 import { example, withDecision } from "./fixture.ts";

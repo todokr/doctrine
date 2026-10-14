@@ -1,4 +1,4 @@
-import { test } from "@std/testing/bdd";
+import { test } from "node:test";
 import assert from "node:assert/strict";
 import { getIntake, replaceCurrentTask, upsertPrObservation } from "../../src/db/intakes.ts";
 import { insertProject, insertTask, type NewTask } from "../../src/db/tasks.ts";

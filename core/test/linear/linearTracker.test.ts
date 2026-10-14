@@ -1,4 +1,4 @@
-import { test } from "@std/testing/bdd";
+import { test } from "node:test";
 import assert from "node:assert/strict";
 import { linearTracker } from "../../src/linear/linearTracker.ts";
 import { fakeLinear } from "../helpers/linear.ts";

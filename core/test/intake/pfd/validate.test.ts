@@ -1,4 +1,4 @@
-import { test } from "@std/testing/bdd";
+import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { Pfd } from "../../../../shared/intake/pfd.ts";
 import { frozenPart, type ValidateContext, validatePfd } from "../../../src/intake/pfd/validate.ts";
