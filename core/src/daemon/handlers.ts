@@ -1,11 +1,6 @@
 import { basename, dirname, isAbsolute, join } from "@std/path";
 import { computeDiff, mergeBase, type TaskDiff } from "../domain/diff.ts";
-import {
-  branchOf,
-  type Step,
-  type Workflow,
-  WorkflowValidationError,
-} from "../workflow/schema.ts";
+import { branchOf, type Step, type Workflow, WorkflowValidationError } from "../workflow/schema.ts";
 import {
   applyProjectConfig,
   parseProjectConfig,
@@ -15,17 +10,8 @@ import {
 } from "../workflow/project.ts";
 import { applyWorkflowChanges, writeWorkflowYaml } from "../workflow/save.ts";
 import type { TrackerConfig } from "../workflow/workspace.ts";
-import {
-  pinOf,
-  toStepViews,
-  type WorkflowLoader,
-  type WorkflowPin,
-} from "../workflow/load.ts";
-import {
-  SETUP_WORKFLOW_NAME,
-  setupPrompt,
-  setupWorkflowYaml,
-} from "../workflow/setupWorkflow.ts";
+import { pinOf, toStepViews, type WorkflowLoader, type WorkflowPin } from "../workflow/load.ts";
+import { SETUP_WORKFLOW_NAME, setupPrompt, setupWorkflowYaml } from "../workflow/setupWorkflow.ts";
 import {
   getProject,
   getProjectByPath,
@@ -50,12 +36,7 @@ import {
   updateWorkspace,
 } from "./workspaceRegistry.ts";
 import { detectWorkspace } from "./workspaceDetect.ts";
-import {
-  getStepRun,
-  lastRejectedReview,
-  lastStepRun,
-  listStepRuns,
-} from "../db/stepRuns.ts";
+import { getStepRun, lastRejectedReview, lastStepRun, listStepRuns } from "../db/stepRuns.ts";
 import { commitStepBoundary, StateConflictError } from "../db/boundary.ts";
 import type { Db } from "../db/schema.ts";
 import { recentRateLimitSamples } from "../db/rateLimits.ts";
@@ -95,11 +76,7 @@ import {
   startIntake,
 } from "../intake/commands.ts";
 import { previewTaskPrompt, redispatchProcess } from "../intake/dispatch.ts";
-import {
-  intakeDraft,
-  toIntakeDetail,
-  toIntakeSummary,
-} from "../intake/view.ts";
+import { intakeDraft, toIntakeDetail, toIntakeSummary } from "../intake/view.ts";
 import type { IntakeWatcher } from "../intake/watch.ts";
 import { type TrackerOf, WorkspaceConfigError } from "../tracker/tracker.ts";
 import { applyApproval, runTask } from "../domain/engine.ts";
@@ -149,10 +126,7 @@ export type DaemonContext = {
   adapter: AgentAdapter;
   logRoot: string;
   globalLimit: number;
-  broadcast(
-    ev: ServerEvent,
-    opts?: { followKey?: string; followersOnly?: boolean },
-  ): void;
+  broadcast(ev: ServerEvent, opts?: { followKey?: string; followersOnly?: boolean }): void;
   /** 作成時（task.create）と、作成時の定義を持たない行の読み込みに使う。 */
   loadWorkflow: WorkflowLoader;
   /** タスクが従うワークフロー（setup を差し込んだ後）。tick・承認・読み取りの経路はすべてここを通る。 */
@@ -196,13 +170,7 @@ function toStepDetail(step: Step): WorkflowStepDetail {
     case "command":
       return { id: step.id, branch, type: "command", run: step.run };
     case "poll":
-      return {
-        id: step.id,
-        branch,
-        type: "poll",
-        run: step.run,
-        interval: step.interval,
-      };
+      return { id: step.id, branch, type: "poll", run: step.run, interval: step.interval };
     case "agent":
       return {
         id: step.id,
@@ -260,10 +228,7 @@ async function reqProject(ctx: DaemonContext, params: Record<string, unknown>) {
   return project;
 }
 
-async function reqWorkspace(
-  ctx: DaemonContext,
-  params: Record<string, unknown>,
-) {
+async function reqWorkspace(ctx: DaemonContext, params: Record<string, unknown>) {
   const path = req(params, "workspace");
   const workspace = await getWorkspaceByPath(ctx.db, path);
   if (!workspace) throw new Error(`未登録の workspace です: ${path}`);
@@ -280,15 +245,12 @@ function reqWorkflowName(params: Record<string, unknown>): string {
 }
 
 /** params.changes を取り出す。配列でない、または id を持たない要素があれば投げる。値の型検証は applyWorkflowChanges に任せる。 */
-function readWorkflowChanges(
-  params: Record<string, unknown>,
-): WorkflowStepChange[] {
+function readWorkflowChanges(params: Record<string, unknown>): WorkflowStepChange[] {
   const changes = params.changes;
   if (!Array.isArray(changes)) throw new Error("changes は必須です");
   for (const c of changes) {
     if (
-      typeof c !== "object" || c === null ||
-      typeof (c as { id: unknown }).id !== "string" ||
+      typeof c !== "object" || c === null || typeof (c as { id: unknown }).id !== "string" ||
       (c as { id: string }).id === ""
     ) {
       throw new Error("changes は必須です");
@@ -298,13 +260,9 @@ function readWorkflowChanges(
 }
 
 /** params.config を取り出す。オブジェクトでなければ投げる。値の型検証は applyProjectConfig に任せる。 */
-function readProjectConfigInput(
-  params: Record<string, unknown>,
-): ProjectConfigInput {
+function readProjectConfigInput(params: Record<string, unknown>): ProjectConfigInput {
   const config = params.config;
-  if (typeof config !== "object" || config === null) {
-    throw new Error("config は必須です");
-  }
+  if (typeof config !== "object" || config === null) throw new Error("config は必須です");
   const c = config as Record<string, unknown>;
   return {
     defaultWorkflow: c.defaultWorkflow as string,
@@ -319,15 +277,12 @@ function readWorkspaceInit(
   params: Record<string, unknown>,
 ): { projects: Record<string, string>; tracker?: TrackerConfig } | undefined {
   if (params.projects === undefined) {
-    if (params.tracker !== undefined) {
-      throw new Error("tracker には projects も必要です");
-    }
+    if (params.tracker !== undefined) throw new Error("tracker には projects も必要です");
     return undefined;
   }
   const projects = params.projects;
   if (
-    typeof projects !== "object" || projects === null ||
-    Array.isArray(projects) ||
+    typeof projects !== "object" || projects === null || Array.isArray(projects) ||
     Object.values(projects).some((v) => typeof v !== "string")
   ) {
     throw new Error("projects は文字列のオブジェクトで渡してください");
@@ -338,10 +293,7 @@ function readWorkspaceInit(
   };
 }
 
-function broadcastIntakeTransition(
-  ctx: DaemonContext,
-  t: IntakeTransition,
-): void {
+function broadcastIntakeTransition(ctx: DaemonContext, t: IntakeTransition): void {
   ctx.broadcast({
     event: "intake.stateChanged",
     intake_id: t.intakeId,
@@ -366,11 +318,7 @@ async function intakeDetailOf(ctx: DaemonContext, intakeId: string) {
 async function settleIntakeCommand(ctx: DaemonContext, t: IntakeTransition) {
   broadcastIntakeTransition(ctx, t);
   const row = (await getIntake(ctx.db, t.intakeId))!;
-  return await toIntakeSummary(
-    ctx.db,
-    row,
-    ctx.intakeWatcher.health(row.workspace_id),
-  );
+  return await toIntakeSummary(ctx.db, row, ctx.intakeWatcher.health(row.workspace_id));
 }
 
 /**
@@ -407,18 +355,14 @@ export function createHandler(ctx: DaemonContext): Handler {
       }
       case "workspace.list":
         return await Promise.all(
-          (await listWorkspaces(ctx.db)).map((w) =>
-            toWorkspaceSummary(ctx.db, w.id)
-          ),
+          (await listWorkspaces(ctx.db)).map((w) => toWorkspaceSummary(ctx.db, w.id)),
         );
       case "project.list":
         return await listProjects(ctx.db);
       case "project.config.get": {
         const project = await reqProject(ctx, params);
         return parseProjectConfig(
-          await Deno.readTextFile(
-            join(project.path, ".doctrine", "project.yaml"),
-          ),
+          await Deno.readTextFile(join(project.path, ".doctrine", "project.yaml")),
         );
       }
       case "project.config.save": {
@@ -428,15 +372,13 @@ export function createHandler(ctx: DaemonContext): Handler {
           join(project.path, ".doctrine", "project.yaml"),
         );
         const { text, config } = applyProjectConfig(yamlText, input);
-        await ctx.loadWorkflow(project.path, config.defaultWorkflow).catch(
-          (e) => {
-            throw new Error(
-              `defaultWorkflow が指すワークフローを読めません: .doctrine/workflows/${config.defaultWorkflow}.yaml（${
-                (e as Error).message
-              }）`,
-            );
-          },
-        );
+        await ctx.loadWorkflow(project.path, config.defaultWorkflow).catch((e) => {
+          throw new Error(
+            `defaultWorkflow が指すワークフローを読めません: .doctrine/workflows/${config.defaultWorkflow}.yaml（${
+              (e as Error).message
+            }）`,
+          );
+        });
         await writeProjectYaml(project.path, text);
         await syncProjectRow(ctx.db, project.id, config);
         return await getProject(ctx.db, project.id);
@@ -445,33 +387,19 @@ export function createHandler(ctx: DaemonContext): Handler {
       case "workflow.list": {
         const project = await reqProject(ctx, params);
         const names = await workflowNames(project.path);
-        return await Promise.all(
-          names.map(async (name): Promise<WorkflowListEntry> => {
-            const isDefault = name === project.default_workflow;
-            try {
-              const { workflow } = await ctx.loadWorkflow(project.path, name);
-              const steps = toStepViews(
-                withSetupStep(workflow, project.setup ?? undefined),
-              );
-              return { name, default: isDefault, ok: true, steps };
-            } catch (e) {
-              if (e instanceof WorkflowValidationError) {
-                return {
-                  name,
-                  default: isDefault,
-                  ok: false,
-                  issues: e.issues,
-                };
-              }
-              return {
-                name,
-                default: isDefault,
-                ok: false,
-                issues: [(e as Error).message],
-              };
+        return await Promise.all(names.map(async (name): Promise<WorkflowListEntry> => {
+          const isDefault = name === project.default_workflow;
+          try {
+            const { workflow } = await ctx.loadWorkflow(project.path, name);
+            const steps = toStepViews(withSetupStep(workflow, project.setup ?? undefined));
+            return { name, default: isDefault, ok: true, steps };
+          } catch (e) {
+            if (e instanceof WorkflowValidationError) {
+              return { name, default: isDefault, ok: false, issues: e.issues };
             }
-          }),
-        );
+            return { name, default: isDefault, ok: false, issues: [(e as Error).message] };
+          }
+        }));
       }
       case "workflow.get": {
         const project = await reqProject(ctx, params);
@@ -479,10 +407,7 @@ export function createHandler(ctx: DaemonContext): Handler {
         // warnings はこの応答に載せるだけで ctx.warnings には積まない。設定画面が
         // 何度も呼ぶ経路であり、積む出口は task.create の1箇所だけにする。
         try {
-          const { workflow, warnings } = await ctx.loadWorkflow(
-            project.path,
-            name,
-          );
+          const { workflow, warnings } = await ctx.loadWorkflow(project.path, name);
           return {
             name,
             ok: true,
@@ -491,11 +416,7 @@ export function createHandler(ctx: DaemonContext): Handler {
           } satisfies WorkflowDetail;
         } catch (e) {
           if (e instanceof WorkflowValidationError) {
-            return {
-              name,
-              ok: false,
-              issues: e.issues,
-            } satisfies WorkflowDetail;
+            return { name, ok: false, issues: e.issues } satisfies WorkflowDetail;
           }
           throw e;
         }
@@ -504,12 +425,7 @@ export function createHandler(ctx: DaemonContext): Handler {
         const project = await reqProject(ctx, params);
         const name = reqWorkflowName(params);
         const changes = readWorkflowChanges(params);
-        const path = join(
-          project.path,
-          ".doctrine",
-          "workflows",
-          `${name}.yaml`,
-        );
+        const path = join(project.path, ".doctrine", "workflows", `${name}.yaml`);
         const yamlText = await Deno.readTextFile(path).catch(() => {
           throw new Error(`ワークフローがありません: ${path}`);
         });
@@ -517,18 +433,13 @@ export function createHandler(ctx: DaemonContext): Handler {
         if (!result.ok) return result satisfies WorkflowSaveResult;
         await writeWorkflowYaml(project.path, name, result.text);
         // warnings はこの応答に載せるだけで ctx.warnings には積まない（workflow.get と同じ理由）。
-        return {
-          ok: true,
-          warnings: result.warnings,
-        } satisfies WorkflowSaveResult;
+        return { ok: true, warnings: result.warnings } satisfies WorkflowSaveResult;
       }
 
       case "task.create": {
         const projectPath = req(params, "project");
         const project = await getProjectByPath(ctx.db, projectPath);
-        if (!project) {
-          throw new Error(`未登録のプロジェクトです: ${projectPath}`);
-        }
+        if (!project) throw new Error(`未登録のプロジェクトです: ${projectPath}`);
         const title = req(params, "title");
         const prompt = req(params, "prompt");
         const workflowName = typeof params.workflow === "string"
@@ -541,15 +452,11 @@ export function createHandler(ctx: DaemonContext): Handler {
           prompt,
           workflowName,
           pin: pinOf(loaded, project),
-          priority: typeof params.priority === "number"
-            ? params.priority
-            : undefined,
+          priority: typeof params.priority === "number" ? params.priority : undefined,
         });
         // タスク作成時だけがこの warnings の出口。以後 tick・承認は保存した
         // 作成時の中身を読み直すだけで、ディスクを読まないので警告は積まない。
-        for (const w of loaded.warnings) {
-          ctx.warnings.push(`作成時の検証: ${w}`, task.id);
-        }
+        for (const w of loaded.warnings) ctx.warnings.push(`作成時の検証: ${w}`, task.id);
         // dctl add はレスポンスをそのまま表示するCLIなので、ここに乗せておけば
         // ログを探しに行かなくてもユーザーの目の前に出る。
         return { ...task, warnings: loaded.warnings };
@@ -561,21 +468,15 @@ export function createHandler(ctx: DaemonContext): Handler {
           throw new Error("projects は文字列の配列で渡してください");
         }
         const policy = params.policy as SetupPolicy | undefined;
-        if (!policy || typeof policy !== "object") {
-          throw new Error("policy は必須です");
-        }
+        if (!policy || typeof policy !== "object") throw new Error("policy は必須です");
         if (policy.pr === "branch_only" && policy.sync) {
-          throw new Error(
-            "PR を開かない方針（pr: branch_only）では sync を true にできません",
-          );
+          throw new Error("PR を開かない方針（pr: branch_only）では sync を true にできません");
         }
         const projects = await listProjectsOf(ctx.db, workspace);
         const targets = (names as string[]).map((name) => {
           const project = projects.find((p) => p.name === name);
           if (!project) {
-            throw new Error(
-              `workspace ${workspace} にプロジェクト ${name} はありません`,
-            );
+            throw new Error(`workspace ${workspace} にプロジェクト ${name} はありません`);
           }
           return project;
         });
@@ -599,12 +500,9 @@ export function createHandler(ctx: DaemonContext): Handler {
       case "task.list": {
         const filter: { projectId?: number; state?: TaskState } = {};
         if (typeof params.project === "string") {
-          filter.projectId = (await getProjectByPath(ctx.db, params.project))
-            ?.id;
+          filter.projectId = (await getProjectByPath(ctx.db, params.project))?.id;
         }
-        if (typeof params.state === "string") {
-          filter.state = params.state as TaskState;
-        }
+        if (typeof params.state === "string") filter.state = params.state as TaskState;
         return await listTasks(ctx.db, filter);
       }
       case "task.get": {
@@ -680,11 +578,7 @@ export function createHandler(ctx: DaemonContext): Handler {
         await commitStepBoundary(ctx.db, {
           taskId,
           requireState: task.state,
-          taskPatch: {
-            state: "paused",
-            child_pid: null,
-            child_started_at: null,
-          },
+          taskPatch: { state: "paused", child_pid: null, child_started_at: null },
         });
         ctx.broadcast({
           event: "task.stateChanged",
@@ -715,12 +609,7 @@ export function createHandler(ctx: DaemonContext): Handler {
           requireState: task.state,
           // 上限待ち・マージ待ちからの再開は、人が「待たずに今やれ」と言ったということ。
           // 期限を消さないと、次の tick が同じ行をもう一度解放しようとする。
-          taskPatch: {
-            state: "queued",
-            resumed: 1,
-            rate_limited_until: null,
-            waiting_until: null,
-          },
+          taskPatch: { state: "queued", resumed: 1, rate_limited_until: null, waiting_until: null },
           stepRunUpdate: await closeAwaitingStepRun(ctx.db, task),
         });
         ctx.broadcast({
@@ -736,12 +625,7 @@ export function createHandler(ctx: DaemonContext): Handler {
         const task = await getTask(ctx.db, taskId);
         if (!task) throw new Error("タスクがありません");
         const { from } = await cancelTask(ctx.db, task, defaultProbe());
-        ctx.broadcast({
-          event: "task.stateChanged",
-          task_id: taskId,
-          from,
-          to: "canceled",
-        });
+        ctx.broadcast({ event: "task.stateChanged", task_id: taskId, from, to: "canceled" });
         return await getTask(ctx.db, taskId);
       }
       case "task.logs": {
@@ -753,23 +637,13 @@ export function createHandler(ctx: DaemonContext): Handler {
         // 切り替えるときに「前のタスクをやめる」と「次のタスクを追う」を別々に
         // 投げるので、遅れて届いた前者が後者を取り消しうる。
         if (params.follow === true) conn.follow(taskId);
-        else if (params.follow === false && conn.isFollowing(taskId)) {
-          conn.unfollow();
-        }
+        else if (params.follow === false && conn.isFollowing(taskId)) conn.unfollow();
         const run = params.step_run_id === undefined
           ? await lastStepRun(ctx.db, taskId)
           : await getStepRun(ctx.db, Number(params.step_run_id));
-        if (params.step_run_id !== undefined && !run) {
-          throw new Error("ステップ実行がありません");
-        }
+        if (params.step_run_id !== undefined && !run) throw new Error("ステップ実行がありません");
         // まだ1度もステップが走っていないタスク（queued）。追従だけ張って空で返す。
-        if (!run) {
-          return {
-            step_run_id: null,
-            log_path: null,
-            lines: [],
-          } satisfies TaskLogs;
-        }
+        if (!run) return { step_run_id: null, log_path: null, lines: [] } satisfies TaskLogs;
         return {
           step_run_id: run.id,
           log_path: run.log_path,
@@ -781,21 +655,14 @@ export function createHandler(ctx: DaemonContext): Handler {
         const task = await getTask(ctx.db, taskId);
         if (!task) throw new Error("タスクがありません");
         if (params.since !== undefined && params.since !== "last_review") {
-          throw new Error(
-            `since に指定できるのは last_review だけです: ${
-              String(params.since)
-            }`,
-          );
+          throw new Error(`since に指定できるのは last_review だけです: ${String(params.since)}`);
         }
         // 完了して削除済み、またはまだ実行枠が取れていない。空の diff を返すと
         // 「変更なし」と区別がつかないので、はっきり失敗させる。
         if (!task.worktree_path) throw new Error("worktree がありません");
         const project = (await getProject(ctx.db, task.project_id))!;
 
-        const merge_base = await mergeBase(
-          task.worktree_path,
-          project.base_branch,
-        );
+        const merge_base = await mergeBase(task.worktree_path, project.base_branch);
         const toRef = await captureTree(task.worktree_path);
 
         // 記録が無ければ全体に倒す（初回のレビューには「前回」が無い）。
@@ -831,15 +698,9 @@ export function createHandler(ctx: DaemonContext): Handler {
         const read = await readGuideFile(task.worktree_path);
         if (read.status === "missing") {
           const project = (await getProject(ctx.db, task.project_id))!;
-          const workflow = await ctx.workflowOf(task, project).catch(() =>
-            null
-          );
-          const hasGuideStep = workflow?.steps.some((s) =>
-            s.type === "guide"
-          ) ?? true;
-          return {
-            status: hasGuideStep ? "missing" : "none",
-          } satisfies TaskGuide;
+          const workflow = await ctx.workflowOf(task, project).catch(() => null);
+          const hasGuideStep = workflow?.steps.some((s) => s.type === "guide") ?? true;
+          return { status: hasGuideStep ? "missing" : "none" } satisfies TaskGuide;
         }
         if (read.status !== "ok") return read satisfies TaskGuide;
 
@@ -861,23 +722,15 @@ export function createHandler(ctx: DaemonContext): Handler {
         // force が外すのは未コミットの変更の拒否だけ。走る・待つ・再開できるタスクや
         // 進行中の Intake の作業場所は、force でも消させない。
         if (target.kind === "task" && !isTerminal(target.task.state)) {
-          throw new Error(
-            `終わっていないタスク（${target.task.state}）の worktree は消せません`,
-          );
+          throw new Error(`終わっていないタスク（${target.task.state}）の worktree は消せません`);
         }
-        if (
-          target.kind === "intake" && !isIntakeTerminal(target.intake.state)
-        ) {
+        if (target.kind === "intake" && !isIntakeTerminal(target.intake.state)) {
           throw new Error(
             `終わっていない Intake（${target.intake.state}）の worktree は消せません`,
           );
         }
         if (target.kind === "intake") {
-          await removeIntakeWorktrees(
-            ctx.db,
-            target.parentPath,
-            params.force === true,
-          );
+          await removeIntakeWorktrees(ctx.db, target.parentPath, params.force === true);
           await updateIntake(ctx.db, target.intake.id, { worktree_path: null });
           return { removed: target.parentPath };
         }
@@ -949,9 +802,7 @@ export function createHandler(ctx: DaemonContext): Handler {
       case "tracker.issues": {
         const ws = await reqWorkspace(ctx, params);
         const assignee = params.assignee === "any" ? "any" : "me";
-        const search = typeof params.search === "string"
-          ? params.search
-          : undefined;
+        const search = typeof params.search === "string" ? params.search : undefined;
         const wt = await ctx.trackerOf(await workspaceRefOf(ctx.db, ws.id));
         const issues = await wt.listIssues({
           assignee,
@@ -960,21 +811,14 @@ export function createHandler(ctx: DaemonContext): Handler {
           // 理由が分かる失敗は、トラッカーの生のエラーより先に返す。
           const failed = (await wt.status()).find((s) => !s.ok);
           if (failed && !failed.ok) {
-            throw new Error(
-              `Issue トラッカーを使えません（${failed.reason}）: ${failed.message}`,
-            );
+            throw new Error(`Issue トラッカーを使えません（${failed.reason}）: ${failed.message}`);
           }
           throw e;
         });
         const open = new Map(
-          (await listIntakes(ctx.db, { workspaceId: ws.id })).map((
-            i,
-          ) => [i.issue_url, i.id]),
+          (await listIntakes(ctx.db, { workspaceId: ws.id })).map((i) => [i.issue_url, i.id]),
         );
-        return issues.map((i) => ({
-          ...i,
-          intake_id: open.get(i.url) ?? null,
-        }));
+        return issues.map((i) => ({ ...i, intake_id: open.get(i.url) ?? null }));
       }
       case "tracker.issue": {
         const ws = await reqWorkspace(ctx, params);
@@ -982,9 +826,7 @@ export function createHandler(ctx: DaemonContext): Handler {
         const url = req(params, "url");
         const projectPath = await wt.projectPathFor(url);
         if (projectPath === null) {
-          throw new Error(
-            `この Issue は workspace のどのリポジトリにもありません: ${url}`,
-          );
+          throw new Error(`この Issue は workspace のどのリポジトリにもありません: ${url}`);
         }
         return await wt.tracker.readIssue(projectPath, url);
       }
@@ -992,15 +834,11 @@ export function createHandler(ctx: DaemonContext): Handler {
       case "intake.start": {
         const ws = await reqWorkspace(ctx, params);
         const wt = await ctx.trackerOf(await workspaceRefOf(ctx.db, ws.id));
-        const { intake, alreadyActive, problems } = await startIntake(
-          ctx.db,
-          wt,
-          {
-            workspaceId: ws.id,
-            issueUrl: req(params, "issue_url"),
-            logRoot: ctx.logRoot,
-          },
-        );
+        const { intake, alreadyActive, problems } = await startIntake(ctx.db, wt, {
+          workspaceId: ws.id,
+          issueUrl: req(params, "issue_url"),
+          logRoot: ctx.logRoot,
+        });
         for (const message of problems) ctx.warnings.push(message);
         const summary = await toIntakeSummary(
           ctx.db,
@@ -1021,9 +859,7 @@ export function createHandler(ctx: DaemonContext): Handler {
         }
         const rows = await listIntakes(ctx.db, filter);
         return await Promise.all(
-          rows.map((r) =>
-            toIntakeSummary(ctx.db, r, ctx.intakeWatcher.health(r.workspace_id))
-          ),
+          rows.map((r) => toIntakeSummary(ctx.db, r, ctx.intakeWatcher.health(r.workspace_id))),
         );
       }
       case "intake.get": {
@@ -1091,11 +927,7 @@ export function createHandler(ctx: DaemonContext): Handler {
         return summary;
       }
       case "intake.draft":
-        return await intakeDraft(
-          ctx.db,
-          req(params, "intake_id"),
-          reqNumber(params, "draft_id"),
-        );
+        return await intakeDraft(ctx.db, req(params, "intake_id"), reqNumber(params, "draft_id"));
       case "intake.processPrompt":
         return {
           prompt: await previewTaskPrompt(ctx.db, {
@@ -1151,9 +983,7 @@ export function createHandler(ctx: DaemonContext): Handler {
           intakeId,
           processId: req(params, "process_id"),
         }, { loadWorkflow: ctx.loadWorkflow });
-        if (replacedTaskId !== null) {
-          await cleanupReplacedTask(ctx, replacedTaskId);
-        }
+        if (replacedTaskId !== null) await cleanupReplacedTask(ctx, replacedTaskId);
         ctx.broadcast({ event: "intake.updated", intake_id: intakeId });
         return await intakeDetailOf(ctx, intakeId);
       }
@@ -1166,20 +996,11 @@ export function createHandler(ctx: DaemonContext): Handler {
       }
       case "intake.setDispatchPaused": {
         const intakeId = req(params, "intake_id");
-        if (typeof params.paused !== "boolean") {
-          throw new Error("paused は必須です");
-        }
-        const row = await setDispatchPaused(ctx.db, {
-          intakeId,
-          paused: params.paused,
-        });
+        if (typeof params.paused !== "boolean") throw new Error("paused は必須です");
+        const row = await setDispatchPaused(ctx.db, { intakeId, paused: params.paused });
         ctx.broadcast({ event: "intake.updated", intake_id: intakeId });
         if (!params.paused) void ctx.intakeWatcher.request(row.workspace_id);
-        return await toIntakeSummary(
-          ctx.db,
-          row,
-          ctx.intakeWatcher.health(row.workspace_id),
-        );
+        return await toIntakeSummary(ctx.db, row, ctx.intakeWatcher.health(row.workspace_id));
       }
       case "intake.closeIssue": {
         const intake = await getIntake(ctx.db, req(params, "intake_id"));
@@ -1196,23 +1017,15 @@ export function createHandler(ctx: DaemonContext): Handler {
           intakeId: intake.id,
           projectPath,
         });
-        return await toIntakeSummary(
-          ctx.db,
-          row,
-          ctx.intakeWatcher.health(row.workspace_id),
-        );
+        return await toIntakeSummary(ctx.db, row, ctx.intakeWatcher.health(row.workspace_id));
       }
 
       case "intake.logs": {
         const intakeId = req(params, "intake_id");
-        if (!await getIntake(ctx.db, intakeId)) {
-          throw new Error("Intake がありません");
-        }
+        if (!await getIntake(ctx.db, intakeId)) throw new Error("Intake がありません");
         // 追従の作法は task.logs と同じ。追従先の枠もタスクと分け合う
         if (params.follow === true) conn.follow(intakeId);
-        else if (params.follow === false && conn.isFollowing(intakeId)) {
-          conn.unfollow();
-        }
+        else if (params.follow === false && conn.isFollowing(intakeId)) conn.unfollow();
         let run;
         if (params.run_id === undefined) {
           run = await lastIntakeRun(ctx.db, intakeId);
@@ -1220,13 +1033,7 @@ export function createHandler(ctx: DaemonContext): Handler {
           run = await getIntakeRun(ctx.db, Number(params.run_id));
           if (run?.intake_id !== intakeId) throw new Error("実行がありません");
         }
-        if (!run) {
-          return {
-            run_id: null,
-            log_path: null,
-            lines: [],
-          } satisfies IntakeLogs;
-        }
+        if (!run) return { run_id: null, log_path: null, lines: [] } satisfies IntakeLogs;
         return {
           run_id: run.id,
           log_path: run.log_path,
@@ -1244,13 +1051,7 @@ export function createHandler(ctx: DaemonContext): Handler {
 async function createTaskRow(
   db: Db,
   project: ProjectRow,
-  t: {
-    title: string;
-    prompt: string;
-    workflowName: string;
-    pin: WorkflowPin;
-    priority?: number;
-  },
+  t: { title: string; prompt: string; workflowName: string; pin: WorkflowPin; priority?: number },
 ): Promise<TaskRow> {
   const id = crypto.randomUUID();
   return await insertTask(db, {
@@ -1305,49 +1106,40 @@ async function worktreeEntries(db: Db): Promise<WorktreeEntry[]> {
   for (const project of await listProjects(db)) {
     const tasks = new Map<string, TaskRow>();
     for (const t of await listTasks(db, { projectId: project.id })) {
-      if (t.worktree_path !== null) {
-        tasks.set(await canonical(t.worktree_path), t);
-      }
+      if (t.worktree_path !== null) tasks.set(await canonical(t.worktree_path), t);
     }
     const intakes = new Map<string, IntakeRow>();
     for (
-      const i of await listIntakes(db, {
-        workspaceId: project.workspace_id,
-        includeClosed: true,
-      })
+      const i of await listIntakes(db, { workspaceId: project.workspace_id, includeClosed: true })
     ) {
-      if (i.worktree_path !== null) {
-        intakes.set(await canonical(i.worktree_path), i);
-      }
+      if (i.worktree_path !== null) intakes.set(await canonical(i.worktree_path), i);
     }
     const entries = await Promise.all(
-      (await listWorktrees(project.path)).map(
-        async (w): Promise<WorktreeEntry | null> => {
-          let stat: Deno.FileInfo;
-          try {
-            stat = await Deno.stat(w.path);
-          } catch (e) {
-            // git は実体の無い worktree も（prunable として）列挙する
-            if (e instanceof Deno.errors.NotFound) return null;
-            throw e;
-          }
-          const key = await canonical(w.path);
-          const task = tasks.get(key);
-          const intake = task ? undefined : intakes.get(dirname(key));
-          const age = task?.updated_at ?? intake?.updated_at ??
-            (stat.mtime ?? stat.birthtime ?? new Date()).toISOString();
-          return {
-            project: project.path,
-            path: w.path,
-            branch: w.branch,
-            task_id: task?.id ?? null,
-            task_state: task?.state ?? null,
-            intake_id: intake?.id ?? null,
-            dirty: await hasUncommittedChanges(w.path),
-            age_basis: age,
-          };
-        },
-      ),
+      (await listWorktrees(project.path)).map(async (w): Promise<WorktreeEntry | null> => {
+        let stat: Deno.FileInfo;
+        try {
+          stat = await Deno.stat(w.path);
+        } catch (e) {
+          // git は実体の無い worktree も（prunable として）列挙する
+          if (e instanceof Deno.errors.NotFound) return null;
+          throw e;
+        }
+        const key = await canonical(w.path);
+        const task = tasks.get(key);
+        const intake = task ? undefined : intakes.get(dirname(key));
+        const age = task?.updated_at ?? intake?.updated_at ??
+          (stat.mtime ?? stat.birthtime ?? new Date()).toISOString();
+        return {
+          project: project.path,
+          path: w.path,
+          branch: w.branch,
+          task_id: task?.id ?? null,
+          task_state: task?.state ?? null,
+          intake_id: intake?.id ?? null,
+          dirty: await hasUncommittedChanges(w.path),
+          age_basis: age,
+        };
+      }),
     );
     out.push(...entries.filter((e): e is WorktreeEntry => e !== null));
   }
@@ -1402,14 +1194,10 @@ async function resolveRemoveTarget(
   }
 
   // 相対パスはデーモンの cwd から解決されてしまう。
-  if (!isAbsolute(path!)) {
-    throw new Error(`path は絶対パスで指定してください: ${path}`);
-  }
+  if (!isAbsolute(path!)) throw new Error(`path は絶対パスで指定してください: ${path}`);
   const real = await canonical(path!);
   if (!await isUnderWorktreesDir(real)) {
-    throw new Error(
-      `doctrine の worktree 置き場の外にあるパスは消せません: ${path}`,
-    );
+    throw new Error(`doctrine の worktree 置き場の外にあるパスは消せません: ${path}`);
   }
 
   for (const project of await listProjects(ctx.db)) {
@@ -1430,10 +1218,7 @@ async function resolveRemoveTarget(
         includeClosed: true,
       })
     ) {
-      if (
-        intake.worktree_path &&
-        await canonical(intake.worktree_path) === dirname(real)
-      ) {
+      if (intake.worktree_path && await canonical(intake.worktree_path) === dirname(real)) {
         return { kind: "intake", intake, parentPath: intake.worktree_path };
       }
     }
@@ -1448,19 +1233,14 @@ async function resolveRemoveTarget(
       return { kind: "intake", intake, parentPath: intake.worktree_path };
     }
     // 名前を確かめないと、存在しないパスも canonical が resolve に倒れて一致してしまう
-    if (
-      dirname(real) === parent && await hasIntakeChild(parent, basename(real))
-    ) {
+    if (dirname(real) === parent && await hasIntakeChild(parent, basename(real))) {
       return { kind: "intake", intake, parentPath: intake.worktree_path };
     }
   }
   throw new Error(`git worktree list に出ないパスは消せません: ${path}`);
 }
 
-async function hasIntakeChild(
-  parentPath: string,
-  name: string,
-): Promise<boolean> {
+async function hasIntakeChild(parentPath: string, name: string): Promise<boolean> {
   try {
     return (await listIntakeWorktrees(parentPath)).some((w) => w.name === name);
   } catch (e) {
@@ -1496,8 +1276,7 @@ async function removeIntakeWorktrees(
   const targets: { repoPath: string; worktreePath: string }[] = [];
   for (const child of children) {
     targets.push({
-      repoPath: repoOf.get(await canonical(child.path)) ??
-        await repoOfWorktree(child.path),
+      repoPath: repoOf.get(await canonical(child.path)) ?? await repoOfWorktree(child.path),
       worktreePath: child.path,
     });
   }
@@ -1526,10 +1305,7 @@ async function removeIntakeWorktrees(
  * どちらも後始末の失敗で本来の仕事（実行の完了・承認の受理）を失敗させては
  * いけない。想定外の例外も refused として届ける。
  */
-export async function cleanupAfterRun(
-  ctx: DaemonContext,
-  taskId: string,
-): Promise<void> {
+export async function cleanupAfterRun(ctx: DaemonContext, taskId: string): Promise<void> {
   const task = await getTask(ctx.db, taskId);
   if (!task || task.state !== "completed" || !task.worktree_path) return;
   await removeTaskWorktree(
@@ -1545,10 +1321,7 @@ export async function cleanupAfterRun(
  * そのプロセスをまだ誰も引き継いでいないからで、新しいタスクが引き継いだ後は残す理由が無い。
  * タスクの記録とブランチは残す。未コミットの変更があれば消さない。投げない（再投入そのものは済んでいる）。
  */
-async function cleanupReplacedTask(
-  ctx: DaemonContext,
-  taskId: string,
-): Promise<void> {
+async function cleanupReplacedTask(ctx: DaemonContext, taskId: string): Promise<void> {
   const task = await getTask(ctx.db, taskId);
   if (!task || !isTerminal(task.state) || !task.worktree_path) return;
   await removeTaskWorktree(
@@ -1585,10 +1358,7 @@ async function removeTaskWorktree(
       force: false,
     });
     await releaseReviewRefs(ctx, project.path, taskId);
-    await commitStepBoundary(ctx.db, {
-      taskId,
-      taskPatch: { worktree_path: null },
-    });
+    await commitStepBoundary(ctx.db, { taskId, taskPatch: { worktree_path: null } });
     ctx.broadcast({
       event: "task.cleanedUp",
       task_id: taskId,
@@ -1602,11 +1372,7 @@ async function removeTaskWorktree(
     } else {
       // git worktree remove 自体が失敗した場合など（原因不明）。未コミットの
       // 変更の話にすり替えず、そのまま見せる。
-      refuse(
-        `worktree の削除に失敗しました (${worktreePath}): ${
-          (e as Error).message
-        }`,
-      );
+      refuse(`worktree の削除に失敗しました (${worktreePath}): ${(e as Error).message}`);
     }
   }
 }
@@ -1636,12 +1402,7 @@ async function failTaskInTick(
       requireState: fromState,
       taskPatch: { state: "failed" },
     });
-    ctx.broadcast({
-      event: "task.stateChanged",
-      task_id: taskId,
-      from: fromState,
-      to: "failed",
-    });
+    ctx.broadcast({ event: "task.stateChanged", task_id: taskId, from: fromState, to: "failed" });
   } catch {
     // fromState から failed へ遷移できない（既に終端など）、または読んだ後に
     // 状態が変わっていた（cancel が先に書いた）場合はこれ以上書かず、
@@ -1707,21 +1468,10 @@ async function startIntakeRuns(ctx: DaemonContext): Promise<void> {
       trackerOf: ctx.trackerOf,
       logRoot: ctx.logRoot,
       onStateChanged: (intakeId, from, to, revising) =>
-        ctx.broadcast({
-          event: "intake.stateChanged",
-          intake_id: intakeId,
-          from,
-          to,
-          revising,
-        }),
+        ctx.broadcast({ event: "intake.stateChanged", intake_id: intakeId, from, to, revising }),
       onLogLine: (line) =>
         ctx.broadcast(
-          {
-            event: "intake.logLine",
-            intake_id: run.intake_id,
-            run_id: run.id,
-            line,
-          },
+          { event: "intake.logLine", intake_id: run.intake_id, run_id: run.id, line },
           { followKey: run.intake_id, followersOnly: true },
         ),
     })
@@ -1729,27 +1479,19 @@ async function startIntakeRuns(ctx: DaemonContext): Promise<void> {
         // 実行の途中の例外を握りつぶすと .finally() が同じ理由で再 reject し、
         // unhandled rejection でデーモンごと落ちる。ここで受け止め、行を failed、
         // Intake を要確認に倒して警告に残す。この後始末自体も reject させない。
-        const message =
-          `Intake ${run.intake_id} の実行中に例外が発生しました: ${
-            (e as Error).message
-          }`;
+        const message = `Intake ${run.intake_id} の実行中に例外が発生しました: ${
+          (e as Error).message
+        }`;
         try {
           await updateIntakeRun(ctx.db, run.id, {
             status: "failed",
             ended_at: new Date().toISOString(),
           });
           const intake = await getIntake(ctx.db, run.intake_id);
-          if (
-            intake &&
-            (intake.state === "investigating" || intake.state === "decomposing")
-          ) {
+          if (intake && (intake.state === "investigating" || intake.state === "decomposing")) {
             await updateIntake(ctx.db, intake.id, {
               state: "needs_attention",
-              attention_reason: JSON.stringify({
-                kind: "agent_failed",
-                runId: run.id,
-                message,
-              }),
+              attention_reason: JSON.stringify({ kind: "agent_failed", runId: run.id, message }),
               rate_limited_until: null,
               child_pid: null,
               child_started_at: null,
@@ -1763,9 +1505,7 @@ async function startIntakeRuns(ctx: DaemonContext): Promise<void> {
           }
           ctx.warnings.push(message);
         } catch (e2) {
-          ctx.warnings.push(
-            `${message}（要確認への記録にも失敗: ${(e2 as Error).message}）`,
-          );
+          ctx.warnings.push(`${message}（要確認への記録にも失敗: ${(e2 as Error).message}）`);
         }
       })
       .finally(() => ctx.runningIntakeRuns.delete(run.id));
@@ -1783,12 +1523,7 @@ async function tickOnce(ctx: DaemonContext): Promise<void> {
   }
   await releaseDueIntakeRateLimited(ctx.db, { logRoot: ctx.logRoot });
   for (const taskId of await releaseDueWaiting(ctx.db)) {
-    ctx.broadcast({
-      event: "task.stateChanged",
-      task_id: taskId,
-      from: "waiting",
-      to: "queued",
-    });
+    ctx.broadcast({ event: "task.stateChanged", task_id: taskId, from: "waiting", to: "queued" });
   }
   // 上限はアカウント全体に掛かるので、待っている間に新しいタスクを始めても
   // 同じように弾かれ、step_run と worktree だけが増える。既に running のタスクは
@@ -1839,9 +1574,7 @@ async function tickOnce(ctx: DaemonContext): Promise<void> {
         repoPath: project.path,
         worktreePath: worktreePathFor(project.path, task.id),
         branch: task.branch,
-        baseBranch: task.intake_id === null
-          ? project.base_branch
-          : await intakeBase(project),
+        baseBranch: task.intake_id === null ? project.base_branch : await intakeBase(project),
       });
 
       await commitStepBoundary(ctx.db, {
@@ -1885,14 +1618,7 @@ async function tickOnce(ctx: DaemonContext): Promise<void> {
             step_id: stepId,
           });
         },
-        onStepRunFinished: (
-          id,
-          stepRunId,
-          stepId,
-          status,
-          gotoStepId,
-          attempt,
-        ) =>
+        onStepRunFinished: (id, stepRunId, stepId, status, gotoStepId, attempt) =>
           ctx.broadcast({
             event: "stepRun.finished",
             task_id: id,
@@ -1911,12 +1637,7 @@ async function tickOnce(ctx: DaemonContext): Promise<void> {
           }),
         onLogLine: (line) =>
           ctx.broadcast(
-            {
-              event: "log.line",
-              task_id: task.id,
-              step_run_id: currentStepRunId,
-              line,
-            },
+            { event: "log.line", task_id: task.id, step_run_id: currentStepRunId, line },
             { followKey: task.id, followersOnly: true },
           ),
       })
@@ -1947,10 +1668,7 @@ async function tickOnce(ctx: DaemonContext): Promise<void> {
       // void runTask(...) の呼び出し自体（Promise が返る前）で何か起きた場合も、
       // ctx.running の解放を必ず通す。
       ctx.running.delete(task.id);
-      ctx.warnings.push(
-        `tick 中に例外が発生しました: ${(e as Error).message}`,
-        task.id,
-      );
+      ctx.warnings.push(`tick 中に例外が発生しました: ${(e as Error).message}`, task.id);
     }
   }
 }
