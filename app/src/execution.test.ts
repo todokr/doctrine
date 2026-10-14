@@ -14,6 +14,7 @@ import {
   panelContentOf,
   processKeyOfTask,
   railsOf,
+  suspendedProcessIds,
   readPanelHeight,
   writePanelHeight,
 } from "./execution";
@@ -102,6 +103,18 @@ describe("executionOrder", () => {
     const before = ids(INTAKES);
     executionOrder(INTAKES, [], "all", false);
     expect(ids(INTAKES)).toEqual(before);
+  });
+});
+
+describe("suspendedProcessIds", () => {
+  test("いまのタスクが承認待ちのプロセスだけ。古いタスクの承認待ちと状態だけの人の番は入れない", () => {
+    const processes = [
+      ...INTAKE_ACTIVE.processes,
+      { ...INTAKE_ACTIVE.processes[1], id: "build-api", state: "running" as const, taskId: "t9", task_ids: ["t9"] },
+      { ...INTAKE_ACTIVE.processes[1], id: "build-ui", state: "running" as const, taskId: "t8", task_ids: ["t7", "t8"] },
+    ];
+    const tasks = [task("t9", "suspended", "i2"), task("t7", "suspended", "i2"), task("t8", "running", "i2")];
+    expect(suspendedProcessIds(processes, tasks)).toEqual(new Set(["build-api"]));
   });
 });
 

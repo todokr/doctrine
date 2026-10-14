@@ -149,22 +149,24 @@ export function statusNote(status: ProcessStatus): string | null {
   return null;
 }
 
-/** Execution の図のプロセスの状態の文言。「word · detail」と 1 行に描く */
-export type StatusLine = { word: string; detail: string | null };
+/** Execution の図のプロセスの状態の文言。「word · detail」と 1 行に描く。awaiting はいまのタスクの承認待ち */
+export type StatusLine = { word: string; detail: string | null; awaiting: boolean };
 
 /**
  * 状態の言葉と、添える語（spec 6.2）。実行中はいまのステップの名前、要確認と着手可能は statusNote。
+ * 実行中でいまのタスクが承認待ち（suspended）なら、言葉を「承認待ち」にする（プロセスの状態は running のまま）。
  * 1 行が max に収まらなければ添える語を … で切る
  */
-export function statusLine(status: ProcessStatus, rail: readonly RailNode[] | null, max: number): StatusLine {
-  const word = LOOK[status.state].word;
+export function statusLine(status: ProcessStatus, rail: readonly RailNode[] | null, max: number, suspended = false): StatusLine {
+  const awaiting = suspended && status.state === "running";
+  const word = awaiting ? "承認待ち" : LOOK[status.state].word;
   const detail = status.state === "running" ? rail?.find((r) => r.current)?.id ?? null : statusNote(status);
-  if (detail === null) return { word, detail };
+  if (detail === null) return { word, detail, awaiting };
   const fits = (d: string) => textWidth(`${word} · ${d}`) <= max;
-  if (fits(detail)) return { word, detail };
+  if (fits(detail)) return { word, detail, awaiting };
   let cut = [...detail];
   while (cut.length > 0 && !fits(`${cut.join("")}…`)) cut = cut.slice(0, -1);
-  return { word, detail: `${cut.join("")}…` };
+  return { word, detail: `${cut.join("")}…`, awaiting };
 }
 
 // 箱の寸法。幅は種類ごとに固定し、長いラベルは行を増やして収める
@@ -248,6 +250,8 @@ export function buildPfdView(
       rails: Record<string, RailNode[] | null>;
       /** 人の番のプロセスの id */
       attention?: ReadonlySet<string>;
+      /** いまのタスクが承認待ち（suspended）のプロセスの id */
+      suspended?: ReadonlySet<string>;
     };
   } = {},
 ): PfdView {
@@ -393,7 +397,7 @@ export function buildPfdView(
       labelY: y + labelDy,
       marks,
       rail,
-      status: status === undefined ? null : { ...statusLine(status, rail, w - STATUS_INSET * 2), y: y + statusDy! },
+      status: status === undefined ? null : { ...statusLine(status, rail, w - STATUS_INSET * 2, exec?.suspended?.has(s.id)), y: y + statusDy! },
       attention: s.kind === "process" && (exec?.attention?.has(s.id) ?? false),
     };
   });

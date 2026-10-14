@@ -3,7 +3,7 @@ import { describe, expect, test } from "vitest";
 import type { RailNode } from "../../../shared/rail.ts";
 import { PFD_SAMPLE, PFD_STATUSES_A, PFD_STATUSES_B } from "../fixtures";
 import { buildPfdView, LOOK, type PfdView } from "../pfd";
-import { PROCESS_TONE, RUN_TONE, toneClass } from "../tone";
+import { PROCESS_TONE, RUN_TONE, TASK_TONE, toneClass } from "../tone";
 import { PfdDiagram } from "./PfdDiagram";
 
 const render = (view: PfdView, selected: string | null = null) =>
@@ -183,6 +183,13 @@ describe("PfdDiagram の Execution の図", () => {
     }
     expect(block(html, "プロセス", "スキーマを設計する")).toMatch(/class="pfd-status-detail"[^>]*> · タスクが止まった<\/tspan>/);
     expect(block(html, "プロセス", "受け入れる")).not.toContain("pfd-status-detail");
+  });
+
+  test("承認待ちの言葉はタスクの承認待ちの色で描く", () => {
+    const html = render(buildPfdView(PFD_SAMPLE, { statuses: PFD_STATUSES_A, exec: { rails, suspended: new Set(["build-ui"]) } }));
+    const b = block(html, "プロセス", "ボタンを作る");
+    expect(b).toContain(`<tspan class="pfd-status-word ${toneClass(TASK_TONE.suspended)}">承認待ち</tspan>`);
+    expect(openTag(b)).toContain("承認待ち");
   });
 
   test("状態の線・段の数字・プロジェクト名・人の印を描かず、成果物の種類の印は描く", () => {

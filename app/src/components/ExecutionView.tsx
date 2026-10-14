@@ -2,7 +2,7 @@ import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import type { Pfd } from "../../../shared/intake/pfd.ts";
 import type { IntakeDetail, IntakeSummary } from "../../../shared/protocol.ts";
 import { sendDecision } from "../decision";
-import { attentionProcessIds, firstAttentionKey, processKeyOfTask, railsOf } from "../execution";
+import { attentionProcessIds, firstAttentionKey, processKeyOfTask, railsOf, suspendedProcessIds } from "../execution";
 import { processStatuses, progressOps, workspaceOfIntake } from "../intake";
 import { intakeDetailOf, intakeRowOf } from "../model";
 import { buildPfdView, directPfd } from "../pfd";
@@ -53,9 +53,10 @@ function GraphBody(p: { detail: IntakeDetail; pfd: Pfd; heading: ReactNode; hist
     if (follow !== null) setSelected(follow);
   }, [follow]);
   const attention = useMemo(() => attentionProcessIds(p.detail.processes, s.tasks), [p.detail.processes, s.tasks]);
+  const suspended = useMemo(() => suspendedProcessIds(p.detail.processes, s.tasks), [p.detail.processes, s.tasks]);
   const view = useMemo(
-    () => buildPfdView(p.pfd, { statuses: processStatuses(p.detail.processes), exec: { rails: railsOf(p.detail.processes), attention } }),
-    [p.pfd, p.detail.processes, attention],
+    () => buildPfdView(p.pfd, { statuses: processStatuses(p.detail.processes), exec: { rails: railsOf(p.detail.processes), attention, suspended } }),
+    [p.pfd, p.detail.processes, attention, suspended],
   );
   return (
     <div className={maximized ? "exec maximized" : "exec"} ref={execRef}>

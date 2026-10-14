@@ -46,14 +46,18 @@ export function executionOrder(
   return rows.sort((a, b) => rank(a) - rank(b) || recent(a, b));
 }
 
-/** 図のプロセスごとの人の番（spec 6.3）。task_ids は古い順なので、末尾がいまのタスク */
-export function attentionProcessIds(processes: readonly IntakeProcessView[], tasks: readonly Task[]): Set<string> {
-  const ids = new Set<string>();
-  for (const p of processes) {
-    if (p.state === "your_turn" || p.state === "needs_attention") ids.add(p.id);
+/** いまのタスクが承認待ちのプロセス。task_ids は古い順なので、末尾がいまのタスク */
+export function suspendedProcessIds(processes: readonly IntakeProcessView[], tasks: readonly Task[]): Set<string> {
+  return new Set(processes.filter((p) => {
     const current = p.task_ids.at(-1);
-    if (current !== undefined && tasks.some((t) => t.id === current && t.state === "suspended")) ids.add(p.id);
-  }
+    return current !== undefined && tasks.some((t) => t.id === current && t.state === "suspended");
+  }).map((p) => p.id));
+}
+
+/** 図のプロセスごとの人の番（spec 6.3） */
+export function attentionProcessIds(processes: readonly IntakeProcessView[], tasks: readonly Task[]): Set<string> {
+  const ids = suspendedProcessIds(processes, tasks);
+  for (const p of processes) if (p.state === "your_turn" || p.state === "needs_attention") ids.add(p.id);
   return ids;
 }
 

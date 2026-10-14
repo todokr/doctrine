@@ -480,6 +480,12 @@ describe("buildPfdView の帯", () => {
     expect(node(view, "a:api").attention).toBe(false);
   });
 
+  test("exec の suspended のプロセスは承認待ちの文言", () => {
+    const view = buildPfdView(PFD_SAMPLE, { statuses: PFD_STATUSES_A, exec: { rails, suspended: new Set(["build-ui"]) } });
+    expect(node(view, "p:build-ui").status).toMatchObject({ word: "承認待ち", awaiting: true });
+    expect(node(view, "p:build-api").status).toMatchObject({ awaiting: false });
+  });
+
   test("状態の文言は Execution の図のプロセスだけが持つ", () => {
     const exec = buildPfdView(PFD_SAMPLE, { statuses: PFD_STATUSES_B, exec: { rails } });
     expect(node(exec, "p:design").status).toMatchObject({ word: "要確認", detail: "タスクが止まった" });
@@ -494,24 +500,30 @@ describe("statusLine", () => {
   const pr = { number: 41, url: "u", state: "OPEN" as const, baseRef: "develop", mergedAt: null, mergeCommit: null };
 
   test("実行中はいまのステップの名前を添える", () => {
-    expect(statusLine({ state: "running", taskId: "t" }, rail, 200)).toEqual({ word: "実行中", detail: "implement" });
-    expect(statusLine({ state: "running", taskId: "t" }, [step("plan", "success")], 200)).toEqual({ word: "実行中", detail: null });
-    expect(statusLine({ state: "running", taskId: "t" }, null, 200)).toEqual({ word: "実行中", detail: null });
+    expect(statusLine({ state: "running", taskId: "t" }, rail, 200)).toEqual({ word: "実行中", detail: "implement", awaiting: false });
+    expect(statusLine({ state: "running", taskId: "t" }, [step("plan", "success")], 200)).toEqual({ word: "実行中", detail: null, awaiting: false });
+    expect(statusLine({ state: "running", taskId: "t" }, null, 200)).toEqual({ word: "実行中", detail: null, awaiting: false });
   });
 
   test("要確認は理由、着手可能は止めている理由を添える", () => {
-    expect(statusLine({ state: "needs_attention", taskId: "t", reason: "pr_closed" }, rail, 200)).toEqual({ word: "要確認", detail: "PR が閉じられた" });
-    expect(statusLine({ state: "ready", blockedBy: "paused" }, null, 200)).toEqual({ word: "着手可能", detail: "一時停止中" });
-    expect(statusLine({ state: "ready", blockedBy: null }, null, 200)).toEqual({ word: "着手可能", detail: null });
+    expect(statusLine({ state: "needs_attention", taskId: "t", reason: "pr_closed" }, rail, 200)).toEqual({ word: "要確認", detail: "PR が閉じられた", awaiting: false });
+    expect(statusLine({ state: "ready", blockedBy: "paused" }, null, 200)).toEqual({ word: "着手可能", detail: "一時停止中", awaiting: false });
+    expect(statusLine({ state: "ready", blockedBy: null }, null, 200)).toEqual({ word: "着手可能", detail: null, awaiting: false });
   });
 
   test("ステップの無い状態は状態の言葉だけ", () => {
-    expect(statusLine({ state: "waiting", missing: ["x"] }, null, 200)).toEqual({ word: "入力待ち", detail: null });
-    expect(statusLine({ state: "your_turn" }, null, 200)).toEqual({ word: "あなたの番", detail: null });
-    expect(statusLine({ state: "done", note: "n", at: "a" }, null, 200)).toEqual({ word: "完了（人）", detail: null });
+    expect(statusLine({ state: "waiting", missing: ["x"] }, null, 200)).toEqual({ word: "入力待ち", detail: null, awaiting: false });
+    expect(statusLine({ state: "your_turn" }, null, 200)).toEqual({ word: "あなたの番", detail: null, awaiting: false });
+    expect(statusLine({ state: "done", note: "n", at: "a" }, null, 200)).toEqual({ word: "完了（人）", detail: null, awaiting: false });
     // PR の段では帯は終わっているので、いまのステップがあっても添えない
-    expect(statusLine({ state: "pr_open", taskId: "t", pr }, rail, 200)).toEqual({ word: "PR レビュー中", detail: null });
-    expect(statusLine({ state: "merged", taskId: "t", pr: { ...pr, state: "MERGED" } }, rail, 200)).toEqual({ word: "マージ済み", detail: null });
+    expect(statusLine({ state: "pr_open", taskId: "t", pr }, rail, 200)).toEqual({ word: "PR レビュー中", detail: null, awaiting: false });
+    expect(statusLine({ state: "merged", taskId: "t", pr: { ...pr, state: "MERGED" } }, rail, 200)).toEqual({ word: "マージ済み", detail: null, awaiting: false });
+  });
+
+  test("いまのタスクが承認待ちなら、承認待ちといまのステップの名前", () => {
+    const gate = [step("implement", "success"), step("review", "awaiting", true)];
+    expect(statusLine({ state: "running", taskId: "t" }, gate, 200, true)).toEqual({ word: "承認待ち", detail: "review", awaiting: true });
+    expect(statusLine({ state: "running", taskId: "t" }, gate, 200)).toMatchObject({ word: "実行中", awaiting: false });
   });
 
   test("幅に収まらない補足は … で切る", () => {

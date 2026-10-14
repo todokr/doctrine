@@ -1,6 +1,6 @@
 import { useId, type KeyboardEvent } from "react";
 import { LOOK, RAIL_BAR_H, railSegments, type PfdNode, type PfdView } from "../pfd";
-import { PROCESS_TONE, RUN_TONE, toneClass } from "../tone";
+import { PROCESS_TONE, RUN_TONE, TASK_TONE, toneClass } from "../tone";
 
 /** `useId()` の記号（«r0» など）は url(#…) の中で WebKit が解決しないことがあるので、英数字だけにする */
 const useSvgId = (name: string) => `${name}-${useId().replace(/[^A-Za-z0-9_-]/g, "")}`;
@@ -99,7 +99,7 @@ export function PfdDiagram({ view, selected, onSelect }: { view: PfdView; select
               </text>
               {n.status && n.look && (
                 <text x={n.x + n.w / 2} y={n.status.y} textAnchor="middle" className="pfd-status">
-                  <tspan className={`pfd-status-word ${toneClass(PROCESS_TONE[n.look].tone)}`}>{n.status.word}</tspan>
+                  <tspan className={`pfd-status-word ${toneClass(n.status.awaiting ? TASK_TONE.suspended : PROCESS_TONE[n.look].tone)}`}>{n.status.word}</tspan>
                   {n.status.detail !== null && <tspan className="pfd-status-detail">{` · ${n.status.detail}`}</tspan>}
                 </text>
               )}
