@@ -403,7 +403,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       .then((value) => {
         if (detailGate.isLatest(token)) dispatch({ type: "intake.detail", id, gen, loaded: { kind: "ok", value } });
       })
-      // 落ちたら前の詳細を残す。次のイベントか 15 秒の取り直しで追いつく
+      // 落ちたら前の詳細を残す。次のタスクのイベントで取り直す
       .catch(() => {});
   }, [execId, stale]);
 

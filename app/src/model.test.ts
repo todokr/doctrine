@@ -1699,10 +1699,12 @@ describe("Intake の一覧の取り直し", () => {
       intakeSel: "c",
       intakeDetails: { a: detailOk("a"), b: detailOk("b"), c: detailOk("c") },
       intakeGen: { a: 1, b: 1, c: 1 },
+      intakeStale: { a: 1, b: 1, c: 1 },
     });
     const after = reduce(s, { type: "intakes.sync", intakes: [{ ...INTAKES[0], id: "a" }] });
     expect(Object.keys(after.intakeDetails).sort()).toEqual(["a", "c"]);
     expect(Object.keys(after.intakeGen).sort()).toEqual(["a", "c"]);
+    expect(Object.keys(after.intakeStale).sort()).toEqual(["a", "c"]);
     expect(after.intakeSel).toBe("c");
   });
 

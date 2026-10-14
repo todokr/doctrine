@@ -950,6 +950,7 @@ export function reduce(s: State, a: Action): State {
         intakeDetails: keep(s.intakeDetails),
         intakeLogs: keep(s.intakeLogs),
         intakeGen: keep(s.intakeGen),
+        intakeStale: keep(s.intakeStale),
         intakeDrafts: keep(s.intakeDrafts),
       };
     }
@@ -1101,8 +1102,9 @@ export function reduce(s: State, a: Action): State {
           // 落とさないと、この通知がワークフローの残り全部の間ずっと出たままになる
           patch.bounce = undefined;
         }
-        if (Object.keys(patch).length === 0) return { ...s, ...touchIntakeOfTask(s, ev.task_id) };
-        return { ...s, now: a.now, tasks: updateTask(s, ev.task_id, patch), ...touchIntakeOfTask(s, ev.task_id) };
+        const touch = touchIntakeOfTask(s, ev.task_id);
+        if (Object.keys(patch).length === 0) return { ...s, ...touch };
+        return { ...s, now: a.now, tasks: updateTask(s, ev.task_id, patch), ...touch };
       }
       if (ev.event === "log.line") {
         if (!s.tasks.some((x) => x.id === ev.task_id)) return s;
