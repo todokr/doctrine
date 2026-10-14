@@ -63,7 +63,6 @@ export function saveDrafts(drafts: SavedDrafts): Promise<void> {
 export type AppSettings = {
   editorCommand: string;
   terminalCommand: string;
-  staleDays: number;
 };
 
 /** ファイルが無いときやキーが欠けているときの既定値は Rust が埋めるので、ここでは補わない */

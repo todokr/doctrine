@@ -7,7 +7,6 @@ use serde::{Deserialize, Serialize};
 pub struct Settings {
     pub editor_command: String,
     pub terminal_command: String,
-    pub stale_days: u32,
 }
 
 impl Default for Settings {
@@ -22,7 +21,6 @@ impl Default for Settings {
         Self {
             editor_command: editor_command.into(),
             terminal_command: terminal_command.into(),
-            stale_days: 7,
         }
     }
 }
@@ -55,7 +53,6 @@ mod tests {
         Settings {
             editor_command: "code {path}".into(),
             terminal_command: "wezterm start --cwd {path}".into(),
-            stale_days: 14,
         }
     }
 
@@ -64,7 +61,6 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let got = load(&dir.path().join("settings.json")).unwrap();
         assert_eq!(got, Settings::default());
-        assert_eq!(got.stale_days, 7);
         assert!(got.editor_command.contains("{path}"));
         assert!(got.terminal_command.contains("{path}"));
     }
@@ -82,7 +78,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("settings.json");
         save(&path, &custom()).unwrap();
-        let second = Settings { stale_days: 30, ..custom() };
+        let second = Settings { editor_command: "zed {path}".into(), ..custom() };
         save(&path, &second).unwrap();
         assert_eq!(load(&path).unwrap(), second);
         assert!(!dir.path().join("settings.json.tmp").exists());
@@ -92,12 +88,18 @@ mod tests {
     fn missing_keys_fall_back_to_defaults() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("settings.json");
-        std::fs::write(&path, r#"{"staleDays": 3}"#).unwrap();
+        std::fs::write(&path, r#"{"editorCommand": "code {path}"}"#).unwrap();
         let got = load(&path).unwrap();
-        let defaults = Settings::default();
-        assert_eq!(got.stale_days, 3);
-        assert_eq!(got.editor_command, defaults.editor_command);
-        assert_eq!(got.terminal_command, defaults.terminal_command);
+        assert_eq!(got.editor_command, "code {path}");
+        assert_eq!(got.terminal_command, Settings::default().terminal_command);
+    }
+
+    #[test]
+    fn unknown_keys_are_ignored() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        std::fs::write(&path, r#"{"staleDays": 3}"#).unwrap();
+        assert_eq!(load(&path).unwrap(), Settings::default());
     }
 
     #[test]
@@ -116,7 +118,7 @@ mod tests {
         save(&path, &custom()).unwrap();
         let value: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-        for key in ["editorCommand", "terminalCommand", "staleDays"] {
+        for key in ["editorCommand", "terminalCommand"] {
             assert!(value.get(key).is_some(), "{key} が無い: {value}");
         }
     }

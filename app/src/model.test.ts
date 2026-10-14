@@ -1682,7 +1682,7 @@ describe("設定のビュー", () => {
   });
 
   test("読み込んだ設定を持つ", () => {
-    const value = { editorCommand: "code {path}", terminalCommand: "wezterm start --cwd {path}", staleDays: 14 };
+    const value = { editorCommand: "code {path}", terminalCommand: "wezterm start --cwd {path}" };
     const s = reduce(base(), { type: "settings", loaded: { kind: "ok", value } });
     expect(s.settings).toEqual({ kind: "ok", value });
   });

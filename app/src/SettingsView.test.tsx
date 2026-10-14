@@ -15,7 +15,7 @@ beforeEach(() => {
   invoke.mockClear();
 });
 
-const FORM = { editorCommand: "code {path}", terminalCommand: "wezterm start --cwd {path}", staleDays: "14" };
+const FORM = { editorCommand: "code {path}", terminalCommand: "wezterm start --cwd {path}" };
 const noop = () => {};
 
 const waitingTask: TaskSummary = {
@@ -69,7 +69,6 @@ describe("SettingsFields", () => {
     );
     expect(html).toContain('value="code {path}"');
     expect(html).toContain('value="wezterm start --cwd {path}"');
-    expect(html).toContain('value="14"');
   });
 
   test("コマンドには {path} が置き換わることを添える", () => {
@@ -89,13 +88,13 @@ describe("SettingsFields", () => {
     expect(m![0]).not.toContain("disabled");
   });
 
-  test("日数が不正なら保存を押せず、理由を出す", () => {
+  test("コマンドが空なら保存を押せず、理由を出す", () => {
     const html = renderToStaticMarkup(
-      <SettingsFields form={{ ...FORM, staleDays: "0" }} pending={false} onChange={noop} onSave={noop} />,
+      <SettingsFields form={{ ...FORM, editorCommand: " " }} pending={false} onChange={noop} onSave={noop} />,
     );
     const m = html.match(/<button[^>]*disabled=""[^>]*>保存<\/button>/);
     expect(m).not.toBeNull();
-    expect(html).toContain("1 以上の整数を入れてください");
+    expect(html).toContain("コマンドを入れてください");
   });
 
   test("保存中は保存を押せない", () => {
@@ -110,8 +109,8 @@ describe("SettingsFields", () => {
 describe("submitSettings", () => {
   test("保存した値が save_settings に渡り、store の設定を置き換える", async () => {
     const dispatch = vi.fn();
-    const value = { editorCommand: "code {path}", terminalCommand: "wezterm start --cwd {path}", staleDays: 30 };
-    const r = await submitSettings({ ...FORM, staleDays: "30" }, saveSettings, dispatch);
+    const value = { editorCommand: "zed {path}", terminalCommand: "wezterm start --cwd {path}" };
+    const r = await submitSettings({ ...FORM, editorCommand: " zed {path} " }, saveSettings, dispatch);
     expect(r).toBe(true);
     expect(invoke).toHaveBeenCalledTimes(1);
     expect(invoke).toHaveBeenCalledWith("save_settings", { settings: value });
@@ -130,7 +129,7 @@ describe("submitSettings", () => {
 
   test("不正な値は送らない", async () => {
     const dispatch = vi.fn();
-    const r = await submitSettings({ ...FORM, staleDays: "0" }, saveSettings, dispatch);
+    const r = await submitSettings({ ...FORM, terminalCommand: "" }, saveSettings, dispatch);
     expect(r).toBe(false);
     expect(invoke).not.toHaveBeenCalled();
     expect(dispatch).not.toHaveBeenCalled();
