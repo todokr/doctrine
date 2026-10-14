@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { IntakeSummary } from "../../../shared/protocol.ts";
 import { sendDecision } from "../decision";
-import { INTAKE_WORD, intakeFace, isClosedIntake, issueNumber, workspaceOfIntake } from "../intake";
+import { INTAKE_WORD, MODE_WORD, intakeFace, isClosedIntake, issueNumber, workspaceOfIntake } from "../intake";
 import { intakeDetailOf, selectedIntake } from "../model";
 import { useIntakeRpc, useStore } from "../store";
 import { INTAKE_TONE } from "../tone";
@@ -26,13 +26,18 @@ export function RevisingBand(p: { intake: IntakeSummary; pending: boolean; onAba
 }
 
 export function IntakeHeading(
-  { intake, workspace, onCancel }: { intake: IntakeSummary; workspace: Workspace | undefined; onCancel?: () => void },
+  { intake, workspace, label = "Intake", onCancel }: {
+    intake: IntakeSummary;
+    workspace: Workspace | undefined;
+    label?: "Intake" | "Execution";
+    onCancel?: () => void;
+  },
 ) {
   const num = issueNumber(intake.issue_url);
   return (
     <>
       <div className="crumbs">
-        <span className="lbl">Intake</span>
+        <span className="lbl">{label}</span>
         <span>/</span>
         <span className="pjdot" style={{ background: workspace?.color ?? "#666" }} />
         <span>{workspace?.name ?? ""}</span>
@@ -43,6 +48,7 @@ export function IntakeHeading(
           {intake.issue_title}
         </h1>
         <StatusDot tone={INTAKE_TONE[intake.state]} word={INTAKE_WORD[intake.state]} />
+        <span className="tag">{MODE_WORD[intake.mode].mark}</span>
         <span className="mono hint">{intake.issue_url}</span>
         {onCancel && !isClosedIntake(intake.state) && <button className="btn sm danger" onClick={onCancel}>中止…</button>}
       </div>
@@ -55,6 +61,18 @@ export function IntakeFacePlaceholder({ intake }: { intake: IntakeSummary }) {
   return (
     <div className="box quiet" data-face={intakeFace(intake.state)}>
       {INTAKE_WORD[intake.state]}
+    </div>
+  );
+}
+
+/** Intake の一覧から外れた（承認済み・終了した）Intake を Intake のビューで開いたとき */
+export function MovedToExecution({ onOpen }: { onOpen: () => void }) {
+  return (
+    <div className="box quiet">
+      <p>この Issue は Execution で扱っています。</p>
+      <div className="actions">
+        <button className="btn" onClick={onOpen}>Execution で開く</button>
+      </div>
     </div>
   );
 }
@@ -126,7 +144,7 @@ export function IntakeView() {
   };
   const dialog = s.modal === "intake-cancel" && (
     <CancelDialog
-      approved={detail.value.approval !== null}
+      scope={detail.value.approval !== null ? "plan" : "none"}
       pending={canceling}
       onSend={cancel}
       onClose={() => dispatch({ type: "modal.close" })}

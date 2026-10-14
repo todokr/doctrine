@@ -116,7 +116,14 @@ function Sec({ title, children }: { title: string; children: ReactNode }) {
 }
 
 /** プロセスの欄に足す 4 つの欄（8.2）。props だけで描く */
-export function ProcessTrail({ view, onOpenTask }: { view: IntakeProcessView; onOpenTask: (taskId: string) => void }) {
+export function ProcessTrail(
+  { view, onOpenTask, showSubIssue = true }: {
+    view: IntakeProcessView;
+    onOpenTask: (taskId: string) => void;
+    /** direct は sub-issue を持たない */
+    showSubIssue?: boolean;
+  },
+) {
   const { subIssueUrl, taskIds, pr } = processTrail(view);
   return (
     <>
@@ -124,9 +131,11 @@ export function ProcessTrail({ view, onOpenTask }: { view: IntakeProcessView; on
         <span>{statusText(view)}</span>
         {view.state === "done" && <Markdown src={view.note} />}
       </Sec>
-      <Sec title="sub-issue">
-        {subIssueUrl === null ? <span className="hint">まだありません</span> : <span className="mono">{subIssueUrl}</span>}
-      </Sec>
+      {showSubIssue && (
+        <Sec title="sub-issue">
+          {subIssueUrl === null ? <span className="hint">まだありません</span> : <span className="mono">{subIssueUrl}</span>}
+        </Sec>
+      )}
       <Sec title="タスク">
         {taskIds.length === 0
           ? <span className="hint">なし</span>
@@ -209,21 +218,21 @@ export function ReviseDecide(p: {
   );
 }
 
-/** 中止の確認（8.6）。承認済みなら leave / stop を選ばせ、承認前は選択肢を出さない */
+/** 中止の確認（8.6）。承認前（none）は選択肢を出さない。direct は sub-issue を持たない */
 export function CancelDialog(p: {
-  /** detail.approval !== null。改訂中も true */
-  approved: boolean;
+  scope: "none" | "plan" | "direct";
   pending: boolean;
   onSend: (mode: "leave" | "stop") => void;
   onClose: () => void;
 }) {
   const [mode, setMode] = useState<"leave" | "stop">("leave");
+  const choose = p.scope !== "none";
   return (
     <>
       <div className="scrim" onClick={p.onClose} />
       <div className="modal" role="dialog" aria-modal="true">
         <h2>Intake を中止する</h2>
-        {p.approved && (
+        {choose && (
           <>
             <label>
               <input type="radio" name="cancel-mode" checked={mode === "leave"} onChange={() => setMode("leave")} />
@@ -231,12 +240,12 @@ export function CancelDialog(p: {
             </label>
             <label>
               <input type="radio" name="cancel-mode" checked={mode === "stop"} onChange={() => setMode("stop")} />
-              タスクを止め、sub-issue を取りやめとして閉じる
+              {p.scope === "plan" ? "タスクを止め、sub-issue を取りやめとして閉じる" : "タスクを止める"}
             </label>
           </>
         )}
         <div className="actions">
-          <button className="btn danger" disabled={p.pending} onClick={() => p.onSend(p.approved ? mode : "leave")}>
+          <button className="btn danger" disabled={p.pending} onClick={() => p.onSend(choose ? mode : "leave")}>
             中止する
           </button>
           <button className="btn" onClick={p.onClose}>戻る</button>

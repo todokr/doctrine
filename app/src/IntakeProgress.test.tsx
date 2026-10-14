@@ -63,6 +63,12 @@ const trail = (view: IntakeProcessView) => renderToStaticMarkup(<ProcessTrail vi
 const count = (html: string, text: string) => html.split(text).length - 1;
 
 describe("ProcessTrail", () => {
+  test("showSubIssue が false なら sub-issue の欄を出さない", () => {
+    const view = INTAKE_ACTIVE.processes[0];
+    const html = renderToStaticMarkup(<ProcessTrail view={view} onOpenTask={noop} showSubIssue={false} />);
+    expect(html).not.toContain("sub-issue");
+  });
+
   test("sub-issue・タスク・PR を別々の欄に出す", () => {
     const design = INTAKE_ACTIVE.processes.find((p) => p.id === "design")!;
     const html = trail(design);
@@ -136,19 +142,25 @@ describe("ReviseDecide", () => {
 });
 
 describe("CancelDialog", () => {
-  const dialog = (approved: boolean) =>
-    renderToStaticMarkup(<CancelDialog approved={approved} pending={false} onSend={noop} onClose={noop} />);
+  const dialog = (scope: "none" | "plan" | "direct") =>
+    renderToStaticMarkup(<CancelDialog scope={scope} pending={false} onSend={noop} onClose={noop} />);
 
-  test("承認済みならタスクと sub-issue の扱いを選ばせる", () => {
-    const html = dialog(true);
+  test("plan の承認後はタスクと sub-issue の扱いを選ばせる", () => {
+    const html = dialog("plan");
     expect(html).toContain("そのままにする");
     expect(html).toContain("タスクを止め、sub-issue を取りやめとして閉じる");
   });
 
+  test("direct はタスクを止めるかを選ばせ、sub-issue には触れない", () => {
+    const html = dialog("direct");
+    expect(html).toContain("そのままにする");
+    expect(html).toContain("タスクを止める");
+    expect(html).not.toContain("sub-issue");
+  });
+
   test("承認前は選択肢を出さない", () => {
-    const html = dialog(false);
+    const html = dialog("none");
     expect(html).not.toContain("そのままにする");
-    expect(html).not.toContain("タスクを止め、sub-issue を取りやめとして閉じる");
     expect(html).toContain("中止する");
   });
 });

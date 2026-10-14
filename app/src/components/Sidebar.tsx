@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import type { IntakeSummary } from "../../../shared/protocol.ts";
 import {
   INTAKE_SECTIONS,
@@ -22,7 +23,7 @@ import {
   visibleTasks,
 } from "../model";
 import { useStore } from "../store";
-import { groupTone, sectionTone, toneClass } from "../tone";
+import { type Tone, groupTone, sectionTone, toneClass } from "../tone";
 import type { Task, Workspace, WorkspaceFilter } from "../types";
 import { RateLimit } from "./RateLimit";
 
@@ -118,6 +119,7 @@ function IntakeItem({ i }: { i: IntakeSummary }) {
     <IntakeRow
       intake={i}
       workspace={workspaceOfIntake(i, s.workspaces)}
+      tone={sectionTone(intakeSection(i), i)}
       selected={s.intakeSel === i.id}
       now={s.now}
       onSelect={() => dispatch({ type: "intake.select", id: i.id })}
@@ -128,19 +130,18 @@ function IntakeItem({ i }: { i: IntakeSummary }) {
 export function IntakeRow(p: {
   intake: IntakeSummary;
   workspace: Workspace | undefined;
+  tone: Tone;
   selected: boolean;
   now: number;
   onSelect: () => void;
+  /** 行のメタの末尾に足す印 */
+  extra?: ReactNode;
 }) {
   const i = p.intake;
   const num = issueNumber(i.issue_url);
   const progress = intakeProgress(i);
   return (
-    <button
-      className={`it ${toneClass(sectionTone(intakeSection(i), i))}`}
-      aria-current={p.selected}
-      onClick={p.onSelect}
-    >
+    <button className={`it ${toneClass(p.tone)}`} aria-current={p.selected} onClick={p.onSelect}>
       <span className="t">
         {num !== null && <span className="num">{`#${num}`}</span>}
         {i.issue_title}
@@ -154,6 +155,7 @@ export function IntakeRow(p: {
         {progress && <span className="prog">{progress}</span>}
         {i.revising && <span className="tag rev">改訂中</span>}
         {i.rate_limited_until && <span>{`${hm(Date.parse(i.rate_limited_until))} 再開`}</span>}
+        {p.extra}
         <span className="tm">{ago(Date.parse(i.updated_at), p.now)}</span>
       </span>
     </button>

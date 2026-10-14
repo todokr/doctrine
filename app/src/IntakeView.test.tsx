@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { IntakeLogPanel } from "./components/IntakeLog";
-import { IntakeFacePlaceholder, IntakeHeading, RevisingBand } from "./components/IntakeView";
+import { IntakeFacePlaceholder, IntakeHeading, MovedToExecution, RevisingBand } from "./components/IntakeView";
 import { IssueChooser, IssueList, IssuePreview, TrackerUnavailable } from "./components/IssuePicker";
 import { GITHUB_ISSUES, INTAKES, LINEAR_ISSUES, WORKSPACES } from "./fixtures";
 
@@ -239,6 +239,19 @@ describe("TrackerUnavailable", () => {
 });
 
 describe("IntakeView の部品", () => {
+  test("見出しのパンくずは label、見出しに種類の印を出す", () => {
+    const html = renderToStaticMarkup(
+      <IntakeHeading intake={{ ...reviewing, mode: "direct" }} workspace={WORKSPACES[0]} label="Execution" />,
+    );
+    expect(html).toContain('<span class="lbl">Execution</span>');
+    expect(html).toContain(">Direct<");
+  });
+
+  test("Execution へ移った Intake は案内と開くボタンを出す", () => {
+    const html = renderToStaticMarkup(<MovedToExecution onOpen={noop} />);
+    expect(html).toContain("Execution で開く");
+  });
+
   test("面の枠は状態の語と面の種類を出す", () => {
     const html = renderToStaticMarkup(<IntakeFacePlaceholder intake={reviewing} />);
     expect(html).toContain('data-face="review"');
