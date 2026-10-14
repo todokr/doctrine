@@ -883,7 +883,7 @@ export function reduce(s: State, a: Action): State {
       if (s.composer !== null) return s;
       if (s.view === "worktrees" || s.view === "settings") return s;
       if (s.view === "intake") {
-        const rows = intakeOrder(s.intakes, s.workspace, s.showClosedIntakes);
+        const rows = intakeOrder(s.intakes, s.workspace, s.intakeRevise);
         if (!rows.length) return s;
         const i = rows.findIndex((x) => x.id === s.intakeSel);
         const n = i < 0 ? rows[0] : rows[Math.max(0, Math.min(rows.length - 1, i + a.delta))];

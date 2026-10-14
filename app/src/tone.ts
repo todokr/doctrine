@@ -78,7 +78,12 @@ export function sectionTone(s: IntakeSection, i: IntakeSummary): Tone {
   switch (s) {
     case "attention": return i.state === "needs_attention" ? "danger" : "human";
     case "working": return "run";
-    case "active": return "idle";
-    case "closed": return i.state === "completed" ? "ok" : "idle";
   }
+}
+
+/** Execution の一覧の行の色 */
+export function executionTone(i: IntakeSummary, attention: boolean): Tone {
+  if (i.state === "completed") return "ok";
+  if (i.state === "canceled") return "idle";
+  return attention ? "human" : "run";
 }

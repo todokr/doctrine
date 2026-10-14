@@ -60,7 +60,7 @@ import {
 } from "./model";
 import { RUN_TONE } from "./tone";
 import type { GuideView } from "./guide";
-import { countIntakeAttention, EMPTY_INTAKE_DRAFT, type IntakeDraft, intakeOrder } from "./intake";
+import { EMPTY_INTAKE_DRAFT, type IntakeDraft, intakeOrder } from "./intake";
 import { buildDiff } from "./patch";
 import type { Guide, RateLimitWindow, ReviewEntry, Task, TaskContext } from "./types";
 import type {
@@ -1400,7 +1400,6 @@ describe("進行中の面", () => {
     const after = reduce(s, { type: "intake.detail", id: "i1", gen: 0, loaded: loaded() });
     expect(after.intakes[0].needs_human).toBe(true);
     expect(after.intakes[0].progress).toEqual(active().progress);
-    expect(countIntakeAttention(after.intakes)).toBe(1);
   });
 
   test("intake.detail は一覧に無い Intake を足さない", () => {
@@ -1785,7 +1784,7 @@ const detailOk = (id: string): Loaded<IntakeDetail> => ({
 const intakeEv = (ev: ServerEvent, s: State) => reduce(s, { type: "daemon", ev, now: NOW });
 
 describe("Intake のビュー", () => {
-  const order = () => intakeOrder(INTAKES, "all", false);
+  const order = () => intakeOrder(INTAKES, "all", null);
 
   test("intake ビューへ移ってもタスクの選択は消えない", () => {
     const s = reduce(base({ sel: "t-0a77" }), { type: "view", view: "intake" });

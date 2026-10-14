@@ -175,7 +175,7 @@ export function ProgressActions(p: {
           {p.paused ? "自動投入を再開" : "自動投入を一時停止"}
         </button>
       )}
-      {ops.revise && <button className="btn" disabled={p.pending} onClick={p.onRevise}>改訂に入る…</button>}
+      {ops.revise && <button className="btn" disabled={p.pending} onClick={p.onRevise}>改訂を始める…</button>}
       {ops.closeIssue && <button className="btn primary" disabled={p.pending} onClick={p.onCloseIssue}>Issue を閉じる</button>}
     </div>
   );

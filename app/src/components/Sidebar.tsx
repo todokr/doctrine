@@ -176,7 +176,7 @@ export function IntakeRow(p: {
 
 function IntakeSidebar() {
   const { s, dispatch } = useStore();
-  const rows = intakeOrder(s.intakes, s.workspace, s.showClosedIntakes);
+  const rows = intakeOrder(s.intakes, s.workspace, s.intakeRevise);
   return (
     <aside className="side">
       <div className="side-head">

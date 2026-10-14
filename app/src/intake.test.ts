@@ -46,6 +46,7 @@ import {
   countIntakeAttention,
   draftReply,
   EMPTY_INTAKE_DRAFT,
+  inIntakeList,
   intakeFace,
   intakeHistory,
   type IntakeDraft,
@@ -206,23 +207,20 @@ test("標本が質問・仮定と回答・応答の検証を通る", () => {
 });
 
 const TARGET = { name: "o/r" };
-const sections = (list: typeof INTAKES) => list.map(intakeSection);
-const times = (list: typeof INTAKES) => list.map((i) => Date.parse(i.updated_at));
 
 describe("countIntakeAttention", () => {
-  test("needs_human だけを数える", () => {
-    expect(countIntakeAttention(INTAKES)).toBe(2);
-  });
-
-  test("1 件もなければ 0", () => {
+  test("回答待ち・レビュー待ち・要確認の数。承認後の your_turn は数えない", () => {
+    expect(countIntakeAttention(INTAKES)).toBe(1);
     expect(countIntakeAttention([])).toBe(0);
+    const answering = { ...INTAKES[0], id: "x", state: "answering" as const };
+    const failed = { ...INTAKES[0], id: "y", state: "needs_attention" as const };
+    expect(countIntakeAttention([answering, failed])).toBe(2);
   });
 
-  test("あなたの番と要確認は needs_human で数える", () => {
-    const active = summaryOf(INTAKE_ACTIVE);
-    const idle = INTAKES.find((i) => !i.needs_human)!;
-    expect(countIntakeAttention([active, idle])).toBe(1);
-    expect(intakeSection(active)).toBe("attention");
+  test("区分は人の判断を待つ状態なら attention、それ以外は working", () => {
+    expect(intakeSection({ ...INTAKES[0], state: "reviewing" })).toBe("attention");
+    expect(intakeSection({ ...INTAKES[0], state: "decomposing" })).toBe("working");
+    expect(intakeSection({ ...INTAKES[0], state: "active", needs_human: true })).toBe("working");
   });
 });
 
@@ -314,6 +312,15 @@ describe("progressOps", () => {
   test("canceled は操作なし", () => {
     expect(ops("canceled")).toEqual({ refresh: false, pause: false, revise: false, closeIssue: false });
   });
+
+  test("direct の進行中は確認だけ。一時停止と改訂は出さない", () => {
+    expect(progressOps({ state: "active", revising: false, mode: "direct" }))
+      .toEqual({ refresh: true, pause: false, revise: false, closeIssue: false });
+  });
+
+  test("direct の完了は Issue を閉じる", () => {
+    expect(progressOps({ state: "completed", revising: false, mode: "direct" }).closeIssue).toBe(true);
+  });
 });
 
 describe("watchAlert", () => {
@@ -352,44 +359,23 @@ describe("taskIntakeMark / taskIntakeLabel", () => {
 });
 
 describe("intakeOrder", () => {
-  const order = intakeOrder(INTAKES, "all", false);
+  const ids = (rows: typeof INTAKES) => rows.map((i) => i.id);
 
-  test("対応が要るもの・調査・分解中・進行中の順に並ぶ", () => {
-    expect(sections(order)).toEqual(["attention", "attention", "working", "working", "active"]);
+  test("承認前と改訂中だけを並べ、対応が要るものを上に、残りは更新の新しい順", () => {
+    expect(ids(intakeOrder(INTAKES, "all", null))).toEqual(["i1", "i3", "i4", "i5"]);
   });
 
-  test("対応が要るものは更新の古い順", () => {
-    const [a, b] = times(order.slice(0, 2));
-    expect(a).toBeLessThan(b);
+  test("改訂に入るモードの active の Intake は、改訂中になる前から並ぶ", () => {
+    expect(ids(intakeOrder(INTAKES, "all", "i2"))).toEqual(["i1", "i3", "i2", "i4", "i5"]);
   });
 
-  test("調査・分解中と進行中は更新の新しい順", () => {
-    const [a, b] = times(order.slice(2, 4));
-    expect(a).toBeGreaterThan(b);
+  test("workspace で絞り込む", () => {
+    expect(ids(intakeOrder(INTAKES, 2, null))).toEqual(["i4"]);
+    expect(intakeOrder(INTAKES, 99, null)).toEqual([]);
   });
 
-  test("既定では終了した Intake を含まない", () => {
-    expect(order.map((i) => i.state)).not.toContain("completed");
-    expect(order.map((i) => i.state)).not.toContain("canceled");
-  });
-
-  test("すべてでは末尾に終了した Intake が新しい順で並ぶ", () => {
-    const all = intakeOrder(INTAKES, "all", true);
-    expect(sections(all.slice(5))).toEqual(["closed", "closed"]);
-    expect(all.slice(5).map((i) => i.state)).toEqual(["canceled", "completed"]);
-  });
-
-  test("workspace で絞る", () => {
-    const out = intakeOrder(INTAKES, 2, false);
-    expect(out.length).toBeGreaterThan(0);
-    expect(out.every((i) => i.workspace_id === 2)).toBe(true);
-    expect(intakeOrder(INTAKES, 99, true)).toEqual([]);
-  });
-
-  test("状態だけ変わった行も一覧から消えない", () => {
-    const stale = { ...INTAKES[6], state: "answering" as const, needs_human: false };
-    expect(intakeSection(stale)).toBe("working");
-    expect(intakeOrder([stale], "all", false)).toEqual([stale]);
+  test("inIntakeList は direct で開始した active を含めない", () => {
+    expect(inIntakeList({ ...INTAKES[0], state: "active", mode: "direct" }, null)).toBe(false);
   });
 });
 
