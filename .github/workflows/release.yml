@@ -1,0 +1,61 @@
+name: Release
+
+# v* のタグを push すると、dctld を同梱した ad-hoc 署名の .dmg を作り、
+# 下書きの Release に添付する。公開は人が下書きを見て行う。
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  dmg:
+    name: .dmg を作って下書きの Release に添付する
+    # macos-latest は arm64（Apple Silicon）のランナー。配布対象が arm64 だけなので、
+    # dctld の SEA も .app も arm64 で作る。
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # ツールの版は mise.toml が正。
+      - uses: jdx/mise-action@v4
+        with:
+          install_args: node npm:pnpm rust
+
+      # 重いビルドの前に、タグと tauri.conf.json の version の食い違いで落とす。
+      - name: タグの版を確かめる
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME#v}"
+          conf=$(jq -r .version app/src-tauri/tauri.conf.json)
+          if [ "$tag" != "$conf" ]; then
+            echo "タグ v$tag と tauri.conf.json の version $conf が一致しない" >&2
+            exit 1
+          fi
+
+      # core と shared の依存
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm install --frozen-lockfile
+        working-directory: app
+
+      # core:build → dctld のコピー → tauri build の順に流れる。
+      # 公証用の APPLE_* 環境変数はここで渡さない。渡すと Tauri が公証を試みる。
+      - run: mise run app:release
+
+      # 最後の行が .dmg のパス。mise run の前置きが混ざらないよう pnpm を直接呼ぶ。
+      - id: verify
+        working-directory: app
+        run: |
+          set -euo pipefail
+          dmg=$(pnpm run --silent verify:release | tail -n 1)
+          echo "dmg=app/$dmg" >> "$GITHUB_OUTPUT"
+
+      # 同じタグで再実行すると既存の Release で失敗する。下書きを消してから再実行する。
+      - run: gh release create "$GITHUB_REF_NAME" --draft --verify-tag --title "$GITHUB_REF_NAME" "${{ steps.verify.outputs.dmg }}"
+        env:
+          GH_TOKEN: ${{ github.token }}

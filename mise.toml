@@ -71,6 +71,23 @@ description = "アプリをウィンドウで開く"
 dir = "app"
 run = "pnpm tauri dev"
 
+# externalBin は tauri.conf.json ではなく tauri.release.conf.json に置いている。
+# tauri build は開始時点で同梱物のファイルを要求するので、tauri.conf.json に書くと
+# tauri dev と CI の cargo check が落ちる。
+# binaries/ に置く dctld は core/dist/dctld のコピーなので core:build に依存する。
+# hardenedRuntime は false にしている。SEA の node は JIT の entitlement が無いと
+# hardened runtime 下で起動できず、ad-hoc 署名で公証もしないので利点が無い。
+[tasks."app:release"]
+description = "dctld を同梱した .dmg を作る（Apple Silicon の macOS 専用）"
+depends = ["core:build"]
+dir = "app"
+run = "pnpm run release"
+
+[tasks."app:verify-release"]
+description = "作った .app の署名と同梱した dctld の起動を確かめる"
+dir = "app"
+run = "pnpm run verify:release"
+
 [tasks."site:deps"]
 description = "ドキュメントサイトの依存を取る"
 dir = "site"
