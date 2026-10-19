@@ -432,7 +432,8 @@ export type AssumptionResponse =
   - 入力を出したタスクの `merge_commit` が `git merge-base --is-ancestor <merge_commit> origin/<baseBranch>` で含まれていることを確かめ、
     含まれていなければ投入を次の周期へ延ばす
 
-  実装では、tick の `createWorktree` の呼び出し（`handlers.ts`）が `task.intake_id` で起点を分けることになる。
+  その後、Intake 由来でないタスクも同じく `git fetch origin <baseBranch>` をしてから `origin/<baseBranch>` で切るように改めた。
+  手元の baseBranch が古いと、直接のタスクも古い基点から始まるため。tick の `createWorktree` の呼び出し（`handlers.ts`）は起点を分けない。
   `merge-base --is-ancestor <merge_commit>` は squash マージでも成り立つ。見るのは baseBranch の上にできたマージのコミットであり、
   PFD spec 7 章が退けたのは、ブランチの head を祖先として見る判定のほうである
 

@@ -2526,6 +2526,51 @@ test("task.diff は worktree の未コミット・未追跡の変更を返す", 
   assert.match(d.patch, /added\.txt/);
 });
 
+test("手元の baseBranch が origin より遅れていても、タスクは origin の先頭から切られ、task.diff に上流のコミットが混ざらない", async () => {
+  const origin = join(root, "origin");
+  await run("git", ["clone", "-q", repo, origin]);
+  await run("git", ["-C", origin, "config", "user.email", "t@e.com"]);
+  await run("git", ["-C", origin, "config", "user.name", "t"]);
+  await run("git", ["-C", repo, "remote", "add", "origin", origin]);
+  // 手元の main はまだ取り込んでいない上流のマージ
+  await writeFile(join(origin, "upstream.txt"), "merged on GitHub\n");
+  await run("git", ["-C", origin, "add", "."]);
+  await run("git", ["-C", origin, "commit", "-q", "-m", "upstream"]);
+  const upstream = (await run("git", ["-C", origin, "rev-parse", "HEAD"])).stdout.trim();
+
+  const ctx = await context();
+  const h = createHandler(ctx);
+  await h("workspace.add", { path: repo }, NOOP_CONN);
+  const t = (await h(
+    "task.create",
+    { project: repo, title: "T", prompt: "直して" },
+    NOOP_CONN,
+  )) as {
+    id: string;
+  };
+  await tick(ctx);
+  await until(
+    async () => (await getTask(ctx.db, t.id))?.state === "suspended",
+    5000,
+    "approval で止まるまで",
+  );
+  const wt = (await getTask(ctx.db, t.id))!.worktree_path!;
+  assert.equal((await run("git", ["-C", wt, "rev-parse", "HEAD"])).stdout.trim(), upstream);
+  const local = (await run("git", ["-C", repo, "rev-parse", "main"])).stdout.trim();
+  assert.notEqual(local, upstream, "手元の main は動かさない");
+
+  await writeFile(join(wt, "added.txt"), "brand new file\n");
+  const d = (await h("task.diff", { task_id: t.id }, NOOP_CONN)) as {
+    base: { branch: string; merge_base: string };
+    files: { path: string; status: string }[];
+  };
+  assert.equal(d.base.merge_base, upstream);
+  assert.deepEqual(
+    d.files.map((f) => f.path),
+    ["added.txt"],
+  );
+});
+
 test("worktree の無いタスクの task.diff は失敗する", async () => {
   const ctx = await context();
   const h = createHandler(ctx);

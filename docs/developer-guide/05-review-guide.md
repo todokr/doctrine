@@ -37,7 +37,7 @@ ref を 2 つ受け取って比べるだけの、DB を知らない層である�
 - コピー（C）はリネーム（R）と別の status のまま返す。コピーを「移動」と表示すると元のファイルが消えたように読めるため
 - name-status に出たパスが numstat に無ければ例外にする。黙って 0 行で埋めると、パースの取りこぼしが「変更なし」に化けるため
 - patch は 2 MiB（`PATCH_LIMIT_BYTES`）で、最後の改行の直後で切る（`truncated: true`）。`files` は常に全件返す
-- `mergeBase` は `git merge-base <base> HEAD` を毎回取り直す。worktree を作った後に baseBranch が進んでも正しい共通祖先になる
+- `mergeBase` は `git merge-base <baseRef> HEAD` を毎回取り直す。worktree を作った後に baseBranch が進んでも正しい共通祖先になる。`baseRef` は worktree の起点と同じく `origin/<base>`（origin の無いリポジトリでは手元の baseBranch）。worktree は `origin/<base>` から切るので、手元の baseBranch と比べると、手元が遅れている分の上流のコミットまで差分に混ざる
 
 ### 未コミット・未追跡を含むツリー（`reviewTree.ts:captureTree`）
 

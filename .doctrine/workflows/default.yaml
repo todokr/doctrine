@@ -101,7 +101,7 @@ steps:
       権限で拒否されます。許可は `&&` でつないだ各コマンドに個別に照合されるので、
       `cd core && pnpm exec biome check` は `cd` の側で落ちます。
       `git` に `-C` を付けないでください。`Bash(git diff:*)` のような許可に前方一致
-      しなくなります。`git diff develop...HEAD` のようにそのまま書きます。
+      しなくなります。`git diff {{ project.base_ref }}...HEAD` のようにそのまま書きます。
 
       差し戻されて再度呼ばれた場合は、指摘を踏まえて plan.md を全文書き直してください。
 
@@ -154,7 +154,7 @@ steps:
       権限で拒否されます。許可は `&&` でつないだ各コマンドに個別に照合されるので、
       `cd core && pnpm exec biome check` は `cd` の側で落ちます。
       `git` に `-C` を付けないでください。`Bash(git diff:*)` のような許可に前方一致
-      しなくなります。`git diff develop...HEAD` のようにそのまま書きます。
+      しなくなります。`git diff {{ project.base_ref }}...HEAD` のようにそのまま書きます。
 
       plan-review.md の1行目は必ず `verdict: approve` か `verdict: reject` のどちらかにします。
       2行目以降に指摘を書いてください。修正が必要な具体的な指摘があるときだけ reject にします。
@@ -231,7 +231,7 @@ steps:
 
       作業ディレクトリは worktree のルートです。Bash に渡すパスは worktree のルートからの相対で書いてください。
       コマンドは1つずつ実行してください。`&&` や `cd` でつなぐと権限で拒否されます。
-      `git` に `-C` を付けないでください。`Bash(git diff:*)` のような許可に前方一致しなくなります。`git diff develop...HEAD` のようにそのまま書きます。
+      `git` に `-C` を付けないでください。`Bash(git diff:*)` のような許可に前方一致しなくなります。`git diff {{ project.base_ref }}...HEAD` のようにそのまま書きます。
       app の依存を足すときは `pnpm -C app add <パッケージ>` を使い、pnpm-lock.yaml は手で編集しないでください。
       整形と lint は `pnpm exec biome check --write core/src/...` のようにパスを渡して実行します。
 
@@ -302,10 +302,10 @@ steps:
       権限で拒否されます。許可は `&&` でつないだ各コマンドに個別に照合されるので、
       `cd core && pnpm exec biome check` は `cd` の側で落ちます。
       `git` に `-C` を付けないでください。`Bash(git diff:*)` のような許可に前方一致
-      しなくなります。`git diff develop...HEAD` のようにそのまま書きます。
+      しなくなります。`git diff {{ project.base_ref }}...HEAD` のようにそのまま書きます。
       `pnpm exec biome check core/src` のように、ルートからの相対パスで実行します。
 
-      `git diff develop...HEAD` と `git log develop..HEAD` で実装の差分とコミットを読み、
+      `git diff {{ project.base_ref }}...HEAD` と `git log {{ project.base_ref }}..HEAD` で実装の差分とコミットを読み、
       {{ worktree.path }}/.doctrine-out/plan.md と突き合わせます。
       {{ worktree.path }}/.doctrine-out/implement-notes.md も読みます。実装者が、やったこと・
       通した検証・できなかったことを書いています。見るのは次の3点です。

@@ -55,6 +55,7 @@
 | `task.id` / `task.title` / `task.prompt` / `task.branch` | タスク行 |
 | `issue.url` / `issue.parent_url` / `issue.closes` | Intake 由来のタスクの sub-issue、親 Issue、`Closes <sub-issue>`。そうでなければ空文字 |
 | `worktree.path` / `project.path` | パス |
+| `project.base_ref` | 差分の起点にする ref。`origin/<baseBranch>` を取り込んであればそれ、無ければ（origin の無いリポジトリ）`baseBranch`。プロンプトでは `git diff {{ project.base_ref }}...HEAD` のように使う |
 | `steps.<id>.last_stdout` / `last_stderr` / `exitCode` | そのステップの**最新の**実行の出力 |
 
 - 置換結果は再走査しない。エージェントの出力に `{{ }}` が含まれていても展開されない
@@ -155,7 +156,7 @@ stateDiagram-v2
 4. `selectAdmissible(db, globalLimit)` が返すタスクごとに:
    1. `commitStepBoundary({ requireState: "queued", taskPatch: { state: "running", resumed: 0 } })` で**遅い処理の前に枠を押さえる**。読んだ後に cancel されていれば `StateConflictError` で見送る
    2. `ctx.workflowOf(task, project)` で固定済みの定義を得る
-   3. `task.worktree_path` が無ければ `createWorktree`。Intake 由来のタスクは `git fetch origin <base>` をしてから `origin/<base>` を起点にする（上流の PR のマージを確実に含めるため）。それ以外は local の baseBranch
+   3. `task.worktree_path` が無ければ `createWorktree`。`git fetch origin <base>` をしてから `origin/<base>` を起点にする（`baseRef`）。手元の baseBranch は動かさず、起点にも使わない。手元の baseBranch は利用者が pull しない限り古いままで、そこから切ると上流の PR のマージを持たずに始まるため。fetch に失敗したら前に取り込んだ `origin/<base>` から切る。origin の無いリポジトリでは手元の baseBranch から切る
    4. ここまでで例外が出たら `failTaskInTick` で `failed` にする。`queued` に戻すと毎周リトライして他を巻き込むため、一時的な失敗でも恒久的に失敗させる
    5. `void runTask(...)` を**待たずに**起動し、完了後に `cleanupAfterRun`、例外なら `failTaskInTick`
 

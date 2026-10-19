@@ -9,7 +9,7 @@ function inputOf(over: Partial<GuidePromptInput> = {}): GuidePromptInput {
       task: { id: "t1", title: "タイトル", prompt: "Issue #49 を実装する", branch: "b" },
       issue: { url: null, parent_url: null },
       worktree: { path: "/w" },
-      project: { path: "/p" },
+      project: { path: "/p", base_ref: "origin/main" },
       steps: {},
     },
     mergeBase: "abc1234",

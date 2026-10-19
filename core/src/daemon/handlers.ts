@@ -78,15 +78,16 @@ import type { IntakeWatcher } from "../intake/watch.ts";
 import { type TrackerOf, WorkspaceConfigError } from "../tracker/tracker.ts";
 import { applyApproval, runTask } from "../domain/engine.ts";
 import {
+  baseRef,
   branchNameFor,
   canonical,
   createWorktree,
   fetchBaseBranch,
+  hasOrigin,
   hasUncommittedChanges,
   isUnderWorktreesDir,
   listIntakeWorktrees,
   listWorktrees,
-  originRef,
   removeWorktree,
   repoOfWorktree,
   UncommittedChangesError,
@@ -326,17 +327,19 @@ async function settleIntakeCommand(ctx: DaemonContext, t: IntakeTransition) {
 }
 
 /**
- * Intake 由来のタスクの worktree の起点（spec 11.3）。見張りは投入の前に取り込んでいるが、
- * 画面からの再投入は見張りを通らないので、ここでも取り込む。取り込めなくても、前に取り込んだ origin 側から切る。
+ * タスクの worktree の起点。origin の baseBranch を取り込んでから、その origin 側を返す。
+ * 取り込めなくても、前に取り込んだ origin 側から切る。origin の無いリポジトリは手元の baseBranch。
  */
-async function intakeBase(project: ProjectRow): Promise<string> {
-  await fetchBaseBranch(project.path, project.base_branch).catch((e) => {
-    console.error(
-      `origin の ${project.base_branch} を取り込めませんでした（前に取り込んだものから切ります）:`,
-      e,
-    );
-  });
-  return originRef(project.base_branch);
+async function worktreeBase(project: ProjectRow): Promise<string> {
+  if (await hasOrigin(project.path)) {
+    await fetchBaseBranch(project.path, project.base_branch).catch((e) => {
+      console.error(
+        `origin の ${project.base_branch} を取り込めませんでした（前に取り込んだものから切ります）:`,
+        e,
+      );
+    });
+  }
+  return await baseRef(project.path, project.base_branch);
 }
 
 export function createHandler(ctx: DaemonContext): Handler {
@@ -1569,7 +1572,7 @@ async function tickOnce(ctx: DaemonContext): Promise<void> {
           repoPath: project.path,
           worktreePath: worktreePathFor(project.path, task.id),
           branch,
-          baseBranch: task.intake_id === null ? project.base_branch : await intakeBase(project),
+          baseBranch: await worktreeBase(project),
         });
       } else {
         worktreePath = task.worktree_path;

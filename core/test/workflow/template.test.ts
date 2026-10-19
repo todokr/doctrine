@@ -6,7 +6,7 @@ const ctx: TemplateContext = {
   task: { id: "t1", title: "ログイン修正", prompt: "直して", branch: "doctrine/t1-login" },
   issue: { url: "https://github.com/o/r/issues/2", parent_url: "https://github.com/o/r/issues/1" },
   worktree: { path: "/state/wt/t1" },
-  project: { path: "/repo" },
+  project: { path: "/repo", base_ref: "origin/main" },
   steps: { test: { last_stdout: "ok", last_stderr: "3 failing", exitCode: "1" } },
 };
 
@@ -18,6 +18,7 @@ test("5系統すべてを展開する", () => {
   assert.equal(expand("{{ issue.closes }}", ctx), "Closes https://github.com/o/r/issues/2");
   assert.equal(expand("{{ worktree.path }}", ctx), "/state/wt/t1");
   assert.equal(expand("{{ project.path }}", ctx), "/repo");
+  assert.equal(expand("{{ project.base_ref }}", ctx), "origin/main");
   assert.equal(expand("{{ steps.test.last_stderr }}", ctx), "3 failing");
   assert.equal(expand("{{ steps.test.exitCode }}", ctx), "1");
 });

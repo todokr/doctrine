@@ -199,8 +199,8 @@ function toolLines(tools: string[]): string {
  * implement だけは auto で動かし、テストやビルドのコマンドを列挙させない。計画・審査・ガイドの役は
  * 読み取り系の許可だけにして、コードを書き換えられないようにしておく。
  *
- * テンプレート変数に baseBranch が無いので、agent-review が読む diff の範囲だけは
- * 雛形を作った時点の値を文字列で埋め込む。
+ * テンプレート変数に baseBranch が無いので、PR の --base の例だけは雛形を作った時点の値を
+ * 文字列で埋め込む。
  */
 export function defaultWorkflowYamlFor(baseBranch: string | undefined): string {
   const base = baseBranch ?? "main";
@@ -347,7 +347,7 @@ ${readOnly}
       implement が積んだコミットを毎回読み直して審査し、結果を
       {{ worktree.path }}/.doctrine-out/review.md に上書きしてください。
 
-      「git diff ${base}...HEAD」と「git log ${base}..HEAD」で実装の差分とコミットを読み、
+      「git diff {{ project.base_ref }}...HEAD」と「git log {{ project.base_ref }}..HEAD」で実装の差分とコミットを読み、
       {{ worktree.path }}/.doctrine-out/plan.md と突き合わせます。
       {{ worktree.path }}/.doctrine-out/implement-notes.md も読みます。実装者が、やったこと・
       通した検証・できなかったことを書いています。見るのは次の3点です。

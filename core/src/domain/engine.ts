@@ -10,6 +10,7 @@ import {
   type StepRunStatus,
 } from "../db/stepRuns.ts";
 import { captureTree, retainTree } from "./reviewTree.ts";
+import { baseRef } from "./worktree.ts";
 import {
   attemptCount,
   getProject,
@@ -114,7 +115,7 @@ async function contextFor(db: Db, task: TaskRow): Promise<TemplateContext> {
     task: { id: task.id, title: task.title, prompt: task.prompt, branch: task.branch },
     issue: { url: task.issue_url, parent_url: task.parent_issue_url },
     worktree: { path: task.worktree_path ?? "" },
-    project: { path: project.path },
+    project: { path: project.path, base_ref: await baseRef(project.path, project.base_branch) },
     steps: await getStepOutputs(db, task.id),
   };
 }
