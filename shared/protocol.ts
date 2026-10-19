@@ -639,7 +639,7 @@ export type Methods = {
   };
   "tracker.issue": { params: { workspace: string; url: string }; result: IssueDetail };
   "intake.start": {
-    params: { workspace: string; issue_url: string; mode: IntakeMode };
+    params: { workspace: string; issue_url: string; mode: IntakeMode; project?: string };
     result: IntakeSummary & { alreadyActive: boolean };
   };
   "intake.list": {

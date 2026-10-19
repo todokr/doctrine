@@ -819,6 +819,7 @@ export function createHandler(ctx: DaemonContext): Handler {
             issueUrl: req(params, "issue_url"),
             logRoot: ctx.logRoot,
             mode,
+            ...(typeof params.project === "string" ? { project: params.project } : {}),
           },
           { loadWorkflow: ctx.loadWorkflow },
         );

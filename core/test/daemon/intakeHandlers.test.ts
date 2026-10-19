@@ -10,6 +10,7 @@ import { getIntake, listIntakeRuns, listProcesses, updateIntake } from "../../sr
 import { createHandler, type DaemonContext, tick } from "../../src/daemon/handlers.ts";
 import { commitStepBoundary } from "../../src/db/boundary.ts";
 import { getTask } from "../../src/db/tasks.ts";
+import { listProjectsOf } from "../../src/db/workspaces.ts";
 import { createWorktree, worktreePathFor } from "../../src/domain/worktree.ts";
 import { createMockAdapter } from "../../src/adapter/mock.ts";
 import type { AgentAdapter } from "../../src/adapter/types.ts";
@@ -1549,6 +1550,57 @@ test("direct で開始すると、調査を立てずに active になり、プ�
     detail.processes[0].rail!.map((n) => n.id),
     ["review"],
   );
+});
+
+/** tracker が linear で、プロジェクト a・b を持つ workspace を登録する。 */
+async function linearTwoProjects(lin: Tracker) {
+  const files = {
+    "README.md": "x\n",
+    ".doctrine/project.yaml": "defaultWorkflow: feature\nmaxConcurrent: 1\nbaseBranch: main\n",
+    ".doctrine/workflows/feature.yaml":
+      "name: feature\nsteps:\n  - id: review\n    type: approval\n    title: 見て\n",
+  };
+  await makeRepo(join(root, "la"), files);
+  await makeRepo(join(root, "lb"), files);
+  const ws = join(root, "lws");
+  await mkdir(join(ws, ".doctrine"), { recursive: true });
+  await writeFile(
+    join(ws, ".doctrine", "workspace.yaml"),
+    "projects:\n  a: ../la/repo\n  b: ../lb/repo\ntracker:\n  kind: linear\n  team: ENG\n",
+  );
+  const s = await setup({
+    trackerOf: trackerFor({ linearApiKey: "lin_x", github: fakeTracker(), linear: () => lin }),
+  });
+  await s.call("workspace.add", { path: ws });
+  return { ...s, ws };
+}
+
+test("Linear でプロジェクトが 2 つの workspace は、intake.start の project で direct のプロジェクトを選ぶ", async () => {
+  const lin = fakeTracker({}, { kind: "linear", status: linearStatus });
+  const { ctx, call, ws } = await linearTwoProjects(lin);
+  const started = await call<IntakeSummary & { alreadyActive: boolean }>("intake.start", {
+    mode: "direct",
+    workspace: ws,
+    issue_url: LINEAR_ISSUE,
+    project: "b",
+  });
+  assert.equal(started.state, "active");
+  const [main] = await listProcesses(ctx.db, started.id);
+  const task = (await getTask(ctx.db, main.current_task_id!))!;
+  const projects = await listProjectsOf(ctx.db, started.workspace_id);
+  assert.equal(task.project_id, projects.find((p) => p.name === "b")!.id);
+  assert.deepEqual(lin.reads, [LINEAR_ISSUE]);
+});
+
+test("Linear でプロジェクトが 2 つの workspace で project の無い direct の intake.start は拒まれる", async () => {
+  const lin = fakeTracker({}, { kind: "linear", status: linearStatus });
+  const { ctx, call, ws } = await linearTwoProjects(lin);
+  await assert.rejects(
+    () => call("intake.start", { mode: "direct", workspace: ws, issue_url: LINEAR_ISSUE }),
+    /プロジェクトを選んでください/,
+  );
+  assert.deepEqual(await call<IntakeSummary[]>("intake.list", { include_closed: true }), []);
+  assert.deepEqual(await ctx.db.selectFrom("tasks").selectAll().execute(), []);
 });
 
 test("mode が plan でも direct でもない intake.start は拒まれる", async () => {
