@@ -26,6 +26,7 @@ Issue を取り込むとき、計画して複数の PR に分ける（plan）か
 | Intake の一覧 | 承認前の Intake と改訂中の Intake だけ。direct は一度も出ない | 4.1 |
 | direct の中身 | 調査も分解も sub-issue も無し。開始と同時に `active`、プロセス 1 行とタスク 1 本を作る | 5 |
 | direct のワークフロー | プロジェクトの既定 | 5.1 |
+| direct のプロジェクト | GitHub は URL のリポジトリ、Linear は 1 つならそれ・2 つ以上なら `project` で選ぶ | 5.1 |
 | Execution の骨格 | 左に Issue の一覧（進行中 / 終了）、右に選んだ Issue の図 | 6 |
 | 図 | いまの PFD の図のまま、プロセスのノードを大きくしてステップの帯を描く | 6.2 |
 | 人の番 | タスクの承認待ち・プロセスの要確認・人のプロセスの番 | 6.3 |
@@ -87,6 +88,21 @@ Issue を選んだ後、開始のボタンの前で取り込みの種類を選�
    `issue_url` は Issue そのもの、`parent_issue_url` は null、`intake_id` / `intake_process_id` は 1 と 2 を指す
 
 調査・分解の実行、PFD の案と承認、sub-issue の同期、投入（`dispatchIntake`）は direct では一度も走らない。
+
+タスクのプロジェクトは、Issue を読み書きするプロジェクトとは別に決める。Linear の Issue の URL にはリポジトリの情報が無く、
+`projectPathFor` は常に先頭のプロジェクトを返すので、それをタスクのプロジェクトにするとプロジェクトが複数ある workspace で必ず先頭になってしまう。
+`projectPathFor` は Issue の読み書き（`readIssue`・親 Issue の状態を進める・sub-issue を閉じる・見張り）にだけ使い、
+direct のタスクのプロジェクトは `intake.start` の中で次のように決める。
+
+| トラッカー | タスクのプロジェクト |
+| --- | --- |
+| GitHub | Issue の URL の owner/name が一致するプロジェクト |
+| Linear・プロジェクト 1 つ | そのプロジェクト |
+| Linear・プロジェクト 2 つ以上 | `intake.start` の `project`（プロジェクトの名前）で、workspace のプロジェクトを名前から引いたもの |
+
+Linear でプロジェクトが 2 つ以上あり、`project` が無い、または workspace に無い名前のときは拒否し、Intake もタスクも作らない。
+名前の引き方は PFD のプロセスの `project` と同じで、workspace のプロジェクトの名前で照らす。
+`project` が要らない場面（GitHub の direct、plan、Linear でプロジェクト 1 つ）で受け取った `project` は無視する。
 
 プロセスの行を 1 つ持たせるのは、承認後の仕組みがプロセスを単位に組まれているからである。
 `TaskSummary` の「`intake_id` と `intake_process_id` は両方 null か両方非 null」を守ったまま、
@@ -239,7 +255,7 @@ Execution で選んでいる Intake について、それに属するタスク�
 
 ### 7.3 protocol の変更
 
-- `intake.start` の params に `mode`
+- `intake.start` の params に `mode` と `project`（省略可。direct で Linear のプロジェクトを選ぶプロジェクトの名前。5.1）
 - `IntakeSummary` に `mode`
 - `IntakeProcessView` に `rail`
 - `workspace.setup` を消す（8.2）

@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { getIntake, listProcesses, upsertPrObservation } from "../../src/db/intakes.ts";
-import { getTask, listTasks } from "../../src/db/tasks.ts";
+import { getTask, insertProject, listTasks } from "../../src/db/tasks.ts";
 import { openDb } from "../../src/db/migrate.ts";
 import {
   completeHumanProcess,
@@ -18,7 +18,7 @@ import { fakeTracker as statefulTracker } from "../helpers/fakeTracker.ts";
 import { fakePrWatcher } from "../helpers/prWatcher.ts";
 import { constTrackerOf, fakeTracker } from "../helpers/tracker.ts";
 import { fakeBaseSync, fakeWorkflowLoader } from "../helpers/watcher.ts";
-import { DIRECT_WORKFLOW, PARENT_URL, seedDirect } from "./watchFixture.ts";
+import { addApi, DIRECT_WORKFLOW, PARENT_URL, seedDirect } from "./watchFixture.ts";
 
 test("direct: Intake は active で、プロセス main とタスク 1 本を持つ", async () => {
   const { db, projectId, taskId } = await seedDirect();
@@ -129,6 +129,7 @@ async function startDirect(loadWorkflow = fakeWorkflowLoader(DIRECT_WORKFLOW)) {
   const db = await openDb(":memory:");
   const project = await seedProject(db, { path: "/repo", default_workflow: "feature" });
   const wt = {
+    kind: "github" as const,
     tracker: fakeTracker({ title: "直す", body: "本文" }),
     projectPathFor: () => Promise.resolve("/repo"),
   };
@@ -171,6 +172,108 @@ test("startIntake: 同じ Issue の direct がまだ終わっていなければ�
   const second = await started();
   assert.equal(second.alreadyActive, true);
   assert.equal(second.intake.id, first.intake.id);
+});
+
+const LINEAR_URL = "https://linear.app/acme/issue/ENG-1/x";
+
+/** Linear の workspace に、プロジェクト a（/a, workflow a-flow）と b（/b, workflow b-flow）を入れる。projects は 1 か 2。 */
+async function startLinearDirect(o: { projects: 1 | 2; project?: string }) {
+  const db = await openDb(":memory:");
+  const a = await seedProject(db, { path: "/a", name: "a", default_workflow: "a-flow" });
+  const bId =
+    o.projects === 2
+      ? await insertProject(db, {
+          workspace_id: a.workspace_id,
+          name: "b",
+          path: "/b",
+          default_workflow: "b-flow",
+          max_concurrent: 1,
+          base_branch: "main",
+          setup: null,
+        })
+      : null;
+  const tracker = fakeTracker({ title: "直す", body: "本文" }, { kind: "linear" });
+  const wt = {
+    kind: "linear" as const,
+    tracker,
+    projectPathFor: () => Promise.resolve("/a"),
+  };
+  const started = () =>
+    startIntake(
+      db,
+      wt,
+      {
+        workspaceId: a.workspace_id,
+        issueUrl: LINEAR_URL,
+        logRoot: "/tmp/doctrine-test-logs",
+        mode: "direct",
+        ...(o.project === undefined ? {} : { project: o.project }),
+      },
+      { loadWorkflow: fakeWorkflowLoader(DIRECT_WORKFLOW) },
+    );
+  return { db, started, tracker, aId: a.id, bId };
+}
+
+async function mainTaskOf(db: Awaited<ReturnType<typeof openDb>>, intakeId: string) {
+  const [main] = await listProcesses(db, intakeId);
+  return (await getTask(db, main.current_task_id!))!;
+}
+
+async function assertNothingCreated(db: Awaited<ReturnType<typeof openDb>>) {
+  assert.deepEqual(await db.selectFrom("intakes").selectAll().execute(), []);
+  assert.deepEqual(await db.selectFrom("intake_processes").selectAll().execute(), []);
+  assert.deepEqual(await db.selectFrom("tasks").selectAll().execute(), []);
+}
+
+test("startIntake: Linear でプロジェクトが 2 つなら、project で選んだプロジェクトにタスクを作る", async () => {
+  const { db, started, tracker, bId } = await startLinearDirect({ projects: 2, project: "b" });
+  const { intake } = await started();
+  const task = await mainTaskOf(db, intake.id);
+  assert.equal(task.project_id, bId);
+  assert.equal(task.workflow_name, "b-flow");
+  assert.deepEqual(tracker.reads, [LINEAR_URL]);
+});
+
+test("startIntake: Linear でプロジェクトが 2 つあり project が無ければ、拒んで何も作らない", async () => {
+  const { db, started } = await startLinearDirect({ projects: 2 });
+  await assert.rejects(started, /プロジェクトを選んでください/);
+  await assertNothingCreated(db);
+});
+
+test("startIntake: workspace に無いプロジェクトの名前は拒む", async () => {
+  const { db, started } = await startLinearDirect({ projects: 2, project: "c" });
+  await assert.rejects(started, /プロジェクト c は workspace にありません/);
+  await assertNothingCreated(db);
+});
+
+test("startIntake: Linear でプロジェクトが 1 つなら、project が無くてもそのプロジェクトで通る", async () => {
+  const { db, started, aId } = await startLinearDirect({ projects: 1 });
+  const { intake } = await started();
+  assert.equal((await mainTaskOf(db, intake.id)).project_id, aId);
+});
+
+test("startIntake: GitHub の direct は project を付けても Issue の URL のプロジェクトにする", async () => {
+  const db = await openDb(":memory:");
+  const repo = await seedProject(db, { path: "/repo", default_workflow: "feature" });
+  await addApi(db, repo.workspace_id);
+  const wt = {
+    kind: "github" as const,
+    tracker: fakeTracker({ title: "直す", body: "本文" }),
+    projectPathFor: () => Promise.resolve("/repo"),
+  };
+  const { intake } = await startIntake(
+    db,
+    wt,
+    {
+      workspaceId: repo.workspace_id,
+      issueUrl: PARENT_URL,
+      logRoot: "/tmp/doctrine-test-logs",
+      mode: "direct",
+      project: "api",
+    },
+    { loadWorkflow: fakeWorkflowLoader(DIRECT_WORKFLOW) },
+  );
+  assert.equal((await mainTaskOf(db, intake.id)).project_id, repo.id);
 });
 
 async function watchDirect() {

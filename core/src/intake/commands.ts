@@ -16,7 +16,7 @@ import {
 } from "../db/intakes.ts";
 import { advanceParentIssue } from "./issueStateSync.ts";
 import { loadQuestionSets } from "./questionSet.ts";
-import type { Db, IntakeRow, IntakeState } from "../db/schema.ts";
+import type { Db, IntakeRow, IntakeState, ProjectRow } from "../db/schema.ts";
 import { getProjectByPath, type TaskState } from "../db/tasks.ts";
 import { listProjectsOf } from "../db/workspaces.ts";
 import { cancelTask } from "../domain/cancelTask.ts";
@@ -26,6 +26,7 @@ import { pinOf, type WorkflowLoader } from "../workflow/load.ts";
 import type { Tracker, TrackerOf } from "../tracker/tracker.ts";
 import type { WorkspaceRef, WorkspaceTracker } from "../tracker/workspaceTracker.ts";
 import type { Pfd } from "../../../shared/intake/pfd.ts";
+import type { TrackerKind } from "../../../shared/intake/tracker.ts";
 import type { IntakeMode } from "../../../shared/intake/state.ts";
 import { validateAnswers } from "../../../shared/intake/validateQuestion.ts";
 import { insertDirectIntake, loadApprovedPlan } from "./dispatch.ts";
@@ -53,15 +54,40 @@ async function requireIntake(db: Db, intakeId: string): Promise<IntakeRow> {
   return intake;
 }
 
+/** direct のタスクのプロジェクト（spec 5.1）。 */
+async function directProjectOf(
+  db: Db,
+  o: { kind: TrackerKind; workspaceId: number; issueProjectPath: string; project?: string },
+): Promise<ProjectRow> {
+  if (o.kind === "github") {
+    const project = await getProjectByPath(db, o.issueProjectPath);
+    if (!project) throw new Error(`未登録のプロジェクトです: ${o.issueProjectPath}`);
+    return project;
+  }
+  const projects = await listProjectsOf(db, o.workspaceId);
+  if (projects.length === 1) return projects[0];
+  if (o.project === undefined) throw new Error("プロジェクトを選んでください");
+  const found = projects.find((p) => p.name === o.project);
+  if (!found) throw new Error(`プロジェクト ${o.project} は workspace にありません`);
+  return found;
+}
+
 /**
  * 同じ Issue の終わっていない Intake があれば、作らずにそれを返す。
  * 失敗応答は文字列しか運べず既存の id を返せないので、失敗にはしない（spec 13 章）。
  * direct は調査を立てず、プロセス main とタスクを同じトランザクションで作る。ワークフローが読めなければ何も作らない。
+ * direct のタスクのプロジェクトは、Issue を読み書きするプロジェクトとは別に決める（spec 5.1）。
  */
 export async function startIntake(
   db: Db,
-  wt: Pick<WorkspaceTracker, "tracker" | "projectPathFor">,
-  o: { workspaceId: number; issueUrl: string; logRoot: string; mode: IntakeMode },
+  wt: Pick<WorkspaceTracker, "kind" | "tracker" | "projectPathFor">,
+  o: {
+    workspaceId: number;
+    issueUrl: string;
+    logRoot: string;
+    mode: IntakeMode;
+    project?: string;
+  },
   deps: { loadWorkflow: WorkflowLoader },
 ): Promise<{ intake: IntakeRow; alreadyActive: boolean; problems: string[] }> {
   // gh が使えなくても、進行中の Intake は開けるように、gh を呼ぶ前にも引く。
@@ -88,8 +114,12 @@ export async function startIntake(
   try {
     let intake: IntakeRow;
     if (o.mode === "direct") {
-      const project = await getProjectByPath(db, projectPath);
-      if (!project) throw new Error(`未登録のプロジェクトです: ${projectPath}`);
+      const project = await directProjectOf(db, {
+        kind: wt.kind,
+        workspaceId: o.workspaceId,
+        issueProjectPath: projectPath,
+        project: o.project,
+      });
       const loaded = await deps.loadWorkflow(project.path, project.default_workflow);
       for (const w of loaded.warnings) problems.push(`作成時の検証: ${w}`);
       intake = await insertDirectIntake(db, {
