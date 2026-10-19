@@ -37,7 +37,8 @@ describe("startIntake", () => {
       actions,
       refresh,
       deps: {
-        start: (w: string, u: string, m: IntakeMode) => rpc("intake.start", { workspace: w, issue_url: u, mode: m }),
+        start: (w: string, u: string, m: IntakeMode, p?: string) =>
+          rpc("intake.start", { workspace: w, issue_url: u, mode: m, ...(p !== undefined ? { project: p } : {}) }),
         dispatch: (a: Action) => {
           actions.push(a);
         },
@@ -66,6 +67,24 @@ describe("startIntake", () => {
     const plan = setup();
     await startIntake("~/work/shop-api", "https://github.com/o/r/issues/8", "plan", plan.deps);
     expect(plan.refresh).not.toHaveBeenCalled();
+  });
+
+  test("project を渡したら intake.start の params に載せる", async () => {
+    invoke.mockResolvedValue({ ...INTAKES[0], mode: "direct", alreadyActive: false });
+    const { deps } = setup();
+    await startIntake("~/work", "https://linear.app/t/issue/ENG-1", "direct", deps, "admin");
+    expect(invoke).toHaveBeenCalledWith("rpc", {
+      method: "intake.start",
+      params: { workspace: "~/work", issue_url: "https://linear.app/t/issue/ENG-1", mode: "direct", project: "admin" },
+    });
+  });
+
+  test("project を渡さなければ params に project のキーを作らない", async () => {
+    invoke.mockResolvedValue({ ...INTAKES[0], mode: "direct", alreadyActive: false });
+    const { deps } = setup();
+    await startIntake("~/work/shop-api", "https://github.com/o/r/issues/8", "direct", deps);
+    const params = (invoke.mock.calls[0][1] as { params: Record<string, unknown> }).params;
+    expect(Object.keys(params)).not.toContain("project");
   });
 
   test("失敗したらトーストを出す", async () => {

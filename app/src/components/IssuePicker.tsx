@@ -234,7 +234,10 @@ export function pickerWorkspace(workspaces: Workspace[], chosen: number | undefi
   return workspaces.find((w) => w.id === chosen) ?? workspaces[0];
 }
 
-/** intake.start を root で呼び、始まった Intake を置く。失敗はトーストに出す */
+/**
+ * intake.start を root で呼び、始まった Intake を置く。失敗はトーストに出す。
+ * project は direct で Linear のプロジェクトを選んだときだけ渡す（プロジェクトの名前）
+ */
 export async function startIntake(
   root: string,
   issueUrl: string,
@@ -244,9 +247,10 @@ export async function startIntake(
     dispatch: Dispatch<Action>;
     refresh: () => Promise<void>;
   },
+  project?: string,
 ): Promise<void> {
   try {
-    const { alreadyActive: _, ...intake } = await deps.start(root, issueUrl, mode);
+    const { alreadyActive: _, ...intake } = await deps.start(root, issueUrl, mode, project);
     deps.dispatch({ type: "intake.started", intake });
     // direct は開始と同時にタスクを投入する。次の取り直しを待たずに一覧へ載せる
     if (intake.mode === "direct") void deps.refresh();
