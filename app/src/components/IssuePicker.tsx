@@ -1,4 +1,4 @@
-import { type Dispatch, useEffect, useState } from "react";
+import { type Dispatch, Fragment, useEffect, useState } from "react";
 import type { IssueDetail, TrackerKind } from "../../../shared/intake/tracker.ts";
 import type { IntakeMode, IntakeSummary, TrackerIssue } from "../../../shared/protocol.ts";
 import { type Cached, revalidate, trackerCache, trackerCacheKey } from "../trackerCache";
@@ -98,11 +98,13 @@ export function IssueList(
 }
 
 export function IssuePreview(
-  { issue, detail, target, pending, onStart, onOpen }: {
+  { issue, detail, target, pending, directProject, onStart, onOpen }: {
     issue: { url: string; identifier: string | null; title: string };
     detail: Loaded<IssueDetail> | undefined;
     target: IssueTarget;
     pending: boolean;
+    /** 渡したときだけ direct のプロジェクトを選ぶ欄を出す。value は選んだ名前、未選択は null */
+    directProject?: { choices: string[]; value: string | null; onChange: (name: string | null) => void };
     onStart: (mode: IntakeMode) => void;
     onOpen: (intakeId: string) => void;
   },
@@ -132,10 +134,29 @@ export function IssuePreview(
         {target.kind === "open"
           ? <button className="btn" onClick={() => onOpen(target.intakeId)}>進行中の Intake を開く</button>
           : (["plan", "direct"] as const).map((mode) => (
-            <button key={mode} className="btn" disabled={pending} onClick={() => onStart(mode)}>
-              {MODE_WORD[mode].name}
-              <span className="hint">（{MODE_WORD[mode].hint}）</span>
-            </button>
+            <Fragment key={mode}>
+              {mode === "direct" && directProject !== undefined && (
+                <label className="hint">
+                  プロジェクト{" "}
+                  <select
+                    aria-label="direct のプロジェクト"
+                    value={directProject.value ?? ""}
+                    onChange={(e) => directProject.onChange(e.target.value === "" ? null : e.target.value)}
+                  >
+                    <option value="">選んでください</option>
+                    {directProject.choices.map((name) => <option key={name} value={name}>{name}</option>)}
+                  </select>
+                </label>
+              )}
+              <button
+                className="btn"
+                disabled={pending || (mode === "direct" && directProject !== undefined && directProject.value === null)}
+                onClick={() => onStart(mode)}
+              >
+                {MODE_WORD[mode].name}
+                <span className="hint">（{MODE_WORD[mode].hint}）</span>
+              </button>
+            </Fragment>
           ))}
       </div>
     </div>
@@ -234,6 +255,11 @@ export function pickerWorkspace(workspaces: Workspace[], chosen: number | undefi
   return workspaces.find((w) => w.id === chosen) ?? workspaces[0];
 }
 
+/** direct で選ばせるプロジェクトの名前。Linear でプロジェクトが 2 つ以上のときだけ。それ以外は null（欄を出さず project を送らない） */
+export function directProjectChoices(kind: TrackerKind, workspace: Workspace): string[] | null {
+  return kind === "linear" && workspace.projects.length >= 2 ? workspace.projects.map((p) => p.name) : null;
+}
+
 /**
  * intake.start を root で呼び、始まった Intake を置く。失敗はトーストに出す。
  * project は direct で Linear のプロジェクトを選んだときだけ渡す（プロジェクトの名前）
@@ -289,11 +315,13 @@ export function IssuePicker() {
   const [picked, setPicked] = useState<Picked | null>(null);
   const [direct, setDirect] = useState("");
   const [pending, setPending] = useState(false);
+  const [directProject, setDirectProject] = useState<string | null>(null);
 
   // 別の workspace で選んでいたものを捨てる
   useEffect(() => {
     setPicked(null);
     setDirect("");
+    setDirectProject(null);
   }, [root]);
 
   // トラッカーが使えるかは workspace ごとに違うので、状態も workspace ごとに持つ
@@ -350,9 +378,14 @@ export function IssuePicker() {
   const failed = status.value.targets.filter((t) => !t.ok);
   const usable = status.value.targets.filter((t): t is Extract<typeof t, { ok: true }> => t.ok);
 
+  const choices = directProjectChoices(status.value.kind, workspace);
+  // 選択肢に無い名前（一覧の取り直しで消えた）は未選択として扱う
+  const chosenProject = choices !== null && directProject !== null && choices.includes(directProject) ? directProject : null;
+
   const choose = (url: string) => {
     const listed = issues.kind === "ok" ? issues.value.find((i) => i.url === url) : undefined;
     setPicked({ url, identifier: listed?.identifier ?? issueIdentifier(url), title: listed?.title ?? "" });
+    setDirectProject(null);
   };
   const title = picked?.title || (detail?.kind === "ok" ? detail.value.title : "");
 
@@ -407,10 +440,17 @@ export function IssuePicker() {
               const row = s.intakes.find((i) => i.id === id);
               dispatch(row && !inIntakeList(row, s.intakeRevise) ? { type: "intake.open", id } : { type: "intake.select", id });
             }}
+            directProject={choices === null ? undefined : { choices, value: chosenProject, onChange: setDirectProject }}
             onStart={async (mode) => {
               setPending(true);
               try {
-                await startIntake(workspace.path, picked.url, mode, { start: api.start, dispatch, refresh });
+                await startIntake(
+                  workspace.path,
+                  picked.url,
+                  mode,
+                  { start: api.start, dispatch, refresh },
+                  mode === "direct" && chosenProject !== null ? chosenProject : undefined,
+                );
               } finally {
                 setPending(false);
               }

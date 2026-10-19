@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 const { invoke } = vi.hoisted(() => ({ invoke: vi.fn((..._: unknown[]) => Promise.resolve({})) }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 
-import { pickerWorkspace, startIntake, WorkspacePick } from "./components/IssuePicker";
+import { directProjectChoices, IssuePreview, pickerWorkspace, startIntake, WorkspacePick } from "./components/IssuePicker";
 import { rpc } from "./daemon/client";
 import { INTAKES, WORKSPACES } from "./fixtures";
 import type { Action } from "./model";
@@ -93,6 +93,77 @@ describe("startIntake", () => {
     await startIntake("~/work/shop-api", "https://github.com/o/r/issues/8", "plan", deps);
     expect(actions).toEqual([{ type: "toast", message: "Intake を始められませんでした（x）" }]);
     expect(refresh).not.toHaveBeenCalled();
+  });
+});
+
+describe("directProjectChoices", () => {
+  test("Linear でプロジェクトが 2 つ以上なら名前を workspace の順で返す", () => {
+    expect(directProjectChoices("linear", WORKSPACES[3])).toEqual(["shop", "admin", "batch"]);
+  });
+  test("Linear でプロジェクトが 1 つなら null", () => {
+    expect(directProjectChoices("linear", WORKSPACES[0])).toBeNull();
+  });
+  test("GitHub ならプロジェクトが 2 つ以上でも null", () => {
+    expect(directProjectChoices("github", WORKSPACES[3])).toBeNull();
+  });
+  test("名前は id ではなく name を使う", () => {
+    const w = { ...WORKSPACES[3], projects: WORKSPACES[3].projects.map((p) => ({ ...p, id: `dir-${p.id}` })) };
+    expect(directProjectChoices("linear", w)).toEqual(["shop", "admin", "batch"]);
+  });
+});
+
+describe("IssuePreview の direct のプロジェクト", () => {
+  const url = "https://linear.app/t/issue/ENG-1";
+  const noop = () => {};
+  const preview = (o: Partial<Parameters<typeof IssuePreview>[0]>) =>
+    renderToStaticMarkup(
+      <IssuePreview
+        issue={{ url, identifier: "ENG-1", title: "T" }}
+        detail={undefined}
+        target={{ kind: "start", url }}
+        pending={false}
+        onStart={noop}
+        onOpen={noop}
+        {...o}
+      />,
+    );
+  const directDisabled = /<button[^>]*disabled=""[^>]*>すぐ実行する/;
+  const planDisabled = /<button[^>]*disabled=""[^>]*>計画して進める/;
+
+  test("directProject を渡したときだけプロジェクトを選ぶ欄を出す", () => {
+    const html = preview({ directProject: { choices: ["shop", "admin"], value: null, onChange: noop } });
+    expect(html).toContain('aria-label="direct のプロジェクト"');
+    expect(html).toContain('<option value="shop">shop</option>');
+    expect(html).toContain('<option value="admin">admin</option>');
+    const none = preview({});
+    expect(none).not.toContain("direct のプロジェクト");
+    expect(none).not.toContain("<select");
+  });
+
+  test("未選択の間は direct を押せず、plan は押せる", () => {
+    const html = preview({ directProject: { choices: ["shop", "admin"], value: null, onChange: noop } });
+    expect(html).toMatch(directDisabled);
+    expect(html).not.toMatch(planDisabled);
+    expect(html).toContain('<option value="" selected="">選んでください</option>');
+  });
+
+  test("選んだら direct を押せ、選んだ名前に selected が付く", () => {
+    const html = preview({ directProject: { choices: ["shop", "admin"], value: "admin", onChange: noop } });
+    expect(html).not.toMatch(directDisabled);
+    expect(html).toContain('<option value="admin" selected="">admin</option>');
+  });
+
+  test("directProject が無ければ direct は pending のときだけ押せない", () => {
+    expect(preview({})).not.toMatch(directDisabled);
+    expect(preview({ pending: true })).toMatch(directDisabled);
+  });
+
+  test("Intake のある Issue では欄を出さない", () => {
+    const html = preview({
+      target: { kind: "open", intakeId: "i1" },
+      directProject: { choices: ["shop", "admin"], value: null, onChange: noop },
+    });
+    expect(html).not.toContain("<select");
   });
 });
 
