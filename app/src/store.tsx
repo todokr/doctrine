@@ -476,8 +476,14 @@ export function useIntakeRpc() {
       workspacePath: string,
       issueUrl: string,
       mode: IntakeMode,
+      project?: string,
     ): Promise<IntakeSummary & { alreadyActive: boolean }> =>
-      rpc("intake.start", { workspace: workspacePath, issue_url: issueUrl, mode }),
+      rpc("intake.start", {
+        workspace: workspacePath,
+        issue_url: issueUrl,
+        mode,
+        ...(project !== undefined ? { project } : {}),
+      }),
     answer: (intakeId: string, questionSetId: number, reply: QuestionSetReply): Promise<IntakeSummary> =>
       rpc("intake.answer", {
         intake_id: intakeId,
