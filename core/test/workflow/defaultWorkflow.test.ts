@@ -63,7 +63,7 @@ cat > "$GH_BODY"
       task: { id: "t", title: "タイトル", prompt: "P", branch: "b" },
       issue,
       worktree: { path: dir },
-      project: { path: dir },
+      project: { path: dir, base_ref: "origin/develop" },
       steps: {},
     };
     const command = expand(await openPrRun(), ctx);
@@ -188,7 +188,7 @@ async function runWaitMergeWithGh(ghScript: string): Promise<{ code: number; std
       task: { id: "t", title: "T", prompt: "P", branch: "b" },
       issue: { url: null, parent_url: null },
       worktree: { path: dir },
-      project: { path: dir },
+      project: { path: dir, base_ref: "origin/develop" },
       steps: {},
     };
     try {

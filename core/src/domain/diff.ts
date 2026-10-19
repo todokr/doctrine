@@ -1,4 +1,5 @@
 import { runCommand } from "../util/exec.ts";
+import { baseRef } from "./worktree.ts";
 
 /**
  * リネームとコピーだけが「前のパス」を持つ。他の状態で old_path を読めないようにし、
@@ -94,7 +95,7 @@ export async function mergeBase(worktreePath: string, baseBranch: string): Promi
     "-C",
     worktreePath,
     "merge-base",
-    baseBranch,
+    await baseRef(worktreePath, baseBranch),
     "HEAD",
   ]);
   return stdout.trim();

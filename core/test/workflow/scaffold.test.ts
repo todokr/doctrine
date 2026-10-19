@@ -151,7 +151,7 @@ test("雛形のプロンプトと feed はテンプレート展開を通る", ()
     task: { id: "t", title: "T", prompt: "P", branch: "b" },
     issue: { url: null, parent_url: null },
     worktree: { path: "/w" },
-    project: { path: "/p" },
+    project: { path: "/p", base_ref: "origin/main" },
     steps: Object.fromEntries(steps.map((s) => [s.id, empty])),
   };
   for (const s of steps) {
@@ -161,14 +161,10 @@ test("雛形のプロンプトと feed はテンプレート展開を通る", ()
   }
 });
 
-test("baseBranch が agent-review の diff の範囲に入る", () => {
+test("agent-review は project.base_ref からの diff を読む", () => {
   const review = byId(stepsOf("develop"), "agent-review") as AgentStep;
-  assert.ok(review.prompt.includes("develop...HEAD"));
-});
-
-test("baseBranch が取れなければ main にする", () => {
-  const review = byId(stepsOf(undefined), "agent-review") as AgentStep;
-  assert.ok(review.prompt.includes("main...HEAD"));
+  assert.ok(review.prompt.includes("{{ project.base_ref }}...HEAD"));
+  assert.ok(!review.prompt.includes("develop...HEAD"), "手元の baseBranch は古いことがある");
 });
 
 test("ensureWorkspaceScaffold: リポジトリのルートなら projects: { repo: . } の雛形を書く", async () => {

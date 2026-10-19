@@ -172,6 +172,7 @@ describe("TEMPLATE_VARIABLES", () => {
       "{{ issue.closes }}",
       "{{ worktree.path }}",
       "{{ project.path }}",
+      "{{ project.base_ref }}",
       "{{ steps.<id>.last_stdout }}",
       "{{ steps.<id>.last_stderr }}",
       "{{ steps.<id>.exitCode }}",

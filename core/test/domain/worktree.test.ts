@@ -6,6 +6,7 @@ import { mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from "node:fs
 import { tmpdir } from "node:os";
 import { basename, join, sep } from "node:path";
 import {
+  baseRef,
   branchNameFor,
   changedPaths,
   checkoutDetached,
@@ -14,6 +15,7 @@ import {
   createWorktree,
   fetchBaseBranch,
   findOrphans,
+  hasOrigin,
   hasUncommittedChanges,
   intakeWorktreePathFor,
   listIntakeWorktrees,
@@ -443,6 +445,21 @@ test("fetchBaseBranch: origin の baseBranch を取り込み、手元の baseBra
     baseBranch: originRef("main"),
   });
   assert.ok((await stat(join(wt, "merged.txt"))).isFile(), "上流の成果物を持って始まる");
+});
+
+test("baseRef: origin が無いリポジトリでは手元の baseBranch を返す", async () => {
+  assert.equal(await hasOrigin(repo), false);
+  assert.equal(await baseRef(repo, "main"), "main");
+});
+
+test("baseRef: origin の baseBranch を取り込んだ後は origin 側を返す", async () => {
+  const origin = join(root, "origin");
+  await run("git", ["clone", "-q", repo, origin]);
+  await run("git", ["-C", repo, "remote", "add", "origin", origin]);
+  assert.equal(await hasOrigin(repo), true);
+  assert.equal(await baseRef(repo, "main"), "main", "取り込む前は origin/main が無い");
+  await fetchBaseBranch(repo, "main");
+  assert.equal(await baseRef(repo, "main"), originRef("main"));
 });
 
 test("containsCommit: 含まれない・手元に無いコミットは false", async () => {

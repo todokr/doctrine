@@ -137,12 +137,41 @@ export async function createWorktree(o: {
   return await canonical(o.worktreePath);
 }
 
-/** Intake 由来のタスクの worktree の起点。GitHub 上のマージを持つよう、origin 側から切る（spec 11.3）。 */
 export const originRef = (baseBranch: string) => `origin/${baseBranch}`;
 
 /** origin の baseBranch を取り込む。手元の baseBranch は動かさない。 */
 export async function fetchBaseBranch(repoPath: string, baseBranch: string): Promise<void> {
   await runCommand("git", ["-C", repoPath, "fetch", "origin", baseBranch]);
+}
+
+export async function hasOrigin(repoPath: string): Promise<boolean> {
+  try {
+    await runCommand("git", ["-C", repoPath, "remote", "get-url", "origin"]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * worktree と差分の起点にする ref。origin/<baseBranch> を取り込んであればそれ、
+ * 無ければ（origin の無いリポジトリ）手元の baseBranch。
+ */
+export async function baseRef(repoPath: string, baseBranch: string): Promise<string> {
+  const ref = originRef(baseBranch);
+  try {
+    await runCommand("git", [
+      "-C",
+      repoPath,
+      "rev-parse",
+      "--verify",
+      "--quiet",
+      `${ref}^{commit}`,
+    ]);
+    return ref;
+  } catch {
+    return baseBranch;
+  }
 }
 
 /** commit が ref に含まれるか。commit が手元に無い（まだ取り込んでいない）ときも false。 */

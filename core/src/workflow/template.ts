@@ -2,7 +2,7 @@ export type TemplateContext = {
   task: { id: string; title: string; prompt: string; branch: string };
   issue: { url: string | null; parent_url: string | null };
   worktree: { path: string };
-  project: { path: string };
+  project: { path: string; base_ref: string };
   steps: Record<string, { last_stdout: string; last_stderr: string; exitCode: string }>;
 };
 
@@ -108,6 +108,7 @@ function resolve(expr: string, ctx: TemplateContext): string {
   }
   if (expr === "worktree.path") return ctx.worktree.path;
   if (expr === "project.path") return ctx.project.path;
+  if (expr === "project.base_ref") return ctx.project.base_ref;
   if (parts[0] === "steps") {
     if (parts.length < 3) {
       throw new TemplateError(
@@ -135,6 +136,6 @@ function resolve(expr: string, ctx: TemplateContext): string {
     return out[parts[2] as (typeof STEP_FIELDS)[number]];
   }
   throw new TemplateError(
-    `{{ ${expr} }}: 使える変数は task.* / issue.* / worktree.path / project.path / steps.<id>.* のみです`,
+    `{{ ${expr} }}: 使える変数は task.* / issue.* / worktree.path / project.path / project.base_ref / steps.<id>.* のみです`,
   );
 }

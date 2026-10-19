@@ -48,6 +48,7 @@ export const TEMPLATE_VARIABLES: { name: string; note: string }[] = [
   { name: "{{ issue.closes }}", note: "issue.url があれば \"Closes <url>\"、無ければ空文字" },
   { name: "{{ worktree.path }}", note: "worktree のパス" },
   { name: "{{ project.path }}", note: "プロジェクトのパス" },
+  { name: "{{ project.base_ref }}", note: "差分の起点。origin があれば origin/<baseBranch>、無ければ baseBranch" },
   { name: "{{ steps.<id>.last_stdout }}", note: "そのステップが先に走っていること。標準出力" },
   { name: "{{ steps.<id>.last_stderr }}", note: "そのステップが先に走っていること。標準エラー出力" },
   { name: "{{ steps.<id>.exitCode }}", note: "そのステップが先に走っていること。終了コード" },
