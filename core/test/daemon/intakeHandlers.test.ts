@@ -1413,7 +1413,7 @@ test("tracker.status は workspace のトラッカーの結果と種類を返す
   assert.deepEqual(await call("tracker.status", { workspace: linearRepo }), {
     ok: true,
     kind: "linear",
-    targets: [{ ok: true, target: { id: "T1", name: "Eng" }, project: "linear" }],
+    targets: [{ ok: true, target: { id: "T1", name: "Eng" }, project: null }],
   });
 });
 

@@ -218,6 +218,18 @@ describe("TrackerUnavailable", () => {
     expect(html).toContain("tp: このリポジトリに GitHub の remote がありません");
   });
 
+  test("project が null なら見出しに前置しない", () => {
+    const html = renderToStaticMarkup(
+      <TrackerUnavailable
+        status={{ reason: "team_not_found", message: "チーム ENG が見つかりません" }}
+        root="/ws"
+        project={null}
+        onRetry={noop}
+      />,
+    );
+    expect(html).toContain("<h2>Linear のチームが見つかりません</h2>");
+  });
+
   test("workspace.yaml が無いときは選んだ workspace の root のパスを出す", () => {
     const html = renderToStaticMarkup(
       <TrackerUnavailable

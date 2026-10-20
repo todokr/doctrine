@@ -49,7 +49,7 @@ export function TrackerUnavailable(
   { status, root, project, onRetry }: {
     status: { reason: string; message: string };
     root: string;
-    project?: string;
+    project?: string | null;
     onRetry: () => void;
   },
 ) {
@@ -390,7 +390,7 @@ export function IssuePicker() {
   const title = picked?.title || (detail?.kind === "ok" ? detail.value.title : "");
 
   const failedBoxes = failed.map((f) => (
-    <TrackerUnavailable key={f.project} status={f} root={workspace.path} project={f.project} onRetry={() => setStatusTick((t) => t + 1)} />
+    <TrackerUnavailable key={f.project ?? "workspace"} status={f} root={workspace.path} project={f.project} onRetry={() => setStatusTick((t) => t + 1)} />
   ));
 
   if (usable.length === 0) {
