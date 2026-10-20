@@ -9,10 +9,10 @@ export type TrackerStatus =
 /** トラッカーの種類。workspace.yaml の tracker.kind と同じ値 */
 export type TrackerKind = "github" | "linear";
 
-/** tracker.status の応答。targets の project はプロジェクトの名前。Linear は先頭のプロジェクト 1 つ */
+/** tracker.status の応答。targets の project はプロジェクトの名前。Linear は workspace に 1 つで、project は null */
 export type WorkspaceTrackerStatus =
   | { ok: false; reason: "workspace_config_missing" | "workspace_config_invalid"; message: string }
-  | { ok: true; kind: TrackerKind; targets: (TrackerStatus & { project: string })[] };
+  | { ok: true; kind: TrackerKind; targets: (TrackerStatus & { project: string | null })[] };
 
 /** Issue の一覧の 1 行（S-1）。identifier は表示のためだけに持つ（GitHub は "#112"。プロジェクトが 2 つ以上の workspace では "tp#112"） */
 export type IssueSummary = {

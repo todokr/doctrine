@@ -141,7 +141,26 @@ test("プロジェクト 1 つの workspace では識別子がいまと同じ #<
   );
 });
 
-test("Linear は先頭のプロジェクトで 1 回だけ引き、status の project は先頭の名前", async () => {
+test("Linear のチームが見つからないとき、status の失敗にプロジェクトの名前を付けない", async () => {
+  const ft = fakeTracker(
+    {},
+    {
+      kind: "linear",
+      status: { ok: false, reason: "team_not_found", message: "チーム ENG が見つかりません" },
+    },
+  );
+  const wt = workspaceTracker(withProjects(["a", "b"]), ft);
+  assert.deepEqual(await wt.status(), [
+    {
+      ok: false,
+      reason: "team_not_found",
+      message: "チーム ENG が見つかりません",
+      project: null,
+    },
+  ]);
+});
+
+test("Linear は先頭のプロジェクトで 1 回だけ引き、status の project は null", async () => {
   const ft = fakeTracker(
     {},
     {
@@ -163,7 +182,7 @@ test("Linear は先頭のプロジェクトで 1 回だけ引き、status の pr
     {
       ok: true,
       target: { id: "T1", name: "Eng" },
-      project: "a",
+      project: null,
     },
   ]);
   await wt.listIssues({ assignee: "any" });

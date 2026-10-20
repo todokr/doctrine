@@ -214,7 +214,7 @@ const processSchema = z.strictObject({
 
 ### 8.3 状態
 
-`tracker.status` の `target` を配列にする。GitHub はリポジトリごとの成否を並べ、Linear は team を 1 つ並べる。
+`tracker.status` の `target` を配列にする。GitHub はリポジトリごとの成否を並べ、Linear は team を 1 つ並べる。Linear の成否は team で決まり、workspace に 1 つなので、その要素の `project` は null にする。画面はプロジェクトの名前を前置しない。
 `workspace.yaml` が無いときは `{ ok: false, reason: "workspace_config_missing" }`、形が違うときは `workspace_config_invalid` を返し、画面は置き場所や直し方を案内する。
 
 ## 9. RPC と画面

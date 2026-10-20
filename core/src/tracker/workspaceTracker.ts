@@ -6,7 +6,7 @@ export type WorkspaceRef = { path: string; projects: { name: string; path: strin
 export interface WorkspaceTracker {
   readonly kind: TrackerKind;
   readonly tracker: Tracker;
-  status(): Promise<(TrackerStatus & { project: string })[]>;
+  status(): Promise<(TrackerStatus & { project: string | null })[]>;
   /** GitHub は全プロジェクトを合わせて updatedAt の降順。一部が落ちても残りを返し、全部落ちたら投げる。
    *  プロジェクトが 2 つ以上なら identifier に "<name>#<n>" を使う。 */
   listIssues(o: { assignee: "me" | "any"; search?: string }): Promise<IssueSummary[]>;
@@ -28,8 +28,9 @@ export function workspaceTracker(ws: WorkspaceRef, tracker: Tracker): WorkspaceT
     return {
       kind: tracker.kind,
       tracker,
+      // Linear の成否はチームで決まり、どのプロジェクトのものでもない
       async status() {
-        return [{ ...(await tracker.status(first.path)), project: first.name }];
+        return [{ ...(await tracker.status(first.path)), project: null }];
       },
       listIssues(o) {
         return tracker.listIssues(first.path, o);
