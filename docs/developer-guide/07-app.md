@@ -48,7 +48,7 @@ localStorage を使わないのは、WebView を作り直すと消えるため�
 | `connection_status` | 最後に emit した接続状態（起動直後の追いつき用） |
 | `load_drafts` / `save_drafts` | `drafts.json` の読み書き（tmp に書いて rename） |
 | `load_settings` / `save_settings` | `settings.json` の読み書き。壊れた JSON は既定値に倒さずエラーにする |
-| `open_path` | 設定のコマンドの `{path}` をクォートして置き換え、`/bin/sh -c` で切り離して起動する（今は画面から呼ばれていない） |
+| `open_path` | 設定のコマンドの `{path}` をクォートして置き換え、`/bin/sh -c` で切り離して起動する（レビュー画面とタスク画面の「エディタで開く」が設定のエディタのコマンドで呼ぶ） |
 
 ソケットパスが決まらない環境（macOS で HOME も `DOCTRINE_STATE_DIR` も無いなど）でも panic せず、ウィンドウを出して理由をバナーで伝える。
 

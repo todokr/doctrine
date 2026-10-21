@@ -279,7 +279,7 @@ export function TaskView({ t }: { t: Task }) {
       >
         {t.worktree && (
           <>
-            <OpenInEditor />
+            <OpenInEditor path={t.worktree} />
             <button className="btn sm" onClick={() => notYet("パスのコピーは第2段階です")}>パスをコピー</button>
           </>
         )}

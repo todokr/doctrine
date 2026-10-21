@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { checkGlobalLimit, checkSettingsForm } from "./settings";
+import { checkGlobalLimit, checkSettingsForm, editorCommandOf } from "./settings";
 
 describe("checkSettingsForm", () => {
   test("正しい値は AppSettings になる", () => {
@@ -38,5 +38,24 @@ describe("checkGlobalLimit", () => {
     for (const bad of ["", "0", "-1", "1.5", "abc", "01"]) {
       expect(checkGlobalLimit(bad)).toEqual({ ok: false, error: "1 以上の整数を入れてください" });
     }
+  });
+});
+
+describe("editorCommandOf", () => {
+  const settings = { editorCommand: "code {path}", terminalCommand: "open -a Terminal {path}" };
+
+  test("読めた設定からエディタのコマンドを取る", () => {
+    expect(editorCommandOf({ kind: "ok", value: settings })).toEqual({ ok: true, command: "code {path}" });
+  });
+
+  test("読み込み中は開かない", () => {
+    expect(editorCommandOf({ kind: "loading" })).toEqual({ ok: false, message: "設定を読み込んでいます" });
+  });
+
+  test("設定を読めなかったときは理由を添えて開かない", () => {
+    expect(editorCommandOf({ kind: "error", message: "bad json" })).toEqual({
+      ok: false,
+      message: "設定を読めないのでエディタを開けません（bad json）",
+    });
   });
 });

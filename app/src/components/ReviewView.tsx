@@ -24,7 +24,9 @@ import {
   type RejectedReview,
   type Scope,
 } from "../model";
-import { useDecide, useNotYet, useStore } from "../store";
+import { openPath } from "../daemon/client";
+import { editorCommandOf } from "../settings";
+import { useDecide, useStore } from "../store";
 import type { ReviewFile, Task, TaskContext } from "../types";
 import { DiffFileBlock, fileAnchor, fileStat } from "./DiffFileBlock";
 import { GuideNotice, GuidePanel, RiskNote } from "./Guide";
@@ -69,9 +71,19 @@ export function Crumbs({ t, kind }: { t: Task; kind: "Task" | "Review" }) {
   );
 }
 
-export function OpenInEditor() {
-  const notYet = useNotYet();
-  return <button className="btn sm" onClick={() => notYet("エディタ／ターミナルで開くボタンは第2段階です")}>エディタで開く</button>;
+/** 起動の失敗（ディレクトリが無い等）は Rust が返す。起動した後のコマンドの失敗はここでは分からない */
+export function OpenInEditor({ path }: { path: string }) {
+  const { s, dispatch } = useStore();
+  const onClick = () => {
+    const r = editorCommandOf(s.settings);
+    if (!r.ok) {
+      dispatch({ type: "toast", message: r.message });
+      return;
+    }
+    openPath(r.command, path).catch((e: unknown) =>
+      dispatch({ type: "toast", message: `エディタを開けませんでした（${e instanceof Error ? e.message : String(e)}）` }));
+  };
+  return <button className="btn sm" onClick={onClick}>エディタで開く</button>;
 }
 
 /** 取れなかったものは黙って隠さない。人は「無い」と「取れていない」を区別できる必要がある */
@@ -327,7 +339,7 @@ export function ReviewView({ t }: { t: Task }) {
           <span className="hint">{ago(t.since, s.now)}から待っています</span>
           <span className="mono hint">{t.branch}</span>
           <span className="spacer" />
-          <OpenInEditor />
+          {t.worktree && <OpenInEditor path={t.worktree} />}
         </div>
 
         {c?.escalation && (

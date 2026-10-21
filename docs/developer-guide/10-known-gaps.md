@@ -12,7 +12,6 @@
 | Intake の worktree の自動削除 | intake-core spec 7 章 | 終わった Intake の worktree は `worktree.remove` で手で消す |
 | Intake 由来のタスクの完了を見張りの契機にする | intake-core spec 11.1 | 見張りは 120 秒周期と明示の要求でだけ回る |
 | アプリのトレイ・single-instance・dctld の同梱 | review-app spec 4 章・8 章 | 未実装。dctld は PATH か `DOCTRINE_DCTLD` で探す |
-| 「エディタで開く」 | review-app spec 6 章・7 章 | Rust の `open_path` と `app/src/daemon/client.ts:openPath` はあるが、画面のボタン（`app/src/components/ReviewView.tsx:OpenInEditor`）は「まだありません」のトーストのまま |
 
 ## 10.2 コードの注意点
 
