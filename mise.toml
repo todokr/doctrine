@@ -3,7 +3,7 @@
 # 唯一の版の出どころなので、`latest` や `stable` のような動く別名は置かない
 # （手元と CI で違う版が入り、再現しない失敗の原因になる）。
 # node は公式の配布物を使う。core の単一バイナリ（node --build-sea）は Homebrew の node では作れない。
-node = "26.8.1"
+node = "26.12.1"
 # aqua の pnpm レジストリは 11 系の配布物（tarball 化された）に追随できておらず
 # `pnpm = "11.15.1"` だと install が 404 で落ちる。npm 経由なら版を指定できる。
 # package.json・app/package.json・site/package.json の packageManager と一致させること（食い違うと pnpm 自身が
